@@ -42,6 +42,27 @@ OLLAMA_NUM_CTX = int(
     )
 )
 
+OLLAMA_NUM_PREDICT = int(
+    os.getenv(
+        "OLLAMA_NUM_PREDICT",
+        "1400",
+    )
+)
+
+OLLAMA_MAX_ISSUES = int(
+    os.getenv(
+        "OLLAMA_MAX_ISSUES",
+        "3",
+    )
+)
+
+OLLAMA_MAX_RETRIES = int(
+    os.getenv(
+        "OLLAMA_MAX_RETRIES",
+        "2",
+    )
+)
+
 PDF_RENDER_MAX_SIDE = int(
     os.getenv(
         "PDF_RENDER_MAX_SIDE",
@@ -70,16 +91,22 @@ app = FastAPI(
 )
 
 
+# services/pdf-service/app/main.py
+
 ISSUE_SCHEMA: dict[str, Any] = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
         "summary": {
             "type": "string",
+            "maxLength": 500,
         },
         "issues": {
             "type": "array",
+            "maxItems": OLLAMA_MAX_ISSUES,
             "items": {
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "category": {
                         "type": "string",
@@ -103,15 +130,15 @@ ISSUE_SCHEMA: dict[str, Any] = {
                     },
                     "comment": {
                         "type": "string",
+                        "maxLength": 500,
                     },
                     "evidence": {
                         "type": "string",
+                        "maxLength": 500,
                     },
                     "recommendation": {
                         "type": "string",
-                    },
-                    "basis": {
-                        "type": "string",
+                        "maxLength": 500,
                     },
                     "confidence": {
                         "type": "number",
@@ -125,7 +152,6 @@ ISSUE_SCHEMA: dict[str, Any] = {
                     "comment",
                     "evidence",
                     "recommendation",
-                    "basis",
                     "confidence",
                 ],
             },
@@ -321,13 +347,14 @@ def render_page(
     return pixmap.tobytes("png")
 
 
+
 def build_prompt(
     *,
     page_number: int,
     page_type: str,
     extracted_text: str,
 ) -> str:
-    """Сформировать ограниченный промпт первого MVP."""
+    """Сформировать промпт первичной визуальной проверки."""
 
     text_fragment = extracted_text[:PDF_TEXT_LIMIT]
 
@@ -335,43 +362,45 @@ def build_prompt(
 Ты выполняешь первичную техническую проверку одного листа
 проектной или рабочей документации.
 
-Это экспериментальный MVP.
-
 Страница PDF: {page_number}
 Предварительный тип страницы: {page_type}
 
-Текст, который удалось программно извлечь из PDF:
+Извлечённый программно текст:
 
 --- НАЧАЛО ТЕКСТА ---
 {text_fragment}
 --- КОНЕЦ ТЕКСТА ---
 
-Проверь только то, что реально видно на изображении страницы
-или непосредственно следует из извлечённого текста.
+Анализируй изображение страницы и приведённый текст.
 
-Ищи:
-1. очевидные противоречия в обозначениях;
-2. пропущенные или подозрительные соединения;
-3. несогласованность маркировок;
-4. технически сомнительные решения;
-5. недостаточные или противоречивые пояснения;
-6. ошибки или неполноту оформления;
-7. места, которые требуют проверки инженером.
+Найди только конкретные проблемы, которые действительно можно
+обосновать содержанием этого листа:
 
-ВАЖНО:
+1. внутренние противоречия;
+2. несогласованные обозначения;
+3. очевидно пропущенные соединения или элементы;
+4. противоречивые технические указания;
+5. неполные или неоднозначные комментарии;
+6. места, которые действительно требуют проверки инженером.
 
-- пока нормативная база ГОСТ/СП/ПУЭ НЕ подключена;
-- НЕ придумывай номера нормативных документов и пунктов;
-- поле basis оставляй пустой строкой, если основание
-  невозможно подтвердить по данным страницы;
-- не утверждай наличие нарушения, если данных недостаточно;
-- в таком случае используй категорию "требует_проверки";
-- замечание должно быть конкретным;
-- evidence должно описывать, что именно на листе послужило
-  основанием для замечания;
-- если замечаний нет, верни пустой массив issues.
+КРИТИЧЕСКИЕ ПРАВИЛА:
 
-Ответ должен строго соответствовать переданной JSON-схеме.
+- верни максимум {OLLAMA_MAX_ISSUES} уникальных замечания;
+- не дублируй одно и то же замечание;
+- каждое поле должно быть кратким: максимум 1-2 предложения;
+- обычное техническое указание на листе само по себе НЕ является ошибкой;
+- отсутствие на этом же листе доказательства некоторого утверждения
+  само по себе НЕ является ошибкой;
+- не придумывай отсутствующие данные;
+- не придумывай и не проверяй ГОСТ, СП, ПУЭ и другие нормативы;
+- не указывай номера нормативных документов вообще;
+- нормативная база будет проверяться отдельным этапом;
+- если данных недостаточно, используй категорию "требует_проверки";
+- если реальных замечаний нет, верни пустой массив issues;
+- не добавляй пояснений вне JSON;
+- обязательно закончи полный корректный JSON.
+
+Ответ должен строго соответствовать JSON-схеме.
 """.strip()
 
 
@@ -380,125 +409,168 @@ async def call_ollama(
     prompt: str,
     image_bytes: bytes,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Отправить страницу и текст в локальную VLM."""
+    """Отправить страницу в VLM с повтором при повреждённом JSON."""
 
     encoded_image = base64.b64encode(
         image_bytes,
     ).decode("ascii")
-
-    payload = {
-        "model": OLLAMA_VISION_MODEL,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt,
-                "images": [
-                    encoded_image,
-                ],
-            }
-        ],
-        "stream": False,
-        "format": ISSUE_SCHEMA,
-        "options": {
-            "temperature": 0.1,
-            "num_ctx": OLLAMA_NUM_CTX,
-        },
-    }
 
     timeout = httpx.Timeout(
         timeout=OLLAMA_REQUEST_TIMEOUT,
         connect=20.0,
     )
 
-    try:
-        async with httpx.AsyncClient(
-            timeout=timeout,
-        ) as client:
-            response = await client.post(
-                f"{OLLAMA_BASE_URL}/api/chat",
-                json=payload,
-            )
+    last_content = ""
+    last_done_reason: str | None = None
 
-            response.raise_for_status()
+    for attempt in range(
+        1,
+        OLLAMA_MAX_RETRIES + 1,
+    ):
+        attempt_prompt = prompt
 
-    except httpx.HTTPStatusError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "message": "Ollama вернул ошибку.",
-                "status_code": exc.response.status_code,
-                "response": exc.response.text[:2000],
+        if attempt > 1:
+            attempt_prompt += """
+
+ПРЕДЫДУЩАЯ ПОПЫТКА НЕ СФОРМИРОВАЛА ЗАВЕРШЁННЫЙ JSON.
+
+Повтори анализ в максимально кратком виде.
+
+Дополнительные ограничения:
+- максимум 2 замечания;
+- только самые существенные;
+- никаких повторов;
+- каждое текстовое поле максимум одно короткое предложение;
+- обязательно закрой все JSON-массивы и объекты.
+""".strip()
+
+        payload = {
+            "model": OLLAMA_VISION_MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": attempt_prompt,
+                    "images": [
+                        encoded_image,
+                    ],
+                }
+            ],
+            "stream": False,
+            "format": ISSUE_SCHEMA,
+            "options": {
+                "temperature": 0.0,
+                "seed": 42 + attempt,
+                "repeat_penalty": 1.2,
+                "num_ctx": OLLAMA_NUM_CTX,
+                "num_predict": OLLAMA_NUM_PREDICT,
             },
-        ) from exc
+        }
 
-    except httpx.HTTPError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Не удалось обратиться к Ollama: "
-                f"{exc}"
-            ),
-        ) from exc
+        try:
+            async with httpx.AsyncClient(
+                timeout=timeout,
+            ) as client:
+                response = await client.post(
+                    f"{OLLAMA_BASE_URL}/api/chat",
+                    json=payload,
+                )
 
-    ollama_response = response.json()
+                response.raise_for_status()
 
-    content = (
-        ollama_response
-        .get(
-            "message",
-            {},
-        )
-        .get(
-            "content",
-            "",
-        )
-    )
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "message": "Ollama вернул ошибку.",
+                    "status_code": exc.response.status_code,
+                    "response": exc.response.text[:2000],
+                },
+            ) from exc
 
-    try:
-        parsed_result = json.loads(
-            content,
-        )
-
-    except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "message": (
-                    "Модель вернула ответ, "
-                    "который не удалось разобрать как JSON."
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Не удалось обратиться к Ollama: "
+                    f"{exc}"
                 ),
-                "raw_response": content[:3000],
-            },
-        ) from exc
+            ) from exc
 
-    metrics = {
-        "total_duration_ms": round(
-            ollama_response.get(
-                "total_duration",
-                0,
-            )
-            / 1_000_000,
-            2,
-        ),
-        "load_duration_ms": round(
-            ollama_response.get(
-                "load_duration",
-                0,
-            )
-            / 1_000_000,
-            2,
-        ),
-        "prompt_eval_count": ollama_response.get(
-            "prompt_eval_count",
-        ),
-        "eval_count": ollama_response.get(
-            "eval_count",
-        ),
-    }
+        ollama_response = response.json()
 
-    return (
-        parsed_result,
-        metrics,
+        last_content = (
+            ollama_response
+            .get(
+                "message",
+                {},
+            )
+            .get(
+                "content",
+                "",
+            )
+        )
+
+        last_done_reason = ollama_response.get(
+            "done_reason",
+        )
+
+        try:
+            parsed_result = json.loads(
+                last_content,
+            )
+
+        except json.JSONDecodeError:
+            if attempt < OLLAMA_MAX_RETRIES:
+                continue
+
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "message": (
+                        "Модель не смогла сформировать "
+                        "корректный JSON после повторной попытки."
+                    ),
+                    "attempts": OLLAMA_MAX_RETRIES,
+                    "done_reason": last_done_reason,
+                    "raw_response": last_content[:3000],
+                },
+            )
+
+        metrics = {
+            "attempt": attempt,
+            "done_reason": last_done_reason,
+            "total_duration_ms": round(
+                ollama_response.get(
+                    "total_duration",
+                    0,
+                )
+                / 1_000_000,
+                2,
+            ),
+            "load_duration_ms": round(
+                ollama_response.get(
+                    "load_duration",
+                    0,
+                )
+                / 1_000_000,
+                2,
+            ),
+            "prompt_eval_count": ollama_response.get(
+                "prompt_eval_count",
+            ),
+            "eval_count": ollama_response.get(
+                "eval_count",
+            ),
+        }
+
+        return (
+            parsed_result,
+            metrics,
+        )
+
+    raise HTTPException(
+        status_code=502,
+        detail="Не удалось получить ответ от модели.",
     )
 
 
@@ -745,6 +817,7 @@ async def analyze_pdf(
                 for issue in issues:
                     normalized_issue = {
                         **issue,
+                        "basis": "",
                         "page": page_number,
                         "page_type": page_type,
                     }
