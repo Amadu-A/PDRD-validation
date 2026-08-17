@@ -26,10 +26,19 @@ OLLAMA_VISION_MODEL = os.getenv(
     "qwen3-vl:2b-instruct",
 )
 
+# services/pdf-service/app/main.py
+
 OLLAMA_REQUEST_TIMEOUT = float(
     os.getenv(
         "OLLAMA_REQUEST_TIMEOUT",
         "1800",
+    )
+)
+
+OLLAMA_NUM_CTX = int(
+    os.getenv(
+        "OLLAMA_NUM_CTX",
+        "8192",
     )
 )
 
@@ -392,7 +401,7 @@ async def call_ollama(
         "format": ISSUE_SCHEMA,
         "options": {
             "temperature": 0.1,
-            "num_ctx": 4096,
+            "num_ctx": OLLAMA_NUM_CTX,
         },
     }
 
