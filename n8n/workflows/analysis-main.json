@@ -1,0 +1,77 @@
+{
+  "name": "Drawing Validation AI - Analysis Main",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analysis",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "4b9a66a0-fae7-4f82-862f-25eb58d4b38f",
+      "name": "POST /analysis",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -360,
+        0
+      ],
+      "webhookId": "e3e97b9e-f995-4dc9-bca2-77dd2330a990"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdf-service:8101/analyze",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "pdf"
+            },
+            {
+              "name": "pages",
+              "value": "={{ $json.body?.pages ?? '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "6677ab56-a32c-45d7-a7fb-0a7857fa1490",
+      "name": "Analyze PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -80,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "POST /analysis": {
+      "main": [
+        [
+          {
+            "node": "Analyze PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7d2ae2f4-6c5a-4e7c-a669-81cb30a426ff",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

@@ -1,42 +1,113 @@
+<!-- frontend/index.html -->
+
 <!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+
   <title>Drawing Validation AI</title>
-  <link rel="stylesheet" href="/styles.css">
+
+  <link
+    rel="stylesheet"
+    href="/styles.css"
+  >
 </head>
+
 <body>
   <main class="container">
     <section class="card">
-      <h1>Проверка проектной документации</h1>
-      <p class="muted">Stage 1: проверяем цепочку frontend → n8n.</p>
+      <h1>
+        Проверка проектной документации
+      </h1>
+
+      <p class="muted">
+        Stage 2: PDF → n8n → PDF-service → Qwen3-VL.
+      </p>
+
       <form id="analysisForm">
-        <label>PDF *
-          <input id="pdfFile" name="pdf" type="file" accept=".pdf,application/pdf" required>
+        <label>
+          PDF <span class="required">*</span>
+
+          <input
+            id="pdfFile"
+            name="pdf"
+            type="file"
+            accept=".pdf,application/pdf"
+            required
+          >
         </label>
-        <label>DXF — необязательно
-          <input id="dxfFile" name="dxf" type="file" accept=".dxf">
+
+        <label>
+          DXF — необязательно
+
+          <input
+            id="dxfFile"
+            name="dxf"
+            type="file"
+            accept=".dxf"
+          >
         </label>
-        <label>Страницы
-          <input id="pages" name="pages" type="text" placeholder="3,5,8-12; пусто = весь документ">
+
+        <label>
+          Страницы для анализа
+
+          <input
+            id="pages"
+            name="pages"
+            type="text"
+            placeholder="Например: 3,5,8-12. Пусто = весь PDF"
+          >
         </label>
-        <button id="submitButton" type="submit">Анализировать</button>
+
+        <p class="muted">
+          На текущем компьютере для первого теста
+          лучше начинать с одной страницы.
+        </p>
+
+        <button
+          id="submitButton"
+          type="submit"
+        >
+          Анализировать
+        </button>
       </form>
     </section>
 
     <section class="card">
-      <h2>Результат</h2>
-      <pre id="result">Пока нет результата.</pre>
+      <h2>
+        Результат проверки
+      </h2>
+
+      <pre id="result">
+Пока нет результата.
+      </pre>
     </section>
   </main>
 
-  <div id="modal" class="modal hidden">
+  <div
+    id="modal"
+    class="modal hidden"
+    aria-hidden="true"
+  >
     <div class="modal-card">
       <div class="spinner"></div>
-      <h2>Идёт анализ документа</h2>
-      <p id="modalText">Отправляем файлы в n8n…</p>
-      <p class="muted">Интерфейс заблокирован до окончания операции.</p>
+
+      <h2>
+        Идёт анализ документа
+      </h2>
+
+      <p id="modalText">
+        PDF передаётся на анализ…
+      </p>
+
+      <p class="muted">
+        Интерфейс заблокирован до завершения анализа.
+      </p>
     </div>
   </div>
 

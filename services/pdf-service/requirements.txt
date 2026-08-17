@@ -1,0 +1,7 @@
+# services/pdf-service/requirements.txt
+
+fastapi==0.140.0
+uvicorn[standard]==0.51.0
+pymupdf==1.28.0
+httpx==0.28.1
+python-multipart==0.0.32
