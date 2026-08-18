@@ -12,7 +12,19 @@ from typing import Any
 import fitz
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from app.rag import search_knowledge
+from app.rag import (
+    search_knowledge,
+    search_knowledge_many,
+)
+from app.validator import (
+    build_rag_query,
+    build_rejected_prefilter_issue,
+    build_unvalidated_issue,
+    candidate_passes_prefilter,
+    fallback_validation_decision,
+    normalize_validated_candidate,
+    validate_page_candidates,
+)
 
 
 APP_NAME = "Drawing Validation PDF Service"
@@ -745,9 +757,14 @@ async def inspect_pdf(
 )
 async def analyze_pdf(
     file: UploadFile = File(...),
-    pages: str | None = Form(default=None),
+    pages: str | None = Form(
+        default=None,
+    ),
+    use_rag: bool = Form(
+        default=True,
+    ),
 ) -> dict[str, Any]:
-    """Выполнить первый реальный VLM-анализ PDF."""
+    """Выполнить VLM-анализ и при необходимости RAG-валидацию."""
 
     started_at = time.perf_counter()
 
@@ -795,15 +812,20 @@ async def analyze_pdf(
                             "для одного анализа."
                         ),
                         "selected": len(
-                            selected_pages,
+                            selected_pages
                         ),
-                        "limit": PDF_MAX_ANALYSIS_PAGES,
+                        "limit": (
+                            PDF_MAX_ANALYSIS_PAGES
+                        ),
                     },
                 )
 
-            page_results: list[dict[str, Any]] = []
-            all_issues: list[dict[str, Any]] = []
+            page_drafts = []
+            all_candidates = []
 
+            # ЭТАП 1.
+            # Сначала VLM проходит по всем выбранным страницам.
+            # Пока никаких нормативов ей не передаём.
             for page_number in selected_pages:
                 page = document[
                     page_number - 1
@@ -823,7 +845,10 @@ async def analyze_pdf(
                     page,
                 )
 
-                model_result, metrics = await call_ollama(
+                (
+                    model_result,
+                    initial_metrics,
+                ) = await call_ollama(
                     prompt=build_prompt(
                         page_number=page_number,
                         page_type=page_type,
@@ -832,43 +857,346 @@ async def analyze_pdf(
                     image_bytes=image_bytes,
                 )
 
-                issues = model_result.get(
-                    "issues",
-                    [],
-                )
+                candidates = []
 
-                normalized_issues: list[
-                    dict[str, Any]
-                ] = []
-
-                for issue in issues:
-                    normalized_issue = {
+                for index, issue in enumerate(
+                    model_result.get(
+                        "issues",
+                        [],
+                    ),
+                    start=1,
+                ):
+                    candidate = {
                         **issue,
-                        "basis": "",
+                        "candidate_id": (
+                            f"p{page_number}-c{index}"
+                        ),
                         "page": page_number,
                         "page_type": page_type,
                     }
 
-                    normalized_issues.append(
-                        normalized_issue,
+                    candidates.append(
+                        candidate
                     )
 
-                    all_issues.append(
-                        normalized_issue,
+                    all_candidates.append(
+                        candidate
                     )
 
-                page_results.append(
+                page_drafts.append(
                     {
                         "page": page_number,
                         "page_type": page_type,
-                        "summary": model_result.get(
-                            "summary",
-                            "",
+                        "extracted_text": extracted_text,
+                        "summary_initial": (
+                            model_result.get(
+                                "summary",
+                                "",
+                            )
                         ),
-                        "issues": normalized_issues,
-                        "metrics": metrics,
+                        "candidates": candidates,
+                        "initial_metrics": (
+                            initial_metrics
+                        ),
                     }
                 )
+
+            # Старый режим оставляем для A/B-сравнения.
+            if not use_rag:
+                page_results = []
+                all_issues = []
+
+                for draft in page_drafts:
+                    issues = [
+                        build_unvalidated_issue(
+                            candidate
+                        )
+                        for candidate in draft[
+                            "candidates"
+                        ]
+                    ]
+
+                    all_issues.extend(
+                        issues
+                    )
+
+                    page_results.append(
+                        {
+                            "page": draft[
+                                "page"
+                            ],
+                            "page_type": draft[
+                                "page_type"
+                            ],
+                            "summary": draft[
+                                "summary_initial"
+                            ],
+                            "issues": issues,
+                            "rejected_issues": [],
+                            "metrics": {
+                                "initial": draft[
+                                    "initial_metrics"
+                                ],
+                                "validation": None,
+                            },
+                        }
+                    )
+
+            else:
+                eligible_candidates = []
+
+                rejected_by_page = {}
+
+                # ЭТАП 2a.
+                # Дешёвый фильтр до embeddings/Qdrant.
+                for candidate in all_candidates:
+                    (
+                        passes,
+                        reason,
+                    ) = (
+                        candidate_passes_prefilter(
+                            candidate
+                        )
+                    )
+
+                    if passes:
+                        eligible_candidates.append(
+                            candidate
+                        )
+
+                    else:
+                        page_number = int(
+                            candidate[
+                                "page"
+                            ]
+                        )
+
+                        rejected_by_page.setdefault(
+                            page_number,
+                            [],
+                        ).append(
+                            build_rejected_prefilter_issue(
+                                candidate,
+                                reason,
+                            )
+                        )
+
+                # ЭТАП 2b.
+                # Все embeddings считаются одним batch-вызовом.
+                rag_by_candidate = {}
+
+                if eligible_candidates:
+                    rag_queries = [
+                        build_rag_query(
+                            candidate
+                        )
+                        for candidate
+                        in eligible_candidates
+                    ]
+
+                    rag_results = (
+                        await search_knowledge_many(
+                            rag_queries
+                        )
+                    )
+
+                    for (
+                        candidate,
+                        rag_result,
+                    ) in zip(
+                        eligible_candidates,
+                        rag_results,
+                        strict=True,
+                    ):
+                        rag_by_candidate[
+                            str(
+                                candidate[
+                                    "candidate_id"
+                                ]
+                            )
+                        ] = rag_result
+
+                page_results = []
+                all_issues = []
+
+                # ЭТАП 3.
+                # Для каждого листа второй VLM-проход.
+                # Модель получает изображение + найденные нормы + опыт.
+                for draft in page_drafts:
+                    page_number = int(
+                        draft[
+                            "page"
+                        ]
+                    )
+
+                    page_candidates = [
+                        candidate
+                        for candidate in draft[
+                            "candidates"
+                        ]
+                        if str(
+                            candidate[
+                                "candidate_id"
+                            ]
+                        )
+                        in rag_by_candidate
+                    ]
+
+                    rejected_issues = list(
+                        rejected_by_page.get(
+                            page_number,
+                            [],
+                        )
+                    )
+
+                    validated_issues = []
+
+                    validation_metrics = None
+
+                    validation_summary = ""
+
+                    if page_candidates:
+                        image_bytes = render_page(
+                            document[
+                                page_number - 1
+                            ]
+                        )
+
+                        page_rag = {
+                            str(
+                                candidate[
+                                    "candidate_id"
+                                ]
+                            ): rag_by_candidate[
+                                str(
+                                    candidate[
+                                        "candidate_id"
+                                    ]
+                                )
+                            ]
+                            for candidate
+                            in page_candidates
+                        }
+
+                        (
+                            validation_result,
+                            validation_metrics,
+                        ) = (
+                            await validate_page_candidates(
+                                page_number=page_number,
+                                page_type=draft[
+                                    "page_type"
+                                ],
+                                extracted_text=draft[
+                                    "extracted_text"
+                                ],
+                                image_bytes=image_bytes,
+                                candidates=page_candidates,
+                                rag_by_candidate=page_rag,
+                            )
+                        )
+
+                        validation_summary = str(
+                            validation_result.get(
+                                "summary",
+                                "",
+                            )
+                        )
+
+                        decisions_by_id = {
+                            str(
+                                decision.get(
+                                    "candidate_id"
+                                )
+                            ): decision
+                            for decision
+                            in validation_result.get(
+                                "decisions",
+                                [],
+                            )
+                            if decision.get(
+                                "candidate_id"
+                            )
+                        }
+
+                        for candidate in page_candidates:
+                            candidate_id = str(
+                                candidate[
+                                    "candidate_id"
+                                ]
+                            )
+
+                            decision = (
+                                decisions_by_id.get(
+                                    candidate_id
+                                )
+                                or (
+                                    fallback_validation_decision(
+                                        candidate
+                                    )
+                                )
+                            )
+
+                            normalized = (
+                                normalize_validated_candidate(
+                                    candidate=candidate,
+                                    decision=decision,
+                                    rag_result=(
+                                        rag_by_candidate[
+                                            candidate_id
+                                        ]
+                                    ),
+                                )
+                            )
+
+                            if (
+                                normalized[
+                                    "validation_status"
+                                ]
+                                == "rejected"
+                            ):
+                                rejected_issues.append(
+                                    normalized
+                                )
+
+                            else:
+                                validated_issues.append(
+                                    normalized
+                                )
+
+                                all_issues.append(
+                                    normalized
+                                )
+
+                    page_results.append(
+                        {
+                            "page": page_number,
+                            "page_type": draft[
+                                "page_type"
+                            ],
+                            "summary": (
+                                validation_summary
+                                or draft[
+                                    "summary_initial"
+                                ]
+                            ),
+                            "summary_initial": draft[
+                                "summary_initial"
+                            ],
+                            "issues": validated_issues,
+                            "rejected_issues": (
+                                rejected_issues
+                            ),
+                            "metrics": {
+                                "initial": draft[
+                                    "initial_metrics"
+                                ],
+                                "validation": (
+                                    validation_metrics
+                                ),
+                            },
+                        }
+                    )
 
     except fitz.FileDataError as exc:
         raise HTTPException(
@@ -881,37 +1209,75 @@ async def analyze_pdf(
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
-            detail=str(exc),
+            detail=str(
+                exc
+            ),
+        ) from exc
+
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(
+                exc
+            ),
         ) from exc
 
     elapsed_seconds = round(
-        time.perf_counter() - started_at,
+        time.perf_counter()
+        - started_at,
         2,
+    )
+
+    rejected_count = sum(
+        len(
+            page.get(
+                "rejected_issues",
+                [],
+            )
+        )
+        for page in page_results
     )
 
     return {
         "status": "completed",
-        "stage": "pdf_vlm",
+        "stage": (
+            "pdf_vlm_rag_validation"
+            if use_rag
+            else "pdf_vlm"
+        ),
         "file_name": file.filename,
         "model": OLLAMA_VISION_MODEL,
         "total_pages": total_pages,
         "selected_pages": selected_pages,
-        "issues_count": len(all_issues),
+        "use_rag": use_rag,
+        "candidates_count": len(
+            all_candidates
+        ),
+        "issues_count": len(
+            all_issues
+        ),
+        "rejected_count": (
+            rejected_count
+        ),
         "issues": all_issues,
         "pages": page_results,
-        "elapsed_seconds": elapsed_seconds,
+        "elapsed_seconds": (
+            elapsed_seconds
+        ),
         "limitations": [
             (
-                "Нормативная база ГОСТ/СП/ПУЭ "
-                "на этом этапе ещё не подключена."
+                "DXF на этом этапе ещё "
+                "не участвует в анализе."
             ),
             (
-                "DXF на этом этапе ещё не участвует "
-                "в анализе."
+                "Большие чертежи пока "
+                "анализируются как одно "
+                "изображение без тайлинга."
             ),
             (
-                "Большие чертежи пока анализируются "
-                "как одно изображение без тайлинга."
+                "База Опыта является "
+                "дополнительным сигналом "
+                "и не заменяет нормативное основание."
             ),
         ],
     }

@@ -51,12 +51,23 @@ RAG_EXPERIENCE_TOP_K = int(
 )
 
 
-async def embed_text(
-    text: str,
-) -> list[float]:
-    """Получить embedding текста через Ollama."""
+async def embed_texts(
+    texts: list[str],
+) -> list[list[float]]:
+    """Получить embeddings нескольких текстов одним запросом к Ollama."""
 
-    if not text.strip():
+    normalized = [
+        text.strip()
+        for text in texts
+    ]
+
+    if not normalized:
+        return []
+
+    if any(
+        not text
+        for text in normalized
+    ):
         raise ValueError(
             "Нельзя построить embedding пустого текста."
         )
@@ -72,7 +83,7 @@ async def embed_text(
                 f"{OLLAMA_BASE_URL}/api/embed",
                 json={
                     "model": OLLAMA_EMBEDDING_MODEL,
-                    "input": text,
+                    "input": normalized,
                     "truncate": True,
                 },
             )
@@ -81,38 +92,61 @@ async def embed_text(
 
     except httpx.HTTPStatusError as exc:
         raise RuntimeError(
-            "Ollama вернул ошибку при "
-            "построении embedding: "
+            "Ollama вернул ошибку при построении embedding: "
             f"{exc.response.status_code}: "
             f"{exc.response.text[:1000]}"
         ) from exc
 
     except httpx.HTTPError as exc:
         raise RuntimeError(
-            "Не удалось обратиться "
-            f"к Ollama embeddings: {exc}"
+            f"Не удалось обратиться к Ollama embeddings: {exc}"
         ) from exc
 
     embeddings = response.json().get(
         "embeddings",
     )
 
-    if (
-        not isinstance(
-            embeddings,
-            list,
-        )
-        or not embeddings
-        or not isinstance(
-            embeddings[0],
-            list,
-        )
+    if not isinstance(
+        embeddings,
+        list,
     ):
         raise RuntimeError(
-            "Ollama вернул некорректный embedding."
+            "Ollama вернул некорректный список embeddings."
         )
 
-    return embeddings[0]
+    if len(embeddings) != len(
+        normalized
+    ):
+        raise RuntimeError(
+            "Количество embeddings не совпадает "
+            "с количеством поисковых запросов."
+        )
+
+    if any(
+        not isinstance(
+            item,
+            list,
+        )
+        or not item
+        for item in embeddings
+    ):
+        raise RuntimeError(
+            "Ollama вернул пустой или некорректный embedding."
+        )
+
+    return embeddings
+
+
+async def embed_text(
+    text: str,
+) -> list[float]:
+    """Получить embedding одного текста."""
+
+    return (
+        await embed_texts(
+            [text]
+        )
+    )[0]
 
 
 async def query_collection(
@@ -121,7 +155,7 @@ async def query_collection(
     vector: list[float],
     limit: int,
 ) -> list[dict[str, Any]]:
-    """Найти ближайшие записи в одной коллекции."""
+    """Найти ближайшие записи в одной коллекции Qdrant."""
 
     try:
         async with httpx.AsyncClient(
@@ -152,8 +186,7 @@ async def query_collection(
     except httpx.HTTPError as exc:
         raise RuntimeError(
             f"Не удалось обратиться к "
-            f"Qdrant collection {collection}: "
-            f"{exc}"
+            f"Qdrant collection {collection}: {exc}"
         ) from exc
 
     points = (
@@ -173,8 +206,7 @@ async def query_collection(
         list,
     ):
         raise RuntimeError(
-            "Qdrant вернул некорректный "
-            "формат points."
+            "Qdrant вернул некорректный формат points."
         )
 
     return points
@@ -183,11 +215,9 @@ async def query_collection(
 def normalize_normative_results(
     points: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Привести нормативные результаты к компактному формату."""
+    """Привести результаты нормативной коллекции к API-формату."""
 
-    result: list[
-        dict[str, Any]
-    ] = []
+    result = []
 
     for index, point in enumerate(
         points,
@@ -235,11 +265,9 @@ def normalize_normative_results(
 def normalize_experience_results(
     points: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Привести экспертные примеры к компактному формату."""
+    """Привести результаты опытной коллекции к API-формату."""
 
-    result: list[
-        dict[str, Any]
-    ] = []
+    result = []
 
     for index, point in enumerate(
         points,
@@ -283,21 +311,12 @@ def normalize_experience_results(
     return result
 
 
-async def search_knowledge(
+async def search_knowledge_by_vector(
+    *,
     query: str,
+    vector: list[float],
 ) -> dict[str, Any]:
-    """Искать одновременно по нормативам и Базе Опыта."""
-
-    normalized_query = query.strip()
-
-    if not normalized_query:
-        raise ValueError(
-            "Поисковый запрос не может быть пустым."
-        )
-
-    vector = await embed_text(
-        normalized_query
-    )
+    """Искать по нормативам и опыту для уже рассчитанного вектора."""
 
     (
         normative_points,
@@ -321,7 +340,7 @@ async def search_knowledge(
 
     return {
         "status": "ok",
-        "query": normalized_query,
+        "query": query,
         "embedding_model": (
             OLLAMA_EMBEDDING_MODEL
         ),
@@ -347,3 +366,67 @@ async def search_knowledge(
             )
         ),
     }
+
+
+async def search_knowledge(
+    query: str,
+) -> dict[str, Any]:
+    """Искать один запрос по нормативам и опыту."""
+
+    normalized_query = query.strip()
+
+    if not normalized_query:
+        raise ValueError(
+            "Поисковый запрос не может быть пустым."
+        )
+
+    vector = await embed_text(
+        normalized_query
+    )
+
+    return await search_knowledge_by_vector(
+        query=normalized_query,
+        vector=vector,
+    )
+
+
+async def search_knowledge_many(
+    queries: list[str],
+) -> list[dict[str, Any]]:
+    """Искать несколько запросов с одним batch-вызовом embeddings."""
+
+    normalized_queries = [
+        query.strip()
+        for query in queries
+    ]
+
+    if not normalized_queries:
+        return []
+
+    if any(
+        not query
+        for query in normalized_queries
+    ):
+        raise ValueError(
+            "Поисковый запрос не может быть пустым."
+        )
+
+    vectors = await embed_texts(
+        normalized_queries
+    )
+
+    return list(
+        await asyncio.gather(
+            *[
+                search_knowledge_by_vector(
+                    query=query,
+                    vector=vector,
+                )
+                for query, vector in zip(
+                    normalized_queries,
+                    vectors,
+                    strict=True,
+                )
+            ]
+        )
+    )
