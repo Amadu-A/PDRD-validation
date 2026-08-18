@@ -1,0 +1,152 @@
+{
+  "schema_version": 2,
+  "project_id": "ЗН00-000009-АТМ",
+  "before_pdf": "before/ЗН00-000009-АТМ с замечаниями.pdf",
+  "after_pdf": "after/ЗН00-000009.26.1-АТМ исправленный.pdf",
+  "issues": [
+    {
+      "id": "issue-001",
+      "text": "Округлить длину",
+      "category": null,
+      "status": "mapped_to_after",
+      "verified_fixed": false,
+      "before": {
+        "pdf_page": 3,
+        "page_size_points": {
+          "width": 1190.55,
+          "height": 841.89
+        },
+        "bbox_points": {
+          "x0": 207.23,
+          "y0": 270.32,
+          "x1": 1020.74,
+          "y1": 431.67
+        },
+        "source": "pdf_annotation:FreeText"
+      },
+      "after": {
+        "pdf_page": 8
+      }
+    },
+    {
+      "id": "issue-002",
+      "text": "наименование привести к единообразию",
+      "category": null,
+      "status": "mapped_to_after",
+      "verified_fixed": false,
+      "before": {
+        "pdf_page": 3,
+        "page_size_points": {
+          "width": 1190.55,
+          "height": 841.89
+        },
+        "bbox_points": {
+          "x0": 64.32,
+          "y0": 374.4,
+          "x1": 173.81,
+          "y1": 524.13
+        },
+        "source": "pdf_annotation:FreeText"
+      },
+      "after": {
+        "pdf_page": 8
+      }
+    },
+    {
+      "id": "issue-003",
+      "text": "Добавить теги кабелей",
+      "category": null,
+      "status": "mapped_to_after",
+      "verified_fixed": false,
+      "before": {
+        "pdf_page": 5,
+        "page_size_points": {
+          "width": 1191.0,
+          "height": 842.0
+        },
+        "bbox_points": {
+          "x0": 50.52,
+          "y0": 93.48,
+          "x1": 191.04,
+          "y1": 211.9
+        },
+        "source": "pdf_annotation:FreeText"
+      },
+      "after": {
+        "pdf_page": 9
+      }
+    },
+    {
+      "id": "issue-004",
+      "text": "привести в соответствие с УГО",
+      "category": null,
+      "status": "mapped_to_after",
+      "verified_fixed": false,
+      "before": {
+        "pdf_page": 5,
+        "page_size_points": {
+          "width": 1191.0,
+          "height": 842.0
+        },
+        "bbox_points": {
+          "x0": 383.04,
+          "y0": 315.5,
+          "x1": 712.26,
+          "y1": 478.53
+        },
+        "source": "pdf_annotation:FreeText"
+      },
+      "after": {
+        "pdf_page": 9
+      }
+    },
+    {
+      "id": "issue-005",
+      "text": "Потока нет",
+      "category": null,
+      "status": "mapped_to_after",
+      "verified_fixed": false,
+      "before": {
+        "pdf_page": 5,
+        "page_size_points": {
+          "width": 1191.0,
+          "height": 842.0
+        },
+        "bbox_points": {
+          "x0": 33.02,
+          "y0": 421.85,
+          "x1": 176.49,
+          "y1": 481.75
+        },
+        "source": "pdf_annotation:FreeText"
+      },
+      "after": {
+        "pdf_page": 9
+      }
+    },
+    {
+      "id": "issue-006",
+      "text": "откорректировать марку кабеля, разделить кабель и КНС",
+      "category": null,
+      "status": "mapped_to_after",
+      "verified_fixed": false,
+      "before": {
+        "pdf_page": 7,
+        "page_size_points": {
+          "width": 1191.0,
+          "height": 842.0
+        },
+        "bbox_points": {
+          "x0": 245.96,
+          "y0": 541.2,
+          "x1": 404.57,
+          "y1": 601.41
+        },
+        "source": "pdf_annotation:FreeText"
+      },
+      "after": {
+        "pdf_page": 13
+      }
+    }
+  ]
+}

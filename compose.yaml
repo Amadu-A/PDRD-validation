@@ -137,6 +137,10 @@ services:
       PDF_MAX_ANALYSIS_PAGES: ${PDF_MAX_ANALYSIS_PAGES:-50}
       PDF_TEXT_LIMIT: ${PDF_TEXT_LIMIT:-12000}
 
+    volumes:
+      - ./data/knowledge:/data/knowledge
+      - ./scripts:/scripts:ro
+
     ports:
       - "${PDF_SERVICE_PORT:-8101}:8101"
 

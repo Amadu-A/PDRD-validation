@@ -1,0 +1,50 @@
+{
+  "schema_version": 2,
+  "project_id": "ЗН00-000009-АТМ",
+  "generated_at": "2026-08-18T06:46:35.757901+00:00",
+  "detection": {
+    "mode": "pdf_annotations",
+    "automatic_candidates": 6,
+    "confirmed_issues": 6
+  },
+  "before": {
+    "file": "before/ЗН00-000009-АТМ с замечаниями.pdf",
+    "sha256": "f65e1b0ccafaba3b13f12ca810679d73f191fdc5a43360073ecee41e83d90c2d",
+    "page_count": 7
+  },
+  "after": {
+    "file": "after/ЗН00-000009.26.1-АТМ исправленный.pdf",
+    "sha256": "83165220ae901d392e29cc566e31c77abf5e56aa812f8a8024a8decd8ed114f0",
+    "page_count": 13
+  },
+  "reviewed_before_pages": [
+    3,
+    5,
+    7
+  ],
+  "page_mapping": [
+    {
+      "before_pdf_page": 3,
+      "after_pdf_page": 8
+    },
+    {
+      "before_pdf_page": 5,
+      "after_pdf_page": 9
+    },
+    {
+      "before_pdf_page": 7,
+      "after_pdf_page": 13
+    }
+  ],
+  "issues_count": 6,
+  "dxf_available": {
+    "before": false,
+    "after": false
+  },
+  "notes": [
+    "Все страницы и замечания подтверждены пользователем до формирования JSON.",
+    "pdf_page — физический номер страницы PDF, начиная с 1.",
+    "Соответствие BEFORE -> AFTER указано пользователем вручную.",
+    "verified_fixed=false: факт устранения конкретного замечания пока автоматически не проверяется."
+  ]
+}
