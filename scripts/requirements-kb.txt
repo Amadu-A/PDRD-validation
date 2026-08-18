@@ -1,0 +1,4 @@
+# scripts/requirements-kb.txt
+
+PyMuPDF==1.28.0
+httpx==0.28.1

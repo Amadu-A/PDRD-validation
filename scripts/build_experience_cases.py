@@ -2,34 +2,35 @@
 
 """Подготовка Базы Опыта из PDF до и после исправлений.
 
-Этапы обработки одного проекта:
+Скрипт автоматически перебирает все проекты в:
 
-1. Находим PDF из before и after.
-2. Извлекаем существующие замечания из BEFORE.
-3. Показываем найденные страницы пользователю.
-4. Пользователь может исключить ошибочно найденные страницы.
-5. По каждой оставшейся странице пользователь подтверждает
-   найденные замечания и может исключить лишние.
-6. Только после подтверждения замечаний пользователь указывает,
-   каким страницам AFTER соответствуют страницы BEFORE.
-7. Создаются annotations/issues.json и annotations/meta.json.
+    data/knowledge/experience/cases/
+
+Для каждого неподготовленного проекта он:
+
+1. Находит ровно один PDF в ``before`` и один PDF в ``after``.
+2. Извлекает замечания из BEFORE:
+   - в первую очередь из текстовых PDF-аннотаций;
+   - если их нет во всём документе, использует красный текст как fallback.
+3. Даёт пользователю исключить ошибочно найденные страницы.
+4. Даёт пользователю исключить ошибочно найденные замечания на каждой странице.
+5. Показывает итоговый подтверждённый список.
+6. Просит сопоставить страницы BEFORE с исправленными страницами AFTER.
+7. Создаёт:
+   - annotations/issues.json
+   - annotations/meta.json
+
+Если в папке ``annotations`` уже есть хотя бы один файл, проект полностью
+пропускается. Чтобы подготовить его заново, удалите файлы из ``annotations``
+и снова запустите скрипт.
 
 Запуск из корня репозитория:
 
     python -m scripts.build_experience_cases
-
-Принцип обнаружения:
-
-- если в PDF есть текстовые PDF-аннотации, используем их;
-- красный текст в таком документе НЕ используем, чтобы не спутать
-  цветную графику и обозначения схемы с замечаниями;
-- если PDF-аннотаций вообще нет, используем красный текст
-  как fallback-кандидаты и обязательно просим подтверждение.
 """
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import re
@@ -60,22 +61,6 @@ class ExtractionResult:
     detection_mode: str
 
 
-def parse_args() -> argparse.Namespace:
-    """Разобрать параметры CLI."""
-
-    parser = argparse.ArgumentParser(
-        description="Подготовить все кейсы Базы Опыта.",
-    )
-
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Перезаписать существующие issues.json/meta.json.",
-    )
-
-    return parser.parse_args()
-
-
 def get_repo_root() -> Path:
     """Получить корень репозитория."""
 
@@ -95,17 +80,13 @@ def get_cases_dir() -> Path:
 
 
 def clean_text(text: str) -> str:
-    """Нормализовать пробелы без изменения содержания."""
+    """Нормализовать пробелы без изменения содержания текста."""
 
-    return re.sub(
-        r"\s+",
-        " ",
-        text,
-    ).strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def normalize_text(text: str) -> str:
-    """Нормализовать текст для поиска дублей."""
+    """Нормализовать текст для поиска точных дублей."""
 
     return re.sub(
         r"[^a-zа-яё0-9]+",
@@ -127,11 +108,12 @@ def file_sha256(path: Path) -> str:
 
 
 def find_projects(cases_dir: Path) -> list[Path]:
-    """Найти все проекты в cases."""
+    """Найти все каталоги проектов в cases."""
 
-    if not cases_dir.exists():
+    if not cases_dir.is_dir():
         raise RuntimeError(
-            f"Каталог Базы Опыта не найден:\n{cases_dir}"
+            "Каталог Базы Опыта не найден:\n"
+            f"{cases_dir}"
         )
 
     return sorted(
@@ -142,22 +124,38 @@ def find_projects(cases_dir: Path) -> list[Path]:
     )
 
 
+def annotations_exist(annotations_dir: Path) -> bool:
+    """Проверить, подготовлен ли уже проект.
+
+    Если в ``annotations`` уже есть хотя бы один файл, проект не меняем.
+    Для повторной подготовки пользователь вручную удаляет эти файлы.
+    """
+
+    if not annotations_dir.is_dir():
+        return False
+
+    return any(
+        path.is_file()
+        for path in annotations_dir.iterdir()
+    )
+
+
 def find_single_pdf(
     directory: Path,
     folder_name: str,
 ) -> Path:
     """Найти единственный PDF в before или after."""
 
-    if not directory.exists():
+    if not directory.is_dir():
         raise RuntimeError(
             f"Не найдена папка {folder_name}: {directory}"
         )
 
     pdf_files = sorted(
-        file
-        for file in directory.iterdir()
-        if file.is_file()
-        and file.suffix.lower() == ".pdf"
+        path
+        for path in directory.iterdir()
+        if path.is_file()
+        and path.suffix.lower() == ".pdf"
     )
 
     if not pdf_files:
@@ -167,8 +165,8 @@ def find_single_pdf(
 
     if len(pdf_files) > 1:
         names = "\n".join(
-            f"  - {file.name}"
-            for file in pdf_files
+            f"  - {path.name}"
+            for path in pdf_files
         )
 
         raise RuntimeError(
@@ -192,7 +190,7 @@ def rgb_from_int(value: int) -> tuple[int, int, int]:
 def is_reviewer_red(
     color: tuple[int, int, int],
 ) -> bool:
-    """Определить красный/оранжевый цвет."""
+    """Определить красный/оранжевый текст как fallback-кандидат."""
 
     red, green, blue = color
 
@@ -209,20 +207,16 @@ def extract_annotation_issues_from_page(
     page: fitz.Page,
     page_number: int,
 ) -> list[Issue]:
-    """Получить текстовые PDF-аннотации страницы."""
+    """Получить замечания из текстового содержимого PDF-аннотаций."""
 
     issues: list[Issue] = []
-
     annotation = page.first_annot
 
     while annotation is not None:
         info = annotation.info or {}
 
         text = clean_text(
-            info.get(
-                "content",
-                "",
-            )
+            info.get("content", "")
         )
 
         if text:
@@ -248,18 +242,18 @@ def extract_annotation_issues_from_page(
 def extract_all_annotation_issues(
     document: fitz.Document,
 ) -> list[Issue]:
-    """Извлечь текст всех PDF-аннотаций."""
+    """Извлечь текст всех PDF-аннотаций документа."""
 
     issues: list[Issue] = []
 
-    for index, page in enumerate(
+    for page_number, page in enumerate(
         document,
         start=1,
     ):
         issues.extend(
             extract_annotation_issues_from_page(
                 page,
-                index,
+                page_number,
             )
         )
 
@@ -269,13 +263,10 @@ def extract_all_annotation_issues(
 def extract_red_spans(
     page: fitz.Page,
 ) -> list[dict]:
-    """Получить красные текстовые фрагменты."""
+    """Получить отдельные красные текстовые фрагменты страницы."""
 
     result: list[dict] = []
-
-    page_data = page.get_text(
-        "dict",
-    )
+    page_data = page.get_text("dict")
 
     for block in page_data.get(
         "blocks",
@@ -335,15 +326,15 @@ def can_join_spans(
     previous: dict,
     current: dict,
 ) -> bool:
-    """Проверить принадлежность строк одному комментарию."""
+    """Проверить, относятся ли две строки к одному замечанию."""
 
-    previous_rect: fitz.Rect = previous[
-        "rect"
-    ]
+    previous_rect: fitz.Rect = (
+        previous["rect"]
+    )
 
-    current_rect: fitz.Rect = current[
-        "rect"
-    ]
+    current_rect: fitz.Rect = (
+        current["rect"]
+    )
 
     font_size = max(
         previous["font_size"],
@@ -377,7 +368,7 @@ def extract_red_text_issues_from_page(
     page: fitz.Page,
     page_number: int,
 ) -> list[Issue]:
-    """Объединить красные текстовые строки в кандидаты."""
+    """Объединить красные текстовые строки в замечания-кандидаты."""
 
     spans = sorted(
         extract_red_spans(
@@ -450,7 +441,7 @@ def extract_red_text_issues_from_page(
 def remove_exact_duplicates(
     issues: list[Issue],
 ) -> list[Issue]:
-    """Удалить точные текстовые дубли."""
+    """Удалить точные текстовые дубли в пределах страницы."""
 
     result: list[Issue] = []
     seen: set[
@@ -480,18 +471,17 @@ def remove_exact_duplicates(
 def extract_issues(
     pdf_path: Path,
 ) -> ExtractionResult:
-    """Извлечь кандидаты максимально надёжным способом.
+    """Извлечь замечания максимально надёжным доступным способом.
 
-    Важная логика:
+    Если в документе есть хотя бы одна текстовая PDF-аннотация,
+    используем только PDF-аннотации.
 
-    Если в документе существует хотя бы одна текстовая
-    PDF-аннотация, считаем, что проверяющий использовал
-    механизм аннотаций PDF.
+    Красный текст в этом случае не используем, потому что на инженерной
+    схеме красным могут быть нарисованы обычные обозначения, жилы,
+    номера и другие элементы, не являющиеся замечаниями.
 
-    В этом случае красный текст самого чертежа не анализируем.
-
-    Если ни одной текстовой PDF-аннотации нет, включается
-    менее надёжный fallback по красному тексту.
+    Если текстовых PDF-аннотаций нет вообще, включаем fallback
+    по красному тексту и обязательно просим ручное подтверждение.
     """
 
     with fitz.open(
@@ -523,21 +513,19 @@ def extract_issues(
             return ExtractionResult(
                 issues=issues,
                 page_count=page_count,
-                detection_mode=(
-                    "pdf_annotations"
-                ),
+                detection_mode="pdf_annotations",
             )
 
         red_issues: list[Issue] = []
 
-        for index, page in enumerate(
+        for page_number, page in enumerate(
             document,
             start=1,
         ):
             red_issues.extend(
                 extract_red_text_issues_from_page(
                     page,
-                    index,
+                    page_number,
                 )
             )
 
@@ -558,16 +546,14 @@ def extract_issues(
         return ExtractionResult(
             issues=red_issues,
             page_count=page_count,
-            detection_mode=(
-                "red_text_fallback"
-            ),
+            detection_mode="red_text_fallback",
         )
 
 
 def parse_number_list(
     raw_value: str,
 ) -> list[int]:
-    """Разобрать строку ``1 3 7``."""
+    """Разобрать строку вида ``1 3 7`` или ``1,3,7``."""
 
     if not raw_value.strip():
         return []
@@ -613,7 +599,6 @@ def group_issues_by_page(
 
 
 def confirm_pages(
-    project_name: str,
     issues: list[Issue],
 ) -> list[Issue]:
     """Дать пользователю исключить ошибочно найденные страницы."""
@@ -635,7 +620,7 @@ def confirm_pages(
         print(
             f"  Страница {page}: "
             f"{len(grouped[page])} "
-            f"замечаний-кандидатов"
+            "замечаний-кандидатов"
         )
 
     print()
@@ -644,7 +629,7 @@ def confirm_pages(
     )
 
     print(
-        "Введите РЕАЛЬНЫЕ номера страниц, "
+        "Введите номера страниц, "
         "которые надо ИСКЛЮЧИТЬ."
     )
 
@@ -663,6 +648,7 @@ def confirm_pages(
                     raw_value
                 )
             )
+
         except ValueError as error:
             print(
                 f"Ошибка: {error}"
@@ -677,8 +663,7 @@ def confirm_pages(
 
         if unknown_pages:
             print(
-                "Этих страниц нет "
-                "среди найденных: "
+                "Этих страниц нет среди найденных: "
                 + ", ".join(
                     map(
                         str,
@@ -688,11 +673,15 @@ def confirm_pages(
             )
             continue
 
+        excluded_set = set(
+            excluded_pages
+        )
+
         confirmed = [
             issue
             for issue in issues
             if issue.page
-            not in excluded_pages
+            not in excluded_set
         ]
 
         kept_pages = sorted(
@@ -706,8 +695,7 @@ def confirm_pages(
 
         if kept_pages:
             print(
-                "После фильтрации остаются "
-                "страницы: "
+                "После фильтрации остаются страницы: "
                 + ", ".join(
                     map(
                         str,
@@ -715,17 +703,18 @@ def confirm_pages(
                     )
                 )
             )
+
         else:
             print(
                 "После фильтрации "
                 "не осталось страниц."
             )
 
-        confirmation = input(
+        answer = input(
             "Подтвердить страницы? [Y/n]: "
         ).strip().lower()
 
-        if confirmation in {
+        if answer in {
             "",
             "y",
             "yes",
@@ -775,6 +764,7 @@ def confirm_issues_on_page(
         )
 
     print()
+
     print(
         "Введите номера ЛИШНИХ замечаний, "
         "которые надо исключить."
@@ -794,8 +784,10 @@ def confirm_issues_on_page(
         )
 
         try:
-            excluded = parse_number_list(
-                raw_value
+            excluded_numbers = (
+                parse_number_list(
+                    raw_value
+                )
             )
 
         except ValueError as error:
@@ -813,7 +805,7 @@ def confirm_issues_on_page(
 
         invalid_numbers = [
             number
-            for number in excluded
+            for number in excluded_numbers
             if number
             not in valid_numbers
         ]
@@ -831,7 +823,7 @@ def confirm_issues_on_page(
             continue
 
         excluded_set = set(
-            excluded
+            excluded_numbers
         )
 
         confirmed = [
@@ -845,6 +837,7 @@ def confirm_issues_on_page(
         ]
 
         print()
+
         print(
             f"Останется замечаний: "
             f"{len(confirmed)}"
@@ -859,12 +852,12 @@ def confirm_issues_on_page(
                 f"{issue.text}"
             )
 
-        confirmation = input(
+        answer = input(
             "Подтвердить замечания "
             "этой страницы? [Y/n]: "
         ).strip().lower()
 
-        if confirmation in {
+        if answer in {
             "",
             "y",
             "yes",
@@ -888,17 +881,13 @@ def confirm_all_issues(
     for page_number in sorted(
         grouped
     ):
-        page_issues = (
+        confirmed.extend(
             confirm_issues_on_page(
                 page_number,
                 grouped[
                     page_number
                 ],
             )
-        )
-
-        confirmed.extend(
-            page_issues
         )
 
     confirmed.sort(
@@ -942,6 +931,7 @@ def show_final_selection(
         grouped
     ):
         print()
+
         print(
             f"Страница {page_number}:"
         )
@@ -957,8 +947,10 @@ def show_final_selection(
             )
 
     print()
+
     print(
-        f"Всего подтверждено: {total}"
+        f"Всего подтверждено: "
+        f"{total}"
     )
 
     answer = input(
@@ -979,7 +971,7 @@ def parse_after_pages(
     before_pages: list[int],
     after_page_count: int,
 ) -> dict[int, int]:
-    """Разобрать отображение BEFORE -> AFTER."""
+    """Разобрать отображение страниц BEFORE -> AFTER."""
 
     parts = [
         value
@@ -1059,12 +1051,11 @@ def ask_after_mapping(
     )
 
     print("=" * 78)
-
     print()
 
     print(
         f"Для проекта {project_name} "
-        f"подтверждены замечания "
+        "подтверждены замечания "
         f"на страницах: {pages_text}."
     )
 
@@ -1074,6 +1065,7 @@ def ask_after_mapping(
     )
 
     print()
+
     print(
         "Укажите соответствующие страницы "
         "исправленного проекта "
@@ -1103,6 +1095,7 @@ def ask_after_mapping(
             continue
 
         print()
+
         print(
             "Получено соответствие:"
         )
@@ -1116,11 +1109,11 @@ def ask_after_mapping(
                 f" -> AFTER {after_page}"
             )
 
-        confirmation = input(
+        answer = input(
             "Подтвердить? [Y/n]: "
         ).strip().lower()
 
-        if confirmation in {
+        if answer in {
             "",
             "y",
             "yes",
@@ -1133,7 +1126,7 @@ def ask_after_mapping(
 def rect_to_dict(
     rect: fitz.Rect,
 ) -> dict[str, float]:
-    """Сериализовать координаты."""
+    """Сериализовать координаты замечания."""
 
     return {
         "x0": round(
@@ -1159,7 +1152,7 @@ def write_json(
     path: Path,
     payload: dict,
 ) -> None:
-    """Записать JSON UTF-8."""
+    """Записать JSON в UTF-8."""
 
     path.parent.mkdir(
         parents=True,
@@ -1177,50 +1170,10 @@ def write_json(
     )
 
 
-def should_overwrite(
-    project_name: str,
-    annotations_dir: Path,
-    force: bool,
-) -> bool:
-    """Проверить перезапись существующих JSON."""
-
-    if force:
-        return True
-
-    issues_path = (
-        annotations_dir
-        / "issues.json"
-    )
-
-    meta_path = (
-        annotations_dir
-        / "meta.json"
-    )
-
-    if (
-        not issues_path.exists()
-        and not meta_path.exists()
-    ):
-        return True
-
-    answer = input(
-        f"{project_name}: JSON уже существуют. "
-        "Пересоздать? [y/N]: "
-    ).strip().lower()
-
-    return answer in {
-        "y",
-        "yes",
-        "д",
-        "да",
-    }
-
-
 def process_project(
     project_dir: Path,
     project_number: int,
     projects_count: int,
-    force: bool,
 ) -> bool:
     """Обработать один проект."""
 
@@ -1239,6 +1192,22 @@ def process_project(
 
     print("=" * 78)
 
+    annotations_dir = (
+        project_dir
+        / "annotations"
+    )
+
+    # Готовые кейсы пропускаем сразу.
+    # Никакие файлы проекта не читаем и не изменяем.
+    if annotations_exist(
+        annotations_dir
+    ):
+        print(
+            "[SKIP] Проект уже подготовлен: "
+            "в annotations есть файлы."
+        )
+        return False
+
     before_pdf = find_single_pdf(
         project_dir / "before",
         "before",
@@ -1249,21 +1218,8 @@ def process_project(
         "after",
     )
 
-    annotations_dir = (
-        project_dir
-        / "annotations"
-    )
-
-    if not should_overwrite(
-        project_name,
-        annotations_dir,
-        force,
-    ):
-        print(
-            "[SKIP] Проект пропущен."
-        )
-        return False
-
+    # Сохраняем утверждённую структуру,
+    # даже если DXF пока отсутствует.
     (
         project_dir
         / "dxf"
@@ -1332,7 +1288,7 @@ def process_project(
         )
 
     print(
-        f"Найдено замечаний-кандидатов: "
+        "Найдено замечаний-кандидатов: "
         f"{len(extraction.issues)}"
     )
 
@@ -1344,8 +1300,7 @@ def process_project(
         return False
 
     page_confirmed = confirm_pages(
-        project_name,
-        extraction.issues,
+        extraction.issues
     )
 
     if not page_confirmed:
@@ -1355,8 +1310,10 @@ def process_project(
         )
         return False
 
-    issue_confirmed = confirm_all_issues(
-        page_confirmed
+    issue_confirmed = (
+        confirm_all_issues(
+            page_confirmed
+        )
     )
 
     if not issue_confirmed:
@@ -1446,7 +1403,9 @@ def process_project(
                             issue.rect
                         )
                     ),
-                    "source": issue.source,
+                    "source": (
+                        issue.source
+                    ),
                 },
                 "after": {
                     "pdf_page": (
@@ -1605,6 +1564,7 @@ def process_project(
     )
 
     print()
+
     print(
         "[OK] Созданы:"
     )
@@ -1631,8 +1591,6 @@ def process_project(
 def main() -> int:
     """Точка входа."""
 
-    args = parse_args()
-
     cases_dir = get_cases_dir()
 
     try:
@@ -1648,7 +1606,7 @@ def main() -> int:
         return 1
 
     print(
-        f"Каталог Базы Опыта:\n"
+        "Каталог Базы Опыта:\n"
         f"{cases_dir}"
     )
 
@@ -1672,6 +1630,7 @@ def main() -> int:
         )
 
     processed = 0
+    skipped = 0
     errors = 0
 
     for index, project in enumerate(
@@ -1679,15 +1638,20 @@ def main() -> int:
         start=1,
     ):
         try:
-            if process_project(
-                project_dir=project,
-                project_number=index,
-                projects_count=len(
-                    projects
-                ),
-                force=args.force,
-            ):
+            processed_project = (
+                process_project(
+                    project_dir=project,
+                    project_number=index,
+                    projects_count=len(
+                        projects
+                    ),
+                )
+            )
+
+            if processed_project:
                 processed += 1
+            else:
+                skipped += 1
 
         except (
             RuntimeError,
@@ -1697,8 +1661,10 @@ def main() -> int:
             errors += 1
 
             print()
+
             print(
-                f"[ERROR] {project.name}: "
+                f"[ERROR] "
+                f"{project.name}: "
                 f"{error}"
             )
 
@@ -1710,11 +1676,18 @@ def main() -> int:
     )
 
     print(
-        f"Успешно: {processed}"
+        f"Успешно подготовлено: "
+        f"{processed}"
     )
 
     print(
-        f"Ошибок: {errors}"
+        f"Пропущено: "
+        f"{skipped}"
+    )
+
+    print(
+        f"Ошибок: "
+        f"{errors}"
     )
 
     return 1 if errors else 0
