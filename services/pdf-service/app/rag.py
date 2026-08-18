@@ -1,6 +1,6 @@
 # services/pdf-service/app/rag.py
 
-"""Поиск по нормативной и опытной базе знаний."""
+"""RAG-поиск по нормативной базе и Базе Опыта."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ OLLAMA_BASE_URL = os.getenv(
 
 OLLAMA_EMBEDDING_MODEL = os.getenv(
     "OLLAMA_EMBEDDING_MODEL",
-    "qwen3-embedding:0.6b",
+    "qwen3-embedding:4b",
 )
 
 QDRANT_URL = os.getenv(
@@ -28,18 +28,25 @@ QDRANT_URL = os.getenv(
 
 QDRANT_NORMATIVE_COLLECTION = os.getenv(
     "QDRANT_NORMATIVE_COLLECTION",
-    "dva_normative",
+    "dva_normative_v2",
 )
 
 QDRANT_EXPERIENCE_COLLECTION = os.getenv(
     "QDRANT_EXPERIENCE_COLLECTION",
-    "dva_experience",
+    "dva_experience_v2",
 )
 
 RAG_NORMATIVE_TOP_K = int(
     os.getenv(
         "RAG_NORMATIVE_TOP_K",
-        "5",
+        "4",
+    )
+)
+
+RAG_NORMATIVE_MAX_SOURCES = int(
+    os.getenv(
+        "RAG_NORMATIVE_MAX_SOURCES",
+        "12",
     )
 )
 
@@ -50,32 +57,59 @@ RAG_EXPERIENCE_TOP_K = int(
     )
 )
 
+NORMATIVE_QUERY_INSTRUCTION = (
+    "Given a description of a Russian engineering drawing or a technical "
+    "check topic, retrieve the most directly applicable normative requirement "
+    "for compliance verification."
+)
 
-async def embed_texts(
-    texts: list[str],
-) -> list[list[float]]:
-    """Получить embeddings нескольких текстов одним запросом к Ollama."""
+EXPERIENCE_QUERY_INSTRUCTION = (
+    "Given an engineering design violation, retrieve similar expert review "
+    "comments and correction examples."
+)
 
-    normalized = [
-        text.strip()
-        for text in texts
-    ]
+
+def _prepare_query(
+    query: str,
+    instruction: str,
+) -> str:
+    """Добавить task instruction к поисковому запросу Qwen3-Embedding."""
+
+    normalized = query.strip()
 
     if not normalized:
+        raise ValueError(
+            "Поисковый запрос не может быть пустым."
+        )
+
+    return (
+        f"Instruct: {instruction}\n"
+        f"Query: {normalized}"
+    )
+
+
+async def embed_queries(
+    queries: list[str],
+    *,
+    instruction: str,
+) -> list[list[float]]:
+    """Получить embeddings поисковых запросов одним вызовом Ollama."""
+
+    if not queries:
         return []
 
-    if any(
-        not text
-        for text in normalized
-    ):
-        raise ValueError(
-            "Нельзя построить embedding пустого текста."
+    prepared = [
+        _prepare_query(
+            query,
+            instruction,
         )
+        for query in queries
+    ]
 
     try:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(
-                600.0,
+                900.0,
                 connect=20.0,
             ),
         ) as client:
@@ -83,7 +117,7 @@ async def embed_texts(
                 f"{OLLAMA_BASE_URL}/api/embed",
                 json={
                     "model": OLLAMA_EMBEDDING_MODEL,
-                    "input": normalized,
+                    "input": prepared,
                     "truncate": True,
                 },
             )
@@ -92,14 +126,15 @@ async def embed_texts(
 
     except httpx.HTTPStatusError as exc:
         raise RuntimeError(
-            "Ollama вернул ошибку при построении embedding: "
+            "Ollama вернул ошибку при построении embeddings: "
             f"{exc.response.status_code}: "
             f"{exc.response.text[:1000]}"
         ) from exc
 
     except httpx.HTTPError as exc:
         raise RuntimeError(
-            f"Не удалось обратиться к Ollama embeddings: {exc}"
+            "Не удалось обратиться к Ollama embeddings: "
+            f"{exc}"
         ) from exc
 
     embeddings = response.json().get(
@@ -115,20 +150,20 @@ async def embed_texts(
         )
 
     if len(embeddings) != len(
-        normalized
+        prepared
     ):
         raise RuntimeError(
             "Количество embeddings не совпадает "
-            "с количеством поисковых запросов."
+            "с количеством запросов."
         )
 
     if any(
         not isinstance(
-            item,
+            vector,
             list,
         )
-        or not item
-        for item in embeddings
+        or not vector
+        for vector in embeddings
     ):
         raise RuntimeError(
             "Ollama вернул пустой или некорректный embedding."
@@ -137,29 +172,17 @@ async def embed_texts(
     return embeddings
 
 
-async def embed_text(
-    text: str,
-) -> list[float]:
-    """Получить embedding одного текста."""
-
-    return (
-        await embed_texts(
-            [text]
-        )
-    )[0]
-
-
 async def query_collection(
     *,
     collection: str,
     vector: list[float],
     limit: int,
 ) -> list[dict[str, Any]]:
-    """Найти ближайшие записи в одной коллекции Qdrant."""
+    """Выполнить vector search в одной коллекции Qdrant."""
 
     try:
         async with httpx.AsyncClient(
-            timeout=60.0,
+            timeout=90.0,
         ) as client:
             response = await client.post(
                 f"{QDRANT_URL}"
@@ -177,16 +200,15 @@ async def query_collection(
 
     except httpx.HTTPStatusError as exc:
         raise RuntimeError(
-            f"Qdrant collection {collection} "
-            "вернула ошибку: "
+            f"Qdrant collection {collection} вернула ошибку: "
             f"{exc.response.status_code}: "
             f"{exc.response.text[:1000]}"
         ) from exc
 
     except httpx.HTTPError as exc:
         raise RuntimeError(
-            f"Не удалось обратиться к "
-            f"Qdrant collection {collection}: {exc}"
+            "Не удалось обратиться к Qdrant "
+            f"collection {collection}: {exc}"
         ) from exc
 
     points = (
@@ -212,12 +234,73 @@ async def query_collection(
     return points
 
 
+def _merge_points(
+    groups: list[list[dict[str, Any]]],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Объединить результаты нескольких запросов без дублей."""
+
+    by_id: dict[
+        str,
+        dict[str, Any],
+    ] = {}
+
+    for points in groups:
+        for point in points:
+            point_id = str(
+                point.get(
+                    "id",
+                    "",
+                )
+            )
+
+            if not point_id:
+                continue
+
+            previous = by_id.get(
+                point_id
+            )
+
+            if (
+                previous is None
+                or float(
+                    point.get(
+                        "score",
+                        0.0,
+                    )
+                )
+                > float(
+                    previous.get(
+                        "score",
+                        0.0,
+                    )
+                )
+            ):
+                by_id[
+                    point_id
+                ] = point
+
+    return sorted(
+        by_id.values(),
+        key=lambda item: float(
+            item.get(
+                "score",
+                0.0,
+            )
+        ),
+        reverse=True,
+    )[:limit]
+
+
 def normalize_normative_results(
     points: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Привести результаты нормативной коллекции к API-формату."""
+    """Привести нормативные результаты к стабильному API-формату."""
 
-    result = []
+    result: list[
+        dict[str, Any]
+    ] = []
 
     for index, point in enumerate(
         points,
@@ -231,6 +314,12 @@ def normalize_normative_results(
         result.append(
             {
                 "source_id": f"N{index}",
+                "point_id": str(
+                    point.get(
+                        "id",
+                        "",
+                    )
+                ),
                 "score": round(
                     float(
                         point.get(
@@ -262,12 +351,65 @@ def normalize_normative_results(
     return result
 
 
+def _split_experience_context(
+    text: str,
+) -> tuple[str, str]:
+    """Извлечь BEFORE/AFTER контекст из старого payload, если он есть."""
+
+    before_context = ""
+    after_context = ""
+
+    before_marker = (
+        "Контекст листа до исправления:"
+    )
+
+    after_page_marker = (
+        "\n\nСтраница после исправления:"
+    )
+
+    after_marker = (
+        "Контекст исправленного листа:"
+    )
+
+    if before_marker in text:
+        tail = text.split(
+            before_marker,
+            maxsplit=1,
+        )[1]
+
+        if after_page_marker in tail:
+            before_context, after_tail = (
+                tail.split(
+                    after_page_marker,
+                    maxsplit=1,
+                )
+            )
+
+            if after_marker in after_tail:
+                after_context = (
+                    after_tail.split(
+                        after_marker,
+                        maxsplit=1,
+                    )[1]
+                )
+
+        else:
+            before_context = tail
+
+    return (
+        before_context.strip(),
+        after_context.strip(),
+    )
+
+
 def normalize_experience_results(
     points: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Привести результаты опытной коллекции к API-формату."""
+    """Привести результаты Базы Опыта к стабильному API-формату."""
 
-    result = []
+    result: list[
+        dict[str, Any]
+    ] = []
 
     for index, point in enumerate(
         points,
@@ -278,9 +420,29 @@ def normalize_experience_results(
             {},
         )
 
+        raw_text = str(
+            payload.get(
+                "text",
+                "",
+            )
+        )
+
+        (
+            legacy_before,
+            legacy_after,
+        ) = _split_experience_context(
+            raw_text
+        )
+
         result.append(
             {
                 "source_id": f"E{index}",
+                "point_id": str(
+                    point.get(
+                        "id",
+                        "",
+                    )
+                ),
                 "score": round(
                     float(
                         point.get(
@@ -299,11 +461,32 @@ def normalize_experience_results(
                 "issue_text": payload.get(
                     "issue_text",
                 ),
+                "status": payload.get(
+                    "status",
+                ),
+                "verified_fixed": bool(
+                    payload.get(
+                        "verified_fixed",
+                        False,
+                    )
+                ),
                 "before_page": payload.get(
                     "before_page",
                 ),
                 "after_page": payload.get(
                     "after_page",
+                ),
+                "before_context": (
+                    payload.get(
+                        "before_context"
+                    )
+                    or legacy_before
+                ),
+                "after_context": (
+                    payload.get(
+                        "after_context"
+                    )
+                    or legacy_after
                 ),
             }
         )
@@ -311,31 +494,166 @@ def normalize_experience_results(
     return result
 
 
-async def search_knowledge_by_vector(
-    *,
-    query: str,
-    vector: list[float],
+async def search_normative(
+    queries: list[str],
 ) -> dict[str, Any]:
-    """Искать по нормативам и опыту для уже рассчитанного вектора."""
+    """Найти нормы для набора нейтральных тем проверки листа."""
 
-    (
-        normative_points,
-        experience_points,
-    ) = await asyncio.gather(
-        query_collection(
-            collection=(
-                QDRANT_NORMATIVE_COLLECTION
+    normalized_queries: list[
+        str
+    ] = []
+
+    seen: set[
+        str
+    ] = set()
+
+    for query in queries:
+        normalized = query.strip()
+
+        if (
+            not normalized
+            or normalized in seen
+        ):
+            continue
+
+        seen.add(
+            normalized
+        )
+
+        normalized_queries.append(
+            normalized
+        )
+
+    if not normalized_queries:
+        return {
+            "queries": [],
+            "sources": [],
+            "embedding_model": (
+                OLLAMA_EMBEDDING_MODEL
             ),
-            vector=vector,
-            limit=RAG_NORMATIVE_TOP_K,
+        }
+
+    vectors = await embed_queries(
+        normalized_queries,
+        instruction=(
+            NORMATIVE_QUERY_INSTRUCTION
         ),
-        query_collection(
-            collection=(
-                QDRANT_EXPERIENCE_COLLECTION
+    )
+
+    groups = await asyncio.gather(
+        *[
+            query_collection(
+                collection=(
+                    QDRANT_NORMATIVE_COLLECTION
+                ),
+                vector=vector,
+                limit=(
+                    RAG_NORMATIVE_TOP_K
+                ),
+            )
+            for vector in vectors
+        ]
+    )
+
+    merged = _merge_points(
+        list(
+            groups
+        ),
+        limit=(
+            RAG_NORMATIVE_MAX_SOURCES
+        ),
+    )
+
+    return {
+        "queries": normalized_queries,
+        "sources": (
+            normalize_normative_results(
+                merged
+            )
+        ),
+        "embedding_model": (
+            OLLAMA_EMBEDDING_MODEL
+        ),
+    }
+
+
+async def search_experience_many(
+    queries: list[str],
+) -> list[dict[str, Any]]:
+    """Найти похожий опыт отдельно для каждого установленного нарушения."""
+
+    normalized = [
+        query.strip()
+        for query in queries
+    ]
+
+    if not normalized:
+        return []
+
+    if any(
+        not query
+        for query in normalized
+    ):
+        raise ValueError(
+            "Запрос к Базе Опыта "
+            "не может быть пустым."
+        )
+
+    vectors = await embed_queries(
+        normalized,
+        instruction=(
+            EXPERIENCE_QUERY_INSTRUCTION
+        ),
+    )
+
+    groups = await asyncio.gather(
+        *[
+            query_collection(
+                collection=(
+                    QDRANT_EXPERIENCE_COLLECTION
+                ),
+                vector=vector,
+                limit=(
+                    RAG_EXPERIENCE_TOP_K
+                ),
+            )
+            for vector in vectors
+        ]
+    )
+
+    return [
+        {
+            "query": query,
+            "sources": (
+                normalize_experience_results(
+                    points
+                )
             ),
-            vector=vector,
-            limit=RAG_EXPERIENCE_TOP_K,
-        ),
+            "embedding_model": (
+                OLLAMA_EMBEDDING_MODEL
+            ),
+        }
+        for query, points in zip(
+            normalized,
+            groups,
+            strict=True,
+        )
+    ]
+
+
+async def search_knowledge(
+    query: str,
+) -> dict[str, Any]:
+    """Диагностический поиск одного запроса сразу по двум базам."""
+
+    normative = await search_normative(
+        [query]
+    )
+
+    experience = (
+        await search_experience_many(
+            [query]
+        )
     )
 
     return {
@@ -343,9 +661,6 @@ async def search_knowledge_by_vector(
         "query": query,
         "embedding_model": (
             OLLAMA_EMBEDDING_MODEL
-        ),
-        "vector_size": len(
-            vector
         ),
         "collections": {
             "normative": (
@@ -355,78 +670,81 @@ async def search_knowledge_by_vector(
                 QDRANT_EXPERIENCE_COLLECTION
             ),
         },
-        "normative": (
-            normalize_normative_results(
-                normative_points
-            )
-        ),
+        "normative": normative[
+            "sources"
+        ],
         "experience": (
-            normalize_experience_results(
-                experience_points
-            )
+            experience[0][
+                "sources"
+            ]
+            if experience
+            else []
         ),
     }
 
 
-async def search_knowledge(
-    query: str,
-) -> dict[str, Any]:
-    """Искать один запрос по нормативам и опыту."""
+async def get_rag_status() -> dict[str, Any]:
+    """Проверить доступность Qdrant и обеих необходимых коллекций."""
 
-    normalized_query = query.strip()
+    try:
+        async with httpx.AsyncClient(
+            timeout=10.0,
+        ) as client:
+            response = await client.get(
+                f"{QDRANT_URL}/collections"
+            )
 
-    if not normalized_query:
-        raise ValueError(
-            "Поисковый запрос не может быть пустым."
+            response.raise_for_status()
+
+    except httpx.HTTPError as exc:
+        return {
+            "qdrant": False,
+            "collections_ready": False,
+            "error": str(
+                exc
+            ),
+        }
+
+    collections = (
+        response.json()
+        .get(
+            "result",
+            {},
         )
-
-    vector = await embed_text(
-        normalized_query
-    )
-
-    return await search_knowledge_by_vector(
-        query=normalized_query,
-        vector=vector,
-    )
-
-
-async def search_knowledge_many(
-    queries: list[str],
-) -> list[dict[str, Any]]:
-    """Искать несколько запросов с одним batch-вызовом embeddings."""
-
-    normalized_queries = [
-        query.strip()
-        for query in queries
-    ]
-
-    if not normalized_queries:
-        return []
-
-    if any(
-        not query
-        for query in normalized_queries
-    ):
-        raise ValueError(
-            "Поисковый запрос не может быть пустым."
-        )
-
-    vectors = await embed_texts(
-        normalized_queries
-    )
-
-    return list(
-        await asyncio.gather(
-            *[
-                search_knowledge_by_vector(
-                    query=query,
-                    vector=vector,
-                )
-                for query, vector in zip(
-                    normalized_queries,
-                    vectors,
-                    strict=True,
-                )
-            ]
+        .get(
+            "collections",
+            [],
         )
     )
+
+    names = {
+        str(
+            item.get(
+                "name",
+                "",
+            )
+        )
+        for item in collections
+    }
+
+    required = {
+        QDRANT_NORMATIVE_COLLECTION,
+        QDRANT_EXPERIENCE_COLLECTION,
+    }
+
+    return {
+        "qdrant": True,
+        "collections_ready": (
+            required.issubset(
+                names
+            )
+        ),
+        "required_collections": sorted(
+            required
+        ),
+        "available_collections": sorted(
+            name
+            for name in names
+            if name
+        ),
+    }

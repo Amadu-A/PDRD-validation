@@ -1,16 +1,15 @@
 # scripts/kb_sync.py
 
-"""Синхронизация нормативной и опытной базы знаний с Qdrant.
+"""Синхронизация нормативной базы и Базы Опыта с Qdrant.
 
-Запуск:
+Запуск из корня репозитория:
 
     python -m scripts.kb_sync
 
 Повторный запуск:
-
-- неизменённые документы пропускаются;
+- неизменённые источники пропускаются;
 - изменённый источник удаляется из Qdrant и индексируется заново;
-- новые документы добавляются.
+- новые источники добавляются.
 """
 
 from __future__ import annotations
@@ -32,8 +31,13 @@ from scripts.kb_common import (
 )
 
 
-def normalize_text(text: str) -> str:
-    """Нормализовать текст документа."""
+EXPERIENCE_PAYLOAD_SCHEMA_VERSION = 2
+
+
+def normalize_text(
+    text: str,
+) -> str:
+    """Нормализовать извлечённый текст."""
 
     text = text.replace(
         "\x00",
@@ -47,16 +51,24 @@ def normalize_text(text: str) -> str:
     ).strip()
 
 
-def file_sha256(path: Path) -> str:
-    """Посчитать SHA-256."""
+def file_sha256(
+    path: Path,
+) -> str:
+    """Посчитать SHA-256 файла."""
 
-    digest = hashlib.sha256()
+    digest = (
+        hashlib.sha256()
+    )
 
-    with path.open("rb") as stream:
+    with path.open(
+        "rb"
+    ) as stream:
         while chunk := stream.read(
             1024 * 1024
         ):
-            digest.update(chunk)
+            digest.update(
+                chunk
+            )
 
     return digest.hexdigest()
 
@@ -66,7 +78,7 @@ def chunk_text(
     chunk_size: int,
     overlap: int,
 ) -> list[str]:
-    """Разрезать текст на перекрывающиеся части."""
+    """Разрезать текст страницы на перекрывающиеся chunks."""
 
     text = normalize_text(
         text
@@ -81,13 +93,19 @@ def chunk_text(
             "меньше KB_CHUNK_SIZE."
         )
 
-    chunks: list[str] = []
+    chunks: list[
+        str
+    ] = []
 
     start = 0
 
-    while start < len(text):
+    while start < len(
+        text
+    ):
         end = min(
-            len(text),
+            len(
+                text
+            ),
             start + chunk_size,
         )
 
@@ -96,12 +114,18 @@ def chunk_text(
         ].strip()
 
         if chunk:
-            chunks.append(chunk)
+            chunks.append(
+                chunk
+            )
 
-        if end >= len(text):
+        if end >= len(
+            text
+        ):
             break
 
-        start = end - overlap
+        start = (
+            end - overlap
+        )
 
     return chunks
 
@@ -113,10 +137,14 @@ def batched(
     """Разбить список на batches."""
 
     return [
-        items[index:index + batch_size]
+        items[
+            index:index + batch_size
+        ]
         for index in range(
             0,
-            len(items),
+            len(
+                items
+            ),
             batch_size,
         )
     ]
@@ -128,7 +156,7 @@ def prepare_normative_chunks(
     chunk_size: int,
     overlap: int,
 ) -> list[dict[str, Any]]:
-    """Извлечь текст нормативного PDF."""
+    """Извлечь нормативный PDF постранично и подготовить chunks."""
 
     source_key = (
         "normative:"
@@ -137,8 +165,10 @@ def prepare_normative_chunks(
         ).as_posix()
     )
 
-    source_sha256 = file_sha256(
-        pdf_path
+    source_sha256 = (
+        file_sha256(
+            pdf_path
+        )
     )
 
     records: list[
@@ -148,7 +178,10 @@ def prepare_normative_chunks(
     with fitz.open(
         pdf_path
     ) as document:
-        for page_index, page in enumerate(
+        for (
+            page_index,
+            page,
+        ) in enumerate(
             document,
             start=1,
         ):
@@ -163,15 +196,24 @@ def prepare_normative_chunks(
                 overlap,
             )
 
-            for chunk_index, chunk in enumerate(
+            for (
+                chunk_index,
+                chunk,
+            ) in enumerate(
                 chunks,
                 start=1,
             ):
                 records.append(
                     {
-                        "source_key": source_key,
-                        "source_sha256": source_sha256,
-                        "source_file": pdf_path.name,
+                        "source_key": (
+                            source_key
+                        ),
+                        "source_sha256": (
+                            source_sha256
+                        ),
+                        "source_file": (
+                            pdf_path.name
+                        ),
                         "source_path": (
                             pdf_path
                             .relative_to(
@@ -179,9 +221,15 @@ def prepare_normative_chunks(
                             )
                             .as_posix()
                         ),
-                        "page": page_index,
-                        "chunk_index": chunk_index,
-                        "text": chunk,
+                        "page": (
+                            page_index
+                        ),
+                        "chunk_index": (
+                            chunk_index
+                        ),
+                        "text": (
+                            chunk
+                        ),
                     }
                 )
 
@@ -197,7 +245,9 @@ def get_page_text(
 
     if (
         page_number < 1
-        or page_number > len(document)
+        or page_number > len(
+            document
+        )
     ):
         return ""
 
@@ -220,7 +270,7 @@ def prepare_experience_records(
     str,
     list[dict[str, Any]],
 ]:
-    """Подготовить один подтверждённый проект."""
+    """Подготовить подтверждённые замечания одного проекта."""
 
     annotations_dir = (
         case_dir
@@ -265,36 +315,55 @@ def prepare_experience_records(
         f"experience:{project_id}"
     )
 
+    # Версия payload входит в hash специально:
+    # если структура индексируемого опыта меняется,
+    # маленькая experience-коллекция
+    # обновится автоматически.
     digest_source = json.dumps(
         {
+            "payload_schema_version": (
+                EXPERIENCE_PAYLOAD_SCHEMA_VERSION
+            ),
             "issues": issues_data,
             "before_sha256": (
-                meta_data["before"][
+                meta_data[
+                    "before"
+                ][
                     "sha256"
                 ]
             ),
             "after_sha256": (
-                meta_data["after"][
+                meta_data[
+                    "after"
+                ][
                     "sha256"
                 ]
             ),
         },
         ensure_ascii=False,
         sort_keys=True,
-    ).encode("utf-8")
+    ).encode(
+        "utf-8"
+    )
 
-    source_sha256 = hashlib.sha256(
-        digest_source
-    ).hexdigest()
+    source_sha256 = (
+        hashlib.sha256(
+            digest_source
+        ).hexdigest()
+    )
 
     before_pdf = (
         case_dir
-        / issues_data["before_pdf"]
+        / issues_data[
+            "before_pdf"
+        ]
     )
 
     after_pdf = (
         case_dir
-        / issues_data["after_pdf"]
+        / issues_data[
+            "after_pdf"
+        ]
     )
 
     records: list[
@@ -313,35 +382,54 @@ def prepare_experience_records(
             "issues"
         ]:
             before_page = (
-                issue["before"][
+                issue[
+                    "before"
+                ][
                     "pdf_page"
                 ]
             )
 
             after_page = (
-                issue["after"][
+                issue[
+                    "after"
+                ][
                     "pdf_page"
                 ]
             )
 
-            before_context = get_page_text(
-                before_document,
-                before_page,
+            before_context = (
+                get_page_text(
+                    before_document,
+                    before_page,
+                )
             )
 
-            after_context = get_page_text(
-                after_document,
-                after_page,
+            after_context = (
+                get_page_text(
+                    after_document,
+                    after_page,
+                )
             )
 
-            issue_text = issue[
-                "text"
-            ]
+            issue_text = str(
+                issue[
+                    "text"
+                ]
+            )
+
+            verified_fixed = bool(
+                issue.get(
+                    "verified_fixed",
+                    False,
+                )
+            )
 
             embedding_text = (
                 f"Экспертное замечание: "
                 f"{issue_text}\n"
                 f"Проект: {project_id}\n"
+                f"Категория: "
+                f"{issue.get('category') or ''}\n"
                 f"Страница до исправления: "
                 f"{before_page}\n"
                 f"Контекст листа до исправления:\n"
@@ -354,27 +442,69 @@ def prepare_experience_records(
 
             records.append(
                 {
-                    "source_key": source_key,
-                    "source_sha256": source_sha256,
-                    "project_id": project_id,
+                    "source_key": (
+                        source_key
+                    ),
+                    "source_sha256": (
+                        source_sha256
+                    ),
+                    "payload_schema_version": (
+                        EXPERIENCE_PAYLOAD_SCHEMA_VERSION
+                    ),
+                    "project_id": (
+                        project_id
+                    ),
                     "issue_id": issue[
                         "id"
                     ],
-                    "issue_text": issue_text,
-                    "before_page": before_page,
-                    "after_page": after_page,
+                    "issue_text": (
+                        issue_text
+                    ),
+                    "category": (
+                        issue.get(
+                            "category"
+                        )
+                    ),
+                    "status": (
+                        issue.get(
+                            "status"
+                        )
+                    ),
+                    "verified_fixed": (
+                        verified_fixed
+                    ),
+                    "before_page": (
+                        before_page
+                    ),
+                    "after_page": (
+                        after_page
+                    ),
                     "bbox_points": (
-                        issue["before"].get(
+                        issue[
+                            "before"
+                        ].get(
                             "bbox_points"
                         )
                     ),
-                    "before_pdf": issues_data[
-                        "before_pdf"
-                    ],
-                    "after_pdf": issues_data[
-                        "after_pdf"
-                    ],
-                    "text": embedding_text,
+                    "before_pdf": (
+                        issues_data[
+                            "before_pdf"
+                        ]
+                    ),
+                    "after_pdf": (
+                        issues_data[
+                            "after_pdf"
+                        ]
+                    ),
+                    "before_context": (
+                        before_context
+                    ),
+                    "after_context": (
+                        after_context
+                    ),
+                    "text": (
+                        embedding_text
+                    ),
                 }
             )
 
@@ -387,19 +517,25 @@ def prepare_experience_records(
 
 def index_records(
     *,
-    records: list[dict[str, Any]],
+    records: list[
+        dict[str, Any]
+    ],
     collection: str,
     source_key: str,
     source_sha256: str,
-    embedding_client: OllamaEmbeddingClient,
+    embedding_client: (
+        OllamaEmbeddingClient
+    ),
     qdrant: QdrantRestClient,
     batch_size: int,
 ) -> int:
-    """Проиндексировать один источник."""
+    """Проиндексировать один логический источник."""
 
-    existing = qdrant.get_source_payload(
-        collection,
-        source_key,
+    existing = (
+        qdrant.get_source_payload(
+            collection,
+            source_key,
+        )
     )
 
     if (
@@ -439,17 +575,24 @@ def index_records(
         batch_size,
     ):
         texts = [
-            record["text"]
+            record[
+                "text"
+            ]
             for record in batch
         ]
 
-        vectors = embedding_client.embed(
-            texts
+        vectors = (
+            embedding_client.embed(
+                texts
+            )
         )
 
         points = []
 
-        for record, vector in zip(
+        for (
+            record,
+            vector,
+        ) in zip(
             batch,
             vectors,
             strict=True,
@@ -466,13 +609,19 @@ def index_records(
 
             points.append(
                 {
-                    "id": stable_point_id(
-                        collection,
-                        source_key,
-                        identity,
+                    "id": (
+                        stable_point_id(
+                            collection,
+                            source_key,
+                            identity,
+                        )
                     ),
-                    "vector": vector,
-                    "payload": record,
+                    "vector": (
+                        vector
+                    ),
+                    "payload": (
+                        record
+                    ),
                 }
             )
 
@@ -489,10 +638,15 @@ def index_records(
 
 
 def main() -> int:
-    """Синхронизировать обе базы знаний."""
+    """Синхронизировать нормативную базу и Базу Опыта."""
 
-    repo_root = get_repo_root()
-    settings = get_settings()
+    repo_root = (
+        get_repo_root()
+    )
+
+    settings = (
+        get_settings()
+    )
 
     normative_dir = (
         repo_root
@@ -517,12 +671,15 @@ def main() -> int:
         )
     )
 
-    qdrant = QdrantRestClient(
-        settings.qdrant_url
+    qdrant = (
+        QdrantRestClient(
+            settings.qdrant_url
+        )
     )
 
     print(
-        f"Ollama: {settings.ollama_url}"
+        f"Ollama: "
+        f"{settings.ollama_url}"
     )
 
     print(
@@ -531,32 +688,36 @@ def main() -> int:
     )
 
     print(
-        f"Qdrant: {settings.qdrant_url}"
+        f"Qdrant: "
+        f"{settings.qdrant_url}"
     )
 
     if not qdrant.is_alive():
         print(
             "[ERROR] Qdrant недоступен."
         )
+
         return 1
 
-    print()
     print(
-        "Определяем размер embedding..."
+        "\nОпределяем размер embedding..."
     )
 
-    probe_vector = embedding_client.embed(
-        [
-            "Проверка базы знаний"
-        ]
-    )[0]
+    probe_vector = (
+        embedding_client.embed(
+            [
+                "Проверка базы знаний"
+            ]
+        )[0]
+    )
 
     vector_size = len(
         probe_vector
     )
 
     print(
-        f"Размер вектора: {vector_size}"
+        f"Размер вектора: "
+        f"{vector_size}"
     )
 
     qdrant.ensure_collection(
@@ -569,9 +730,8 @@ def main() -> int:
         vector_size,
     )
 
-    print()
     print(
-        "=== НОРМАТИВНАЯ БАЗА ==="
+        "\n=== НОРМАТИВНАЯ БАЗА ==="
     )
 
     normative_files = (
@@ -591,20 +751,26 @@ def main() -> int:
 
     normative_points = 0
 
-    for pdf_path in normative_files:
+    for pdf_path in (
+        normative_files
+    ):
         print(
             f"\n{pdf_path.name}"
         )
 
         source_key = (
             "normative:"
-            + pdf_path.relative_to(
+            + pdf_path
+            .relative_to(
                 normative_dir
-            ).as_posix()
+            )
+            .as_posix()
         )
 
-        source_sha256 = file_sha256(
-            pdf_path
+        source_sha256 = (
+            file_sha256(
+                pdf_path
+            )
         )
 
         records = (
@@ -616,39 +782,50 @@ def main() -> int:
             )
         )
 
-        inserted = index_records(
-            records=records,
-            collection=(
-                settings.normative_collection
-            ),
-            source_key=source_key,
-            source_sha256=source_sha256,
-            embedding_client=(
-                embedding_client
-            ),
-            qdrant=qdrant,
-            batch_size=(
-                settings.embed_batch_size
-            ),
+        inserted = (
+            index_records(
+                records=records,
+                collection=(
+                    settings
+                    .normative_collection
+                ),
+                source_key=(
+                    source_key
+                ),
+                source_sha256=(
+                    source_sha256
+                ),
+                embedding_client=(
+                    embedding_client
+                ),
+                qdrant=qdrant,
+                batch_size=(
+                    settings
+                    .embed_batch_size
+                ),
+            )
         )
 
-        normative_points += inserted
+        normative_points += (
+            inserted
+        )
 
         if inserted:
             print(
-                f"  [OK] Добавлено chunks: "
+                "  [OK] Добавлено chunks: "
                 f"{inserted}"
             )
 
-    print()
     print(
-        "=== БАЗА ОПЫТА ==="
+        "\n=== БАЗА ОПЫТА ==="
     )
 
     case_dirs = (
         sorted(
             path
-            for path in cases_dir.iterdir()
+            for path in (
+                cases_dir.iterdir()
+            )
             if path.is_dir()
         )
         if cases_dir.is_dir()
@@ -672,57 +849,82 @@ def main() -> int:
                 source_key,
                 source_sha256,
                 records,
-            ) = prepare_experience_records(
-                case_dir
+            ) = (
+                prepare_experience_records(
+                    case_dir
+                )
             )
 
         except RuntimeError as error:
             print(
                 f"  [SKIP] {error}"
             )
+
             continue
 
-        inserted = index_records(
-            records=records,
-            collection=(
-                settings.experience_collection
-            ),
-            source_key=source_key,
-            source_sha256=source_sha256,
-            embedding_client=(
-                embedding_client
-            ),
-            qdrant=qdrant,
-            batch_size=(
-                settings.embed_batch_size
-            ),
+        inserted = (
+            index_records(
+                records=records,
+                collection=(
+                    settings
+                    .experience_collection
+                ),
+                source_key=(
+                    source_key
+                ),
+                source_sha256=(
+                    source_sha256
+                ),
+                embedding_client=(
+                    embedding_client
+                ),
+                qdrant=qdrant,
+                batch_size=(
+                    settings
+                    .embed_batch_size
+                ),
+            )
         )
 
-        experience_points += inserted
+        experience_points += (
+            inserted
+        )
 
         if inserted:
             print(
-                f"  [OK] Добавлено замечаний: "
+                "  [OK] Добавлено замечаний: "
                 f"{inserted}"
             )
 
-    print()
-    print("=" * 72)
+    print(
+        "\n"
+        + "=" * 78
+    )
 
     print(
         "Синхронизация завершена."
     )
 
     print(
-        f"Новых/обновлённых "
-        f"нормативных chunks: "
+        "Новых/обновлённых "
+        "нормативных points: "
         f"{normative_points}"
     )
 
     print(
-        f"Новых/обновлённых "
-        f"примеров опыта: "
+        "Новых/обновлённых "
+        "experience points: "
         f"{experience_points}"
+    )
+
+    print(
+        "Normative collection: "
+        f"{settings.normative_collection}"
+    )
+
+    print(
+        "Experience collection: "
+        f"{settings.experience_collection}"
     )
 
     return 0

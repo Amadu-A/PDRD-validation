@@ -27,6 +27,19 @@ function setBusy(
 }
 
 
+function statusLabel(status) {
+  if (status === "confirmed") {
+    return "Подтверждено по найденной нормативной базе";
+  }
+
+  if (status === "needs_review") {
+    return "Требует проверки инженером";
+  }
+
+  return status || "Не определён";
+}
+
+
 function renderReport(payload) {
   if (payload.status !== "completed") {
     return JSON.stringify(
@@ -43,7 +56,11 @@ function renderReport(payload) {
   );
 
   lines.push(
-    `Модель: ${payload.model}`,
+    `VLM: ${payload.vision_model}`,
+  );
+
+  lines.push(
+    `Embeddings: ${payload.embedding_model}`,
   );
 
   lines.push(
@@ -55,22 +72,36 @@ function renderReport(payload) {
   );
 
   lines.push(
-    `Найдено замечаний: ${payload.issues_count}`,
+    `Всего замечаний: ${payload.issues_count}`,
+  );
+
+  lines.push(
+    `Подтверждено: ${payload.confirmed_count}`,
+  );
+
+  lines.push(
+    `Требует проверки: ${payload.needs_review_count}`,
   );
 
   lines.push("");
 
-  if (!payload.issues.length) {
+  if (!payload.issues?.length) {
     lines.push(
-      "Модель не сформировала замечаний "
-      + "по выбранным страницам.",
+      "По найденным нормативным требованиям "
+      + "замечаний не сформировано.",
     );
+
+    lines.push("");
   }
 
-  payload.issues.forEach(
+  payload.issues?.forEach(
     (issue, index) => {
       lines.push(
         `${index + 1}. Страница ${issue.page}`,
+      );
+
+      lines.push(
+        `Статус: ${statusLabel(issue.status)}`,
       );
 
       lines.push(
@@ -86,16 +117,52 @@ function renderReport(payload) {
       );
 
       lines.push(
-        `Основание на листе: ${issue.evidence}`,
-      );
-
-      lines.push(
-        `Рекомендация: ${issue.recommendation}`,
+        `Что видно на листе: ${issue.evidence}`,
       );
 
       if (issue.basis) {
         lines.push(
           `Нормативное основание: ${issue.basis}`,
+        );
+      }
+
+      if (issue.basis_sources?.length) {
+        lines.push(
+          "Найденные нормативные фрагменты:",
+        );
+
+        issue.basis_sources.forEach(
+          (source) => {
+            lines.push(
+              `  - ${source.source_file}, PDF стр. ${source.page}`
+              + `; similarity=${source.score}`,
+            );
+          },
+        );
+      }
+
+      lines.push(
+        `Рекомендация: ${issue.recommendation}`,
+      );
+
+      if (issue.experience_sources?.length) {
+        lines.push(
+          "Похожий экспертный опыт:",
+        );
+
+        issue.experience_sources.forEach(
+          (source) => {
+            const fixedLabel = source.verified_fixed
+              ? "исправление подтверждено"
+              : "исправление не подтверждено";
+
+            lines.push(
+              `  - ${source.project_id}/${source.issue_id}: `
+              + `${source.issue_text} `
+              + `(${fixedLabel}; BEFORE ${source.before_page}`
+              + ` → AFTER ${source.after_page})`,
+            );
+          },
         );
       }
 
@@ -108,7 +175,9 @@ function renderReport(payload) {
   );
 
   if (payload.limitations?.length) {
-    lines.push("Ограничения текущего этапа:");
+    lines.push(
+      "Ограничения текущего MVP:",
+    );
 
     payload.limitations.forEach(
       (limitation) => {
@@ -132,10 +201,6 @@ form.addEventListener(
       .getElementById("pdfFile")
       .files[0];
 
-    const dxf = document
-      .getElementById("dxfFile")
-      .files[0];
-
     const pages = document
       .getElementById("pages")
       .value
@@ -155,13 +220,6 @@ form.addEventListener(
       pdf,
     );
 
-    if (dxf) {
-      body.append(
-        "dxf",
-        dxf,
-      );
-    }
-
     body.append(
       "pages",
       pages,
@@ -169,8 +227,10 @@ form.addEventListener(
 
     setBusy(
       true,
-      "Qwen3-VL анализирует PDF. "
-      + "На текущей GPU это может занять несколько минут.",
+      "Qwen3-VL 8B понимает лист, подбирает нормативы, "
+      + "проверяет соответствие и формирует отчёт. "
+      + "На текущем компьютере один лист может "
+      + "обрабатываться несколько минут.",
     );
 
     result.textContent =
@@ -210,9 +270,10 @@ form.addEventListener(
         );
       }
 
-      result.textContent = renderReport(
-        payload,
-      );
+      result.textContent =
+        renderReport(
+          payload,
+        );
 
     } catch (error) {
       result.textContent =
