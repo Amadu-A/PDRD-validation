@@ -12,6 +12,7 @@ from typing import Any
 import fitz
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from app.rag import search_knowledge
 
 
 APP_NAME = "Drawing Validation PDF Service"
@@ -640,6 +641,32 @@ async def health_ready() -> dict[str, Any]:
         "model_available": model_available,
         "installed_models": models,
     }
+
+
+@app.get(
+    "/rag/search",
+)
+async def rag_search(
+    q: str,
+) -> dict[str, Any]:
+    """Проверить RAG-поиск из самого pdf-service."""
+
+    try:
+        return await search_knowledge(
+            q
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+        ) from exc
 
 
 @app.post(

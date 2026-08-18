@@ -120,9 +120,6 @@ services:
     container_name: dva-pdf-service
     restart: unless-stopped
 
-    depends_on:
-      - ollama
-
     environment:
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_VISION_MODEL: ${OLLAMA_VISION_MODEL:-qwen3-vl:2b-instruct}
@@ -136,6 +133,14 @@ services:
       PDF_RENDER_MAX_SIDE: ${PDF_RENDER_MAX_SIDE:-2400}
       PDF_MAX_ANALYSIS_PAGES: ${PDF_MAX_ANALYSIS_PAGES:-50}
       PDF_TEXT_LIMIT: ${PDF_TEXT_LIMIT:-12000}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:0.6b}
+
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_NORMATIVE_COLLECTION: ${QDRANT_NORMATIVE_COLLECTION:-dva_normative}
+      QDRANT_EXPERIENCE_COLLECTION: ${QDRANT_EXPERIENCE_COLLECTION:-dva_experience}
+
+      RAG_NORMATIVE_TOP_K: ${RAG_NORMATIVE_TOP_K:-5}
+      RAG_EXPERIENCE_TOP_K: ${RAG_EXPERIENCE_TOP_K:-3}
 
     volumes:
       - ./data/knowledge:/data/knowledge
@@ -156,6 +161,10 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+    depends_on:
+      - ollama
+      - qdrant
 
     networks:
       - app-net
