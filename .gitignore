@@ -8,7 +8,7 @@ data/uploads/*
 !data/uploads/.gitkeep
 data/results/*
 !data/results/.gitkeep
-data/knowledge/normative/source/*
-!data/knowledge/normative/source/.gitkeep
+#data/knowledge/normative/source/*
+#!data/knowledge/normative/source/.gitkeep
 #data/knowledge/experience/cases/*
 #!data/knowledge/experience/cases/.gitkeep
