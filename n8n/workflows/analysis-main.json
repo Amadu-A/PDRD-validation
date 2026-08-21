@@ -1,5 +1,5 @@
 {
-  "name": "Drawing Validation AI - Analysis Main",
+  "name": "[PDRD] Drawing Validation AI - Analysis Main",
   "nodes": [
     {
       "parameters": {
@@ -21,7 +21,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://pdf-service:8101/analyze",
+        "url": "http://pdrd-pdf-service:8101/analyze",
         "sendBody": true,
         "contentType": "multipart-form-data",
         "bodyParameters": {

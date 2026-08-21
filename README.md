@@ -4,6 +4,27 @@ MVP-сервис для проверки проектной и рабочей д
 
 Текущая версия ориентирована на **PDF**. Поддержка **DXF** предусмотрена архитектурой, но пока не включена в рабочий pipeline.
 
+### Инфраструктурная схема
+
+PDRD использует общие инфраструктурные сервисы из отдельного
+`shared-infrastructure`.
+
+```text
+shared-infrastructure
+├── Ollama
+├── n8n
+├── RabbitMQ
+└── n8n PostgreSQL
+        │
+        └── ai-shared
+              │
+              ├── PDRD frontend
+              └── PDRD pdf-service
+                     │
+                     └── project app-net
+                           └── PDRD 
+```
+
 ## 1. Архитектура
 
 ```text
@@ -49,15 +70,25 @@ Qwen3-VL 8B
 
 ## 2. Стек
 
+### PDRD
+
 - Docker / Docker Compose
-- WSL2 / Ubuntu
 - FastAPI
 - nginx
-- n8n
-- PostgreSQL
 - Qdrant
+- PyMuPDF
+- Python
+
+### Shared infrastructure
+
 - Ollama
-- `qwen3-vl:8b`
+- n8n
+- PostgreSQL для n8n
+- RabbitMQ
+
+### AI models
+
+- `qwen3-vl:8b-instruct`
 - `qwen3-embedding:4b`
 
 Размерность embedding для `qwen3-embedding:4b`:
@@ -154,12 +185,18 @@ DXF пока отключён.
 
 ### `n8n`
 
-Orchestration-слой:
+n8n является shared infrastructure service и не запускается
+Compose-файлом PDRD.
+
+Исходник workflow хранится в репозитории:
 
 ```text
+n8n/workflows/analysis-main.json
 POST /analysis
  ↓
-http://pdf-service:8101/analyze
+shared n8n
+ ↓
+http://pdrd-pdf-service:8101/analyze
 ```
 
 ### `services/pdf-service/app/main.py`
@@ -193,15 +230,16 @@ http://pdf-service:8101/analyze
 
 ## 5. Требования
 
-Рекомендуемое окружение:
+Рекомендуемое серверное окружение:
 
-- Windows + WSL2;
-- Ubuntu в WSL;
-- Docker Desktop с WSL integration;
+- Ubuntu Linux;
+- Docker Engine;
+- Docker Compose;
 - NVIDIA GPU;
+- NVIDIA Container Toolkit;
 - Git;
 - Python 3;
-- Docker Compose.
+- запущенный `shared-infrastructure`.
 
 Проверки:
 
@@ -240,43 +278,23 @@ git pull
 test -f .env || cp .env.example .env
 ```
 
-**Никогда не выполнять `cp .env.example .env`, если `.env` уже существует.**
-
-Можно потерять:
-
-- `N8N_ENCRYPTION_KEY`;
-- пароль PostgreSQL;
-- локальные настройки;
-- выбранные модели;
-- имена Qdrant collections.
+`cp .env.example .env`
 
 Основные параметры:
 
 ```dotenv
-OLLAMA_VISION_MODEL=qwen3-vl:8b
+COMPOSE_PROJECT_NAME=pdrd-validation-ai
+SHARED_DOCKER_NETWORK=ai-shared
+SHARED_N8N_URL=http://127.0.0.1:5678
+
+OLLAMA_BASE_URL=http://ollama:11434
+KB_OLLAMA_URL=http://127.0.0.1:11434
+
+OLLAMA_VISION_MODEL=qwen3-vl:8b-instruct
 OLLAMA_EMBEDDING_MODEL=qwen3-embedding:4b
 
 QDRANT_NORMATIVE_COLLECTION=dva_normative_v2
 QDRANT_EXPERIENCE_COLLECTION=dva_experience_v2
-
-OLLAMA_NUM_CTX=12288
-OLLAMA_MAX_ISSUES=6
-OLLAMA_MAX_RETRIES=2
-OLLAMA_KEEP_ALIVE=15m
-
-OLLAMA_PAGE_FACTS_NUM_PREDICT=1200
-OLLAMA_NORM_CHECK_NUM_PREDICT=1800
-OLLAMA_FINAL_NUM_PREDICT=1400
-
-RAG_NORMATIVE_TOP_K=4
-RAG_NORMATIVE_MAX_SOURCES=12
-RAG_EXPERIENCE_TOP_K=3
-RAG_NORMATIVE_TEXT_LIMIT=700
-RAG_EXPERIENCE_CONTEXT_LIMIT=600
-
-KB_CHUNK_SIZE=3500
-KB_CHUNK_OVERLAP=500
-KB_EMBED_BATCH_SIZE=8
 ```
 
 `OLLAMA_VALIDATOR_MODEL` в текущей архитектуре не используется.
@@ -332,12 +350,9 @@ docker compose ps
 Ожидаемые сервисы:
 
 ```text
-dva-frontend
-dva-n8n
-dva-ollama
-dva-pdf-service
-dva-postgres
-dva-qdrant
+pdrd-validation-ai-frontend-1
+pdrd-validation-ai-pdf-service-1
+pdrd-validation-ai-qdrant-1
 ```
 
 ## 10. Модели Ollama

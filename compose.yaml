@@ -1,83 +1,10 @@
 # compose.yaml
 
-name: ${COMPOSE_PROJECT_NAME:-drawing-validation-ai}
+name: ${COMPOSE_PROJECT_NAME:-pdrd-validation-ai}
 
 services:
-  postgres:
-    image: postgres:${POSTGRES_VERSION:-16-alpine}
-    container_name: dva-postgres
-    restart: unless-stopped
-
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-n8n}
-      POSTGRES_USER: ${POSTGRES_USER:-n8n}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
-
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-n8n} -d ${POSTGRES_DB:-n8n}",
-        ]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 10s
-
-    networks:
-      - app-net
-
-  n8n:
-    image: docker.n8n.io/n8nio/n8n:${N8N_VERSION:-2.34.5}
-    container_name: dva-n8n
-    restart: unless-stopped
-
-    depends_on:
-      postgres:
-        condition: service_healthy
-      pdf-service:
-        condition: service_healthy
-
-    ports:
-      - "${N8N_PORT:-5678}:5678"
-
-    environment:
-      DB_TYPE: postgresdb
-      DB_POSTGRESDB_HOST: postgres
-      DB_POSTGRESDB_PORT: 5432
-      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-n8n}
-      DB_POSTGRESDB_USER: ${POSTGRES_USER:-n8n}
-      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
-
-      N8N_HOST: localhost
-      N8N_PORT: 5678
-      N8N_PROTOCOL: http
-      N8N_SECURE_COOKIE: "false"
-
-      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
-      WEBHOOK_URL: http://localhost:${N8N_PORT:-5678}/
-      N8N_EDITOR_BASE_URL: http://localhost:${N8N_PORT:-5678}/
-
-      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Europe/Moscow}
-      TZ: ${GENERIC_TIMEZONE:-Europe/Moscow}
-
-      OLLAMA_BASE_URL: http://ollama:11434
-      QDRANT_URL: http://qdrant:6333
-      PDF_SERVICE_URL: http://pdf-service:8101
-
-    volumes:
-      - n8n_data:/home/node/.n8n
-      - ./n8n/workflows:/files/workflows:ro
-
-    networks:
-      - app-net
-
   qdrant:
     image: qdrant/qdrant:${QDRANT_VERSION:-v1.19.0}
-    container_name: dva-qdrant
     restart: unless-stopped
 
     ports:
@@ -90,50 +17,26 @@ services:
     networks:
       - app-net
 
-  ollama:
-    image: ollama/ollama:${OLLAMA_VERSION:-0.32.9}
-    container_name: dva-ollama
-    restart: unless-stopped
-
-    ports:
-      - "${OLLAMA_PORT:-11434}:11434"
-
-    volumes:
-      - ollama_data:/root/.ollama
-
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities:
-                - gpu
-
-    networks:
-      - app-net
-
   pdf-service:
     build:
       context: ./services/pdf-service
 
-    container_name: dva-pdf-service
     restart: unless-stopped
 
     environment:
-      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_VISION_MODEL: ${OLLAMA_VISION_MODEL:-qwen3-vl:8b-instruct}
       OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:4b}
       OLLAMA_REQUEST_TIMEOUT: ${OLLAMA_REQUEST_TIMEOUT:-1800}
 
-      OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-12288}
+      OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-16384}
       OLLAMA_MAX_ISSUES: ${OLLAMA_MAX_ISSUES:-6}
       OLLAMA_MAX_RETRIES: ${OLLAMA_MAX_RETRIES:-2}
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-15m}
 
-      OLLAMA_PAGE_FACTS_NUM_PREDICT: ${OLLAMA_PAGE_FACTS_NUM_PREDICT:-1200}
-      OLLAMA_NORM_CHECK_NUM_PREDICT: ${OLLAMA_NORM_CHECK_NUM_PREDICT:-1800}
-      OLLAMA_FINAL_NUM_PREDICT: ${OLLAMA_FINAL_NUM_PREDICT:-1400}
+      OLLAMA_PAGE_FACTS_NUM_PREDICT: ${OLLAMA_PAGE_FACTS_NUM_PREDICT:-1600}
+      OLLAMA_NORM_CHECK_NUM_PREDICT: ${OLLAMA_NORM_CHECK_NUM_PREDICT:-2600}
+      OLLAMA_FINAL_NUM_PREDICT: ${OLLAMA_FINAL_NUM_PREDICT:-1800}
 
       QDRANT_URL: http://qdrant:6333
       QDRANT_NORMATIVE_COLLECTION: ${QDRANT_NORMATIVE_COLLECTION:-dva_normative_v2}
@@ -170,34 +73,31 @@ services:
       start_period: 10s
 
     depends_on:
-      - ollama
       - qdrant
 
     networks:
-      - app-net
+      app-net:
+      ai-shared:
+        aliases:
+          - pdrd-pdf-service
 
   frontend:
     build:
       context: ./frontend
-
-    container_name: dva-frontend
     restart: unless-stopped
-
-    depends_on:
-      - n8n
-
     ports:
       - "${FRONTEND_PORT:-8080}:80"
 
     networks:
       - app-net
-
+      - ai-shared
 volumes:
-  postgres_data:
-  n8n_data:
   qdrant_data:
-  ollama_data:
 
 networks:
   app-net:
     driver: bridge
+
+  ai-shared:
+    external: true
+    name: ${SHARED_DOCKER_NETWORK:-ai-shared}
