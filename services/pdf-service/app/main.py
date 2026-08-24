@@ -1,6 +1,6 @@
 # services/pdf-service/app/main.py
 
-"""PDF-service: нормативная проверка чертежей с RAG и Базой Опыта."""
+"""Анализ PDF и/или CAD с нормативным RAG, ПЗ-контекстом и Базой Опыта."""
 
 from __future__ import annotations
 
@@ -19,6 +19,22 @@ from fastapi import (
     UploadFile,
 )
 
+from app.cad import (
+    analyze_cad_bytes,
+    build_cad_augmented_text,
+    combine_source_images,
+    compact_cad_for_api,
+    get_cad_capabilities,
+)
+from app.project_context import (
+    build_augmented_page_text,
+    build_project_context_query,
+    compact_project_context_for_api,
+    create_temporary_project_context,
+    delete_temporary_project_context,
+    search_project_context,
+    validate_explanatory_note_pages,
+)
 from app.rag import (
     OLLAMA_EMBEDDING_MODEL,
     get_rag_status,
@@ -35,9 +51,7 @@ from app.validator import (
 )
 
 
-APP_NAME = (
-    "Drawing Validation PDF Service"
-)
+APP_NAME = "Drawing Validation Analysis Service"
 
 OLLAMA_BASE_URL = os.getenv(
     "OLLAMA_BASE_URL",
@@ -65,10 +79,17 @@ PDF_TEXT_LIMIT = int(
     )
 )
 
+CAD_MAX_UPLOAD_MB = int(
+    os.getenv(
+        "CAD_MAX_UPLOAD_MB",
+        "200",
+    )
+)
+
 
 app = FastAPI(
     title=APP_NAME,
-    version="0.3.0",
+    version="0.5.0",
 )
 
 
@@ -76,7 +97,7 @@ def parse_page_spec(
     page_spec: str | None,
     total_pages: int,
 ) -> list[int]:
-    """Разобрать строку вида ``1,3,5-8`` в физические номера страниц."""
+    """Разобрать строку ``1,3,5-8`` в физические номера PDF-страниц."""
 
     if (
         not page_spec
@@ -89,23 +110,16 @@ def parse_page_spec(
             )
         )
 
-    result: set[
-        int
-    ] = set()
+    result: set[int] = set()
 
-    for raw_part in page_spec.split(
-        ","
-    ):
+    for raw_part in page_spec.split(","):
         part = raw_part.strip()
 
         if not part:
             continue
 
         if "-" in part:
-            (
-                start_text,
-                end_text,
-            ) = [
+            start_text, end_text = [
                 value.strip()
                 for value in part.split(
                     "-",
@@ -113,18 +127,13 @@ def parse_page_spec(
                 )
             ]
 
-            start = int(
-                start_text
-            )
-
-            end = int(
-                end_text
-            )
+            start = int(start_text)
+            end = int(end_text)
 
             if start > end:
                 raise ValueError(
-                    "Начало диапазона "
-                    f"больше конца: {part}"
+                    "Начало диапазона больше конца: "
+                    f"{part}"
                 )
 
             result.update(
@@ -133,25 +142,19 @@ def parse_page_spec(
                     end + 1,
                 )
             )
-
         else:
             result.add(
-                int(
-                    part
-                )
+                int(part)
             )
 
     if not result:
         raise ValueError(
-            "Не удалось определить "
-            "страницы для анализа."
+            "Не удалось определить страницы для анализа."
         )
 
     invalid_pages = [
         page_number
-        for page_number in sorted(
-            result
-        )
+        for page_number in sorted(result)
         if (
             page_number < 1
             or page_number > total_pages
@@ -162,15 +165,97 @@ def parse_page_spec(
         raise ValueError(
             "Страницы выходят за пределы документа: "
             + ", ".join(
-                map(
-                    str,
-                    invalid_pages,
-                )
+                map(str, invalid_pages)
             )
         )
 
-    return sorted(
-        result
+    return sorted(result)
+
+
+def parse_single_pdf_page_for_cad(
+    page_spec: str | None,
+    total_pages: int,
+) -> int:
+    """При PDF+CAD потребовать ровно одну явно указанную PDF-страницу."""
+
+    normalized = (
+        page_spec
+        or ""
+    ).strip()
+
+    if not re.fullmatch(
+        r"[1-9]\d*",
+        normalized,
+    ):
+        raise ValueError(
+            "При совместном анализе PDF + DWG/DXF "
+            "нужно явно указать ровно одну страницу PDF, "
+            "которая соответствует CAD-файлу."
+        )
+
+    page_number = int(normalized)
+
+    if page_number > total_pages:
+        raise ValueError(
+            "Указанная страница для CAD выходит за пределы PDF: "
+            f"{page_number}; всего страниц: {total_pages}."
+        )
+
+    return page_number
+
+
+def validate_explanatory_note_range(
+    *,
+    enabled: bool,
+    start_page: str | None,
+    end_page: str | None,
+    total_pages: int,
+) -> tuple[list[int], int | None, int | None]:
+    """Проверить пользовательский диапазон ПЗ."""
+
+    if not enabled:
+        return [], None, None
+
+    if not start_page or not end_page:
+        raise ValueError(
+            "При включённом контексте ПЗ необходимо указать "
+            "начальную и конечную страницы."
+        )
+
+    try:
+        start = int(start_page)
+        end = int(end_page)
+    except ValueError as exc:
+        raise ValueError(
+            "Номера страниц ПЗ должны быть целыми числами."
+        ) from exc
+
+    if start < 1 or end < 1:
+        raise ValueError(
+            "Номера страниц ПЗ должны быть положительными."
+        )
+
+    if end <= start:
+        raise ValueError(
+            "Конечная страница ПЗ должна быть больше начальной."
+        )
+
+    if start > total_pages or end > total_pages:
+        raise ValueError(
+            "Диапазон ПЗ выходит за пределы документа. "
+            f"В PDF всего страниц: {total_pages}; "
+            f"получен диапазон: {start}-{end}."
+        )
+
+    return (
+        list(
+            range(
+                start,
+                end + 1,
+            )
+        ),
+        start,
+        end,
     )
 
 
@@ -178,7 +263,7 @@ def classify_page(
     text: str,
     page_number: int,
 ) -> str:
-    """Грубая классификация листа до обращения к VLM."""
+    """Грубая классификация PDF-листа до VLM."""
 
     normalized = re.sub(
         r"\s+",
@@ -251,19 +336,16 @@ def classify_page(
 def render_page(
     page: fitz.Page,
 ) -> bytes:
-    """Отрендерить PDF-страницу в PNG для Qwen3-VL."""
-
-    page_rect = page.rect
+    """Отрендерить PDF-страницу в PNG."""
 
     largest_side = max(
-        page_rect.width,
-        page_rect.height,
+        page.rect.width,
+        page.rect.height,
     )
 
     if largest_side <= 0:
         raise ValueError(
-            "Некорректный размер "
-            "страницы PDF."
+            "Некорректный размер страницы PDF."
         )
 
     scale = (
@@ -272,10 +354,7 @@ def render_page(
     )
 
     scale = min(
-        max(
-            scale,
-            0.5,
-        ),
+        max(scale, 0.5),
         3.0,
     )
 
@@ -294,7 +373,7 @@ def render_page(
 
 
 async def get_ollama_models() -> list[str]:
-    """Получить список уже загруженных моделей Ollama."""
+    """Получить модели shared Ollama."""
 
     try:
         async with httpx.AsyncClient(
@@ -303,9 +382,7 @@ async def get_ollama_models() -> list[str]:
             response = await client.get(
                 f"{OLLAMA_BASE_URL}/api/tags"
             )
-
             response.raise_for_status()
-
     except httpx.HTTPError:
         return []
 
@@ -316,11 +393,9 @@ async def get_ollama_models() -> list[str]:
                 "",
             )
         )
-        for model in (
-            response.json().get(
-                "models",
-                [],
-            )
+        for model in response.json().get(
+            "models",
+            [],
         )
     ]
 
@@ -329,158 +404,122 @@ def build_normative_queries(
     *,
     page_facts: dict[str, Any],
     extracted_text: str,
+    project_context_sources: list[dict[str, Any]] | None = None,
 ) -> list[str]:
-    """Собрать VLM-темы плюс один широкий fact-based запрос."""
+    """Собрать нейтральные запросы к нормативной базе."""
 
     queries = [
-        str(
-            query
-        ).strip()
-        for query in (
-            page_facts.get(
-                "normative_queries",
-                [],
-            )
+        str(query).strip()
+        for query in page_facts.get(
+            "normative_queries",
+            [],
         )
-        if str(
-            query
-        ).strip()
+        if str(query).strip()
     ]
 
     objects = "; ".join(
-        str(
-            item
-        )
-        for item in (
-            page_facts.get(
-                "objects",
-                [],
-            )[:10]
-        )
+        str(item)
+        for item in page_facts.get(
+            "objects",
+            [],
+        )[:10]
     )
 
     connections = "; ".join(
-        str(
-            item
-        )
-        for item in (
-            page_facts.get(
-                "connections",
-                [],
-            )[:8]
-        )
+        str(item)
+        for item in page_facts.get(
+            "connections",
+            [],
+        )[:8]
     )
 
     labels = "; ".join(
-        str(
-            item
-        )
-        for item in (
-            page_facts.get(
-                "labels",
-                [],
-            )[:10]
-        )
+        str(item)
+        for item in page_facts.get(
+            "labels",
+            [],
+        )[:10]
     )
 
-    broad_query = (
-        "Подобрать применимые требования "
-        "для проверки инженерного листа. "
-        f"Дисциплина: "
-        f"{page_facts.get('discipline', '')}. "
-        f"Тип листа: "
-        f"{page_facts.get('page_type', '')}. "
-        f"Содержание: "
-        f"{page_facts.get('summary', '')}. "
-        f"Объекты: {objects}. "
-        f"Связи: {connections}. "
-        f"Обозначения: {labels}."
-    ).strip()
+    pz_hint = ""
 
-    if broad_query:
-        queries.append(
-            broad_query
+    if project_context_sources:
+        pz_hint = " ".join(
+            str(
+                source.get(
+                    "text",
+                    "",
+                )
+            )[:300]
+            for source in project_context_sources[:3]
         )
+
+    queries.append(
+        (
+            "Подобрать применимые требования для проверки "
+            "инженерного листа. "
+            f"Дисциплина: {page_facts.get('discipline', '')}. "
+            f"Тип листа: {page_facts.get('page_type', '')}. "
+            f"Содержание: {page_facts.get('summary', '')}. "
+            f"Объекты: {objects}. "
+            f"Связи: {connections}. "
+            f"Обозначения: {labels}. "
+            f"Контекст ПЗ проекта: {pz_hint}"
+        ).strip()
+    )
 
     if (
         not queries
         and extracted_text.strip()
     ):
         queries.append(
-            "Подобрать применимые нормативные "
-            "требования для листа: "
+            "Подобрать применимые нормативные требования: "
             + extracted_text[:1800]
         )
 
-    result: list[
-        str
-    ] = []
-
-    seen: set[
-        str
-    ] = set()
+    result: list[str] = []
+    seen: set[str] = set()
 
     for query in queries:
-        if query in seen:
+        if not query or query in seen:
             continue
-
-        seen.add(
-            query
-        )
-
-        result.append(
-            query
-        )
+        seen.add(query)
+        result.append(query)
 
     return result[:7]
 
 
 def _select_by_source_ids(
-    sources: list[
-        dict[str, Any]
-    ],
+    sources: list[dict[str, Any]],
     source_ids: list[str],
 ) -> list[dict[str, Any]]:
-    """Выбрать только реально найденные источники по локальным N/E-id."""
+    """Выбрать реально существующие N/E ids."""
 
     by_id = {
-        str(
-            source.get(
-                "source_id"
-            )
-        ): source
+        str(source.get("source_id")): source
         for source in sources
-        if source.get(
-            "source_id"
-        )
+        if source.get("source_id")
     }
 
     result = []
 
     for source_id in source_ids:
         source = by_id.get(
-            str(
-                source_id
-            )
+            str(source_id)
         )
-
         if (
             source is not None
             and source not in result
         ):
-            result.append(
-                source
-            )
+            result.append(source)
 
     return result
 
 
 def _basis_from_norms(
-    sources: list[
-        dict[str, Any]
-    ],
+    sources: list[dict[str, Any]],
 ) -> str:
-    """Сформировать основание только из реально выбранных Qdrant-источников."""
+    """Сформировать нормативное основание только из Qdrant sources."""
 
     parts = []
 
@@ -488,59 +527,36 @@ def _basis_from_norms(
         source_file = source.get(
             "source_file"
         )
-
-        page = source.get(
-            "page"
-        )
+        page = source.get("page")
 
         if not source_file:
             continue
 
         if page is None:
             parts.append(
-                str(
-                    source_file
-                )
+                str(source_file)
             )
-
         else:
             parts.append(
-                f"{source_file}, "
-                f"PDF стр. {page}"
+                f"{source_file}, PDF стр. {page}"
             )
 
-    return "; ".join(
-        parts
-    )
+    return "; ".join(parts)
 
 
 def _compact_normative_for_api(
-    sources: list[
-        dict[str, Any]
-    ],
+    sources: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Не отдавать во frontend весь текст нормативного chunk."""
+    """Сократить нормативные sources для ответа API."""
 
     return [
         {
-            "source_id": source.get(
-                "source_id"
-            ),
-            "score": source.get(
-                "score"
-            ),
-            "source_file": source.get(
-                "source_file"
-            ),
-            "source_path": source.get(
-                "source_path"
-            ),
-            "page": source.get(
-                "page"
-            ),
-            "chunk_index": source.get(
-                "chunk_index"
-            ),
+            "source_id": source.get("source_id"),
+            "score": source.get("score"),
+            "source_file": source.get("source_file"),
+            "source_path": source.get("source_path"),
+            "page": source.get("page"),
+            "chunk_index": source.get("chunk_index"),
             "text_excerpt": str(
                 source.get(
                     "text",
@@ -553,51 +569,48 @@ def _compact_normative_for_api(
 
 
 def _compact_experience_for_api(
-    sources: list[
-        dict[str, Any]
-    ],
+    sources: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Отдать только полезные метаданные похожего экспертного опыта."""
+    """Сократить Experience results."""
 
     return [
         {
-            "source_id": source.get(
-                "source_id"
-            ),
-            "score": source.get(
-                "score"
-            ),
-            "project_id": source.get(
-                "project_id"
-            ),
-            "issue_id": source.get(
-                "issue_id"
-            ),
-            "issue_text": source.get(
-                "issue_text"
-            ),
+            "source_id": source.get("source_id"),
+            "score": source.get("score"),
+            "project_id": source.get("project_id"),
+            "issue_id": source.get("issue_id"),
+            "issue_text": source.get("issue_text"),
             "verified_fixed": source.get(
                 "verified_fixed",
                 False,
             ),
-            "before_page": source.get(
-                "before_page"
-            ),
-            "after_page": source.get(
-                "after_page"
-            ),
+            "before_page": source.get("before_page"),
+            "after_page": source.get("after_page"),
         }
         for source in sources
     ]
 
 
-@app.get(
-    "/health/live",
-)
-async def health_live() -> dict[
-    str,
-    str,
-]:
+def _source_mode(
+    *,
+    has_pdf: bool,
+    has_cad: bool,
+) -> str:
+    """Определить режим анализа."""
+
+    if has_pdf and has_cad:
+        return "pdf_cad"
+    if has_pdf:
+        return "pdf_only"
+    if has_cad:
+        return "cad_only"
+    raise ValueError(
+        "Необходимо загрузить PDF и/или DWG/DXF."
+    )
+
+
+@app.get("/health/live")
+async def health_live() -> dict[str, str]:
     """Liveness probe."""
 
     return {
@@ -606,31 +619,20 @@ async def health_live() -> dict[
     }
 
 
-@app.get(
-    "/health/ready",
-)
-async def health_ready() -> dict[
-    str,
-    Any,
-]:
-    """Проверить обе модели, Qdrant и требуемые коллекции."""
+@app.get("/health/ready")
+async def health_ready() -> dict[str, Any]:
+    """Проверить модели, Qdrant и CAD capabilities."""
 
     models = await get_ollama_models()
-
-    rag_status = (
-        await get_rag_status()
-    )
+    rag_status = await get_rag_status()
+    cad_capabilities = get_cad_capabilities()
 
     vision_available = (
-        OLLAMA_VISION_MODEL
-        in models
+        OLLAMA_VISION_MODEL in models
     )
-
     embedding_available = (
-        OLLAMA_EMBEDDING_MODEL
-        in models
+        OLLAMA_EMBEDDING_MODEL in models
     )
-
     collections_ready = bool(
         rag_status.get(
             "collections_ready"
@@ -641,6 +643,8 @@ async def health_ready() -> dict[
         vision_available
         and embedding_available
         and collections_ready
+        and cad_capabilities["dxf"]
+        and cad_capabilities["dwg"]
     )
 
     return {
@@ -649,72 +653,49 @@ async def health_ready() -> dict[
             if ready
             else "not_ready"
         ),
-        "vision_model": (
-            OLLAMA_VISION_MODEL
-        ),
-        "vision_model_available": (
-            vision_available
-        ),
-        "embedding_model": (
-            OLLAMA_EMBEDDING_MODEL
-        ),
-        "embedding_model_available": (
-            embedding_available
-        ),
+        "vision_model": OLLAMA_VISION_MODEL,
+        "vision_model_available": vision_available,
+        "embedding_model": OLLAMA_EMBEDDING_MODEL,
+        "embedding_model_available": embedding_available,
         "installed_models": models,
         "rag": rag_status,
+        "cad": cad_capabilities,
     }
 
 
-@app.get(
-    "/rag/search",
-)
+@app.get("/rag/search")
 async def rag_search(
     q: str,
 ) -> dict[str, Any]:
-    """Оставить диагностический endpoint ручного RAG-поиска."""
+    """Диагностический RAG endpoint."""
 
     try:
-        return await search_knowledge(
-            q
-        )
-
+        return await search_knowledge(q)
     except ValueError as exc:
         raise HTTPException(
             status_code=400,
-            detail=str(
-                exc
-            ),
+            detail=str(exc),
         ) from exc
-
     except RuntimeError as exc:
         raise HTTPException(
             status_code=502,
-            detail=str(
-                exc
-            ),
+            detail=str(exc),
         ) from exc
 
 
-@app.post(
-    "/inspect",
-)
+@app.post("/inspect")
 async def inspect_pdf(
     file: UploadFile = File(...),
-    pages: str | None = Form(
-        default=None,
-    ),
+    pages: str | None = Form(default=None),
 ) -> dict[str, Any]:
-    """Проверить PDF и извлечённый текст без LLM/RAG."""
+    """Старый диагностический PDF inspect endpoint."""
 
     pdf_bytes = await file.read()
 
     if not pdf_bytes:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Передан пустой PDF-файл."
-            ),
+            detail="Передан пустой PDF-файл.",
         )
 
     try:
@@ -722,26 +703,18 @@ async def inspect_pdf(
             stream=pdf_bytes,
             filetype="pdf",
         ) as document:
-            total_pages = len(
-                document
-            )
-
-            selected_pages = (
-                parse_page_spec(
-                    pages,
-                    total_pages,
-                )
+            total_pages = len(document)
+            selected_pages = parse_page_spec(
+                pages,
+                total_pages,
             )
 
             page_info = []
 
-            for page_number in (
-                selected_pages
-            ):
+            for page_number in selected_pages:
                 page = document[
                     page_number - 1
                 ]
-
                 text = page.get_text(
                     "text",
                     sort=True,
@@ -749,23 +722,13 @@ async def inspect_pdf(
 
                 page_info.append(
                     {
-                        "page": (
-                            page_number
+                        "page": page_number,
+                        "page_type": classify_page(
+                            text,
+                            page_number,
                         ),
-                        "page_type": (
-                            classify_page(
-                                text,
-                                page_number,
-                            )
-                        ),
-                        "text_length": (
-                            len(
-                                text
-                            )
-                        ),
-                        "text_preview": (
-                            text[:500]
-                        ),
+                        "text_length": len(text),
+                        "text_preview": text[:500],
                     }
                 )
 
@@ -775,54 +738,121 @@ async def inspect_pdf(
     ) as exc:
         raise HTTPException(
             status_code=422,
-            detail=str(
-                exc
-            ),
+            detail=str(exc),
         ) from exc
 
     return {
         "status": "ok",
-        "file_name": (
-            file.filename
-        ),
-        "total_pages": (
-            total_pages
-        ),
-        "selected_pages": (
-            selected_pages
-        ),
+        "file_name": file.filename,
+        "total_pages": total_pages,
+        "selected_pages": selected_pages,
         "pages": page_info,
     }
 
 
-@app.post(
-    "/analyze",
-)
-async def analyze_pdf(
-    file: UploadFile = File(...),
+@app.post("/analyze")
+async def analyze_document(
+    file: UploadFile | None = File(
+        default=None,
+    ),
+    cad_file: UploadFile | None = File(
+        default=None,
+    ),
     pages: str | None = Form(
         default=None,
     ),
+    use_explanatory_note: bool = Form(
+        default=False,
+    ),
+    note_start_page: str | None = Form(
+        default=None,
+    ),
+    note_end_page: str | None = Form(
+        default=None,
+    ),
 ) -> dict[str, Any]:
-    """Проверить PDF по нормативной базе и оформить замечания по Базе Опыта."""
+    """Проанализировать PDF, CAD либо PDF+CAD как один инженерный лист."""
 
-    started_at = (
-        time.perf_counter()
+    started_at = time.perf_counter()
+
+    has_pdf = bool(
+        file
+        and file.filename
+    )
+    has_cad = bool(
+        cad_file
+        and cad_file.filename
     )
 
-    pdf_bytes = await file.read()
-
-    if not pdf_bytes:
+    try:
+        mode = _source_mode(
+            has_pdf=has_pdf,
+            has_cad=has_cad,
+        )
+    except ValueError as exc:
         raise HTTPException(
             status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    if (
+        use_explanatory_note
+        and not has_pdf
+    ):
+        raise HTTPException(
+            status_code=422,
             detail=(
-                "Передан пустой PDF-файл."
+                "Контекст ПЗ доступен только при загруженном PDF. "
+                "Для CAD-only анализа снимите галочку ПЗ."
             ),
         )
 
-    models = (
-        await get_ollama_models()
+    pdf_bytes = (
+        await file.read()
+        if has_pdf and file
+        else None
     )
+
+    cad_bytes = (
+        await cad_file.read()
+        if has_cad and cad_file
+        else None
+    )
+
+    if (
+        pdf_bytes is not None
+        and not pdf_bytes
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Передан пустой PDF-файл.",
+        )
+
+    if (
+        cad_bytes is not None
+        and not cad_bytes
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Передан пустой CAD-файл.",
+        )
+
+    if (
+        cad_bytes is not None
+        and len(cad_bytes)
+        > CAD_MAX_UPLOAD_MB
+        * 1024
+        * 1024
+    ):
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "CAD-файл слишком большой. "
+                f"Лимит: {CAD_MAX_UPLOAD_MB} МБ."
+            ),
+        )
+
+    models = await get_ollama_models()
 
     missing_models = [
         model
@@ -838,21 +868,14 @@ async def analyze_pdf(
             status_code=503,
             detail={
                 "message": (
-                    "Не все необходимые "
-                    "Ollama-модели загружены."
+                    "Не все необходимые Ollama-модели загружены."
                 ),
-                "missing_models": (
-                    missing_models
-                ),
-                "installed_models": (
-                    models
-                ),
+                "missing_models": missing_models,
+                "installed_models": models,
             },
         )
 
-    rag_status = (
-        await get_rag_status()
-    )
+    rag_status = await get_rag_status()
 
     if not rag_status.get(
         "collections_ready"
@@ -861,597 +884,660 @@ async def analyze_pdf(
             status_code=503,
             detail={
                 "message": (
-                    "Qdrant-коллекции "
-                    "ещё не готовы."
+                    "Qdrant-коллекции ещё не готовы."
                 ),
                 "rag": rag_status,
             },
         )
 
+    project_context_collection: str | None = None
+    cad_result: dict[str, Any] | None = None
+    document: fitz.Document | None = None
+
+    explanatory_note_result: dict[str, Any] = {
+        "enabled": False,
+    }
+
+    all_issues: list[dict[str, Any]] = []
+    page_results: list[dict[str, Any]] = []
+
     try:
-        with fitz.open(
-            stream=pdf_bytes,
-            filetype="pdf",
-        ) as document:
-            total_pages = len(
-                document
+        if cad_bytes is not None and cad_file is not None:
+            cad_result = analyze_cad_bytes(
+                cad_bytes=cad_bytes,
+                filename=(
+                    cad_file.filename
+                    or "drawing.dxf"
+                ),
             )
 
-            selected_pages = (
-                parse_page_spec(
+        if pdf_bytes is not None:
+            try:
+                document = fitz.open(
+                    stream=pdf_bytes,
+                    filetype="pdf",
+                )
+            except fitz.FileDataError as exc:
+                raise ValueError(
+                    "Файл не удалось открыть как PDF."
+                ) from exc
+
+            total_pages = len(document)
+
+            if mode == "pdf_cad":
+                selected_pages = [
+                    parse_single_pdf_page_for_cad(
+                        pages,
+                        total_pages,
+                    )
+                ]
+            else:
+                selected_pages = parse_page_spec(
                     pages,
                     total_pages,
                 )
+
+            if len(selected_pages) > PDF_MAX_ANALYSIS_PAGES:
+                raise ValueError(
+                    "Слишком много страниц для одного анализа: "
+                    f"{len(selected_pages)}; "
+                    f"лимит={PDF_MAX_ANALYSIS_PAGES}."
+                )
+
+            (
+                note_pages,
+                validated_note_start,
+                validated_note_end,
+            ) = validate_explanatory_note_range(
+                enabled=use_explanatory_note,
+                start_page=note_start_page,
+                end_page=note_end_page,
+                total_pages=total_pages,
             )
 
-            if (
-                len(
-                    selected_pages
-                )
-                > PDF_MAX_ANALYSIS_PAGES
-            ):
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "message": (
-                            "Слишком много страниц "
-                            "для одного анализа."
-                        ),
-                        "selected": len(
-                            selected_pages
-                        ),
-                        "limit": (
-                            PDF_MAX_ANALYSIS_PAGES
-                        ),
-                    },
-                )
-
-            page_results: list[
-                dict[str, Any]
-            ] = []
-
-            all_issues: list[
-                dict[str, Any]
-            ] = []
-
-            for page_number in (
-                selected_pages
-            ):
-                page = document[
-                    page_number - 1
-                ]
-
-                extracted_text = (
-                    page.get_text(
+            if note_pages:
+                note_texts = {
+                    page_number: document[
+                        page_number - 1
+                    ].get_text(
                         "text",
                         sort=True,
                     )[:PDF_TEXT_LIMIT]
+                    for page_number in note_pages
+                }
+
+                note_validation = (
+                    await validate_explanatory_note_pages(
+                        note_texts
+                    )
+                )
+
+                context_info = (
+                    await create_temporary_project_context(
+                        note_texts
+                    )
+                )
+
+                project_context_collection = str(
+                    context_info[
+                        "collection_name"
+                    ]
+                )
+
+                explanatory_note_result = {
+                    "enabled": True,
+                    "start_page": validated_note_start,
+                    "end_page": validated_note_end,
+                    "pages_count": len(note_pages),
+                    "indexed_chunks": context_info[
+                        "chunks_count"
+                    ],
+                    "vector_size": context_info[
+                        "vector_size"
+                    ],
+                    "validation": note_validation,
+                }
+        else:
+            total_pages = 0
+            selected_pages = [1]
+
+            if pages and pages.strip():
+                raise ValueError(
+                    "Для CAD-only анализа поле страниц PDF "
+                    "должно быть пустым. CAD-файл считается одним листом."
+                )
+
+        for page_number in selected_pages:
+            pdf_text: str | None = None
+            pdf_image: bytes | None = None
+
+            if document is not None:
+                pdf_page = document[
+                    page_number - 1
+                ]
+
+                pdf_text = pdf_page.get_text(
+                    "text",
+                    sort=True,
+                )[:PDF_TEXT_LIMIT]
+
+                pdf_image = render_page(
+                    pdf_page
+                )
+
+            if mode == "pdf_only":
+                assert pdf_text is not None
+                assert pdf_image is not None
+
+                extracted_text = pdf_text
+                image_bytes = pdf_image
+                heuristic_page_type = classify_page(
+                    pdf_text,
+                    page_number,
+                )
+
+            elif mode == "pdf_cad":
+                assert pdf_text is not None
+                assert pdf_image is not None
+                assert cad_result is not None
+
+                extracted_text = build_cad_augmented_text(
+                    pdf_text=pdf_text,
+                    cad_result=cad_result,
+                )
+
+                image_bytes = combine_source_images(
+                    pdf_image_bytes=pdf_image,
+                    cad_image_bytes=(
+                        cad_result[
+                            "render_bytes"
+                        ]
+                    ),
                 )
 
                 heuristic_page_type = (
-                    classify_page(
-                        extracted_text,
-                        page_number,
+                    "pdf_cad_drawing"
+                )
+
+            else:
+                assert cad_result is not None
+
+                extracted_text = build_cad_augmented_text(
+                    pdf_text=None,
+                    cad_result=cad_result,
+                )
+
+                image_bytes = cad_result[
+                    "render_bytes"
+                ]
+
+                heuristic_page_type = (
+                    "cad_drawing"
+                )
+
+            (
+                page_facts,
+                understanding_metrics,
+            ) = await understand_page(
+                page_number=page_number,
+                heuristic_page_type=(
+                    heuristic_page_type
+                ),
+                extracted_text=extracted_text,
+                image_bytes=image_bytes,
+            )
+
+            project_context_sources: list[
+                dict[str, Any]
+            ] = []
+
+            if project_context_collection:
+                project_query = (
+                    build_project_context_query(
+                        page_facts=page_facts,
+                        extracted_text=(
+                            extracted_text
+                        ),
                     )
                 )
 
-                image_bytes = (
-                    render_page(
-                        page
+                project_context_sources = (
+                    await search_project_context(
+                        project_context_collection,
+                        project_query,
                     )
                 )
 
-                # Этап 1:
-                # понять содержание листа,
-                # но не искать ошибки.
-                (
-                    page_facts,
-                    understanding_metrics,
-                ) = await understand_page(
-                    page_number=(
-                        page_number
-                    ),
-                    heuristic_page_type=(
-                        heuristic_page_type
-                    ),
+            normative_queries = (
+                build_normative_queries(
+                    page_facts=page_facts,
                     extracted_text=(
                         extracted_text
                     ),
-                    image_bytes=(
-                        image_bytes
+                    project_context_sources=(
+                        project_context_sources
                     ),
                 )
+            )
 
-                normative_queries = (
-                    build_normative_queries(
-                        page_facts=(
-                            page_facts
-                        ),
-                        extracted_text=(
-                            extracted_text
-                        ),
-                    )
+            normative_result = (
+                await search_normative(
+                    normative_queries
                 )
+            )
 
-                # Этап 2:
-                # найти применимые нормы
-                # по содержанию листа.
-                normative_result = (
-                    await search_normative(
-                        normative_queries
-                    )
+            normative_sources = (
+                normative_result[
+                    "sources"
+                ]
+            )
+
+            analysis_text = (
+                build_augmented_page_text(
+                    extracted_text=extracted_text,
+                    project_context_sources=(
+                        project_context_sources
+                    ),
                 )
+            )
 
-                normative_sources = (
-                    normative_result[
-                        "sources"
-                    ]
-                )
+            (
+                norm_check,
+                normative_check_metrics,
+            ) = await check_page_against_norms(
+                page_number=page_number,
+                extracted_text=analysis_text,
+                page_facts=page_facts,
+                normative_sources=(
+                    normative_sources
+                ),
+                image_bytes=image_bytes,
+            )
 
-                # Этап 3:
-                # только теперь проверить
-                # лист по найденным нормам.
-                (
-                    norm_check,
-                    normative_check_metrics,
-                ) = (
-                    await check_page_against_norms(
-                        page_number=(
-                            page_number
-                        ),
-                        extracted_text=(
-                            extracted_text
-                        ),
-                        page_facts=(
-                            page_facts
-                        ),
-                        normative_sources=(
-                            normative_sources
-                        ),
-                        image_bytes=(
-                            image_bytes
-                        ),
-                    )
-                )
+            findings: list[
+                dict[str, Any]
+            ] = []
 
-                findings: list[
-                    dict[str, Any]
-                ] = []
-
-                for (
-                    index,
-                    violation,
-                ) in enumerate(
-                    norm_check.get(
-                        "violations",
+            for index, violation in enumerate(
+                norm_check.get(
+                    "violations",
+                    [],
+                ),
+                start=1,
+            ):
+                requested_ids = [
+                    str(source_id)
+                    for source_id in violation.get(
+                        "normative_source_ids",
                         [],
-                    ),
-                    start=1,
-                ):
-                    requested_ids = [
-                        str(
-                            source_id
-                        )
-                        for source_id in (
-                            violation.get(
-                                "normative_source_ids",
-                                [],
-                            )
-                        )
-                    ]
-
-                    selected_norms = (
-                        _select_by_source_ids(
-                            normative_sources,
-                            requested_ids,
-                        )
                     )
+                ]
 
-                    # В финальный отчёт
-                    # не пропускаем норму,
-                    # которой нет в Qdrant.
-                    if not selected_norms:
-                        continue
-
-                    finding_id = (
-                        f"p{page_number}"
-                        f"-f{index}"
+                selected_norms = (
+                    _select_by_source_ids(
+                        normative_sources,
+                        requested_ids,
                     )
-
-                    findings.append(
-                        {
-                            **violation,
-                            "finding_id": (
-                                finding_id
-                            ),
-                            "page": (
-                                page_number
-                            ),
-                            "page_type": (
-                                page_facts.get(
-                                    "page_type"
-                                )
-                                or (
-                                    heuristic_page_type
-                                )
-                            ),
-                            "basis": (
-                                _basis_from_norms(
-                                    selected_norms
-                                )
-                            ),
-                            "basis_sources": (
-                                _compact_normative_for_api(
-                                    selected_norms
-                                )
-                            ),
-                        }
-                    )
-
-                # Этап 4:
-                # опыт ищется только ПОСЛЕ
-                # нормативной проверки.
-                experience_by_finding: dict[
-                    str,
-                    list[dict[str, Any]],
-                ] = {}
-
-                if findings:
-                    experience_queries = [
-                        build_experience_query(
-                            finding
-                        )
-                        for finding in findings
-                    ]
-
-                    experience_results = (
-                        await search_experience_many(
-                            experience_queries
-                        )
-                    )
-
-                    for (
-                        finding,
-                        experience_result,
-                    ) in zip(
-                        findings,
-                        experience_results,
-                        strict=True,
-                    ):
-                        experience_by_finding[
-                            str(
-                                finding[
-                                    "finding_id"
-                                ]
-                            )
-                        ] = (
-                            experience_result[
-                                "sources"
-                            ]
-                        )
-
-                # Этап 5:
-                # опыт используется только
-                # для формулировки
-                # и рекомендации.
-                (
-                    final_result,
-                    final_metrics,
-                ) = await finalize_findings(
-                    findings=findings,
-                    experience_by_finding=(
-                        experience_by_finding
-                    ),
                 )
 
-                final_by_id = {
-                    str(
-                        item.get(
-                            "finding_id"
-                        )
-                    ): item
-                    for item in (
-                        final_result.get(
-                            "findings",
-                            [],
-                        )
-                    )
-                    if item.get(
-                        "finding_id"
-                    )
-                }
+                if not selected_norms:
+                    continue
 
-                page_issues: list[
-                    dict[str, Any]
-                ] = []
+                finding_id = (
+                    f"p{page_number}-f{index}"
+                )
 
-                for finding in findings:
-                    finding_id = str(
-                        finding[
-                            "finding_id"
-                        ]
-                    )
-
-                    formatted = (
-                        final_by_id.get(
-                            finding_id,
-                            {},
-                        )
-                    )
-
-                    experience_sources = (
-                        experience_by_finding.get(
-                            finding_id,
-                            [],
-                        )
-                    )
-
-                    requested_experience_ids = [
-                        str(
-                            source_id
-                        )
-                        for source_id in (
-                            formatted.get(
-                                "experience_source_ids",
-                                [],
-                            )
-                        )
-                    ]
-
-                    selected_experience = (
-                        _select_by_source_ids(
-                            experience_sources,
-                            requested_experience_ids,
-                        )
-                    )
-
-                    issue = {
-                        "finding_id": (
-                            finding_id
-                        ),
-                        "page": finding[
-                            "page"
-                        ],
-                        "page_type": finding[
-                            "page_type"
-                        ],
-                        "category": (
-                            finding.get(
-                                "category"
-                            )
-                        ),
-                        "severity": (
-                            finding.get(
-                                "severity"
-                            )
-                        ),
-                        "status": finding.get(
-                            "status"
-                        ),
-                        "comment": (
-                            formatted.get(
-                                "comment"
-                            )
-                            or finding.get(
-                                "comment",
-                                "",
-                            )
-                        ),
-                        "evidence": (
-                            finding.get(
-                                "evidence",
-                                "",
-                            )
-                        ),
-                        "recommendation": (
-                            formatted.get(
-                                "recommendation"
-                            )
-                            or finding.get(
-                                "recommendation_draft",
-                                "",
-                            )
-                        ),
-                        "confidence": (
-                            finding.get(
-                                "confidence",
-                                0.0,
-                            )
-                        ),
-                        "basis": finding.get(
-                            "basis",
-                            "",
-                        ),
-                        "basis_sources": (
-                            finding.get(
-                                "basis_sources",
-                                [],
-                            )
-                        ),
-                        "experience_sources": (
-                            _compact_experience_for_api(
-                                selected_experience
-                            )
-                        ),
-                    }
-
-                    page_issues.append(
-                        issue
-                    )
-
-                    all_issues.append(
-                        issue
-                    )
-
-                page_results.append(
+                findings.append(
                     {
-                        "page": (
-                            page_number
-                        ),
+                        **violation,
+                        "finding_id": finding_id,
+                        "page": page_number,
                         "page_type": (
                             page_facts.get(
                                 "page_type"
                             )
                             or heuristic_page_type
                         ),
-                        "discipline": (
-                            page_facts.get(
-                                "discipline",
-                                "",
-                            )
+                        "basis": _basis_from_norms(
+                            selected_norms
                         ),
-                        "summary": (
-                            page_facts.get(
-                                "summary",
-                                "",
-                            )
-                        ),
-                        "page_facts": {
-                            "objects": (
-                                page_facts.get(
-                                    "objects",
-                                    [],
-                                )
-                            ),
-                            "connections": (
-                                page_facts.get(
-                                    "connections",
-                                    [],
-                                )
-                            ),
-                            "labels": (
-                                page_facts.get(
-                                    "labels",
-                                    [],
-                                )
-                            ),
-                        },
-                        "normative_queries": (
-                            normative_queries
-                        ),
-                        "normative_sources": (
+                        "basis_sources": (
                             _compact_normative_for_api(
-                                normative_sources
+                                selected_norms
                             )
                         ),
-                        "normative_check_summary": (
-                            norm_check.get(
-                                "summary",
-                                "",
-                            )
-                        ),
-                        "final_summary": (
-                            final_result.get(
-                                "summary",
-                                "",
-                            )
-                        ),
-                        "issues": (
-                            page_issues
-                        ),
-                        "metrics": {
-                            "understanding": (
-                                understanding_metrics
-                            ),
-                            "normative_check": (
-                                normative_check_metrics
-                            ),
-                            "finalization": (
-                                final_metrics
-                            ),
-                        },
                     }
                 )
 
-    except fitz.FileDataError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Файл не удалось открыть "
-                "как PDF."
-            ),
-        ) from exc
+            experience_by_finding: dict[
+                str,
+                list[dict[str, Any]],
+            ] = {}
 
+            if findings:
+                experience_queries = [
+                    build_experience_query(
+                        finding
+                    )
+                    for finding in findings
+                ]
+
+                experience_results = (
+                    await search_experience_many(
+                        experience_queries
+                    )
+                )
+
+                for finding, experience_result in zip(
+                    findings,
+                    experience_results,
+                    strict=True,
+                ):
+                    experience_by_finding[
+                        str(
+                            finding[
+                                "finding_id"
+                            ]
+                        )
+                    ] = experience_result[
+                        "sources"
+                    ]
+
+            (
+                final_result,
+                final_metrics,
+            ) = await finalize_findings(
+                findings=findings,
+                experience_by_finding=(
+                    experience_by_finding
+                ),
+            )
+
+            final_by_id = {
+                str(
+                    item.get(
+                        "finding_id"
+                    )
+                ): item
+                for item in final_result.get(
+                    "findings",
+                    [],
+                )
+                if item.get(
+                    "finding_id"
+                )
+            }
+
+            page_issues: list[
+                dict[str, Any]
+            ] = []
+
+            for finding in findings:
+                finding_id = str(
+                    finding[
+                        "finding_id"
+                    ]
+                )
+
+                formatted = final_by_id.get(
+                    finding_id,
+                    {},
+                )
+
+                experience_sources = (
+                    experience_by_finding.get(
+                        finding_id,
+                        [],
+                    )
+                )
+
+                requested_experience_ids = [
+                    str(source_id)
+                    for source_id in formatted.get(
+                        "experience_source_ids",
+                        [],
+                    )
+                ]
+
+                selected_experience = (
+                    _select_by_source_ids(
+                        experience_sources,
+                        requested_experience_ids,
+                    )
+                )
+
+                issue = {
+                    "finding_id": finding_id,
+                    "source_mode": mode,
+                    "page": page_number,
+                    "page_type": finding[
+                        "page_type"
+                    ],
+                    "category": finding.get(
+                        "category"
+                    ),
+                    "severity": finding.get(
+                        "severity"
+                    ),
+                    "status": finding.get(
+                        "status"
+                    ),
+                    "comment": (
+                        formatted.get(
+                            "comment"
+                        )
+                        or finding.get(
+                            "comment",
+                            "",
+                        )
+                    ),
+                    "evidence": finding.get(
+                        "evidence",
+                        "",
+                    ),
+                    "recommendation": (
+                        formatted.get(
+                            "recommendation"
+                        )
+                        or finding.get(
+                            "recommendation_draft",
+                            "",
+                        )
+                    ),
+                    "confidence": finding.get(
+                        "confidence",
+                        0.0,
+                    ),
+                    "basis": finding.get(
+                        "basis",
+                        "",
+                    ),
+                    "basis_sources": finding.get(
+                        "basis_sources",
+                        [],
+                    ),
+                    "experience_sources": (
+                        _compact_experience_for_api(
+                            selected_experience
+                        )
+                    ),
+                    "project_context_sources": (
+                        compact_project_context_for_api(
+                            project_context_sources
+                        )
+                    ),
+                }
+
+                page_issues.append(issue)
+                all_issues.append(issue)
+
+            page_results.append(
+                {
+                    "page": page_number,
+                    "source_mode": mode,
+                    "page_type": (
+                        page_facts.get(
+                            "page_type"
+                        )
+                        or heuristic_page_type
+                    ),
+                    "discipline": page_facts.get(
+                        "discipline",
+                        "",
+                    ),
+                    "summary": page_facts.get(
+                        "summary",
+                        "",
+                    ),
+                    "page_facts": {
+                        "objects": page_facts.get(
+                            "objects",
+                            [],
+                        ),
+                        "connections": page_facts.get(
+                            "connections",
+                            [],
+                        ),
+                        "labels": page_facts.get(
+                            "labels",
+                            [],
+                        ),
+                    },
+                    "cad": compact_cad_for_api(
+                        cad_result
+                    ),
+                    "project_context_sources": (
+                        compact_project_context_for_api(
+                            project_context_sources
+                        )
+                    ),
+                    "normative_queries": (
+                        normative_queries
+                    ),
+                    "normative_sources": (
+                        _compact_normative_for_api(
+                            normative_sources
+                        )
+                    ),
+                    "normative_check_summary": (
+                        norm_check.get(
+                            "summary",
+                            "",
+                        )
+                    ),
+                    "final_summary": (
+                        final_result.get(
+                            "summary",
+                            "",
+                        )
+                    ),
+                    "issues": page_issues,
+                    "metrics": {
+                        "understanding": (
+                            understanding_metrics
+                        ),
+                        "normative_check": (
+                            normative_check_metrics
+                        ),
+                        "finalization": (
+                            final_metrics
+                        ),
+                    },
+                }
+            )
+
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
-            detail=str(
-                exc
-            ),
+            detail=str(exc),
         ) from exc
-
     except RuntimeError as exc:
         raise HTTPException(
             status_code=502,
-            detail=str(
-                exc
-            ),
+            detail=str(exc),
         ) from exc
+    finally:
+        if document is not None:
+            document.close()
+
+        if project_context_collection:
+            await delete_temporary_project_context(
+                project_context_collection
+            )
 
     confirmed_count = sum(
         1
         for issue in all_issues
-        if (
-            issue.get(
-                "status"
-            )
-            == "confirmed"
-        )
+        if issue.get("status") == "confirmed"
     )
 
     needs_review_count = sum(
         1
         for issue in all_issues
-        if (
-            issue.get(
-                "status"
-            )
-            == "needs_review"
-        )
+        if issue.get("status") == "needs_review"
     )
 
     return {
         "status": "completed",
         "stage": (
-            "normative_rag_experience"
+            "normative_rag_cad_project_context_experience"
+            if mode != "pdf_only"
+            else "normative_rag_project_context_experience"
         ),
+        "source_mode": mode,
         "file_name": (
             file.filename
+            if has_pdf and file
+            else cad_file.filename
+            if cad_file
+            else None
         ),
-        "vision_model": (
-            OLLAMA_VISION_MODEL
+        "pdf_file_name": (
+            file.filename
+            if has_pdf and file
+            else None
         ),
-        "embedding_model": (
-            OLLAMA_EMBEDDING_MODEL
+        "cad_file_name": (
+            cad_file.filename
+            if has_cad and cad_file
+            else None
         ),
-        "total_pages": (
-            total_pages
+        "vision_model": OLLAMA_VISION_MODEL,
+        "embedding_model": OLLAMA_EMBEDDING_MODEL,
+        "total_pages": total_pages,
+        "selected_pages": selected_pages,
+        "explanatory_note_context": (
+            explanatory_note_result
         ),
-        "selected_pages": (
-            selected_pages
+        "cad": compact_cad_for_api(
+            cad_result
         ),
-        "issues_count": len(
-            all_issues
-        ),
-        "confirmed_count": (
-            confirmed_count
-        ),
-        "needs_review_count": (
-            needs_review_count
-        ),
-        "issues": (
-            all_issues
-        ),
-        "pages": (
-            page_results
-        ),
+        "issues_count": len(all_issues),
+        "confirmed_count": confirmed_count,
+        "needs_review_count": needs_review_count,
+        "issues": all_issues,
+        "pages": page_results,
         "elapsed_seconds": round(
             time.perf_counter()
             - started_at,
             2,
         ),
         "pipeline": [
-            "page_understanding",
+            "cad_normalization_and_parsing"
+            if has_cad
+            else "cad_skipped",
+            "explanatory_note_validation"
+            if use_explanatory_note
+            else "explanatory_note_skipped",
+            "temporary_project_context_index"
+            if use_explanatory_note
+            else "temporary_project_context_skipped",
+            "visual_and_machine_understanding",
+            "project_context_retrieval"
+            if use_explanatory_note
+            else "project_context_retrieval_skipped",
             "normative_retrieval",
             "normative_compliance_check",
             "experience_retrieval",
@@ -1459,28 +1545,25 @@ async def analyze_pdf(
         ],
         "limitations": [
             (
-                "DXF пока не участвует в анализе; "
-                "проверка связности выполняется "
-                "по PDF-изображению и "
-                "извлечённому тексту."
+                "CAD connectivity в текущем MVP строится по геометрическим "
+                "endpoint-координатам с заданным tolerance и пока не заменяет "
+                "полноценную семантическую CAD-топологию."
             ),
             (
-                "Проверка выполняется по найденным "
-                "RAG-фрагментам нормативной базы; "
-                "если retrieval не нашёл применимую "
-                "норму, соответствующая проверка "
-                "может быть пропущена."
+                "DWG нормализуется через LibreDWG/dwg2dxf. Для production "
+                "может потребоваться более совместимый лицензированный converter."
             ),
             (
-                "База Опыта используется как пример "
-                "формулировки и инженерного контекста, "
+                "Контекст ПЗ доступен только при наличии PDF и создаётся "
+                "во временной Qdrant collection на время одного запроса."
+            ),
+            (
+                "Проверка выполняется по найденным RAG-фрагментам нормативной "
+                "базы; ненайденное retrieval-требование может быть пропущено."
+            ),
+            (
+                "База Опыта используется как пример формулировки, "
                 "а не как доказательство нарушения."
-            ),
-            (
-                "AFTER-лист из Базы Опыта "
-                "не считается подтверждённым способом "
-                "исправления, пока "
-                "verified_fixed=false."
             ),
         ],
     }

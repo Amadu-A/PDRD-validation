@@ -5,3 +5,5 @@ uvicorn[standard]==0.51.0
 pymupdf==1.28.0
 httpx==0.28.1
 python-multipart==0.0.32
+ezdxf==1.4.4
+Pillow==11.3.0

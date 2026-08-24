@@ -6,6 +6,11 @@ const modal = document.getElementById("modal");
 const modalText = document.getElementById("modalText");
 const submitButton = document.getElementById("submitButton");
 
+const pdfFile = document.getElementById("pdfFile");
+const cadFile = document.getElementById("cadFile");
+const pages = document.getElementById("pages");
+const pagesHint = document.getElementById("pagesHint");
+
 const useExplanatoryNote = document.getElementById(
   "useExplanatoryNote",
 );
@@ -39,8 +44,50 @@ function setBusy(
 }
 
 
+function hasPdf() {
+  return Boolean(
+    pdfFile.files[0],
+  );
+}
+
+
+function hasCad() {
+  return Boolean(
+    cadFile.files[0],
+  );
+}
+
+
+function currentMode() {
+  if (hasPdf() && hasCad()) {
+    return "pdf_cad";
+  }
+
+  if (hasPdf()) {
+    return "pdf_only";
+  }
+
+  if (hasCad()) {
+    return "cad_only";
+  }
+
+  return "empty";
+}
+
+
 function syncExplanatoryNoteFields() {
-  const enabled = useExplanatoryNote.checked;
+  const pdfAvailable = hasPdf();
+
+  useExplanatoryNote.disabled = !pdfAvailable;
+
+  if (!pdfAvailable) {
+    useExplanatoryNote.checked = false;
+  }
+
+  const enabled = (
+    pdfAvailable
+    && useExplanatoryNote.checked
+  );
 
   noteStartPage.disabled = !enabled;
   noteEndPage.disabled = !enabled;
@@ -51,10 +98,48 @@ function syncExplanatoryNoteFields() {
   if (!enabled) {
     noteStartPage.value = "";
     noteEndPage.value = "";
-
     noteStartPage.setCustomValidity("");
     noteEndPage.setCustomValidity("");
   }
+}
+
+
+function syncSourceFields() {
+  const mode = currentMode();
+
+  pages.setCustomValidity("");
+
+  if (mode === "cad_only") {
+    pages.value = "";
+    pages.disabled = true;
+    pages.required = false;
+    pages.placeholder = "Для CAD-only не используется";
+
+    pagesHint.textContent = (
+      "CAD-only: файл считается одним листом; поле страниц PDF отключено."
+    );
+  } else if (mode === "pdf_cad") {
+    pages.disabled = false;
+    pages.required = true;
+    pages.placeholder = "Например: 11";
+
+    pagesHint.textContent = (
+      "PDF + CAD: укажите ровно одну страницу PDF, "
+      + "которая соответствует загруженному DWG/DXF."
+    );
+  } else {
+    pages.disabled = false;
+    pages.required = false;
+    pages.placeholder = (
+      "PDF-only: 3,5,8-12. Пусто = весь PDF"
+    );
+
+    pagesHint.textContent = (
+      "Для PDF-only можно анализировать одну или несколько страниц."
+    );
+  }
+
+  syncExplanatoryNoteFields();
 }
 
 
@@ -83,7 +168,6 @@ function validateExplanatoryNoteFields() {
     );
 
     noteStartPage.reportValidity();
-
     return false;
   }
 
@@ -96,7 +180,6 @@ function validateExplanatoryNoteFields() {
     );
 
     noteEndPage.reportValidity();
-
     return false;
   }
 
@@ -106,11 +189,40 @@ function validateExplanatoryNoteFields() {
     );
 
     noteEndPage.reportValidity();
-
     return false;
   }
 
   return true;
+}
+
+
+function validateSources() {
+  const mode = currentMode();
+
+  pages.setCustomValidity("");
+
+  if (mode === "empty") {
+    result.textContent = (
+      "Загрузите PDF и/или DWG/DXF."
+    );
+
+    return false;
+  }
+
+  if (mode === "pdf_cad") {
+    const normalized = pages.value.trim();
+
+    if (!/^[1-9]\d*$/.test(normalized)) {
+      pages.setCustomValidity(
+        "При PDF + CAD укажите ровно одну положительную страницу PDF.",
+      );
+
+      pages.reportValidity();
+      return false;
+    }
+  }
+
+  return validateExplanatoryNoteFields();
 }
 
 
@@ -127,18 +239,31 @@ function statusLabel(status) {
 }
 
 
+function sourceModeLabel(mode) {
+  if (mode === "pdf_cad") {
+    return "PDF + DWG/DXF";
+  }
+
+  if (mode === "cad_only") {
+    return "DWG/DXF без PDF";
+  }
+
+  return "PDF";
+}
+
+
 function renderExplanatoryNoteSummary(
   payload,
   lines,
 ) {
-  const context =
-    payload.explanatory_note_context;
+  const context = (
+    payload.explanatory_note_context
+  );
 
   if (!context?.enabled) {
     lines.push(
       "Контекст ПЗ: не использовался",
     );
-
     return;
   }
 
@@ -152,8 +277,9 @@ function renderExplanatoryNoteSummary(
     + `${context.indexed_chunks} фрагм.`,
   );
 
-  const warnings =
-    context.validation?.warnings || [];
+  const warnings = (
+    context.validation?.warnings || []
+  );
 
   if (warnings.length) {
     lines.push(
@@ -173,6 +299,52 @@ function renderExplanatoryNoteSummary(
 }
 
 
+function renderCadSummary(
+  payload,
+  lines,
+) {
+  if (!payload.cad) {
+    return;
+  }
+
+  lines.push(
+    `CAD: ${payload.cad.original_file_name}`,
+  );
+
+  lines.push(
+    `CAD-формат: ${payload.cad.original_format.toUpperCase()}`
+    + ` → ${payload.cad.normalized_format.toUpperCase()}`,
+  );
+
+  lines.push(
+    `CAD layout: ${payload.cad.selected_layout}`,
+  );
+
+  lines.push(
+    `CAD entities: ${payload.cad.expanded_entity_count}`,
+  );
+
+  lines.push(
+    `CAD dangling endpoints: `
+    + `${payload.cad.geometry?.dangling_endpoint_count ?? 0}`,
+  );
+
+  if (payload.cad.warnings?.length) {
+    lines.push(
+      "Предупреждения CAD:",
+    );
+
+    payload.cad.warnings.forEach(
+      (warning) => {
+        lines.push(
+          `  - ${warning}`,
+        );
+      },
+    );
+  }
+}
+
+
 function renderReport(payload) {
   if (payload.status !== "completed") {
     return JSON.stringify(
@@ -185,8 +357,20 @@ function renderReport(payload) {
   const lines = [];
 
   lines.push(
-    `Файл: ${payload.file_name}`,
+    `Режим: ${sourceModeLabel(payload.source_mode)}`,
   );
+
+  if (payload.pdf_file_name) {
+    lines.push(
+      `PDF: ${payload.pdf_file_name}`,
+    );
+  }
+
+  if (payload.cad_file_name) {
+    lines.push(
+      `DWG/DXF: ${payload.cad_file_name}`,
+    );
+  }
 
   lines.push(
     `VLM: ${payload.vision_model}`,
@@ -196,34 +380,41 @@ function renderReport(payload) {
     `Embeddings: ${payload.embedding_model}`,
   );
 
-  lines.push(
-    `Страницы: `
-    + `${payload.selected_pages.join(", ")}`,
-  );
+  if (payload.source_mode !== "cad_only") {
+    lines.push(
+      `Страницы PDF: `
+      + `${payload.selected_pages.join(", ")}`,
+    );
+  } else {
+    lines.push(
+      "CAD-лист: 1",
+    );
+  }
 
   renderExplanatoryNoteSummary(
     payload,
     lines,
   );
 
-  lines.push(
-    `Время анализа: `
-    + `${payload.elapsed_seconds} сек.`,
+  renderCadSummary(
+    payload,
+    lines,
   );
 
   lines.push(
-    `Всего замечаний: `
-    + `${payload.issues_count}`,
+    `Время анализа: ${payload.elapsed_seconds} сек.`,
   );
 
   lines.push(
-    `Подтверждено: `
-    + `${payload.confirmed_count}`,
+    `Всего замечаний: ${payload.issues_count}`,
   );
 
   lines.push(
-    `Требует проверки: `
-    + `${payload.needs_review_count}`,
+    `Подтверждено: ${payload.confirmed_count}`,
+  );
+
+  lines.push(
+    `Требует проверки: ${payload.needs_review_count}`,
   );
 
   lines.push("");
@@ -240,7 +431,11 @@ function renderReport(payload) {
   payload.issues?.forEach(
     (issue, index) => {
       lines.push(
-        `${index + 1}. Страница ${issue.page}`,
+        `${index + 1}. Лист/страница ${issue.page}`,
+      );
+
+      lines.push(
+        `Источник: ${sourceModeLabel(issue.source_mode)}`,
       );
 
       lines.push(
@@ -260,7 +455,7 @@ function renderReport(payload) {
       );
 
       lines.push(
-        `Что видно на листе: ${issue.evidence}`,
+        `Основание на листе: ${issue.evidence}`,
       );
 
       if (
@@ -319,14 +514,14 @@ function renderReport(payload) {
 
         issue.experience_sources.forEach(
           (source) => {
-            const fixedLabel =
+            const fixedLabel = (
               source.verified_fixed
                 ? "исправление подтверждено"
-                : "исправление не подтверждено";
+                : "исправление не подтверждено"
+            );
 
             lines.push(
-              `  - ${source.project_id}/`
-              + `${source.issue_id}: `
+              `  - ${source.project_id}/${source.issue_id}: `
               + `${source.issue_text} `
               + `(${fixedLabel}; `
               + `BEFORE ${source.before_page}`
@@ -362,6 +557,16 @@ function renderReport(payload) {
 }
 
 
+pdfFile.addEventListener(
+  "change",
+  syncSourceFields,
+);
+
+cadFile.addEventListener(
+  "change",
+  syncSourceFields,
+);
+
 useExplanatoryNote.addEventListener(
   "change",
   syncExplanatoryNoteFields,
@@ -382,7 +587,14 @@ noteEndPage.addEventListener(
   },
 );
 
-syncExplanatoryNoteFields();
+pages.addEventListener(
+  "input",
+  () => {
+    pages.setCustomValidity("");
+  },
+);
+
+syncSourceFields();
 
 
 form.addEventListener(
@@ -390,36 +602,35 @@ form.addEventListener(
   async (event) => {
     event.preventDefault();
 
-    if (!validateExplanatoryNoteFields()) {
+    if (!validateSources()) {
       return;
     }
 
-    const pdf = document
-      .getElementById("pdfFile")
-      .files[0];
-
-    const pages = document
-      .getElementById("pages")
-      .value
-      .trim();
-
-    if (!pdf) {
-      result.textContent =
-        "Выберите PDF-файл.";
-
-      return;
-    }
+    const pdf = pdfFile.files[0];
+    const cad = cadFile.files[0];
+    const mode = currentMode();
 
     const body = new FormData();
 
-    body.append(
-      "pdf",
-      pdf,
-    );
+    if (pdf) {
+      body.append(
+        "pdf",
+        pdf,
+      );
+    }
+
+    if (cad) {
+      body.append(
+        "cad",
+        cad,
+      );
+    }
 
     body.append(
       "pages",
-      pages,
+      pages.disabled
+        ? ""
+        : pages.value.trim(),
     );
 
     body.append(
@@ -441,53 +652,61 @@ form.addEventListener(
       );
     }
 
-    const contextMessage =
+    let endpoint;
+
+    if (mode === "pdf_cad") {
+      endpoint = "/api/analysis/pdf-cad";
+    } else if (mode === "cad_only") {
+      endpoint = "/api/analysis/cad";
+    } else {
+      endpoint = "/api/analysis/pdf";
+    }
+
+    const contextMessage = (
       useExplanatoryNote.checked
-        ? (
-          " Сначала будет проверен "
-          + "и временно проиндексирован "
-          + "диапазон ПЗ."
-        )
-        : "";
+        ? " Сначала будет проверен и временно проиндексирован диапазон ПЗ."
+        : ""
+    );
+
+    const cadMessage = (
+      cad
+        ? " CAD будет нормализован в DXF, распарсен и отрендерен."
+        : ""
+    );
 
     setBusy(
       true,
-      "Qwen3-VL понимает лист, "
-      + "подбирает нормативы, "
-      + "проверяет соответствие "
-      + "и формирует отчёт."
+      "Qwen3-VL анализирует визуальное представление, "
+      + "машинные CAD-данные и нормативную базу."
+      + cadMessage
       + contextMessage,
     );
 
-    result.textContent =
-      "Анализ выполняется…";
+    result.textContent = (
+      "Анализ выполняется…"
+    );
 
     try {
       const response = await fetch(
-        "/api/analysis",
+        endpoint,
         {
           method: "POST",
           body,
         },
       );
 
-      const raw =
-        await response.text();
+      const raw = await response.text();
 
       let payload;
 
       try {
-        payload = JSON.parse(
-          raw,
-        );
+        payload = JSON.parse(raw);
       } catch {
-        payload = {
-          raw,
-        };
+        payload = {raw};
       }
 
       if (!response.ok) {
-        const detail =
+        const detail = (
           payload?.detail
             ? (
               typeof payload.detail === "string"
@@ -502,22 +721,21 @@ form.addEventListener(
               payload,
               null,
               2,
-            );
+            )
+        );
 
         throw new Error(
           `HTTP ${response.status}\n${detail}`,
         );
       }
 
-      result.textContent =
-        renderReport(
-          payload,
-        );
-
+      result.textContent = renderReport(
+        payload,
+      );
     } catch (error) {
-      result.textContent =
-        `Ошибка:\n${error.message}`;
-
+      result.textContent = (
+        `Ошибка:\n${error.message}`
+      );
     } finally {
       setBusy(false);
     }
