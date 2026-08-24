@@ -6,6 +6,18 @@ const modal = document.getElementById("modal");
 const modalText = document.getElementById("modalText");
 const submitButton = document.getElementById("submitButton");
 
+const useExplanatoryNote = document.getElementById(
+  "useExplanatoryNote",
+);
+
+const noteStartPage = document.getElementById(
+  "noteStartPage",
+);
+
+const noteEndPage = document.getElementById(
+  "noteEndPage",
+);
+
 
 function setBusy(
   isBusy,
@@ -27,6 +39,81 @@ function setBusy(
 }
 
 
+function syncExplanatoryNoteFields() {
+  const enabled = useExplanatoryNote.checked;
+
+  noteStartPage.disabled = !enabled;
+  noteEndPage.disabled = !enabled;
+
+  noteStartPage.required = enabled;
+  noteEndPage.required = enabled;
+
+  if (!enabled) {
+    noteStartPage.value = "";
+    noteEndPage.value = "";
+
+    noteStartPage.setCustomValidity("");
+    noteEndPage.setCustomValidity("");
+  }
+}
+
+
+function validateExplanatoryNoteFields() {
+  if (!useExplanatoryNote.checked) {
+    return true;
+  }
+
+  const start = Number(
+    noteStartPage.value,
+  );
+
+  const end = Number(
+    noteEndPage.value,
+  );
+
+  noteStartPage.setCustomValidity("");
+  noteEndPage.setCustomValidity("");
+
+  if (
+    !Number.isInteger(start)
+    || start <= 0
+  ) {
+    noteStartPage.setCustomValidity(
+      "Введите положительный номер начальной страницы.",
+    );
+
+    noteStartPage.reportValidity();
+
+    return false;
+  }
+
+  if (
+    !Number.isInteger(end)
+    || end <= 0
+  ) {
+    noteEndPage.setCustomValidity(
+      "Введите положительный номер конечной страницы.",
+    );
+
+    noteEndPage.reportValidity();
+
+    return false;
+  }
+
+  if (end <= start) {
+    noteEndPage.setCustomValidity(
+      "Конечная страница ПЗ должна быть больше начальной.",
+    );
+
+    noteEndPage.reportValidity();
+
+    return false;
+  }
+
+  return true;
+}
+
+
 function statusLabel(status) {
   if (status === "confirmed") {
     return "Подтверждено по найденной нормативной базе";
@@ -37,6 +124,52 @@ function statusLabel(status) {
   }
 
   return status || "Не определён";
+}
+
+
+function renderExplanatoryNoteSummary(
+  payload,
+  lines,
+) {
+  const context =
+    payload.explanatory_note_context;
+
+  if (!context?.enabled) {
+    lines.push(
+      "Контекст ПЗ: не использовался",
+    );
+
+    return;
+  }
+
+  lines.push(
+    `Контекст ПЗ: страницы `
+    + `${context.start_page}-${context.end_page}`,
+  );
+
+  lines.push(
+    `ПЗ проиндексирована временно: `
+    + `${context.indexed_chunks} фрагм.`,
+  );
+
+  const warnings =
+    context.validation?.warnings || [];
+
+  if (warnings.length) {
+    lines.push(
+      "Предупреждения по диапазону ПЗ:",
+    );
+
+    warnings.forEach(
+      (warning) => {
+        lines.push(
+          `  - стр. ${warning.page}: `
+          + `${warning.kind}; `
+          + `${warning.reason}`,
+        );
+      },
+    );
+  }
 }
 
 
@@ -64,23 +197,33 @@ function renderReport(payload) {
   );
 
   lines.push(
-    `Страницы: ${payload.selected_pages.join(", ")}`,
+    `Страницы: `
+    + `${payload.selected_pages.join(", ")}`,
+  );
+
+  renderExplanatoryNoteSummary(
+    payload,
+    lines,
   );
 
   lines.push(
-    `Время анализа: ${payload.elapsed_seconds} сек.`,
+    `Время анализа: `
+    + `${payload.elapsed_seconds} сек.`,
   );
 
   lines.push(
-    `Всего замечаний: ${payload.issues_count}`,
+    `Всего замечаний: `
+    + `${payload.issues_count}`,
   );
 
   lines.push(
-    `Подтверждено: ${payload.confirmed_count}`,
+    `Подтверждено: `
+    + `${payload.confirmed_count}`,
   );
 
   lines.push(
-    `Требует проверки: ${payload.needs_review_count}`,
+    `Требует проверки: `
+    + `${payload.needs_review_count}`,
   );
 
   lines.push("");
@@ -120,6 +263,29 @@ function renderReport(payload) {
         `Что видно на листе: ${issue.evidence}`,
       );
 
+      if (
+        issue.project_context_sources?.length
+      ) {
+        const pzPages = [
+          ...new Set(
+            issue.project_context_sources
+              .map(
+                (source) => source.page,
+              )
+              .filter(
+                (page) =>
+                  page !== null
+                  && page !== undefined,
+              ),
+          ),
+        ];
+
+        lines.push(
+          `Учтён контекст ПЗ со страниц: `
+          + `${pzPages.join(", ")}`,
+        );
+      }
+
       if (issue.basis) {
         lines.push(
           `Нормативное основание: ${issue.basis}`,
@@ -134,7 +300,8 @@ function renderReport(payload) {
         issue.basis_sources.forEach(
           (source) => {
             lines.push(
-              `  - ${source.source_file}, PDF стр. ${source.page}`
+              `  - ${source.source_file}, `
+              + `PDF стр. ${source.page}`
               + `; similarity=${source.score}`,
             );
           },
@@ -152,14 +319,17 @@ function renderReport(payload) {
 
         issue.experience_sources.forEach(
           (source) => {
-            const fixedLabel = source.verified_fixed
-              ? "исправление подтверждено"
-              : "исправление не подтверждено";
+            const fixedLabel =
+              source.verified_fixed
+                ? "исправление подтверждено"
+                : "исправление не подтверждено";
 
             lines.push(
-              `  - ${source.project_id}/${source.issue_id}: `
+              `  - ${source.project_id}/`
+              + `${source.issue_id}: `
               + `${source.issue_text} `
-              + `(${fixedLabel}; BEFORE ${source.before_page}`
+              + `(${fixedLabel}; `
+              + `BEFORE ${source.before_page}`
               + ` → AFTER ${source.after_page})`,
             );
           },
@@ -192,10 +362,37 @@ function renderReport(payload) {
 }
 
 
+useExplanatoryNote.addEventListener(
+  "change",
+  syncExplanatoryNoteFields,
+);
+
+noteStartPage.addEventListener(
+  "input",
+  () => {
+    noteStartPage.setCustomValidity("");
+    noteEndPage.setCustomValidity("");
+  },
+);
+
+noteEndPage.addEventListener(
+  "input",
+  () => {
+    noteEndPage.setCustomValidity("");
+  },
+);
+
+syncExplanatoryNoteFields();
+
+
 form.addEventListener(
   "submit",
   async (event) => {
     event.preventDefault();
+
+    if (!validateExplanatoryNoteFields()) {
+      return;
+    }
 
     const pdf = document
       .getElementById("pdfFile")
@@ -225,12 +422,41 @@ form.addEventListener(
       pages,
     );
 
+    body.append(
+      "use_explanatory_note",
+      String(
+        useExplanatoryNote.checked,
+      ),
+    );
+
+    if (useExplanatoryNote.checked) {
+      body.append(
+        "note_start_page",
+        noteStartPage.value,
+      );
+
+      body.append(
+        "note_end_page",
+        noteEndPage.value,
+      );
+    }
+
+    const contextMessage =
+      useExplanatoryNote.checked
+        ? (
+          " Сначала будет проверен "
+          + "и временно проиндексирован "
+          + "диапазон ПЗ."
+        )
+        : "";
+
     setBusy(
       true,
-      "Qwen3-VL 8B понимает лист, подбирает нормативы, "
-      + "проверяет соответствие и формирует отчёт. "
-      + "На текущем компьютере один лист может "
-      + "обрабатываться несколько минут.",
+      "Qwen3-VL понимает лист, "
+      + "подбирает нормативы, "
+      + "проверяет соответствие "
+      + "и формирует отчёт."
+      + contextMessage,
     );
 
     result.textContent =
@@ -245,7 +471,8 @@ form.addEventListener(
         },
       );
 
-      const raw = await response.text();
+      const raw =
+        await response.text();
 
       let payload;
 
@@ -260,13 +487,25 @@ form.addEventListener(
       }
 
       if (!response.ok) {
+        const detail =
+          payload?.detail
+            ? (
+              typeof payload.detail === "string"
+                ? payload.detail
+                : JSON.stringify(
+                  payload.detail,
+                  null,
+                  2,
+                )
+            )
+            : JSON.stringify(
+              payload,
+              null,
+              2,
+            );
+
         throw new Error(
-          `HTTP ${response.status}\n`
-          + JSON.stringify(
-            payload,
-            null,
-            2,
-          ),
+          `HTTP ${response.status}\n${detail}`,
         );
       }
 

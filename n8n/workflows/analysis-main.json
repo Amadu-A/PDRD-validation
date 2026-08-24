@@ -34,6 +34,18 @@
             {
               "name": "pages",
               "value": "={{ $json.body?.pages ?? '' }}"
+            },
+            {
+              "name": "use_explanatory_note",
+              "value": "={{ $json.body?.use_explanatory_note ?? 'false' }}"
+            },
+            {
+              "name": "note_start_page",
+              "value": "={{ $json.body?.note_start_page ?? '' }}"
+            },
+            {
+              "name": "note_end_page",
+              "value": "={{ $json.body?.note_end_page ?? '' }}"
             }
           ]
         },

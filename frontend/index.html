@@ -26,8 +26,8 @@
       </h1>
 
       <p class="muted">
-        PDF → понимание листа → нормативная база → проверка
-        соответствия → База Опыта → инженерный отчёт.
+        PDF → понимание листа → контекст ПЗ → нормативная база →
+        проверка соответствия → База Опыта → инженерный отчёт.
       </p>
 
       <form id="analysisForm">
@@ -44,20 +44,21 @@
         </label>
 
         <label>
-          DXF — следующий этап
+          DWG / DXF — следующий этап
 
           <input
-            id="dxfFile"
-            name="dxf"
+            id="cadFile"
+            name="cad"
             type="file"
-            accept=".dxf"
+            accept=".dwg,.dxf"
             disabled
           >
         </label>
 
         <p class="muted">
-          В текущем PDF-MVP DXF ещё не участвует в анализе.
-          Поле будет включено после добавления CAD/DXF parser.
+          CAD-файл пока не участвует в анализе.
+          В дальнейшем DWG будет нормализоваться в DXF,
+          после чего CAD parser будет проверять сущности и связи.
         </p>
 
         <label>
@@ -71,9 +72,60 @@
           >
         </label>
 
+        <section class="context-box">
+          <label class="checkbox-label">
+            <input
+              id="useExplanatoryNote"
+              name="use_explanatory_note"
+              type="checkbox"
+            >
+
+            <span>
+              Учитывать контекст Пояснительной записки
+            </span>
+          </label>
+
+          <div class="note-range">
+            <label>
+              Начальная страница ПЗ
+
+              <input
+                id="noteStartPage"
+                name="note_start_page"
+                type="number"
+                min="1"
+                step="1"
+                inputmode="numeric"
+                disabled
+              >
+            </label>
+
+            <label>
+              Конечная страница ПЗ
+
+              <input
+                id="noteEndPage"
+                name="note_end_page"
+                type="number"
+                min="1"
+                step="1"
+                inputmode="numeric"
+                disabled
+              >
+            </label>
+          </div>
+
+          <p class="muted">
+            При включении контекста ПЗ обе страницы обязательны.
+            Конечная страница должна быть больше начальной.
+            Backend дополнительно проверит диапазон по фактическому PDF
+            и убедится, что выбранные страницы похожи на ПЗ,
+            а не на чертёж или спецификацию.
+          </p>
+        </section>
+
         <p class="muted">
-          Qwen3-VL 8B работает частично на CPU, поэтому для первой
-          проверки лучше начать с одной страницы.
+          Для первого теста рекомендуется анализировать одну страницу.
         </p>
 
         <button
@@ -90,9 +142,7 @@
         Результат проверки
       </h2>
 
-      <pre id="result">
-Пока нет результата.
-      </pre>
+      <pre id="result">Пока нет результата.</pre>
     </section>
   </main>
 
