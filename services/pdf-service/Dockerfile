@@ -23,8 +23,10 @@ RUN apt-get update \
         libreadline-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL \
-        "https://ftp.gnu.org/gnu/libredwg/libredwg-${LIBREDWG_VERSION}.tar.xz" \
+RUN curl -fL \
+        --retry 3 \
+        --retry-delay 2 \
+        "https://github.com/LibreDWG/libredwg/releases/download/${LIBREDWG_VERSION}/libredwg-${LIBREDWG_VERSION}.tar.xz" \
         -o /tmp/libredwg.tar.xz \
     && tar -xJf /tmp/libredwg.tar.xz -C /tmp \
     && cd "/tmp/libredwg-${LIBREDWG_VERSION}" \
@@ -73,4 +75,11 @@ USER app
 
 EXPOSE 8101
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8101"]
+CMD [
+    "uvicorn",
+    "app.main:app",
+    "--host",
+    "0.0.0.0",
+    "--port",
+    "8101"
+]
