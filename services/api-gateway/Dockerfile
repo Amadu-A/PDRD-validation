@@ -27,11 +27,7 @@ RUN pip install \
 
 COPY tests /app/tests
 
-CMD [
-    "pytest",
-    "-q",
-    "/app/tests"
-]
+CMD ["pytest", "-q", "/app/tests"]
 
 
 FROM base AS runtime
