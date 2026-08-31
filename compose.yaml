@@ -1,8 +1,8 @@
-﻿# compose.yaml
+# compose.yaml
 # Project-specific Docker stack PDRD.
 #
-# Ollama, n8n Рё RabbitMQ РїСЂРёРЅР°РґР»РµР¶Р°С‚ shared infrastructure.
-# PostgreSQL, Qdrant Рё application services РїСЂРёРЅР°РґР»РµР¶Р°С‚ PDRD.
+# Ollama, n8n и RabbitMQ принадлежат shared infrastructure.
+# PostgreSQL, Qdrant и application services принадлежат PDRD.
 
 name: ${COMPOSE_PROJECT_NAME:-pdrd-validation-ai}
 
@@ -285,6 +285,66 @@ services:
     networks:
       - app-net
       - ai-shared
+
+  document-service:
+    build:
+      context: ./services/document-service
+      target: runtime
+
+    restart: unless-stopped
+
+    environment:
+      DOCUMENT_SERVICE_SERVICE_NAME: ${DOCUMENT_SERVICE_SERVICE_NAME:-PDRD Document Service}
+      DOCUMENT_SERVICE_SERVICE_VERSION: ${DOCUMENT_SERVICE_SERVICE_VERSION:-0.1.0}
+      DOCUMENT_SERVICE_ENVIRONMENT: ${DOCUMENT_SERVICE_ENVIRONMENT:-local}
+      DOCUMENT_SERVICE_HOST: 0.0.0.0
+      DOCUMENT_SERVICE_PORT: 8301
+      DOCUMENT_SERVICE_DOCS_ENABLED: ${DOCUMENT_SERVICE_DOCS_ENABLED:-true}
+
+      DOCUMENT_SERVICE_PDF__MAX_UPLOAD_MB: ${DOCUMENT_SERVICE_PDF__MAX_UPLOAD_MB:-200}
+      DOCUMENT_SERVICE_PDF__RENDER_MAX_SIDE: ${DOCUMENT_SERVICE_PDF__RENDER_MAX_SIDE:-2400}
+      DOCUMENT_SERVICE_PDF__MAX_ANALYSIS_PAGES: ${DOCUMENT_SERVICE_PDF__MAX_ANALYSIS_PAGES:-50}
+      DOCUMENT_SERVICE_PDF__TEXT_LIMIT: ${DOCUMENT_SERVICE_PDF__TEXT_LIMIT:-12000}
+
+      DOCUMENT_SERVICE_CAD__MAX_UPLOAD_MB: ${DOCUMENT_SERVICE_CAD__MAX_UPLOAD_MB:-200}
+      DOCUMENT_SERVICE_CAD__DWG_CONVERTER_COMMAND: ${DOCUMENT_SERVICE_CAD__DWG_CONVERTER_COMMAND:-dwg2dxf}
+      DOCUMENT_SERVICE_CAD__DWG_CONVERTER_TIMEOUT_SECONDS: ${DOCUMENT_SERVICE_CAD__DWG_CONVERTER_TIMEOUT_SECONDS:-180}
+      DOCUMENT_SERVICE_CAD__RENDER_DPI: ${DOCUMENT_SERVICE_CAD__RENDER_DPI:-180}
+      DOCUMENT_SERVICE_CAD__RENDER_MAX_SIDE: ${DOCUMENT_SERVICE_CAD__RENDER_MAX_SIDE:-2600}
+      DOCUMENT_SERVICE_CAD__MACHINE_TEXT_LIMIT: ${DOCUMENT_SERVICE_CAD__MACHINE_TEXT_LIMIT:-14000}
+      DOCUMENT_SERVICE_CAD__TEXT_SAMPLE_LIMIT: ${DOCUMENT_SERVICE_CAD__TEXT_SAMPLE_LIMIT:-160}
+      DOCUMENT_SERVICE_CAD__BLOCK_SAMPLE_LIMIT: ${DOCUMENT_SERVICE_CAD__BLOCK_SAMPLE_LIMIT:-120}
+      DOCUMENT_SERVICE_CAD__DANGLING_SAMPLE_LIMIT: ${DOCUMENT_SERVICE_CAD__DANGLING_SAMPLE_LIMIT:-120}
+      DOCUMENT_SERVICE_CAD__CONNECTIVITY_TOLERANCE: ${DOCUMENT_SERVICE_CAD__CONNECTIVITY_TOLERANCE:-0.5}
+      DOCUMENT_SERVICE_CAD__VIRTUAL_INSERT_DEPTH: ${DOCUMENT_SERVICE_CAD__VIRTUAL_INSERT_DEPTH:-2}
+
+    ports:
+      - "${DOCUMENT_SERVICE_BIND_IP:-127.0.0.1}:${DOCUMENT_SERVICE_HOST_PORT:-8301}:8301"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8301/health/ready', timeout=5)"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    networks:
+      app-net:
+      ai-shared:
+        aliases:
+          - pdrd-document-service
 
   pdf-service:
     build:
