@@ -2,11 +2,47 @@
 # Project-specific Docker stack PDRD.
 #
 # Ollama, n8n и RabbitMQ принадлежат shared infrastructure.
-# Qdrant и application backend/frontend принадлежат непосредственно PDRD.
+# PostgreSQL, Qdrant и application services принадлежат PDRD.
 
 name: ${COMPOSE_PROJECT_NAME:-pdrd-validation-ai}
 
 services:
+  postgres:
+    image: postgres:${PDRD_POSTGRES_VERSION:-16-alpine}
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${PDRD_POSTGRES_DB:-pdrd}
+      POSTGRES_USER: ${PDRD_POSTGRES_USER:-pdrd}
+      POSTGRES_PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_INITDB_ARGS: --data-checksums
+
+    ports:
+      - "${PDRD_POSTGRES_BIND_IP:-0.0.0.0}:${PDRD_POSTGRES_HOST_PORT:-5432}:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${PDRD_POSTGRES_USER:-pdrd} -d ${PDRD_POSTGRES_DB:-pdrd}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    networks:
+      - app-net
+
   qdrant:
     image: qdrant/qdrant:${QDRANT_VERSION:-v1.19.0}
     restart: unless-stopped
@@ -36,6 +72,17 @@ services:
       API_GATEWAY_PORT: 8000
       API_GATEWAY_DOCS_ENABLED: ${API_GATEWAY_DOCS_ENABLED:-true}
 
+      API_GATEWAY_DATABASE__HOST: postgres
+      API_GATEWAY_DATABASE__PORT: 5432
+      API_GATEWAY_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
+      API_GATEWAY_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
+      API_GATEWAY_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+      API_GATEWAY_DATABASE__POOL_SIZE: ${API_GATEWAY_DATABASE__POOL_SIZE:-5}
+      API_GATEWAY_DATABASE__MAX_OVERFLOW: ${API_GATEWAY_DATABASE__MAX_OVERFLOW:-10}
+      API_GATEWAY_DATABASE__POOL_TIMEOUT_SECONDS: ${API_GATEWAY_DATABASE__POOL_TIMEOUT_SECONDS:-10}
+      API_GATEWAY_DATABASE__CONNECT_TIMEOUT_SECONDS: ${API_GATEWAY_DATABASE__CONNECT_TIMEOUT_SECONDS:-5}
+      API_GATEWAY_DATABASE__HEALTH_TIMEOUT_SECONDS: ${API_GATEWAY_DATABASE__HEALTH_TIMEOUT_SECONDS:-3}
+
     ports:
       - "${API_GATEWAY_BIND_IP:-127.0.0.1}:${API_GATEWAY_HOST_PORT:-8200}:8000"
 
@@ -45,18 +92,60 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=5)"
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"
         ]
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 5s
+      start_period: 10s
+
+    depends_on:
+      postgres:
+        condition: service_healthy
 
     logging:
       driver: local
       options:
         max-size: "10m"
         max-file: "5"
+
+    networks:
+      - app-net
+
+  api-gateway-tests:
+    build:
+      context: ./services/api-gateway
+      target: test
+
+    profiles:
+      - test
+
+    environment:
+      API_GATEWAY_ENVIRONMENT: test
+
+      API_GATEWAY_DATABASE__HOST: postgres
+      API_GATEWAY_DATABASE__PORT: 5432
+      API_GATEWAY_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
+      API_GATEWAY_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
+      API_GATEWAY_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+      API_GATEWAY_DATABASE__POOL_SIZE: 2
+      API_GATEWAY_DATABASE__MAX_OVERFLOW: 2
+      API_GATEWAY_DATABASE__POOL_TIMEOUT_SECONDS: 5
+      API_GATEWAY_DATABASE__CONNECT_TIMEOUT_SECONDS: 5
+      API_GATEWAY_DATABASE__HEALTH_TIMEOUT_SECONDS: 3
+
+      PDRD_RUN_DATABASE_TESTS: "1"
+
+    command:
+      [
+        "/bin/sh",
+        "-c",
+        "alembic upgrade head && pytest -q /app/tests"
+      ]
+
+    depends_on:
+      postgres:
+        condition: service_healthy
 
     networks:
       - app-net
@@ -165,6 +254,7 @@ services:
       - ai-shared
 
 volumes:
+  postgres_data:
   qdrant_data:
 
 networks:

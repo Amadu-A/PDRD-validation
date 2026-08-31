@@ -1,20 +1,20 @@
 # services/api-gateway/src/pdrd_api_gateway/transport/http/routers/health.py
 
-"""Системные health endpoints API Gateway.
-
-Liveness подтверждает, что процесс способен отвечать на HTTP-запросы.
-Readiness на текущем этапе подтверждает корректную сборку приложения.
-После подключения PostgreSQL и RabbitMQ readiness будет дополнен проверкой
-обязательных инфраструктурных зависимостей.
-"""
+"""Системные health endpoints API Gateway."""
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    status,
+)
 
 from pdrd_api_gateway.core.container import ApplicationContainer
 from pdrd_api_gateway.transport.http.dependencies import get_container
 from pdrd_api_gateway.transport.http.schemas.health import (
+    DependenciesHealthResponse,
     LiveHealthResponse,
     ReadyHealthResponse,
 )
@@ -34,14 +34,7 @@ def health_live(
         Depends(get_container),
     ],
 ) -> LiveHealthResponse:
-    """Возвращает liveness сервиса.
-
-    Args:
-        container: Runtime dependencies API Gateway.
-
-    Returns:
-        Стабильный liveness response.
-    """
+    """Возвращает liveness процесса API Gateway."""
     settings = container.settings
 
     return LiveHealthResponse(
@@ -54,24 +47,28 @@ def health_live(
     "/health/ready",
     response_model=ReadyHealthResponse,
 )
-def health_ready(
+async def health_ready(
     container: Annotated[
         ApplicationContainer,
         Depends(get_container),
     ],
 ) -> ReadyHealthResponse:
-    """Возвращает readiness сервиса.
+    """Проверяет готовность API Gateway принимать рабочий трафик."""
+    readiness = await container.check_readiness.execute()
 
-    Args:
-        container: Runtime dependencies API Gateway.
+    if not readiness.ready:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "database": ("ok" if readiness.database_ready else "unavailable"),
+            },
+        )
 
-    Returns:
-        Текущий readiness response.
-    """
     settings = container.settings
 
     return ReadyHealthResponse(
         service=settings.service_name,
         version=settings.service_version,
         environment=settings.environment,
+        dependencies=DependenciesHealthResponse(),
     )

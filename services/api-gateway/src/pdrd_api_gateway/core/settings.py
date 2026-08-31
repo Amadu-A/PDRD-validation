@@ -1,16 +1,11 @@
 # services/api-gateway/src/pdrd_api_gateway/core/settings.py
 
-"""Конфигурация микросервиса API Gateway.
-
-Модуль является единой типизированной точкой чтения переменных окружения
-сервиса. Application и transport-код не должны обращаться к os.getenv()
-напрямую.
-"""
+"""Конфигурация микросервиса API Gateway."""
 
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 EnvironmentName = Literal[
@@ -22,13 +17,57 @@ EnvironmentName = Literal[
 ]
 
 
-class Settings(BaseSettings):
-    """Описывает runtime-конфигурацию API Gateway.
+class DatabaseSettings(BaseModel):
+    """Настройки project-specific PostgreSQL API Gateway."""
 
-    Значения сначала берутся из committed baseline `.env.example`,
-    затем могут быть переопределены `.env` и переменными процесса.
-    Префикс изолирует настройки Gateway от остальных микросервисов.
-    """
+    host: str = "postgres"
+
+    port: int = Field(
+        default=5432,
+        ge=1,
+        le=65535,
+    )
+
+    name: str = "pdrd"
+    user: str = "pdrd"
+
+    password: SecretStr = SecretStr(
+        "change-me",
+    )
+
+    pool_size: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+    )
+
+    max_overflow: int = Field(
+        default=10,
+        ge=0,
+        le=100,
+    )
+
+    pool_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=120,
+    )
+
+    connect_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        le=60,
+    )
+
+    health_timeout_seconds: float = Field(
+        default=3.0,
+        gt=0,
+        le=30,
+    )
+
+
+class Settings(BaseSettings):
+    """Описывает runtime-конфигурацию API Gateway."""
 
     model_config = SettingsConfigDict(
         env_file=(
@@ -46,6 +85,7 @@ class Settings(BaseSettings):
     environment: EnvironmentName = "local"
 
     host: str = "0.0.0.0"
+
     port: int = Field(
         default=8000,
         ge=1,
@@ -54,12 +94,12 @@ class Settings(BaseSettings):
 
     docs_enabled: bool = True
 
+    database: DatabaseSettings = Field(
+        default_factory=DatabaseSettings,
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:
-    """Возвращает единственный экземпляр конфигурации процесса.
-
-    Returns:
-        Провалидированная конфигурация API Gateway.
-    """
+    """Возвращает единственный экземпляр конфигурации процесса."""
     return Settings()

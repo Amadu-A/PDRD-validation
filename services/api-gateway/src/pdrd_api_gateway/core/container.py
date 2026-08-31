@@ -1,35 +1,62 @@
 # services/api-gateway/src/pdrd_api_gateway/core/container.py
 
-"""Composition root микросервиса API Gateway.
+"""Composition root микросервиса API Gateway."""
 
-Модуль хранит concrete runtime-зависимости приложения и является единственным
-местом, где они собираются. Сейчас Gateway зависит только от конфигурации;
-по мере развития сюда будут добавляться адаптеры PostgreSQL, очереди,
-хранилища и orchestration.
-"""
-
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from pdrd_api_gateway.application.use_cases.check_readiness import (
+    CheckReadiness,
+)
 from pdrd_api_gateway.core.settings import Settings, get_settings
+from pdrd_api_gateway.infrastructure.database.engine import (
+    build_async_engine,
+)
+from pdrd_api_gateway.infrastructure.database.health import (
+    DatabaseReadinessProbe,
+)
+
+ShutdownCallback = Callable[
+    [],
+    Awaitable[None],
+]
 
 
 @dataclass(frozen=True, slots=True)
 class ApplicationContainer:
-    """Хранит concrete зависимости одного экземпляра API Gateway.
-
-    Attributes:
-        settings: Провалидированная runtime-конфигурация сервиса.
-    """
+    """Хранит runtime dependencies API Gateway."""
 
     settings: Settings
+    check_readiness: CheckReadiness
+    shutdown_callback: ShutdownCallback
+
+    async def close(self) -> None:
+        """Корректно освобождает infrastructure resources."""
+        await self.shutdown_callback()
 
 
 def build_container() -> ApplicationContainer:
-    """Собирает runtime-зависимости API Gateway.
+    """Собирает production dependencies API Gateway."""
+    settings = get_settings()
 
-    Returns:
-        Готовый контейнер зависимостей для FastAPI-приложения.
-    """
+    engine = build_async_engine(
+        settings.database,
+    )
+
+    database_readiness = DatabaseReadinessProbe(
+        engine=engine,
+        timeout_seconds=(settings.database.health_timeout_seconds),
+    )
+
+    check_readiness = CheckReadiness(
+        database=database_readiness,
+    )
+
+    async def _shutdown_database() -> None:
+        await engine.dispose()
+
     return ApplicationContainer(
-        settings=get_settings(),
+        settings=settings,
+        check_readiness=check_readiness,
+        shutdown_callback=_shutdown_database,
     )

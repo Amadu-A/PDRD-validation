@@ -1,11 +1,9 @@
 # services/api-gateway/src/pdrd_api_gateway/main.py
 
-"""Точка входа FastAPI-приложения API Gateway.
+"""Точка входа FastAPI-приложения API Gateway."""
 
-Модуль создаёт HTTP-приложение, подключает composition container и routers.
-Бизнес-логика и создание infrastructure adapters непосредственно здесь
-не размещаются.
-"""
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -21,21 +19,27 @@ from pdrd_api_gateway.transport.http.routers.health import (
 def create_app(
     container: ApplicationContainer | None = None,
 ) -> FastAPI:
-    """Создаёт настроенный экземпляр FastAPI.
-
-    Args:
-        container: Необязательный заранее собранный container. Используется
-            тестами для явной подстановки конфигурации и зависимостей.
-
-    Returns:
-        Готовое FastAPI-приложение.
-    """
+    """Создаёт настроенный экземпляр FastAPI."""
     application_container = container if container is not None else build_container()
 
     settings = application_container.settings
 
+    @asynccontextmanager
+    async def lifespan(
+        application: FastAPI,
+    ) -> AsyncIterator[None]:
+        """Управляет lifecycle infrastructure resources."""
+        del application
+
+        try:
+            yield
+        finally:
+            await application_container.close()
+
     docs_url = "/docs" if settings.docs_enabled else None
+
     redoc_url = "/redoc" if settings.docs_enabled else None
+
     openapi_url = "/openapi.json" if settings.docs_enabled else None
 
     application = FastAPI(
@@ -44,6 +48,7 @@ def create_app(
         docs_url=docs_url,
         redoc_url=redoc_url,
         openapi_url=openapi_url,
+        lifespan=lifespan,
     )
 
     application.state.container = application_container

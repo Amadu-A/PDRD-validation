@@ -1,5 +1,5 @@
 # services/api-gateway/Dockerfile
-# Multi-stage image API Gateway: общий runtime, отдельный test stage и production stage.
+# Multi-stage image API Gateway: base, automated tests и runtime.
 
 FROM python:3.12.13-slim-bookworm AS base
 
@@ -10,6 +10,8 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /app
 
 COPY pyproject.toml /app/pyproject.toml
+COPY alembic.ini /app/alembic.ini
+COPY alembic /app/alembic
 COPY src /app/src
 
 RUN pip install \
@@ -25,7 +27,11 @@ RUN pip install \
 
 COPY tests /app/tests
 
-CMD ["pytest", "-q", "/app/tests"]
+CMD [
+    "pytest",
+    "-q",
+    "/app/tests"
+]
 
 
 FROM base AS runtime

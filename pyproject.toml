@@ -73,4 +73,8 @@ testpaths = [
     "services/analysis-service/tests",
 ]
 
+markers = [
+    "database: integration tests requiring a real PostgreSQL instance",
+]
+
 asyncio_mode = "auto"
