@@ -1,4 +1,8 @@
 # compose.yaml
+# Project-specific Docker stack PDRD.
+#
+# Ollama, n8n и RabbitMQ принадлежат shared infrastructure.
+# Qdrant и application backend/frontend принадлежат непосредственно PDRD.
 
 name: ${COMPOSE_PROJECT_NAME:-pdrd-validation-ai}
 
@@ -13,6 +17,46 @@ services:
 
     volumes:
       - qdrant_data:/qdrant/storage
+
+    networks:
+      - app-net
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      target: runtime
+
+    restart: unless-stopped
+
+    environment:
+      API_GATEWAY_SERVICE_NAME: ${API_GATEWAY_SERVICE_NAME:-PDRD API Gateway}
+      API_GATEWAY_SERVICE_VERSION: ${API_GATEWAY_SERVICE_VERSION:-0.1.0}
+      API_GATEWAY_ENVIRONMENT: ${API_GATEWAY_ENVIRONMENT:-local}
+      API_GATEWAY_HOST: 0.0.0.0
+      API_GATEWAY_PORT: 8000
+      API_GATEWAY_DOCS_ENABLED: ${API_GATEWAY_DOCS_ENABLED:-true}
+
+    ports:
+      - "${API_GATEWAY_BIND_IP:-127.0.0.1}:${API_GATEWAY_HOST_PORT:-8200}:8000"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=5)"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"
 
     networks:
       - app-net
@@ -87,7 +131,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8101/health/live', timeout=5)",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8101/health/live', timeout=5)"
         ]
       interval: 10s
       timeout: 5s

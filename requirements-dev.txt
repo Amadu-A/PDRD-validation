@@ -5,3 +5,6 @@ pytest>=8.4,<10.0
 pytest-asyncio>=1.1,<2.0
 pytest-cov>=6.2,<8.0
 ruff>=0.12,<1.0
+
+# Editable installation нового API Gateway вместе с test dependencies.
+-e ./services/api-gateway[test]

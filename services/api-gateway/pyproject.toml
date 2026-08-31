@@ -1,0 +1,27 @@
+# services/api-gateway/pyproject.toml
+# Метаданные, runtime-зависимости и test-зависимости микросервиса API Gateway.
+
+[build-system]
+requires = ["setuptools>=80,<82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdrd-api-gateway"
+version = "0.1.0"
+description = "Публичная HTTP-точка входа для frontend проекта PDRD."
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi==0.141.1",
+    "pydantic-settings==2.15.0",
+    "uvicorn[standard]==0.52.4",
+]
+
+[project.optional-dependencies]
+test = [
+    "httpx2>=2.12,<3.0",
+    "pytest>=8.4,<10.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
