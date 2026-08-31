@@ -29,3 +29,22 @@ test = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+]
+
+testpaths = [
+    "tests",
+]
+
+markers = [
+    "database: integration tests requiring a real PostgreSQL instance",
+]
+
+asyncio_mode = "auto"
