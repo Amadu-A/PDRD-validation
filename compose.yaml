@@ -57,6 +57,14 @@ services:
     networks:
       - app-net
 
+  quality-tests:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile.quality
+
+    profiles:
+      - test
+
   api-gateway:
     build:
       context: ./services/api-gateway
@@ -82,6 +90,18 @@ services:
       API_GATEWAY_DATABASE__POOL_TIMEOUT_SECONDS: ${API_GATEWAY_DATABASE__POOL_TIMEOUT_SECONDS:-10}
       API_GATEWAY_DATABASE__CONNECT_TIMEOUT_SECONDS: ${API_GATEWAY_DATABASE__CONNECT_TIMEOUT_SECONDS:-5}
       API_GATEWAY_DATABASE__HEALTH_TIMEOUT_SECONDS: ${API_GATEWAY_DATABASE__HEALTH_TIMEOUT_SECONDS:-3}
+
+      API_GATEWAY_BROKER__HOST: ${PDRD_RABBITMQ_HOST:-rabbitmq}
+      API_GATEWAY_BROKER__PORT: ${PDRD_RABBITMQ_PORT:-5672}
+      API_GATEWAY_BROKER__USER: ${PDRD_RABBITMQ_USER:-pdrd_validation}
+      API_GATEWAY_BROKER__PASSWORD: ${PDRD_RABBITMQ_PASSWORD:?PDRD_RABBITMQ_PASSWORD must be set in .env}
+      API_GATEWAY_BROKER__VIRTUAL_HOST: ${PDRD_RABBITMQ_VHOST:-pdrd-validation}
+      API_GATEWAY_BROKER__QUEUE_NAME: pdrd.analysis
+      API_GATEWAY_BROKER__EXCHANGE_NAME: pdrd.analysis
+      API_GATEWAY_BROKER__ROUTING_KEY: analysis.execute
+      API_GATEWAY_BROKER__CONNECT_TIMEOUT_SECONDS: 5
+      API_GATEWAY_BROKER__HEALTH_TIMEOUT_SECONDS: 3
+      API_GATEWAY_BROKER__RESULT_EXPIRES_SECONDS: 300
 
     ports:
       - "${API_GATEWAY_BIND_IP:-127.0.0.1}:${API_GATEWAY_HOST_PORT:-8200}:8000"
@@ -111,6 +131,73 @@ services:
 
     networks:
       - app-net
+      - ai-shared
+
+  api-gateway-worker:
+    build:
+      context: ./services/api-gateway
+      target: runtime
+
+    restart: unless-stopped
+
+    command:
+      [
+        "celery",
+        "-A",
+        "pdrd_api_gateway.infrastructure.messaging.celery_app:celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--concurrency=${PDRD_CELERY_CONCURRENCY:-1}",
+        "--hostname=pdrd-analysis@%h"
+      ]
+
+    environment:
+      API_GATEWAY_ENVIRONMENT: ${API_GATEWAY_ENVIRONMENT:-local}
+
+      API_GATEWAY_DATABASE__HOST: postgres
+      API_GATEWAY_DATABASE__PORT: 5432
+      API_GATEWAY_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
+      API_GATEWAY_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
+      API_GATEWAY_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+
+      API_GATEWAY_BROKER__HOST: ${PDRD_RABBITMQ_HOST:-rabbitmq}
+      API_GATEWAY_BROKER__PORT: ${PDRD_RABBITMQ_PORT:-5672}
+      API_GATEWAY_BROKER__USER: ${PDRD_RABBITMQ_USER:-pdrd_validation}
+      API_GATEWAY_BROKER__PASSWORD: ${PDRD_RABBITMQ_PASSWORD:?PDRD_RABBITMQ_PASSWORD must be set in .env}
+      API_GATEWAY_BROKER__VIRTUAL_HOST: ${PDRD_RABBITMQ_VHOST:-pdrd-validation}
+      API_GATEWAY_BROKER__QUEUE_NAME: pdrd.analysis
+      API_GATEWAY_BROKER__EXCHANGE_NAME: pdrd.analysis
+      API_GATEWAY_BROKER__ROUTING_KEY: analysis.execute
+      API_GATEWAY_BROKER__CONNECT_TIMEOUT_SECONDS: 5
+      API_GATEWAY_BROKER__HEALTH_TIMEOUT_SECONDS: 3
+      API_GATEWAY_BROKER__RESULT_EXPIRES_SECONDS: 300
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A pdrd_api_gateway.infrastructure.messaging.celery_app:celery_app inspect ping -d \"pdrd-analysis@$$HOSTNAME\" --timeout=5 | grep -q pong"
+        ]
+      interval: 10s
+      timeout: 8s
+      retries: 10
+      start_period: 10s
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    stop_grace_period: 30s
+
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    networks:
+      - app-net
+      - ai-shared
 
   api-gateway-tests:
     build:
@@ -134,7 +221,20 @@ services:
       API_GATEWAY_DATABASE__CONNECT_TIMEOUT_SECONDS: 5
       API_GATEWAY_DATABASE__HEALTH_TIMEOUT_SECONDS: 3
 
+      API_GATEWAY_BROKER__HOST: ${PDRD_RABBITMQ_HOST:-rabbitmq}
+      API_GATEWAY_BROKER__PORT: ${PDRD_RABBITMQ_PORT:-5672}
+      API_GATEWAY_BROKER__USER: ${PDRD_RABBITMQ_USER:-pdrd_validation}
+      API_GATEWAY_BROKER__PASSWORD: ${PDRD_RABBITMQ_PASSWORD:?PDRD_RABBITMQ_PASSWORD must be set in .env}
+      API_GATEWAY_BROKER__VIRTUAL_HOST: ${PDRD_RABBITMQ_VHOST:-pdrd-validation}
+      API_GATEWAY_BROKER__QUEUE_NAME: pdrd.analysis
+      API_GATEWAY_BROKER__EXCHANGE_NAME: pdrd.analysis
+      API_GATEWAY_BROKER__ROUTING_KEY: analysis.execute
+      API_GATEWAY_BROKER__CONNECT_TIMEOUT_SECONDS: 5
+      API_GATEWAY_BROKER__HEALTH_TIMEOUT_SECONDS: 3
+      API_GATEWAY_BROKER__RESULT_EXPIRES_SECONDS: 300
+
       PDRD_RUN_DATABASE_TESTS: "1"
+      PDRD_RUN_BROKER_TESTS: "1"
 
     command:
       [
@@ -147,8 +247,12 @@ services:
       postgres:
         condition: service_healthy
 
+      api-gateway-worker:
+        condition: service_healthy
+
     networks:
       - app-net
+      - ai-shared
 
   pdf-service:
     build:

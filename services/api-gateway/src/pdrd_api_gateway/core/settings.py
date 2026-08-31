@@ -66,6 +66,48 @@ class DatabaseSettings(BaseModel):
     )
 
 
+class BrokerSettings(BaseModel):
+    """Настройки project-specific RabbitMQ namespace."""
+
+    host: str = "rabbitmq"
+
+    port: int = Field(
+        default=5672,
+        ge=1,
+        le=65535,
+    )
+
+    user: str = "pdrd_validation"
+
+    password: SecretStr = SecretStr(
+        "change-me",
+    )
+
+    virtual_host: str = "pdrd-validation"
+
+    queue_name: str = "pdrd.analysis"
+    exchange_name: str = "pdrd.analysis"
+    routing_key: str = "analysis.execute"
+
+    connect_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        le=60,
+    )
+
+    health_timeout_seconds: float = Field(
+        default=3.0,
+        gt=0,
+        le=30,
+    )
+
+    result_expires_seconds: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+    )
+
+
 class Settings(BaseSettings):
     """Описывает runtime-конфигурацию API Gateway."""
 
@@ -96,6 +138,10 @@ class Settings(BaseSettings):
 
     database: DatabaseSettings = Field(
         default_factory=DatabaseSettings,
+    )
+
+    broker: BrokerSettings = Field(
+        default_factory=BrokerSettings,
     )
 
 

@@ -27,6 +27,7 @@ class DependenciesHealthResponse(BaseModel):
     )
 
     database: Literal["ok"] = "ok"
+    broker: Literal["ok"] = "ok"
 
 
 class ReadyHealthResponse(BaseModel):

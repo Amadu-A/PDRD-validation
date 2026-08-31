@@ -61,6 +61,7 @@ async def health_ready(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "database": ("ok" if readiness.database_ready else "unavailable"),
+                "broker": ("ok" if readiness.broker_ready else "unavailable"),
             },
         )
 

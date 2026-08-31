@@ -1,0 +1,24 @@
+# .dockerignore
+# Исключения для Docker build context, запускаемого от корня repository.
+
+.git/
+.env
+
+.idea/
+.vscode/
+
+.venv/
+.venv-dev/
+
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+
+data/
+frontend/
+n8n/
+scripts/
+
+# Legacy-сервис не требуется quality image нового backend.
+services/pdf-service/

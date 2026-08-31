@@ -15,6 +15,10 @@ from pdrd_api_gateway.infrastructure.database.engine import (
 from pdrd_api_gateway.infrastructure.database.health import (
     DatabaseReadinessProbe,
 )
+from pdrd_api_gateway.infrastructure.messaging.broker import (
+    RabbitMqReadinessProbe,
+    build_broker_url,
+)
 
 ShutdownCallback = Callable[
     [],
@@ -48,8 +52,19 @@ def build_container() -> ApplicationContainer:
         timeout_seconds=(settings.database.health_timeout_seconds),
     )
 
+    broker_url = build_broker_url(
+        settings.broker,
+    )
+
+    broker_readiness = RabbitMqReadinessProbe(
+        broker_url=broker_url,
+        connect_timeout_seconds=(settings.broker.connect_timeout_seconds),
+        health_timeout_seconds=(settings.broker.health_timeout_seconds),
+    )
+
     check_readiness = CheckReadiness(
         database=database_readiness,
+        broker=broker_readiness,
     )
 
     async def _shutdown_database() -> None:

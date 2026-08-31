@@ -31,6 +31,21 @@ class StaticDatabaseReadiness:
         return self._ready
 
 
+class StaticBrokerReadiness:
+    """Fake RabbitMQ readiness adapter."""
+
+    def __init__(
+        self,
+        ready: bool,
+    ) -> None:
+        """Сохраняет ожидаемый результат readiness."""
+        self._ready = ready
+
+    async def is_ready(self) -> bool:
+        """Возвращает заранее заданное состояние."""
+        return self._ready
+
+
 async def noop_shutdown() -> None:
     """Имитирует освобождение infrastructure resources."""
 
@@ -39,6 +54,7 @@ def build_test_client(
     *,
     docs_enabled: bool = True,
     database_ready: bool = True,
+    broker_ready: bool = True,
 ) -> TestClient:
     """Создаёт TestClient с изолированными dependencies."""
     settings = Settings(
@@ -55,6 +71,9 @@ def build_test_client(
     check_readiness = CheckReadiness(
         database=StaticDatabaseReadiness(
             ready=database_ready,
+        ),
+        broker=StaticBrokerReadiness(
+            ready=broker_ready,
         ),
     )
 
@@ -108,6 +127,7 @@ def test_readiness_endpoint() -> None:
         "environment": "test",
         "dependencies": {
             "database": "ok",
+            "broker": "ok",
         },
     }
 
@@ -126,6 +146,26 @@ def test_readiness_returns_503_when_database_is_unavailable() -> None:
     assert response.json() == {
         "detail": {
             "database": "unavailable",
+            "broker": "ok",
+        }
+    }
+
+
+def test_readiness_returns_503_when_broker_is_unavailable() -> None:
+    """Проверяет отказ readiness при недоступном RabbitMQ."""
+    with build_test_client(
+        broker_ready=False,
+    ) as client:
+        response = client.get(
+            "/health/ready",
+        )
+
+    assert response.status_code == 503
+
+    assert response.json() == {
+        "detail": {
+            "database": "ok",
+            "broker": "unavailable",
         }
     }
 
