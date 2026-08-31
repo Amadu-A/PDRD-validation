@@ -1,14 +1,39 @@
+# .gitignore
+# Локальные, временные и генерируемые файлы проекта, которые не должны попадать в Git.
+
 .env
+
 .idea/
 .vscode/
+
+.venv/
+.venv-dev/
+
 __pycache__/
 *.py[cod]
+*.egg-info/
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+.coverage
+coverage.xml
+htmlcov/
+
+build/
+dist/
 
 data/uploads/*
 !data/uploads/.gitkeep
+
 data/results/*
 !data/results/.gitkeep
-#data/knowledge/normative/source/*
-#!data/knowledge/normative/source/.gitkeep
-#data/knowledge/experience/cases/*
-#!data/knowledge/experience/cases/.gitkeep
+
+# Нормативная база и база опыта пока остаются version-controlled,
+# поскольку текущий MVP хранит исходные данные непосредственно в repository.
+# Миграция runtime-файлов в отдельное object storage будет выполнена позднее.
+# data/knowledge/normative/source/*
+# !data/knowledge/normative/source/.gitkeep
+# data/knowledge/experience/cases/*
+# !data/knowledge/experience/cases/.gitkeep

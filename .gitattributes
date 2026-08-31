@@ -1,0 +1,7 @@
+# .gitattributes
+# Единые правила переносов строк для разработки в Windows и запуска на Linux.
+
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
