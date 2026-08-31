@@ -15,6 +15,7 @@ COPY requirements-dev.txt /workspace/requirements-dev.txt
 COPY services/api-gateway /workspace/services/api-gateway
 COPY services/document-service /workspace/services/document-service
 COPY services/knowledge-service /workspace/services/knowledge-service
+COPY services/analysis-service /workspace/services/analysis-service
 COPY tests /workspace/tests
 
 RUN pip install \

@@ -5,7 +5,13 @@
 import ast
 from pathlib import Path
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+REPOSITORY_ROOT = (
+    Path(
+        __file__,
+    )
+    .resolve()
+    .parents[2]
+)
 
 BACKEND_PACKAGES = (
     (
@@ -19,6 +25,10 @@ BACKEND_PACKAGES = (
     (
         "knowledge-service",
         "pdrd_knowledge_service",
+    ),
+    (
+        "analysis-service",
+        "pdrd_analysis_service",
     ),
 )
 
@@ -39,14 +49,14 @@ def package_directory(
     service_name: str,
     package_name: str,
 ) -> Path:
-    """Возвращает src package конкретного backend-сервиса."""
+    """Возвращает src package backend-сервиса."""
     return REPOSITORY_ROOT / "services" / service_name / "src" / package_name
 
 
 def iter_import_names(
     source_file: Path,
 ) -> list[str]:
-    """Возвращает imported module names из Python source."""
+    """Возвращает imported module names."""
     syntax_tree = ast.parse(
         source_file.read_text(
             encoding="utf-8",
