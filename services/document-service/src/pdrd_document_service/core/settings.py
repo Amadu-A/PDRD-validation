@@ -50,6 +50,77 @@ class PdfSettings(BaseModel):
         return self.max_upload_mb * 1024 * 1024
 
 
+class CadSettings(BaseModel):
+    """Настройки DWG/DXF processing."""
+
+    max_upload_mb: int = Field(
+        default=200,
+        ge=1,
+        le=1000,
+    )
+
+    dwg_converter_command: str = "dwg2dxf"
+
+    dwg_converter_timeout_seconds: int = Field(
+        default=180,
+        ge=1,
+        le=1800,
+    )
+
+    render_dpi: int = Field(
+        default=180,
+        ge=72,
+        le=600,
+    )
+
+    render_max_side: int = Field(
+        default=2600,
+        ge=500,
+        le=10000,
+    )
+
+    machine_text_limit: int = Field(
+        default=14000,
+        ge=1000,
+        le=100000,
+    )
+
+    text_sample_limit: int = Field(
+        default=160,
+        ge=1,
+        le=5000,
+    )
+
+    block_sample_limit: int = Field(
+        default=120,
+        ge=1,
+        le=5000,
+    )
+
+    dangling_sample_limit: int = Field(
+        default=120,
+        ge=1,
+        le=5000,
+    )
+
+    connectivity_tolerance: float = Field(
+        default=0.5,
+        gt=0,
+        le=1000,
+    )
+
+    virtual_insert_depth: int = Field(
+        default=2,
+        ge=0,
+        le=10,
+    )
+
+    @property
+    def max_upload_bytes(self) -> int:
+        """Возвращает максимальный размер CAD upload."""
+        return self.max_upload_mb * 1024 * 1024
+
+
 class Settings(BaseSettings):
     """Настройки процесса Document Service."""
 
@@ -81,6 +152,10 @@ class Settings(BaseSettings):
 
     pdf: PdfSettings = Field(
         default_factory=PdfSettings,
+    )
+
+    cad: CadSettings = Field(
+        default_factory=CadSettings,
     )
 
 

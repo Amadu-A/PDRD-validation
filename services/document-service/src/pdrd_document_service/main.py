@@ -8,6 +8,9 @@ from pdrd_document_service.core.container import (
     ApplicationContainer,
     build_container,
 )
+from pdrd_document_service.transport.http.routers.cad import (
+    router as cad_router,
+)
 from pdrd_document_service.transport.http.routers.health import (
     router as health_router,
 )
@@ -40,6 +43,10 @@ def create_app(
 
     application.include_router(
         pdf_router,
+    )
+
+    application.include_router(
+        cad_router,
     )
 
     return application

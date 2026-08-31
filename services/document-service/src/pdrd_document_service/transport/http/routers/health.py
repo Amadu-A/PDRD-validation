@@ -54,12 +54,14 @@ def health_ready(
     """Возвращает готовность локальных document capabilities."""
     settings = container.settings
 
+    cad_capabilities = container.extract_cad.capabilities()
+
     return ReadyHealthResponse(
         service=settings.service_name,
         version=settings.service_version,
         capabilities={
             "pdf": True,
-            "dxf": False,
-            "dwg": False,
+            "dxf": cad_capabilities.dxf,
+            "dwg": cad_capabilities.dwg,
         },
     )
