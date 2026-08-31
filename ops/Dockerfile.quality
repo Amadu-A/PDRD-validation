@@ -14,10 +14,11 @@ COPY requirements-dev.txt /workspace/requirements-dev.txt
 
 COPY services/api-gateway /workspace/services/api-gateway
 COPY services/document-service /workspace/services/document-service
+COPY services/knowledge-service /workspace/services/knowledge-service
 COPY tests /workspace/tests
 
 RUN pip install \
     --no-cache-dir \
     -r /workspace/requirements-dev.txt
 
-CMD ["/bin/sh", "-c", "python -m ruff check . && python -m ruff format --check . && python -m pytest -q"]
+CMD ["/bin/sh", "-c", "python -m ruff check . && python -m ruff format --check . && python -m pytest -q --import-mode=importlib"]

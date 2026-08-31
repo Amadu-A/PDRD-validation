@@ -9,3 +9,4 @@ ruff>=0.12,<1.0
 # Editable installation backend-сервисов вместе с test dependencies.
 -e ./services/api-gateway[test]
 -e ./services/document-service[test]
+-e ./services/knowledge-service[test]

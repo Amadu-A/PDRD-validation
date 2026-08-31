@@ -16,15 +16,22 @@ BACKEND_PACKAGES = (
         "document-service",
         "pdrd_document_service",
     ),
+    (
+        "knowledge-service",
+        "pdrd_knowledge_service",
+    ),
 )
 
 FRAMEWORK_IMPORTS = (
-    "fastapi",
-    "sqlalchemy",
-    "celery",
     "asyncpg",
-    "fitz",
+    "celery",
     "ezdxf",
+    "fastapi",
+    "fitz",
+    "httpx",
+    "PIL",
+    "pydantic",
+    "sqlalchemy",
 )
 
 

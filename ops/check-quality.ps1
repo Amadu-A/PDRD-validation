@@ -7,6 +7,9 @@
 При параметре -Fix Ruff сначала исправляет безопасно исправляемые нарушения
 и форматирует код. После этого выполняются lint, format check и pytest.
 
+Для monorepo pytest запускается в importlib mode, чтобы тестовые файлы
+с одинаковыми именами в разных микросервисах не конфликтовали между собой.
+
 Файл относится к development tooling и не участвует в runtime приложения.
 #>
 
@@ -95,7 +98,10 @@ try {
 
     Write-Host "Pytest..."
 
-    & $pythonExecutable -m pytest -q
+    & $pythonExecutable `
+        -m pytest `
+        -q `
+        --import-mode=importlib
 
     if ($LASTEXITCODE -ne 0) {
         throw "pytest failed."

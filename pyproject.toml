@@ -47,6 +47,12 @@ ignore = [
 
 fixable = ["ALL"]
 
+[tool.ruff.lint.pycodestyle]
+# Formatter по-прежнему стремится к 88 символам.
+# Более высокий предел E501 нужен для машинно-проверяемой первой строки
+# с полным относительным путём к Python-файлу.
+max-line-length = 120
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
@@ -63,6 +69,7 @@ addopts = [
     "-ra",
     "--strict-config",
     "--strict-markers",
+    "--import-mode=importlib",
 ]
 
 testpaths = [
