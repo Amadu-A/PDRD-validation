@@ -346,6 +346,68 @@ services:
         aliases:
           - pdrd-document-service
 
+  knowledge-service:
+    build:
+      context: ./services/knowledge-service
+      target: runtime
+
+    restart: unless-stopped
+
+    environment:
+      KNOWLEDGE_SERVICE_SERVICE_NAME: ${KNOWLEDGE_SERVICE_SERVICE_NAME:-PDRD Knowledge Service}
+      KNOWLEDGE_SERVICE_SERVICE_VERSION: ${KNOWLEDGE_SERVICE_SERVICE_VERSION:-0.1.0}
+      KNOWLEDGE_SERVICE_ENVIRONMENT: ${KNOWLEDGE_SERVICE_ENVIRONMENT:-local}
+      KNOWLEDGE_SERVICE_HOST: 0.0.0.0
+      KNOWLEDGE_SERVICE_PORT: 8401
+      KNOWLEDGE_SERVICE_DOCS_ENABLED: ${KNOWLEDGE_SERVICE_DOCS_ENABLED:-true}
+
+      KNOWLEDGE_SERVICE_EMBEDDING__BASE_URL: ${KNOWLEDGE_SERVICE_EMBEDDING__BASE_URL:-http://ollama:11434}
+      KNOWLEDGE_SERVICE_EMBEDDING__MODEL: ${KNOWLEDGE_SERVICE_EMBEDDING__MODEL:-qwen3-embedding:4b}
+      KNOWLEDGE_SERVICE_EMBEDDING__REQUEST_TIMEOUT_SECONDS: ${KNOWLEDGE_SERVICE_EMBEDDING__REQUEST_TIMEOUT_SECONDS:-900}
+      KNOWLEDGE_SERVICE_EMBEDDING__CONNECT_TIMEOUT_SECONDS: ${KNOWLEDGE_SERVICE_EMBEDDING__CONNECT_TIMEOUT_SECONDS:-20}
+      KNOWLEDGE_SERVICE_EMBEDDING__HEALTH_TIMEOUT_SECONDS: ${KNOWLEDGE_SERVICE_EMBEDDING__HEALTH_TIMEOUT_SECONDS:-5}
+
+      KNOWLEDGE_SERVICE_QDRANT__BASE_URL: ${KNOWLEDGE_SERVICE_QDRANT__BASE_URL:-http://qdrant:6333}
+      KNOWLEDGE_SERVICE_QDRANT__NORMATIVE_COLLECTION: ${KNOWLEDGE_SERVICE_QDRANT__NORMATIVE_COLLECTION:-dva_normative_v2}
+      KNOWLEDGE_SERVICE_QDRANT__EXPERIENCE_COLLECTION: ${KNOWLEDGE_SERVICE_QDRANT__EXPERIENCE_COLLECTION:-dva_experience_v2}
+      KNOWLEDGE_SERVICE_QDRANT__REQUEST_TIMEOUT_SECONDS: ${KNOWLEDGE_SERVICE_QDRANT__REQUEST_TIMEOUT_SECONDS:-90}
+      KNOWLEDGE_SERVICE_QDRANT__HEALTH_TIMEOUT_SECONDS: ${KNOWLEDGE_SERVICE_QDRANT__HEALTH_TIMEOUT_SECONDS:-5}
+
+      KNOWLEDGE_SERVICE_SEARCH__NORMATIVE_TOP_K: ${KNOWLEDGE_SERVICE_SEARCH__NORMATIVE_TOP_K:-4}
+      KNOWLEDGE_SERVICE_SEARCH__NORMATIVE_MAX_SOURCES: ${KNOWLEDGE_SERVICE_SEARCH__NORMATIVE_MAX_SOURCES:-12}
+      KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_TOP_K: ${KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_TOP_K:-3}
+
+    ports:
+      - "${KNOWLEDGE_SERVICE_BIND_IP:-127.0.0.1}:${KNOWLEDGE_SERVICE_HOST_PORT:-8401}:8401"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8401/health/ready', timeout=5)"
+        ]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 15s
+
+    depends_on:
+      - qdrant
+
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    networks:
+      app-net:
+      ai-shared:
+        aliases:
+          - pdrd-knowledge-service
+
   pdf-service:
     build:
       context: ./services/pdf-service
