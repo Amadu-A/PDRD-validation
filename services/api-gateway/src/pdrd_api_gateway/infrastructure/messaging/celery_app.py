@@ -62,4 +62,7 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     broker_connection_timeout=(broker_settings.connect_timeout_seconds),
     broker_heartbeat=30,
+    broker_transport_options={
+        "confirm_publish": True,
+    },
 )

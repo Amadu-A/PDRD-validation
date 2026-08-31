@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import (
 
 from pdrd_api_gateway.infrastructure.database.repositories import (
     SqlAlchemyAnalysisJobRepository,
+    SqlAlchemyOutboxRepository,
 )
 
 
@@ -25,6 +26,10 @@ class SqlAlchemyUnitOfWork:
         self._session = session_factory()
 
         self.analysis_jobs = SqlAlchemyAnalysisJobRepository(
+            self._session,
+        )
+
+        self.outbox = SqlAlchemyOutboxRepository(
             self._session,
         )
 

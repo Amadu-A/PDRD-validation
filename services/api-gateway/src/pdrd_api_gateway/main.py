@@ -11,6 +11,9 @@ from pdrd_api_gateway.core.container import (
     ApplicationContainer,
     build_container,
 )
+from pdrd_api_gateway.transport.http.routers.analyses import (
+    router as analyses_router,
+)
 from pdrd_api_gateway.transport.http.routers.health import (
     router as health_router,
 )
@@ -55,6 +58,10 @@ def create_app(
 
     application.include_router(
         health_router,
+    )
+
+    application.include_router(
+        analyses_router,
     )
 
     return application

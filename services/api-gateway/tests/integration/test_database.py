@@ -4,6 +4,7 @@
 
 import os
 from functools import partial
+from uuid import uuid4
 
 import pytest
 from pdrd_api_gateway.application.use_cases.create_analysis_job import (
@@ -43,8 +44,8 @@ pytestmark = [
 ]
 
 
-async def test_database_health_and_unit_of_work() -> None:
-    """Проверяет PostgreSQL, Repository и Unit of Work вместе."""
+async def test_database_health_job_and_outbox() -> None:
+    """Проверяет PostgreSQL, UoW, job и transactional outbox."""
     settings = Settings(
         _env_file=None,
     )
@@ -72,21 +73,40 @@ async def test_database_health_and_unit_of_work() -> None:
     )
 
     created_job = None
+    document_id = uuid4()
 
     try:
         assert await health_probe.is_ready() is True
 
-        created_job = await use_case.execute()
+        created_job = await use_case.execute(
+            document_id=document_id,
+        )
 
         async with unit_of_work_factory() as unit_of_work:
             loaded_job = await unit_of_work.analysis_jobs.get(
                 created_job.id,
             )
 
+            pending_messages = await unit_of_work.outbox.get_pending(
+                limit=100,
+            )
+
         assert loaded_job is not None
         assert loaded_job.id == created_job.id
+        assert loaded_job.document_id == document_id
         assert loaded_job.status is AnalysisJobStatus.PENDING
         assert loaded_job.attempt_count == 0
+
+        job_messages = [
+            message
+            for message in pending_messages
+            if message.aggregate_id == created_job.id
+        ]
+
+        assert len(job_messages) == 1
+        assert job_messages[0].payload == {
+            "job_id": str(created_job.id),
+        }
     finally:
         if created_job is not None:
             async with session_factory() as session:

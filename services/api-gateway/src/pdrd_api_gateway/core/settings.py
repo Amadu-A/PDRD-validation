@@ -108,6 +108,22 @@ class BrokerSettings(BaseModel):
     )
 
 
+class OutboxSettings(BaseModel):
+    """Настройки фонового transactional outbox dispatcher."""
+
+    poll_interval_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        le=60,
+    )
+
+    batch_size: int = Field(
+        default=20,
+        ge=1,
+        le=500,
+    )
+
+
 class Settings(BaseSettings):
     """Описывает runtime-конфигурацию API Gateway."""
 
@@ -142,6 +158,10 @@ class Settings(BaseSettings):
 
     broker: BrokerSettings = Field(
         default_factory=BrokerSettings,
+    )
+
+    outbox: OutboxSettings = Field(
+        default_factory=OutboxSettings,
     )
 
 

@@ -63,6 +63,7 @@ class AnalysisJob:
     }
 
     id: UUID
+    document_id: UUID | None = None
     status: AnalysisJobStatus = AnalysisJobStatus.PENDING
     attempt_count: int = 0
     error_code: str | None = None
@@ -71,10 +72,15 @@ class AnalysisJob:
     updated_at: datetime = field(default_factory=utc_now)
 
     @classmethod
-    def create(cls) -> "AnalysisJob":
+    def create(
+        cls,
+        *,
+        document_id: UUID | None = None,
+    ) -> "AnalysisJob":
         """Создаёт новое задание в состоянии pending."""
         return cls(
             id=uuid4(),
+            document_id=document_id,
         )
 
     def mark_queued(self) -> None:

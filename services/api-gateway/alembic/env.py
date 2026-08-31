@@ -12,11 +12,13 @@ from pdrd_api_gateway.infrastructure.database.engine import (
 )
 from pdrd_api_gateway.infrastructure.database.models import (
     AnalysisJobModel,
+    OutboxMessageModel,
 )
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 del AnalysisJobModel
+del OutboxMessageModel
 
 config = context.config
 

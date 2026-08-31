@@ -2,11 +2,16 @@
 
 """Celery tasks infrastructure-уровня API Gateway."""
 
+import logging
 import os
 import socket
 
 from pdrd_api_gateway.infrastructure.messaging.celery_app import (
     celery_app,
+)
+
+LOGGER = logging.getLogger(
+    __name__,
 )
 
 
@@ -24,3 +29,21 @@ def queue_probe(
         "hostname": socket.gethostname(),
         "process_id": os.getpid(),
     }
+
+
+@celery_app.task(
+    name="pdrd.analysis.requested",
+    ignore_result=True,
+)
+def analysis_requested(
+    job_id: str,
+) -> None:
+    """Подтверждает получение job worker-ом.
+
+    Реальный вызов n8n orchestration будет добавлен после появления
+    document-service, knowledge-service и analysis-service.
+    """
+    LOGGER.info(
+        "analysis_job_received job_id=%s",
+        job_id,
+    )

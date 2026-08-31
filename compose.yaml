@@ -1,8 +1,8 @@
-# compose.yaml
+﻿# compose.yaml
 # Project-specific Docker stack PDRD.
 #
-# Ollama, n8n и RabbitMQ принадлежат shared infrastructure.
-# PostgreSQL, Qdrant и application services принадлежат PDRD.
+# Ollama, n8n Рё RabbitMQ РїСЂРёРЅР°РґР»РµР¶Р°С‚ shared infrastructure.
+# PostgreSQL, Qdrant Рё application services РїСЂРёРЅР°РґР»РµР¶Р°С‚ PDRD.
 
 name: ${COMPOSE_PROJECT_NAME:-pdrd-validation-ai}
 
@@ -99,9 +99,6 @@ services:
       API_GATEWAY_BROKER__QUEUE_NAME: pdrd.analysis
       API_GATEWAY_BROKER__EXCHANGE_NAME: pdrd.analysis
       API_GATEWAY_BROKER__ROUTING_KEY: analysis.execute
-      API_GATEWAY_BROKER__CONNECT_TIMEOUT_SECONDS: 5
-      API_GATEWAY_BROKER__HEALTH_TIMEOUT_SECONDS: 3
-      API_GATEWAY_BROKER__RESULT_EXPIRES_SECONDS: 300
 
     ports:
       - "${API_GATEWAY_BIND_IP:-127.0.0.1}:${API_GATEWAY_HOST_PORT:-8200}:8000"
@@ -118,6 +115,55 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    networks:
+      - app-net
+      - ai-shared
+
+  api-gateway-outbox:
+    build:
+      context: ./services/api-gateway
+      target: runtime
+
+    restart: unless-stopped
+
+    command:
+      [
+        "python",
+        "-m",
+        "pdrd_api_gateway.infrastructure.messaging.dispatcher"
+      ]
+
+    environment:
+      API_GATEWAY_ENVIRONMENT: ${API_GATEWAY_ENVIRONMENT:-local}
+
+      API_GATEWAY_DATABASE__HOST: postgres
+      API_GATEWAY_DATABASE__PORT: 5432
+      API_GATEWAY_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
+      API_GATEWAY_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
+      API_GATEWAY_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+
+      API_GATEWAY_BROKER__HOST: ${PDRD_RABBITMQ_HOST:-rabbitmq}
+      API_GATEWAY_BROKER__PORT: ${PDRD_RABBITMQ_PORT:-5672}
+      API_GATEWAY_BROKER__USER: ${PDRD_RABBITMQ_USER:-pdrd_validation}
+      API_GATEWAY_BROKER__PASSWORD: ${PDRD_RABBITMQ_PASSWORD:?PDRD_RABBITMQ_PASSWORD must be set in .env}
+      API_GATEWAY_BROKER__VIRTUAL_HOST: ${PDRD_RABBITMQ_VHOST:-pdrd-validation}
+      API_GATEWAY_BROKER__QUEUE_NAME: pdrd.analysis
+      API_GATEWAY_BROKER__EXCHANGE_NAME: pdrd.analysis
+      API_GATEWAY_BROKER__ROUTING_KEY: analysis.execute
+
+      API_GATEWAY_OUTBOX__POLL_INTERVAL_SECONDS: 1
+      API_GATEWAY_OUTBOX__BATCH_SIZE: 20
 
     depends_on:
       postgres:
@@ -168,9 +214,6 @@ services:
       API_GATEWAY_BROKER__QUEUE_NAME: pdrd.analysis
       API_GATEWAY_BROKER__EXCHANGE_NAME: pdrd.analysis
       API_GATEWAY_BROKER__ROUTING_KEY: analysis.execute
-      API_GATEWAY_BROKER__CONNECT_TIMEOUT_SECONDS: 5
-      API_GATEWAY_BROKER__HEALTH_TIMEOUT_SECONDS: 3
-      API_GATEWAY_BROKER__RESULT_EXPIRES_SECONDS: 300
 
     healthcheck:
       test:
@@ -215,23 +258,12 @@ services:
       API_GATEWAY_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
       API_GATEWAY_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
       API_GATEWAY_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
-      API_GATEWAY_DATABASE__POOL_SIZE: 2
-      API_GATEWAY_DATABASE__MAX_OVERFLOW: 2
-      API_GATEWAY_DATABASE__POOL_TIMEOUT_SECONDS: 5
-      API_GATEWAY_DATABASE__CONNECT_TIMEOUT_SECONDS: 5
-      API_GATEWAY_DATABASE__HEALTH_TIMEOUT_SECONDS: 3
 
       API_GATEWAY_BROKER__HOST: ${PDRD_RABBITMQ_HOST:-rabbitmq}
       API_GATEWAY_BROKER__PORT: ${PDRD_RABBITMQ_PORT:-5672}
       API_GATEWAY_BROKER__USER: ${PDRD_RABBITMQ_USER:-pdrd_validation}
       API_GATEWAY_BROKER__PASSWORD: ${PDRD_RABBITMQ_PASSWORD:?PDRD_RABBITMQ_PASSWORD must be set in .env}
       API_GATEWAY_BROKER__VIRTUAL_HOST: ${PDRD_RABBITMQ_VHOST:-pdrd-validation}
-      API_GATEWAY_BROKER__QUEUE_NAME: pdrd.analysis
-      API_GATEWAY_BROKER__EXCHANGE_NAME: pdrd.analysis
-      API_GATEWAY_BROKER__ROUTING_KEY: analysis.execute
-      API_GATEWAY_BROKER__CONNECT_TIMEOUT_SECONDS: 5
-      API_GATEWAY_BROKER__HEALTH_TIMEOUT_SECONDS: 3
-      API_GATEWAY_BROKER__RESULT_EXPIRES_SECONDS: 300
 
       PDRD_RUN_DATABASE_TESTS: "1"
       PDRD_RUN_BROKER_TESTS: "1"
