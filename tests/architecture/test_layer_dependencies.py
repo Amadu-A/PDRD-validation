@@ -7,31 +7,33 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
-API_GATEWAY_PACKAGE = (
-    REPOSITORY_ROOT / "services" / "api-gateway" / "src" / "pdrd_api_gateway"
+BACKEND_PACKAGES = (
+    (
+        "api-gateway",
+        "pdrd_api_gateway",
+    ),
+    (
+        "document-service",
+        "pdrd_document_service",
+    ),
 )
 
-DOMAIN_DIRECTORY = API_GATEWAY_PACKAGE / "domain"
-
-APPLICATION_DIRECTORY = API_GATEWAY_PACKAGE / "application"
-
-DOMAIN_FORBIDDEN_IMPORTS = (
+FRAMEWORK_IMPORTS = (
     "fastapi",
     "sqlalchemy",
     "celery",
     "asyncpg",
-    "pdrd_api_gateway.infrastructure",
-    "pdrd_api_gateway.transport",
+    "fitz",
+    "ezdxf",
 )
 
-APPLICATION_FORBIDDEN_IMPORTS = (
-    "fastapi",
-    "sqlalchemy",
-    "celery",
-    "asyncpg",
-    "pdrd_api_gateway.infrastructure",
-    "pdrd_api_gateway.transport",
-)
+
+def package_directory(
+    service_name: str,
+    package_name: str,
+) -> Path:
+    """Возвращает src package конкретного backend-сервиса."""
+    return REPOSITORY_ROOT / "services" / service_name / "src" / package_name
 
 
 def iter_import_names(
@@ -80,7 +82,9 @@ def find_forbidden_imports(
         return violations
 
     for source_file in sorted(
-        directory.rglob("*.py"),
+        directory.rglob(
+            "*.py",
+        )
     ):
         for import_name in iter_import_names(
             source_file,
@@ -100,11 +104,31 @@ def find_forbidden_imports(
 
 
 def test_domain_does_not_depend_on_frameworks() -> None:
-    """Проверяет независимость Domain от frameworks/infrastructure."""
-    violations = find_forbidden_imports(
-        DOMAIN_DIRECTORY,
-        DOMAIN_FORBIDDEN_IMPORTS,
-    )
+    """Проверяет Domain всех backend-сервисов."""
+    violations: list[str] = []
+
+    for (
+        service_name,
+        package_name,
+    ) in BACKEND_PACKAGES:
+        package = package_directory(
+            service_name,
+            package_name,
+        )
+
+        forbidden_imports = (
+            *FRAMEWORK_IMPORTS,
+            f"{package_name}.application",
+            f"{package_name}.infrastructure",
+            f"{package_name}.transport",
+        )
+
+        violations.extend(
+            find_forbidden_imports(
+                package / "domain",
+                forbidden_imports,
+            )
+        )
 
     assert not violations, "\n".join(
         violations,
@@ -112,11 +136,30 @@ def test_domain_does_not_depend_on_frameworks() -> None:
 
 
 def test_application_does_not_depend_on_infrastructure() -> None:
-    """Проверяет направление Application -> Ports, а не Infrastructure."""
-    violations = find_forbidden_imports(
-        APPLICATION_DIRECTORY,
-        APPLICATION_FORBIDDEN_IMPORTS,
-    )
+    """Проверяет Application всех backend-сервисов."""
+    violations: list[str] = []
+
+    for (
+        service_name,
+        package_name,
+    ) in BACKEND_PACKAGES:
+        package = package_directory(
+            service_name,
+            package_name,
+        )
+
+        forbidden_imports = (
+            *FRAMEWORK_IMPORTS,
+            f"{package_name}.infrastructure",
+            f"{package_name}.transport",
+        )
+
+        violations.extend(
+            find_forbidden_imports(
+                package / "application",
+                forbidden_imports,
+            )
+        )
 
     assert not violations, "\n".join(
         violations,
