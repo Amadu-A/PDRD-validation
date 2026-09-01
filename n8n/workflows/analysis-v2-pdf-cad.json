@@ -1,0 +1,373 @@
+{
+  "name": "[PDRD] Drawing Validation AI - Analysis V2 PDF CAD",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analysis/v2/pdf-cad",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "7213f236-2bc6-41e7-a3d6-ea44042b98bc",
+      "name": "POST /analysis/v2/pdf-cad",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1200,
+        0
+      ],
+      "webhookId": "01512255-f001-4dd4-a74a-f6df55b438af"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-document-service:8301/internal/v1/combined/extract",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "pdf",
+              "inputDataFieldName": "pdf"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "cad",
+              "inputDataFieldName": "cad"
+            },
+            {
+              "name": "pages",
+              "value": "={{ $json.body?.pages ?? '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "682fe4fa-e5c6-4fc1-af27-9775b48786ec",
+      "name": "Document Extract PDF CAD",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const combined = $input.first().json;\n\nconst pdf = combined.pdf ?? {};\nconst cad = combined.cad ?? {};\n\nreturn [\n  {\n    json: {\n      source: {\n        pdf_file_name: combined.pdf_file_name ?? 'document.pdf',\n        cad_file_name: combined.cad_file_name ?? 'drawing.dxf',\n        total_pdf_pages: combined.total_pdf_pages ?? 0,\n        selected_page: combined.selected_page ?? 1,\n      },\n      page: {\n        page_number: combined.selected_page ?? 1,\n        page_type: pdf.page_type ?? 'unknown',\n        text: combined.analysis_text ?? '',\n        width_points: pdf.width_points ?? 0,\n        height_points: pdf.height_points ?? 0,\n        image_base64: combined.combined_image_base64 ?? '',\n      },\n      cad: {\n        original_file_name: cad.original_file_name ?? '',\n        original_format: cad.original_format ?? '',\n        normalized_format: cad.normalized_format ?? '',\n        converted_from_dwg: cad.converted_from_dwg ?? false,\n        selected_layout: cad.selected_layout ?? '',\n        warnings: Array.isArray(cad.warnings) ? cad.warnings : [],\n        machine_data: cad.machine_data ?? {},\n        machine_context: cad.machine_context ?? '',\n      },\n      render: {\n        mime_type: 'image/png',\n        image_base64: combined.combined_image_base64 ?? '',\n        pdf_image_base64: pdf.image_base64 ?? '',\n        cad_image_base64: cad.image_base64 ?? '',\n      },\n    },\n  },\n];"
+      },
+      "id": "de4ace09-67e7-47ec-80bd-8648d19ee560",
+      "name": "Prepare Combined Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/understand",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ page_number: $json.page.page_number, heuristic_page_type: $json.page.page_type, extracted_text: $json.page.text, image_base64: $json.page.image_base64 }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "75b01542-8740-4854-90bc-4f18367ee7b0",
+      "name": "Understand Combined Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/normative-queries",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ page_facts: $json.facts, extracted_text: $('Prepare Combined Context').item.json.page.text, project_context_texts: [] }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "da466eb9-b172-48df-9ed7-af722f63fae7",
+      "name": "Build Normative Queries",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/search/normative",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ queries: $json.queries ?? [] }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "407fc93f-dd12-455a-9538-22912249823b",
+      "name": "Search Normative",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/check-norms",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ page_number: $('Prepare Combined Context').item.json.page.page_number, extracted_text: $('Prepare Combined Context').item.json.page.text, page_facts: $('Understand Combined Page').item.json.facts, normative_sources: $json.sources ?? [], image_base64: $('Prepare Combined Context').item.json.page.image_base64 }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "74e18a58-296a-455c-aae0-f21758bd7c7a",
+      "name": "Check Norms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\n\nconst experienceQueries = findings\n  .map((finding) => String(finding.experience_query ?? '').trim())\n  .filter((query) => query.length > 0);\n\nreturn {\n  json: {\n    findings,\n    experience_queries: experienceQueries,\n  },\n};"
+      },
+      "id": "2535119e-1365-4dc1-aef0-5bc2998899c9",
+      "name": "Prepare Experience Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        340,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/search/experience",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ queries: $json.experience_queries ?? [] }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "8e59c54d-d3d6-4748-8494-e19656191230",
+      "name": "Search Experience",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const prepared = $('Prepare Experience Queries').item.json;\nconst findings = Array.isArray(prepared.findings) ? prepared.findings : [];\nconst results = Array.isArray($json.results) ? $json.results : [];\n\nconst experienceByFinding = {};\n\nfor (let index = 0; index < findings.length; index += 1) {\n  const finding = findings[index];\n  const result = results[index] ?? {};\n\n  experienceByFinding[finding.finding_id] = Array.isArray(result.sources)\n    ? result.sources\n    : [];\n}\n\nreturn {\n  json: {\n    findings,\n    experience_by_finding: experienceByFinding,\n  },\n};"
+      },
+      "id": "eeb22766-38c1-4bd3-9767-c59074d97360",
+      "name": "Build Experience Map",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/findings/finalize",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ findings: $json.findings ?? [], experience_by_finding: $json.experience_by_finding ?? {} }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "364c04c4-aa46-4293-bce8-831e01126368",
+      "name": "Finalize Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const prepared = $('Prepare Combined Context').item.json;\nconst understanding = $('Understand Combined Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst normative = $('Search Normative').item.json;\nconst check = $('Check Norms').item.json;\nconst finalization = $json;\n\nconst findings = Array.isArray(finalization.findings)\n  ? finalization.findings\n  : [];\n\nreturn {\n  json: {\n    status: 'completed',\n    source_mode: 'pdf_cad',\n    file_name: prepared.source.pdf_file_name,\n    pdf_file_name: prepared.source.pdf_file_name,\n    cad_file_name: prepared.source.cad_file_name,\n    total_pages: prepared.source.total_pdf_pages,\n    selected_pages: [prepared.source.selected_page],\n    analyzed_pages: 1,\n    findings_count: findings.length,\n    summary:\n      findings.length > 0\n        ? `Найдено замечаний: ${findings.length}.`\n        : 'Замечания по выбранному PDF + CAD листу не найдены.',\n    findings,\n    render: prepared.render,\n    cad: prepared.cad,\n    page: {\n      page_number: prepared.page.page_number,\n      heuristic_page_type: prepared.page.page_type,\n      width_points: prepared.page.width_points,\n      height_points: prepared.page.height_points,\n      facts: understanding.facts ?? {},\n      understanding_metrics: understanding.metrics ?? {},\n      normative_queries: queries.queries ?? [],\n      normative_sources: normative.sources ?? [],\n      normative_embedding_model: normative.embedding_model ?? '',\n      normative_check: {\n        summary: check.summary ?? '',\n        findings: check.findings ?? [],\n        metrics: check.metrics ?? {},\n      },\n      finalization: {\n        summary: finalization.summary ?? '',\n        metrics: finalization.metrics ?? {},\n      },\n    },\n    pipeline: [\n      'combined_document_extract',\n      'page_understanding',\n      'normative_queries',\n      'normative_search',\n      'normative_check',\n      'experience_search',\n      'finalization',\n    ],\n    limitations: [\n      'Качество замечаний на локальной слабой VLM сейчас не является критерием E2E-теста.',\n      'Контекст пояснительной записки будет подключён отдельным шагом.',\n      'Точное расположение finding на изображении будет добавлено на этапе визуализации.',\n    ],\n  },\n};"
+      },
+      "id": "f41348b8-b800-4100-af80-e2128afcf9c9",
+      "name": "Build PDF CAD Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "POST /analysis/v2/pdf-cad": {
+      "main": [
+        [
+          {
+            "node": "Document Extract PDF CAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document Extract PDF CAD": {
+      "main": [
+        [
+          {
+            "node": "Prepare Combined Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Combined Context": {
+      "main": [
+        [
+          {
+            "node": "Understand Combined Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Understand Combined Page": {
+      "main": [
+        [
+          {
+            "node": "Build Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Normative Queries": {
+      "main": [
+        [
+          {
+            "node": "Search Normative",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Normative": {
+      "main": [
+        [
+          {
+            "node": "Check Norms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Norms": {
+      "main": [
+        [
+          {
+            "node": "Prepare Experience Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Experience Queries": {
+      "main": [
+        [
+          {
+            "node": "Search Experience",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Experience": {
+      "main": [
+        [
+          {
+            "node": "Build Experience Map",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Experience Map": {
+      "main": [
+        [
+          {
+            "node": "Finalize Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Findings": {
+      "main": [
+        [
+          {
+            "node": "Build PDF CAD Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7579992b-ac27-48a1-8e60-ae168f3dba52",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
