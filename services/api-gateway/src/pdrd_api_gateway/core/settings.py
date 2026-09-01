@@ -5,8 +5,15 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import (
+    BaseModel,
+    Field,
+    SecretStr,
+)
+from pydantic_settings import (
+    BaseSettings,
+    SettingsConfigDict,
+)
 
 EnvironmentName = Literal[
     "local",
@@ -124,6 +131,23 @@ class OutboxSettings(BaseModel):
     )
 
 
+class StorageSettings(BaseModel):
+    """Настройки временного хранения документов анализа."""
+
+    root_path: str = "/data/analyses"
+
+    max_upload_mb: int = Field(
+        default=200,
+        ge=1,
+        le=1000,
+    )
+
+    @property
+    def max_upload_bytes(self) -> int:
+        """Возвращает максимальный размер одного файла."""
+        return self.max_upload_mb * 1024 * 1024
+
+
 class Settings(BaseSettings):
     """Описывает runtime-конфигурацию API Gateway."""
 
@@ -162,6 +186,10 @@ class Settings(BaseSettings):
 
     outbox: OutboxSettings = Field(
         default_factory=OutboxSettings,
+    )
+
+    storage: StorageSettings = Field(
+        default_factory=StorageSettings,
     )
 
 

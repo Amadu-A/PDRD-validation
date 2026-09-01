@@ -35,7 +35,9 @@ FROM base AS runtime
 RUN useradd \
     --create-home \
     --uid 1000 \
-    app
+    app \
+    && mkdir -p /data/analyses \
+    && chown -R app:app /data/analyses
 
 USER app
 

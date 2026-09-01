@@ -5,19 +5,14 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+)
 
-from pdrd_api_gateway.domain.analysis_job import AnalysisJobStatus
-
-
-class CreateAnalysisRequest(BaseModel):
-    """Запрос запуска анализа ранее загруженного документа."""
-
-    model_config = ConfigDict(
-        frozen=True,
-    )
-
-    document_id: UUID
+from pdrd_api_gateway.domain.analysis_job import (
+    AnalysisJobStatus,
+)
 
 
 class AnalysisAcceptedResponse(BaseModel):
@@ -28,6 +23,8 @@ class AnalysisAcceptedResponse(BaseModel):
     )
 
     job_id: UUID
+    document_id: UUID
+
     status: AnalysisJobStatus
     status_url: str
 
@@ -41,9 +38,13 @@ class AnalysisStatusResponse(BaseModel):
 
     job_id: UUID
     document_id: UUID | None
+
     status: AnalysisJobStatus
+
     attempt_count: int
+
     error_code: str | None
     error_message: str | None
+
     created_at: datetime
     updated_at: datetime

@@ -2,19 +2,26 @@
 
 """HTTP contract tests асинхронного analysis API."""
 
-from collections.abc import Awaitable, Callable
+from collections.abc import (
+    Awaitable,
+    Callable,
+)
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 from pdrd_api_gateway.application.use_cases.check_readiness import (
     CheckReadiness,
 )
-from pdrd_api_gateway.core.container import ApplicationContainer
+from pdrd_api_gateway.core.container import (
+    ApplicationContainer,
+)
 from pdrd_api_gateway.core.settings import (
     DatabaseSettings,
     Settings,
 )
-from pdrd_api_gateway.domain.analysis_job import AnalysisJob
+from pdrd_api_gateway.domain.analysis_job import (
+    AnalysisJob,
+)
 from pdrd_api_gateway.main import create_app
 
 
@@ -26,23 +33,43 @@ class StaticReadiness:
         return True
 
 
-class CreateAnalysisStub:
-    """Fake CreateAnalysisJob."""
+class SubmitAnalysisStub:
+    """Fake SubmitAnalysis."""
 
     def __init__(self) -> None:
         """Подготавливает stub."""
+        self.pdf_content: bytes | None = None
+        self.pdf_file_name: str | None = None
+
+        self.cad_content: bytes | None = None
+        self.cad_file_name: str | None = None
+
+        self.pages: str | None = None
+
         self.document_id: UUID | None = None
 
     async def execute(
         self,
         *,
-        document_id: UUID,
+        pdf_content: bytes | None,
+        pdf_file_name: str | None,
+        cad_content: bytes | None,
+        cad_file_name: str | None,
+        pages: str | None,
     ) -> AnalysisJob:
-        """Создаёт domain job без database."""
-        self.document_id = document_id
+        """Создаёт fake job и сохраняет аргументы."""
+        self.pdf_content = pdf_content
+        self.pdf_file_name = pdf_file_name
+
+        self.cad_content = cad_content
+        self.cad_file_name = cad_file_name
+
+        self.pages = pages
+
+        self.document_id = uuid4()
 
         return AnalysisJob.create(
-            document_id=document_id,
+            document_id=self.document_id,
         )
 
 
@@ -74,7 +101,7 @@ async def noop_shutdown() -> None:
 
 def build_client(
     *,
-    create_stub: CreateAnalysisStub,
+    submit_stub: SubmitAnalysisStub,
     get_stub: GetAnalysisStub,
 ) -> TestClient:
     """Создаёт HTTP client с fake application use cases."""
@@ -100,8 +127,8 @@ def build_client(
         settings=settings,
         check_readiness=check_readiness,
         shutdown_callback=shutdown_callback,
-        create_analysis_job=create_stub,  # type: ignore[arg-type]
         get_analysis_job=get_stub,  # type: ignore[arg-type]
+        submit_analysis=submit_stub,  # type: ignore[arg-type]
     )
 
     return TestClient(
@@ -111,20 +138,25 @@ def build_client(
     )
 
 
-def test_create_analysis_returns_202() -> None:
-    """Проверяет asynchronous HTTP contract."""
-    document_id = uuid4()
-
-    create_stub = CreateAnalysisStub()
+def test_create_pdf_analysis_returns_202() -> None:
+    """Проверяет asynchronous PDF upload contract."""
+    submit_stub = SubmitAnalysisStub()
 
     with build_client(
-        create_stub=create_stub,
+        submit_stub=submit_stub,
         get_stub=GetAnalysisStub(None),
     ) as client:
         response = client.post(
             "/api/v1/analyses",
-            json={
-                "document_id": str(document_id),
+            files={
+                "pdf": (
+                    "drawing.pdf",
+                    b"pdf-content",
+                    "application/pdf",
+                ),
+            },
+            data={
+                "pages": "1,3",
             },
         )
 
@@ -133,9 +165,55 @@ def test_create_analysis_returns_202() -> None:
     payload = response.json()
 
     assert payload["status"] == "pending"
+
+    assert payload["document_id"] == str(
+        submit_stub.document_id,
+    )
+
     assert payload["status_url"] == (f"/api/v1/analyses/{payload['job_id']}")
 
-    assert create_stub.document_id == document_id
+    assert submit_stub.pdf_content == b"pdf-content"
+
+    assert submit_stub.pdf_file_name == "drawing.pdf"
+
+    assert submit_stub.cad_content is None
+    assert submit_stub.pages == "1,3"
+
+
+def test_create_pdf_cad_analysis_returns_202() -> None:
+    """Проверяет combined multipart contract."""
+    submit_stub = SubmitAnalysisStub()
+
+    with build_client(
+        submit_stub=submit_stub,
+        get_stub=GetAnalysisStub(None),
+    ) as client:
+        response = client.post(
+            "/api/v1/analyses",
+            files={
+                "pdf": (
+                    "drawing.pdf",
+                    b"pdf-content",
+                    "application/pdf",
+                ),
+                "cad": (
+                    "drawing.dxf",
+                    b"cad-content",
+                    "application/dxf",
+                ),
+            },
+            data={
+                "pages": "7",
+            },
+        )
+
+    assert response.status_code == 202
+
+    assert submit_stub.pdf_file_name == "drawing.pdf"
+
+    assert submit_stub.cad_file_name == "drawing.dxf"
+
+    assert submit_stub.pages == "7"
 
 
 def test_get_analysis_returns_job() -> None:
@@ -145,7 +223,7 @@ def test_get_analysis_returns_job() -> None:
     )
 
     with build_client(
-        create_stub=CreateAnalysisStub(),
+        submit_stub=SubmitAnalysisStub(),
         get_stub=GetAnalysisStub(job),
     ) as client:
         response = client.get(
@@ -156,17 +234,21 @@ def test_get_analysis_returns_job() -> None:
 
     payload = response.json()
 
-    assert payload["job_id"] == str(job.id)
+    assert payload["job_id"] == str(
+        job.id,
+    )
+
     assert payload["document_id"] == str(
         job.document_id,
     )
+
     assert payload["status"] == "pending"
 
 
 def test_get_unknown_analysis_returns_404() -> None:
     """Проверяет HTTP 404 для неизвестного job."""
     with build_client(
-        create_stub=CreateAnalysisStub(),
+        submit_stub=SubmitAnalysisStub(),
         get_stub=GetAnalysisStub(None),
     ) as client:
         response = client.get(
@@ -174,19 +256,3 @@ def test_get_unknown_analysis_returns_404() -> None:
         )
 
     assert response.status_code == 404
-
-
-def test_create_analysis_rejects_invalid_document_id() -> None:
-    """Проверяет validation UUID."""
-    with build_client(
-        create_stub=CreateAnalysisStub(),
-        get_stub=GetAnalysisStub(None),
-    ) as client:
-        response = client.post(
-            "/api/v1/analyses",
-            json={
-                "document_id": "not-a-uuid",
-            },
-        )
-
-    assert response.status_code == 422
