@@ -1,26 +1,43 @@
 // frontend/app.js
 
-const form = document.getElementById("analysisForm");
-const result = document.getElementById("result");
-const modal = document.getElementById("modal");
-const modalText = document.getElementById("modalText");
-const submitButton = document.getElementById("submitButton");
+const ANALYSES_ENDPOINT = "/api/v1/analyses";
+const POLL_INTERVAL_MS = 2000;
+const MAX_POLL_ATTEMPTS = 1800;
 
-const pdfFile = document.getElementById("pdfFile");
-const cadFile = document.getElementById("cadFile");
-const pages = document.getElementById("pages");
-const pagesHint = document.getElementById("pagesHint");
-
-const useExplanatoryNote = document.getElementById(
-  "useExplanatoryNote",
+const form = document.getElementById(
+  "analysisForm",
 );
 
-const noteStartPage = document.getElementById(
-  "noteStartPage",
+const result = document.getElementById(
+  "result",
 );
 
-const noteEndPage = document.getElementById(
-  "noteEndPage",
+const modal = document.getElementById(
+  "modal",
+);
+
+const modalText = document.getElementById(
+  "modalText",
+);
+
+const submitButton = document.getElementById(
+  "submitButton",
+);
+
+const pdfFile = document.getElementById(
+  "pdfFile",
+);
+
+const cadFile = document.getElementById(
+  "cadFile",
+);
+
+const pages = document.getElementById(
+  "pages",
+);
+
+const pagesHint = document.getElementById(
+  "pagesHint",
 );
 
 
@@ -75,32 +92,38 @@ function currentMode() {
 }
 
 
-function syncExplanatoryNoteFields() {
-  const pdfAvailable = hasPdf();
-
-  useExplanatoryNote.disabled = !pdfAvailable;
-
-  if (!pdfAvailable) {
-    useExplanatoryNote.checked = false;
+function sourceModeLabel(mode) {
+  if (mode === "pdf_cad") {
+    return "PDF + DWG/DXF";
   }
 
-  const enabled = (
-    pdfAvailable
-    && useExplanatoryNote.checked
-  );
-
-  noteStartPage.disabled = !enabled;
-  noteEndPage.disabled = !enabled;
-
-  noteStartPage.required = enabled;
-  noteEndPage.required = enabled;
-
-  if (!enabled) {
-    noteStartPage.value = "";
-    noteEndPage.value = "";
-    noteStartPage.setCustomValidity("");
-    noteEndPage.setCustomValidity("");
+  if (mode === "cad_only") {
+    return "DWG/DXF";
   }
+
+  if (mode === "pdf_only") {
+    return "PDF";
+  }
+
+  return mode || "Не определён";
+}
+
+
+function statusLabel(status) {
+  const labels = {
+    pending: "Заявка принята",
+    queued: "Ожидает обработки",
+    processing: "Выполняется анализ",
+    completed: "Анализ завершён",
+    failed: "Ошибка анализа",
+    cancelled: "Анализ отменён",
+    confirmed: "Подтверждено",
+    needs_review: "Требует проверки инженером",
+  };
+
+  return labels[status]
+    || status
+    || "Не определён";
 }
 
 
@@ -113,86 +136,45 @@ function syncSourceFields() {
     pages.value = "";
     pages.disabled = true;
     pages.required = false;
-    pages.placeholder = "Для CAD-only не используется";
+
+    pages.placeholder = (
+      "Для CAD-only не используется"
+    );
 
     pagesHint.textContent = (
-      "CAD-only: файл считается одним листом; поле страниц PDF отключено."
+      "CAD-only: DWG/DXF считается одним листом."
     );
-  } else if (mode === "pdf_cad") {
+
+    return;
+  }
+
+  if (mode === "pdf_cad") {
     pages.disabled = false;
     pages.required = true;
-    pages.placeholder = "Например: 11";
+
+    pages.placeholder = (
+      "Например: 11"
+    );
 
     pagesHint.textContent = (
       "PDF + CAD: укажите ровно одну страницу PDF, "
-      + "которая соответствует загруженному DWG/DXF."
-    );
-  } else {
-    pages.disabled = false;
-    pages.required = false;
-    pages.placeholder = (
-      "PDF-only: 3,5,8-12. Пусто = весь PDF"
+      + "соответствующую загруженному DWG/DXF."
     );
 
-    pagesHint.textContent = (
-      "Для PDF-only можно анализировать одну или несколько страниц."
-    );
+    return;
   }
 
-  syncExplanatoryNoteFields();
-}
+  pages.disabled = false;
+  pages.required = false;
 
-
-function validateExplanatoryNoteFields() {
-  if (!useExplanatoryNote.checked) {
-    return true;
-  }
-
-  const start = Number(
-    noteStartPage.value,
+  pages.placeholder = (
+    "PDF-only: 3,5,8-12. Пусто = весь PDF"
   );
 
-  const end = Number(
-    noteEndPage.value,
+  pagesHint.textContent = (
+    "Для PDF-only можно анализировать "
+    + "одну или несколько страниц."
   );
-
-  noteStartPage.setCustomValidity("");
-  noteEndPage.setCustomValidity("");
-
-  if (
-    !Number.isInteger(start)
-    || start <= 0
-  ) {
-    noteStartPage.setCustomValidity(
-      "Введите положительный номер начальной страницы.",
-    );
-
-    noteStartPage.reportValidity();
-    return false;
-  }
-
-  if (
-    !Number.isInteger(end)
-    || end <= 0
-  ) {
-    noteEndPage.setCustomValidity(
-      "Введите положительный номер конечной страницы.",
-    );
-
-    noteEndPage.reportValidity();
-    return false;
-  }
-
-  if (end <= start) {
-    noteEndPage.setCustomValidity(
-      "Конечная страница ПЗ должна быть больше начальной.",
-    );
-
-    noteEndPage.reportValidity();
-    return false;
-  }
-
-  return true;
 }
 
 
@@ -214,127 +196,237 @@ function validateSources() {
 
     if (!/^[1-9]\d*$/.test(normalized)) {
       pages.setCustomValidity(
-        "При PDF + CAD укажите ровно одну положительную страницу PDF.",
+        "При PDF + CAD укажите ровно одну "
+        + "положительную страницу PDF.",
       );
 
       pages.reportValidity();
+
       return false;
     }
   }
 
-  return validateExplanatoryNoteFields();
+  return true;
 }
 
 
-function statusLabel(status) {
-  if (status === "confirmed") {
-    return "Подтверждено по найденной нормативной базе";
-  }
-
-  if (status === "needs_review") {
-    return "Требует проверки инженером";
-  }
-
-  return status || "Не определён";
+function sleep(milliseconds) {
+  return new Promise(
+    (resolve) => {
+      window.setTimeout(
+        resolve,
+        milliseconds,
+      );
+    },
+  );
 }
 
 
-function sourceModeLabel(mode) {
-  if (mode === "pdf_cad") {
-    return "PDF + DWG/DXF";
+async function fetchJson(
+  url,
+  options = {},
+) {
+  const response = await fetch(
+    url,
+    options,
+  );
+
+  const raw = await response.text();
+
+  let payload = {};
+
+  if (raw) {
+    try {
+      payload = JSON.parse(
+        raw,
+      );
+    } catch {
+      payload = {
+        raw,
+      };
+    }
   }
 
-  if (mode === "cad_only") {
-    return "DWG/DXF без PDF";
+  if (!response.ok) {
+    let detail = payload?.detail;
+
+    if (
+      detail
+      && typeof detail !== "string"
+    ) {
+      detail = JSON.stringify(
+        detail,
+        null,
+        2,
+      );
+    }
+
+    if (!detail) {
+      detail = (
+        payload?.raw
+        || JSON.stringify(
+          payload,
+          null,
+          2,
+        )
+      );
+    }
+
+    throw new Error(
+      `HTTP ${response.status}\n${detail}`,
+    );
   }
 
-  return "PDF";
+  return payload;
 }
 
 
-function renderExplanatoryNoteSummary(
+async function submitAnalysis(
+  body,
+) {
+  return fetchJson(
+    ANALYSES_ENDPOINT,
+    {
+      method: "POST",
+      body,
+    },
+  );
+}
+
+
+async function waitForAnalysis(
+  jobId,
+) {
+  const startedAt = Date.now();
+
+  for (
+    let attempt = 0;
+    attempt < MAX_POLL_ATTEMPTS;
+    attempt += 1
+  ) {
+    const statusPayload = await fetchJson(
+      `${ANALYSES_ENDPOINT}/${jobId}`,
+    );
+
+    const status = statusPayload.status;
+
+    const elapsedSeconds = Math.floor(
+      (
+        Date.now()
+        - startedAt
+      )
+      / 1000,
+    );
+
+    const message = (
+      `${statusLabel(status)}. `
+      + `Прошло ${elapsedSeconds} сек.`
+    );
+
+    setBusy(
+      true,
+      message,
+    );
+
+    result.textContent = (
+      `Задание: ${jobId}\n`
+      + `Статус: ${statusLabel(status)}\n`
+      + `Попытка worker: `
+      + `${statusPayload.attempt_count ?? 0}\n`
+      + `Прошло: ${elapsedSeconds} сек.`
+    );
+
+    if (status === "completed") {
+      return statusPayload;
+    }
+
+    if (status === "failed") {
+      throw new Error(
+        statusPayload.error_message
+        || statusPayload.error_code
+        || "Анализ завершился ошибкой.",
+      );
+    }
+
+    if (status === "cancelled") {
+      throw new Error(
+        "Анализ был отменён.",
+      );
+    }
+
+    await sleep(
+      POLL_INTERVAL_MS,
+    );
+  }
+
+  throw new Error(
+    "Превышено максимальное время ожидания анализа.",
+  );
+}
+
+
+async function loadAnalysisResult(
+  jobId,
+) {
+  return fetchJson(
+    `${ANALYSES_ENDPOINT}/${jobId}/result`,
+  );
+}
+
+
+function pushCadSummary(
   payload,
   lines,
 ) {
-  const context = (
-    payload.explanatory_note_context
-  );
+  const cad = payload.cad;
 
-  if (!context?.enabled) {
-    lines.push(
-      "Контекст ПЗ: не использовался",
-    );
+  if (!cad) {
     return;
   }
 
-  lines.push(
-    `Контекст ПЗ: страницы `
-    + `${context.start_page}-${context.end_page}`,
-  );
-
-  lines.push(
-    `ПЗ проиндексирована временно: `
-    + `${context.indexed_chunks} фрагм.`,
-  );
-
-  const warnings = (
-    context.validation?.warnings || []
-  );
-
-  if (warnings.length) {
+  if (cad.original_file_name) {
     lines.push(
-      "Предупреждения по диапазону ПЗ:",
-    );
-
-    warnings.forEach(
-      (warning) => {
-        lines.push(
-          `  - стр. ${warning.page}: `
-          + `${warning.kind}; `
-          + `${warning.reason}`,
-        );
-      },
+      `CAD: ${cad.original_file_name}`,
     );
   }
-}
 
-
-function renderCadSummary(
-  payload,
-  lines,
-) {
-  if (!payload.cad) {
-    return;
+  if (
+    cad.original_format
+    || cad.normalized_format
+  ) {
+    lines.push(
+      "CAD-формат: "
+      + `${cad.original_format || "?"}`
+      + " → "
+      + `${cad.normalized_format || "?"}`,
+    );
   }
 
-  lines.push(
-    `CAD: ${payload.cad.original_file_name}`,
+  if (cad.selected_layout) {
+    lines.push(
+      `CAD layout: ${cad.selected_layout}`,
+    );
+  }
+
+  const entityCounts = (
+    cad.machine_data?.entity_counts
   );
 
-  lines.push(
-    `CAD-формат: ${payload.cad.original_format.toUpperCase()}`
-    + ` → ${payload.cad.normalized_format.toUpperCase()}`,
-  );
+  if (entityCounts) {
+    lines.push(
+      "CAD entities: "
+      + JSON.stringify(
+        entityCounts,
+      ),
+    );
+  }
 
-  lines.push(
-    `CAD layout: ${payload.cad.selected_layout}`,
-  );
-
-  lines.push(
-    `CAD entities: ${payload.cad.expanded_entity_count}`,
-  );
-
-  lines.push(
-    `CAD dangling endpoints: `
-    + `${payload.cad.geometry?.dangling_endpoint_count ?? 0}`,
-  );
-
-  if (payload.cad.warnings?.length) {
+  if (cad.warnings?.length) {
     lines.push(
       "Предупреждения CAD:",
     );
 
-    payload.cad.warnings.forEach(
+    cad.warnings.forEach(
       (warning) => {
         lines.push(
           `  - ${warning}`,
@@ -342,6 +434,158 @@ function renderCadSummary(
       },
     );
   }
+}
+
+
+function pushRenderSummary(
+  payload,
+  lines,
+) {
+  const render = payload.render;
+
+  if (!render) {
+    return;
+  }
+
+  if (render.image_base64) {
+    lines.push(
+      "Рендер листа: доступен",
+    );
+  }
+
+  if (render.pdf_image_base64) {
+    lines.push(
+      "PDF-рендер: доступен",
+    );
+  }
+
+  if (render.cad_image_base64) {
+    lines.push(
+      "CAD-рендер: доступен",
+    );
+  }
+}
+
+
+function pushNormativeSources(
+  finding,
+  lines,
+) {
+  const sources = (
+    finding.normative_sources
+    || finding.basis_sources
+    || []
+  );
+
+  if (!sources.length) {
+    return;
+  }
+
+  lines.push(
+    "Нормативные источники:",
+  );
+
+  sources.forEach(
+    (source) => {
+      const fileName = (
+        source.source_file
+        || source.file_name
+        || source.source
+        || "источник"
+      );
+
+      const page = (
+        source.page
+        ?? source.page_number
+        ?? "?"
+      );
+
+      lines.push(
+        `  - ${fileName}, стр. ${page}`,
+      );
+    },
+  );
+}
+
+
+function renderFinding(
+  finding,
+  index,
+  defaultPage,
+) {
+  const lines = [];
+
+  const page = (
+    finding.page
+    ?? finding.page_number
+    ?? defaultPage
+    ?? 1
+  );
+
+  const comment = (
+    finding.comment
+    || finding.message
+    || finding.issue_text
+    || "Текст замечания не передан."
+  );
+
+  const recommendation = (
+    finding.recommendation
+    || finding.recommendation_draft
+    || "Не указана."
+  );
+
+  lines.push(
+    `${index + 1}. Лист/страница ${page}`,
+  );
+
+  lines.push(
+    `Статус: ${statusLabel(finding.status)}`,
+  );
+
+  lines.push(
+    `Категория: ${finding.category || "—"}`,
+  );
+
+  lines.push(
+    `Уровень: ${finding.severity || "—"}`,
+  );
+
+  lines.push(
+    `Замечание: ${comment}`,
+  );
+
+  if (finding.evidence) {
+    lines.push(
+      `Основание на листе: ${finding.evidence}`,
+    );
+  }
+
+  if (finding.basis) {
+    lines.push(
+      `Нормативное основание: ${finding.basis}`,
+    );
+  }
+
+  pushNormativeSources(
+    finding,
+    lines,
+  );
+
+  lines.push(
+    `Рекомендация: ${recommendation}`,
+  );
+
+  if (
+    finding.confidence !== null
+    && finding.confidence !== undefined
+  ) {
+    lines.push(
+      `Уверенность: ${finding.confidence}`,
+    );
+  }
+
+  return lines;
 }
 
 
@@ -364,180 +608,111 @@ function renderReport(payload) {
     lines.push(
       `PDF: ${payload.pdf_file_name}`,
     );
+  } else if (
+    payload.file_name
+    && payload.source_mode === "pdf_only"
+  ) {
+    lines.push(
+      `PDF: ${payload.file_name}`,
+    );
   }
 
   if (payload.cad_file_name) {
     lines.push(
       `DWG/DXF: ${payload.cad_file_name}`,
     );
-  }
-
-  lines.push(
-    `VLM: ${payload.vision_model}`,
-  );
-
-  lines.push(
-    `Embeddings: ${payload.embedding_model}`,
-  );
-
-  if (payload.source_mode !== "cad_only") {
+  } else if (
+    payload.file_name
+    && payload.source_mode === "cad_only"
+  ) {
     lines.push(
-      `Страницы PDF: `
-      + `${payload.selected_pages.join(", ")}`,
-    );
-  } else {
-    lines.push(
-      "CAD-лист: 1",
+      `DWG/DXF: ${payload.file_name}`,
     );
   }
 
-  renderExplanatoryNoteSummary(
+  if (payload.selected_pages?.length) {
+    lines.push(
+      `Страницы: ${payload.selected_pages.join(", ")}`,
+    );
+  }
+
+  if (
+    payload.analyzed_pages !== null
+    && payload.analyzed_pages !== undefined
+  ) {
+    lines.push(
+      `Проанализировано листов: ${payload.analyzed_pages}`,
+    );
+  }
+
+  lines.push(
+    `Замечаний: ${payload.findings_count ?? 0}`,
+  );
+
+  if (payload.summary) {
+    lines.push(
+      `Итог: ${payload.summary}`,
+    );
+  }
+
+  pushCadSummary(
     payload,
     lines,
   );
 
-  renderCadSummary(
+  pushRenderSummary(
     payload,
     lines,
   );
 
-  lines.push(
-    `Время анализа: ${payload.elapsed_seconds} сек.`,
-  );
-
-  lines.push(
-    `Всего замечаний: ${payload.issues_count}`,
-  );
-
-  lines.push(
-    `Подтверждено: ${payload.confirmed_count}`,
-  );
-
-  lines.push(
-    `Требует проверки: ${payload.needs_review_count}`,
-  );
+  if (payload.pipeline?.length) {
+    lines.push(
+      "Pipeline: "
+      + payload.pipeline.join(
+        " → ",
+      ),
+    );
+  }
 
   lines.push("");
 
-  if (!payload.issues?.length) {
+  const findings = (
+    Array.isArray(payload.findings)
+      ? payload.findings
+      : []
+  );
+
+  if (!findings.length) {
     lines.push(
-      "По найденным нормативным требованиям "
-      + "замечаний не сформировано.",
+      "Замечания не сформированы.",
+    );
+  } else {
+    lines.push(
+      "ЗАМЕЧАНИЯ",
     );
 
     lines.push("");
-  }
 
-  payload.issues?.forEach(
-    (issue, index) => {
-      lines.push(
-        `${index + 1}. Лист/страница ${issue.page}`,
-      );
+    const defaultPage = (
+      payload.page?.page_number
+      ?? payload.selected_pages?.[0]
+      ?? 1
+    );
 
-      lines.push(
-        `Источник: ${sourceModeLabel(issue.source_mode)}`,
-      );
-
-      lines.push(
-        `Статус: ${statusLabel(issue.status)}`,
-      );
-
-      lines.push(
-        `Категория: ${issue.category}`,
-      );
-
-      lines.push(
-        `Уровень: ${issue.severity}`,
-      );
-
-      lines.push(
-        `Замечание: ${issue.comment}`,
-      );
-
-      lines.push(
-        `Основание на листе: ${issue.evidence}`,
-      );
-
-      if (
-        issue.project_context_sources?.length
-      ) {
-        const pzPages = [
-          ...new Set(
-            issue.project_context_sources
-              .map(
-                (source) => source.page,
-              )
-              .filter(
-                (page) =>
-                  page !== null
-                  && page !== undefined,
-              ),
+    findings.forEach(
+      (finding, index) => {
+        lines.push(
+          ...renderFinding(
+            finding,
+            index,
+            defaultPage,
           ),
-        ];
-
-        lines.push(
-          `Учтён контекст ПЗ со страниц: `
-          + `${pzPages.join(", ")}`,
-        );
-      }
-
-      if (issue.basis) {
-        lines.push(
-          `Нормативное основание: ${issue.basis}`,
-        );
-      }
-
-      if (issue.basis_sources?.length) {
-        lines.push(
-          "Найденные нормативные фрагменты:",
         );
 
-        issue.basis_sources.forEach(
-          (source) => {
-            lines.push(
-              `  - ${source.source_file}, `
-              + `PDF стр. ${source.page}`
-              + `; similarity=${source.score}`,
-            );
-          },
-        );
-      }
-
-      lines.push(
-        `Рекомендация: ${issue.recommendation}`,
-      );
-
-      if (issue.experience_sources?.length) {
-        lines.push(
-          "Похожий экспертный опыт:",
-        );
-
-        issue.experience_sources.forEach(
-          (source) => {
-            const fixedLabel = (
-              source.verified_fixed
-                ? "исправление подтверждено"
-                : "исправление не подтверждено"
-            );
-
-            lines.push(
-              `  - ${source.project_id}/${source.issue_id}: `
-              + `${source.issue_text} `
-              + `(${fixedLabel}; `
-              + `BEFORE ${source.before_page}`
-              + ` → AFTER ${source.after_page})`,
-            );
-          },
-        );
-      }
-
-      lines.push(
-        `Уверенность: ${issue.confidence}`,
-      );
-
-      lines.push("");
-    },
-  );
+        lines.push("");
+      },
+    );
+  }
 
   if (payload.limitations?.length) {
     lines.push(
@@ -553,7 +728,9 @@ function renderReport(payload) {
     );
   }
 
-  return lines.join("\n");
+  return lines.join(
+    "\n",
+  );
 }
 
 
@@ -565,26 +742,6 @@ pdfFile.addEventListener(
 cadFile.addEventListener(
   "change",
   syncSourceFields,
-);
-
-useExplanatoryNote.addEventListener(
-  "change",
-  syncExplanatoryNoteFields,
-);
-
-noteStartPage.addEventListener(
-  "input",
-  () => {
-    noteStartPage.setCustomValidity("");
-    noteEndPage.setCustomValidity("");
-  },
-);
-
-noteEndPage.addEventListener(
-  "input",
-  () => {
-    noteEndPage.setCustomValidity("");
-  },
 );
 
 pages.addEventListener(
@@ -608,7 +765,6 @@ form.addEventListener(
 
     const pdf = pdfFile.files[0];
     const cad = cadFile.files[0];
-    const mode = currentMode();
 
     const body = new FormData();
 
@@ -626,118 +782,69 @@ form.addEventListener(
       );
     }
 
-    body.append(
-      "pages",
-      pages.disabled
-        ? ""
-        : pages.value.trim(),
-    );
-
-    body.append(
-      "use_explanatory_note",
-      String(
-        useExplanatoryNote.checked,
-      ),
-    );
-
-    if (useExplanatoryNote.checked) {
+    if (
+      !pages.disabled
+      && pages.value.trim()
+    ) {
       body.append(
-        "note_start_page",
-        noteStartPage.value,
-      );
-
-      body.append(
-        "note_end_page",
-        noteEndPage.value,
+        "pages",
+        pages.value.trim(),
       );
     }
 
-    let endpoint;
-
-    if (mode === "pdf_cad") {
-      endpoint = "/api/analysis/pdf-cad";
-    } else if (mode === "cad_only") {
-      endpoint = "/api/analysis/cad";
-    } else {
-      endpoint = "/api/analysis/pdf";
-    }
-
-    const contextMessage = (
-      useExplanatoryNote.checked
-        ? " Сначала будет проверен и временно проиндексирован диапазон ПЗ."
-        : ""
-    );
-
-    const cadMessage = (
-      cad
-        ? " CAD будет нормализован в DXF, распарсен и отрендерен."
-        : ""
+    result.textContent = (
+      "Отправляем документы в API Gateway…"
     );
 
     setBusy(
       true,
-      "Qwen3-VL анализирует визуальное представление, "
-      + "машинные CAD-данные и нормативную базу."
-      + cadMessage
-      + contextMessage,
-    );
-
-    result.textContent = (
-      "Анализ выполняется…"
+      "Документы загружаются в API Gateway…",
     );
 
     try {
-      const response = await fetch(
-        endpoint,
-        {
-          method: "POST",
-          body,
-        },
+      const accepted = await submitAnalysis(
+        body,
       );
 
-      const raw = await response.text();
+      const jobId = accepted.job_id;
 
-      let payload;
-
-      try {
-        payload = JSON.parse(raw);
-      } catch {
-        payload = {raw};
-      }
-
-      if (!response.ok) {
-        const detail = (
-          payload?.detail
-            ? (
-              typeof payload.detail === "string"
-                ? payload.detail
-                : JSON.stringify(
-                  payload.detail,
-                  null,
-                  2,
-                )
-            )
-            : JSON.stringify(
-              payload,
-              null,
-              2,
-            )
-        );
-
+      if (!jobId) {
         throw new Error(
-          `HTTP ${response.status}\n${detail}`,
+          "API Gateway не вернул job_id.",
         );
       }
+
+      result.textContent = (
+        `Задание создано: ${jobId}\n`
+        + `Статус: ${statusLabel(accepted.status)}`
+      );
+
+      await waitForAnalysis(
+        jobId,
+      );
+
+      setBusy(
+        true,
+        "Анализ завершён. Загружаем результат…",
+      );
+
+      const payload = await loadAnalysisResult(
+        jobId,
+      );
 
       result.textContent = renderReport(
         payload,
       );
+
     } catch (error) {
       result.textContent = (
         `Ошибка:\n${error.message}`
       );
+
     } finally {
-      setBusy(false);
+      setBusy(
+        false,
+      );
     }
   },
 );

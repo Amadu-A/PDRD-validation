@@ -19,6 +19,9 @@ from pdrd_api_gateway.application.use_cases.create_analysis_job import (
 from pdrd_api_gateway.application.use_cases.get_analysis_job import (
     GetAnalysisJob,
 )
+from pdrd_api_gateway.application.use_cases.get_analysis_result import (
+    GetAnalysisResult,
+)
 from pdrd_api_gateway.application.use_cases.submit_analysis import (
     SubmitAnalysis,
 )
@@ -60,6 +63,7 @@ class ApplicationContainer:
 
     create_analysis_job: CreateAnalysisJob | None = None
     get_analysis_job: GetAnalysisJob | None = None
+    get_analysis_result: GetAnalysisResult | None = None
     submit_analysis: SubmitAnalysis | None = None
 
     async def close(self) -> None:
@@ -123,6 +127,11 @@ def build_container() -> ApplicationContainer:
         create_analysis_job=create_analysis_job,
     )
 
+    get_analysis_result = GetAnalysisResult(
+        get_analysis_job=get_analysis_job,
+        artifact_store=artifact_store,
+    )
+
     async def _shutdown_database() -> None:
         await engine.dispose()
 
@@ -132,5 +141,6 @@ def build_container() -> ApplicationContainer:
         shutdown_callback=_shutdown_database,
         create_analysis_job=create_analysis_job,
         get_analysis_job=get_analysis_job,
+        get_analysis_result=get_analysis_result,
         submit_analysis=submit_analysis,
     )

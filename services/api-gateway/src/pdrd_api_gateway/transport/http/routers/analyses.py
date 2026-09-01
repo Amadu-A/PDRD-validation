@@ -2,7 +2,10 @@
 
 """HTTP API асинхронных заданий анализа."""
 
-from typing import Annotated
+from typing import (
+    Annotated,
+    Any,
+)
 from uuid import UUID
 
 from fastapi import (
@@ -17,6 +20,12 @@ from fastapi import (
 
 from pdrd_api_gateway.application.use_cases.get_analysis_job import (
     GetAnalysisJob,
+)
+from pdrd_api_gateway.application.use_cases.get_analysis_result import (
+    AnalysisResultJobNotFoundError,
+    AnalysisResultNotReadyError,
+    AnalysisResultUnavailableError,
+    GetAnalysisResult,
 )
 from pdrd_api_gateway.application.use_cases.submit_analysis import (
     EmptyAnalysisFileError,
@@ -64,6 +73,18 @@ def require_get_analysis_job(
         )
 
     return container.get_analysis_job
+
+
+def require_get_analysis_result(
+    container: ApplicationContainer,
+) -> GetAnalysisResult:
+    """Возвращает настроенный GetAnalysisResult use case."""
+    if container.get_analysis_result is None:
+        raise RuntimeError(
+            "GetAnalysisResult is not configured.",
+        )
+
+    return container.get_analysis_result
 
 
 async def read_upload(
@@ -171,6 +192,55 @@ async def create_analysis(
         status=job.status,
         status_url=(f"/api/v1/analyses/{job.id}"),
     )
+
+
+@router.get(
+    "/{job_id}/result",
+    response_model=dict[str, Any],
+)
+async def get_analysis_result(
+    job_id: UUID,
+    container: Annotated[
+        ApplicationContainer,
+        Depends(get_container),
+    ],
+) -> dict[str, Any]:
+    """Возвращает JSON-результат завершённого анализа."""
+    use_case = require_get_analysis_result(
+        container,
+    )
+
+    try:
+        return await use_case.execute(
+            job_id=job_id,
+        )
+
+    except AnalysisResultJobNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    except AnalysisResultNotReadyError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": str(
+                    error,
+                ),
+                "status": error.status.value,
+            },
+        ) from error
+
+    except AnalysisResultUnavailableError as error:
+        raise HTTPException(
+            status_code=(status.HTTP_500_INTERNAL_SERVER_ERROR),
+            detail=str(
+                error,
+            ),
+        ) from error
 
 
 @router.get(

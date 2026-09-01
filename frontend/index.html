@@ -27,7 +27,7 @@
 
       <p class="muted">
         PDF / DWG / DXF → визуальное и машинное понимание листа →
-        контекст ПЗ → нормативная база → проверка соответствия →
+        нормативная база → проверка соответствия →
         База Опыта → инженерный отчёт.
       </p>
 
@@ -82,8 +82,8 @@
           <label class="checkbox-label">
             <input
               id="useExplanatoryNote"
-              name="use_explanatory_note"
               type="checkbox"
+              disabled
             >
 
             <span>
@@ -97,11 +97,7 @@
 
               <input
                 id="noteStartPage"
-                name="note_start_page"
                 type="number"
-                min="1"
-                step="1"
-                inputmode="numeric"
                 disabled
               >
             </label>
@@ -111,19 +107,15 @@
 
               <input
                 id="noteEndPage"
-                name="note_end_page"
                 type="number"
-                min="1"
-                step="1"
-                inputmode="numeric"
                 disabled
               >
             </label>
           </div>
 
           <p class="muted">
-            ПЗ можно учитывать только при наличии PDF. При включении
-            обе страницы обязательны, а конечная должна быть больше начальной.
+            Контекст ПЗ временно отключён в новой V2-архитектуре.
+            Параметры ПЗ сейчас не отправляются и не учитываются.
           </p>
         </section>
 
@@ -164,11 +156,11 @@
       </h2>
 
       <p id="modalText">
-        Документы передаются на нормативную проверку…
+        Задание передаётся в очередь…
       </p>
 
       <p class="muted">
-        Интерфейс заблокирован до завершения анализа.
+        Анализ выполняется асинхронно через API Gateway.
       </p>
     </div>
   </div>
