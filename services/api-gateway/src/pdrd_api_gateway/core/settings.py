@@ -148,6 +148,30 @@ class StorageSettings(BaseModel):
         return self.max_upload_mb * 1024 * 1024
 
 
+class OrchestrationSettings(BaseModel):
+    """Настройки вызова опубликованных PDRD workflow в n8n."""
+
+    base_url: str = "http://n8n:5678"
+
+    pdf_webhook_path: str = "/webhook/analysis/v2/pdf"
+
+    cad_webhook_path: str = "/webhook/analysis/v2/cad"
+
+    pdf_cad_webhook_path: str = "/webhook/analysis/v2/pdf-cad"
+
+    request_timeout_seconds: float = Field(
+        default=1800.0,
+        gt=0,
+        le=7200,
+    )
+
+    connect_timeout_seconds: float = Field(
+        default=20.0,
+        gt=0,
+        le=120,
+    )
+
+
 class Settings(BaseSettings):
     """Описывает runtime-конфигурацию API Gateway."""
 
@@ -190,6 +214,10 @@ class Settings(BaseSettings):
 
     storage: StorageSettings = Field(
         default_factory=StorageSettings,
+    )
+
+    orchestration: OrchestrationSettings = Field(
+        default_factory=OrchestrationSettings,
     )
 
 
