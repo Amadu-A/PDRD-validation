@@ -37,7 +37,7 @@ class ProjectContextPagePayload(BaseModel):
     ) -> ProjectContextPage:
         """Преобразует HTTP payload в Domain."""
         return ProjectContextPage(
-            page_number=(self.page_number),
+            page_number=self.page_number,
             text=self.text,
         )
 
@@ -109,6 +109,8 @@ class ProjectContextSourcePayload(BaseModel):
 
     source_id: str
 
+    point_id: str | None = None
+
     score: float
 
     page: int | None = None
@@ -120,12 +122,12 @@ class ProjectContextSourcePayload(BaseModel):
     def to_domain(
         self,
     ) -> ProjectContextSource:
-        """Преобразует source в Domain."""
+        """Преобразует wire source в Domain."""
         return ProjectContextSource(
-            source_id=(self.source_id),
+            source_id=self.source_id,
             score=self.score,
             page=self.page,
-            chunk_index=(self.chunk_index),
+            chunk_index=self.chunk_index,
             text=self.text,
         )
 
