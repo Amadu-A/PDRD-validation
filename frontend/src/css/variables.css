@@ -1,0 +1,75 @@
+/* frontend/src/css/variables.css */
+
+/*
+ * Глобальные design tokens приложения.
+ * Конкретные UI-блоки не должны содержать собственные
+ * дублирующиеся значения цветов, радиусов и отступов.
+ */
+
+:root {
+  /* Colors */
+  --color-background: #f4f5f7;
+  --color-surface: #ffffff;
+  --color-surface-secondary: #fafafa;
+  --color-surface-muted: #f8f8f8;
+  --color-disabled: #eeeeee;
+
+  --color-text-primary: #222222;
+  --color-text-secondary: #666666;
+  --color-text-disabled: #777777;
+
+  --color-border: #dddddd;
+  --color-border-control: #bbbbbb;
+
+  --color-danger: #aa0000;
+
+  --color-overlay: rgb(0 0 0 / 50%);
+
+  --color-spinner-track: #dddddd;
+  --color-spinner-active: #333333;
+
+  /* Typography */
+  --font-family-base: Arial, sans-serif;
+
+  --font-size-base: 16px;
+
+  --font-weight-normal: 400;
+  --font-weight-semibold: 600;
+
+  /* Layout */
+  --page-max-width: 900px;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 10px;
+  --space-4: 12px;
+  --space-5: 14px;
+  --space-6: 16px;
+  --space-7: 18px;
+  --space-8: 20px;
+  --space-9: 24px;
+  --space-10: 28px;
+  --space-page: 40px;
+
+  /* Borders */
+  --radius-control: 8px;
+  --radius-block: 10px;
+  --radius-card: 12px;
+
+  /* Controls */
+  --control-padding: 11px;
+  --button-min-width: 180px;
+
+  /* Modal */
+  --modal-max-width: 440px;
+  --modal-z-index: 1000;
+
+  /* Animation */
+  --spinner-size: 42px;
+  --spinner-border-width: 4px;
+  --spinner-duration: 0.9s;
+
+  /* Breakpoints */
+  --mobile-breakpoint: 640px;
+}

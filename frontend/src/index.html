@@ -1,6 +1,7 @@
-<!-- frontend/index.html -->
+<!-- frontend/src/index.html -->
 
 <!doctype html>
+
 <html lang="ru">
 <head>
   <meta charset="utf-8">
@@ -14,7 +15,7 @@
 
   <link
     rel="stylesheet"
-    href="/styles.css"
+    href="/css/main.css"
   >
 </head>
 
@@ -98,6 +99,7 @@
               <input
                 id="noteStartPage"
                 type="number"
+                min="1"
                 disabled
               >
             </label>
@@ -108,14 +110,15 @@
               <input
                 id="noteEndPage"
                 type="number"
+                min="1"
                 disabled
               >
             </label>
           </div>
 
           <p class="muted">
-            Контекст ПЗ временно отключён в новой V2-архитектуре.
-            Параметры ПЗ сейчас не отправляются и не учитываются.
+            Контекст ПЗ будет включён после завершения переноса
+            PZ-2/PZ-3 в новую V2-архитектуру.
           </p>
         </section>
 
@@ -139,7 +142,10 @@
         Результат проверки
       </h2>
 
-      <pre id="result">Пока нет результата.</pre>
+      <pre
+        id="result"
+        class="report"
+      >Пока нет результата.</pre>
     </section>
   </main>
 
@@ -165,6 +171,9 @@
     </div>
   </div>
 
-  <script src="/app.js"></script>
+  <script
+    type="module"
+    src="/js/app.js"
+  ></script>
 </body>
 </html>
