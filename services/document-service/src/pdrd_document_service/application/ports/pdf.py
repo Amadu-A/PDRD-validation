@@ -5,6 +5,7 @@
 from typing import Protocol
 
 from pdrd_document_service.domain.pdf import PdfDocument
+from pdrd_document_service.domain.project_context import PdfTextPage
 
 
 class PdfProcessingError(RuntimeError):
@@ -28,4 +29,13 @@ class PdfReader(Protocol):
         selected_pages: tuple[int, ...],
     ) -> PdfDocument:
         """Извлекает и рендерит выбранные страницы."""
+        ...
+
+    def extract_text(
+        self,
+        content: bytes,
+        *,
+        selected_pages: tuple[int, ...],
+    ) -> tuple[PdfTextPage, ...]:
+        """Извлекает текст без рендера выбранных страниц."""
         ...

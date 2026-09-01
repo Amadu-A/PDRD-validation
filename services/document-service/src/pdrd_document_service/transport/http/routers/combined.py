@@ -45,6 +45,10 @@ from pdrd_document_service.domain.combined import (
 from pdrd_document_service.domain.pdf import (
     InvalidPageSelectionError,
 )
+from pdrd_document_service.domain.project_context import (
+    ExplanatoryNoteContext,
+    InvalidExplanatoryNoteRangeError,
+)
 from pdrd_document_service.transport.http.dependencies import (
     get_container,
 )
@@ -55,13 +59,34 @@ from pdrd_document_service.transport.http.schemas.combined import (
     CombinedExtractionResponse,
 )
 from pdrd_document_service.transport.http.schemas.pdf import (
+    ExplanatoryNoteContextResponse,
     PdfPageResponse,
+    ProjectContextTextPageResponse,
 )
 
 router = APIRouter(
     prefix="/internal/v1/combined",
     tags=["combined"],
 )
+
+
+def _project_context_response(
+    context: ExplanatoryNoteContext,
+) -> ExplanatoryNoteContextResponse:
+    """Преобразует context domain model в HTTP schema."""
+    return ExplanatoryNoteContextResponse(
+        enabled=context.enabled,
+        start_page=context.start_page,
+        end_page=context.end_page,
+        pages_count=context.pages_count,
+        pages=[
+            ProjectContextTextPageResponse(
+                page_number=page.number,
+                text=page.text,
+            )
+            for page in context.pages
+        ],
+    )
 
 
 @router.post(
@@ -85,8 +110,20 @@ async def extract_combined(
         str | None,
         Form(),
     ] = None,
+    use_explanatory_note: Annotated[
+        bool,
+        Form(),
+    ] = False,
+    note_start_page: Annotated[
+        str | None,
+        Form(),
+    ] = None,
+    note_end_page: Annotated[
+        str | None,
+        Form(),
+    ] = None,
 ) -> CombinedExtractionResponse:
-    """Подготавливает соответствующие PDF и CAD представления."""
+    """Подготавливает PDF/CAD и optional контекст ПЗ."""
     pdf_file_name = pdf.filename or "document.pdf"
 
     cad_file_name = cad.filename or ""
@@ -104,19 +141,30 @@ async def extract_combined(
             document = container.extract_combined.execute(
                 pdf_content=pdf_content,
                 cad_content=cad_content,
-                cad_filename=cad_file_name,
+                cad_filename=(cad_file_name),
                 page_spec=pages,
             )
 
-        except EmptyPdfError as error:
-            raise HTTPException(
-                status_code=(status.HTTP_400_BAD_REQUEST),
-                detail=str(
-                    error,
-                ),
-            ) from error
+            if container.extract_pdf_project_context is None:
+                if use_explanatory_note:
+                    raise HTTPException(
+                        status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+                        detail=("Project Context extraction не настроен."),
+                    )
 
-        except EmptyCadError as error:
+                project_context = ExplanatoryNoteContext.disabled()
+            else:
+                project_context = container.extract_pdf_project_context.execute(
+                    content=pdf_content,
+                    enabled=use_explanatory_note,
+                    start_page=note_start_page,
+                    end_page=note_end_page,
+                )
+
+        except (
+            EmptyPdfError,
+            EmptyCadError,
+        ) as error:
             raise HTTPException(
                 status_code=(status.HTTP_400_BAD_REQUEST),
                 detail=str(
@@ -139,6 +187,7 @@ async def extract_combined(
             InvalidPageSelectionError,
             CombinedPageSelectionError,
             InvalidCadFilenameError,
+            InvalidExplanatoryNoteRangeError,
         ) as error:
             raise HTTPException(
                 status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
@@ -179,6 +228,7 @@ async def extract_combined(
         await cad.close()
 
     page = document.page
+
     cad_document = document.cad
 
     return CombinedExtractionResponse(
@@ -193,10 +243,12 @@ async def extract_combined(
             text=page.text,
             width_points=(page.width_points),
             height_points=(page.height_points),
-            image_base64=base64.b64encode(
-                page.rendered_png,
-            ).decode(
-                "ascii",
+            image_base64=(
+                base64.b64encode(
+                    page.rendered_png,
+                ).decode(
+                    "ascii",
+                )
             ),
         ),
         cad=CadExtractionResponse(
@@ -210,10 +262,12 @@ async def extract_combined(
             ),
             machine_data=(cad_document.machine_data),
             machine_context=(cad_document.machine_context),
-            image_base64=base64.b64encode(
-                cad_document.rendered_png,
-            ).decode(
-                "ascii",
+            image_base64=(
+                base64.b64encode(
+                    cad_document.rendered_png,
+                ).decode(
+                    "ascii",
+                )
             ),
         ),
         combined_image_base64=(
@@ -221,6 +275,11 @@ async def extract_combined(
                 document.combined_rendered_png,
             ).decode(
                 "ascii",
+            )
+        ),
+        explanatory_note_context=(
+            _project_context_response(
+                project_context,
             )
         ),
     )

@@ -4,6 +4,9 @@
 
 from typing import Protocol
 
+from pdrd_knowledge_service.domain.project_context import (
+    VectorRecord,
+)
 from pdrd_knowledge_service.domain.search import VectorPoint
 
 
@@ -24,7 +27,38 @@ class VectorStore(Protocol):
         """Ищет ближайшие точки в одной коллекции."""
         ...
 
-    async def is_ready(self) -> bool:
+    async def create_collection(
+        self,
+        *,
+        collection: str,
+        vector_size: int,
+    ) -> None:
+        """Создаёт Cosine vector collection."""
+        ...
+
+    async def upsert(
+        self,
+        *,
+        collection: str,
+        records: tuple[
+            VectorRecord,
+            ...,
+        ],
+    ) -> None:
+        """Сохраняет vector records."""
+        ...
+
+    async def delete_collection(
+        self,
+        *,
+        collection: str,
+    ) -> bool:
+        """Идемпотентно удаляет collection."""
+        ...
+
+    async def is_ready(
+        self,
+    ) -> bool:
         """Проверяет доступность vector storage."""
         ...
 

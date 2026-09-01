@@ -9,9 +9,7 @@ from uuid import UUID
 from pdrd_api_gateway.application.use_cases.execute_analysis_job import (
     ExecuteAnalysisJob,
 )
-from pdrd_api_gateway.core.settings import (
-    get_settings,
-)
+from pdrd_api_gateway.core.settings import get_settings
 from pdrd_api_gateway.infrastructure.database.engine import (
     build_async_engine,
     build_session_factory,
@@ -21,6 +19,9 @@ from pdrd_api_gateway.infrastructure.database.unit_of_work import (
 )
 from pdrd_api_gateway.infrastructure.orchestration.n8n import (
     N8nAnalysisOrchestrator,
+)
+from pdrd_api_gateway.infrastructure.orchestration.project_context import (
+    KnowledgeProjectContextCleaner,
 )
 from pdrd_api_gateway.infrastructure.storage.filesystem import (
     LocalFilesystemAnalysisArtifactStore,
@@ -54,18 +55,24 @@ async def execute_analysis_job(
     )
 
     orchestrator = N8nAnalysisOrchestrator(
-        settings=settings.orchestration,
+        settings=(settings.orchestration),
+    )
+
+    project_context_cleaner = KnowledgeProjectContextCleaner(
+        settings=(settings.project_context_cleanup),
     )
 
     use_case = ExecuteAnalysisJob(
-        unit_of_work_factory=unit_of_work_factory,
-        artifact_store=artifact_store,
-        orchestrator=orchestrator,
+        unit_of_work_factory=(unit_of_work_factory),
+        artifact_store=(artifact_store),
+        orchestrator=(orchestrator),
+        project_context_cleaner=(project_context_cleaner),
     )
 
     try:
         return await use_case.execute(
             job_id=job_id,
         )
+
     finally:
         await engine.dispose()

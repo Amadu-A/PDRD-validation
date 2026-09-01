@@ -12,6 +12,7 @@ from pdrd_document_service.domain.pdf import (
     PdfPage,
     classify_page,
 )
+from pdrd_document_service.domain.project_context import PdfTextPage
 
 
 class PyMuPdfReader:
@@ -74,6 +75,35 @@ class PyMuPdfReader:
                 "Ошибка при обработке PDF.",
             ) from error
 
+    def extract_text(
+        self,
+        content: bytes,
+        *,
+        selected_pages: tuple[int, ...],
+    ) -> tuple[PdfTextPage, ...]:
+        """Извлекает text-only страницы для контекста ПЗ."""
+        try:
+            with fitz.open(
+                stream=content,
+                filetype="pdf",
+            ) as document:
+                return tuple(
+                    PdfTextPage(
+                        number=page_number,
+                        text=(
+                            document[page_number - 1].get_text(
+                                "text",
+                                sort=True,
+                            )[: self._text_limit]
+                        ).strip(),
+                    )
+                    for page_number in selected_pages
+                )
+        except Exception as error:
+            raise PdfProcessingError(
+                "Не удалось извлечь текст страниц ПЗ.",
+            ) from error
+
     def _extract_page(
         self,
         page: fitz.Page,
@@ -83,6 +113,7 @@ class PyMuPdfReader:
         text = (
             page.get_text(
                 "text",
+                sort=True,
             )[: self._text_limit]
         ).strip()
 
@@ -98,11 +129,15 @@ class PyMuPdfReader:
             ),
             text=text,
             width_points=round(
-                float(page.rect.width),
+                float(
+                    page.rect.width,
+                ),
                 3,
             ),
             height_points=round(
-                float(page.rect.height),
+                float(
+                    page.rect.height,
+                ),
                 3,
             ),
             rendered_png=rendered_png,

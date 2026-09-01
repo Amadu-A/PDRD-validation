@@ -16,11 +16,13 @@ class EmbeddingProvider(Protocol):
         self,
         texts: tuple[str, ...],
         *,
-        instruction: str,
+        instruction: str | None,
     ) -> list[list[float]]:
-        """Строит embedding для каждого переданного текста."""
+        """Строит embedding для каждого текста."""
         ...
 
-    async def is_ready(self) -> bool:
-        """Проверяет доступность требуемой embedding-модели."""
+    async def is_ready(
+        self,
+    ) -> bool:
+        """Проверяет доступность embedding-модели."""
         ...

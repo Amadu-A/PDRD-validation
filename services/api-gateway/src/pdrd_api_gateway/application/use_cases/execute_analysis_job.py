@@ -2,6 +2,7 @@
 
 """Use case выполнения queued analysis job."""
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -15,9 +16,16 @@ from pdrd_api_gateway.application.ports.orchestration import (
 from pdrd_api_gateway.application.ports.persistence import (
     UnitOfWorkFactory,
 )
+from pdrd_api_gateway.application.ports.project_context import (
+    ProjectContextCleaner,
+)
 from pdrd_api_gateway.domain.analysis_job import (
     AnalysisJob,
     AnalysisJobStatus,
+)
+
+LOGGER = logging.getLogger(
+    __name__,
 )
 
 
@@ -38,23 +46,33 @@ class ExecuteAnalysisJob:
     """Выполняет одно асинхронное задание анализа."""
 
     unit_of_work_factory: UnitOfWorkFactory
+
     artifact_store: AnalysisArtifactStore
+
     orchestrator: AnalysisOrchestrator
+
+    project_context_cleaner: ProjectContextCleaner | None = None
 
     async def execute(
         self,
         *,
         job_id: UUID,
     ) -> dict[str, Any]:
-        """Запускает job и сохраняет его результат."""
+        """Запускает job, сохраняет result и очищает Project Context."""
         job = await self._prepare_job(
             job_id=job_id,
         )
 
         if job.status is AnalysisJobStatus.COMPLETED:
-            return await self._load_completed_result(
+            result = await self._load_completed_result(
                 job=job,
             )
+
+            await self._cleanup_project_context(
+                context_id=(job.document_id),
+            )
+
+            return result
 
         document_id = job.document_id
 
@@ -69,7 +87,9 @@ class ExecuteAnalysisJob:
             )
 
             raise AnalysisExecutionError(
-                str(error),
+                str(
+                    error,
+                ),
             ) from error
 
         try:
@@ -105,14 +125,44 @@ class ExecuteAnalysisJob:
 
             raise AnalysisExecutionError(
                 "Не удалось выполнить analysis job "
-                f"{job_id}: {type(error).__name__}: {error}"
+                f"{job_id}: "
+                f"{type(error).__name__}: {error}"
             ) from error
+
+        finally:
+            await self._cleanup_project_context(
+                context_id=document_id,
+            )
 
         await self._mark_completed(
             job_id=job_id,
         )
 
         return result
+
+    async def _cleanup_project_context(
+        self,
+        *,
+        context_id: UUID | None,
+    ) -> None:
+        """Выполняет best-effort cleanup без подмены результата job."""
+        if context_id is None or self.project_context_cleaner is None:
+            return
+
+        try:
+            await self.project_context_cleaner.cleanup(
+                context_id=context_id,
+            )
+
+        except Exception as error:
+            LOGGER.warning(
+                "project_context_cleanup_failed context_id=%s error_type=%s error=%s",
+                context_id,
+                type(
+                    error,
+                ).__name__,
+                error,
+            )
 
     async def _prepare_job(
         self,
@@ -145,22 +195,18 @@ class ExecuteAnalysisJob:
 
             changed = False
 
-            # Возможна короткая race-condition:
-            # worker получил RabbitMQ message до commit dispatcher.
-            # Поэтому pending допустимо безопасно поднять
-            # через queued в processing.
             if job.status is AnalysisJobStatus.PENDING:
                 job.mark_queued()
                 job.mark_processing()
+
                 changed = True
 
             elif job.status is AnalysisJobStatus.QUEUED:
                 job.mark_processing()
+
                 changed = True
 
             elif job.status is AnalysisJobStatus.PROCESSING:
-                # Redelivery после worker crash.
-                # Повторно attempt_count не увеличиваем.
                 pass
 
             if changed:
@@ -184,12 +230,12 @@ class ExecuteAnalysisJob:
             )
 
         result = await self.artifact_store.load_result(
-            document_id=job.document_id,
+            document_id=(job.document_id),
         )
 
         if result is None:
             raise AnalysisExecutionError(
-                "Analysis job имеет статус completed, но result.json отсутствует.",
+                "Analysis job имеет status=completed, но result.json отсутствует.",
             )
 
         return result
@@ -251,7 +297,7 @@ class ExecuteAnalysisJob:
                 return
 
             job.mark_failed(
-                error_code="analysis_execution_failed",
+                error_code=("analysis_execution_failed"),
                 error_message=(f"{type(error).__name__}: {error}")[:2000],
             )
 

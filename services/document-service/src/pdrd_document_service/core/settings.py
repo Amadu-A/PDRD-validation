@@ -38,6 +38,12 @@ class PdfSettings(BaseModel):
         le=500,
     )
 
+    max_context_pages: int = Field(
+        default=100,
+        ge=2,
+        le=1000,
+    )
+
     text_limit: int = Field(
         default=12000,
         ge=100,

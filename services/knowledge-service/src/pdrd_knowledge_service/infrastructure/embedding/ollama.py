@@ -38,15 +38,18 @@ class OllamaEmbeddingProvider:
         self,
         texts: tuple[str, ...],
         *,
-        instruction: str,
+        instruction: str | None,
     ) -> list[list[float]]:
-        """Строит embeddings с Qwen instruction prefix."""
+        """Строит document или instruction-aware embeddings."""
         if not texts:
             return []
 
-        prepared = [
-            (f"Instruct: {instruction}\nQuery: {text.strip()}") for text in texts
-        ]
+        if instruction is None:
+            prepared = [text.strip() for text in texts]
+        else:
+            prepared = [
+                (f"Instruct: {instruction}\nQuery: {text.strip()}") for text in texts
+            ]
 
         try:
             async with httpx.AsyncClient(
@@ -56,7 +59,7 @@ class OllamaEmbeddingProvider:
                 ),
             ) as client:
                 response = await client.post(
-                    f"{self._base_url}/api/embed",
+                    (f"{self._base_url}/api/embed"),
                     json={
                         "model": self._model,
                         "input": prepared,
@@ -65,12 +68,15 @@ class OllamaEmbeddingProvider:
                 )
 
                 response.raise_for_status()
+
         except httpx.HTTPStatusError as error:
             raise EmbeddingProviderError(
-                "Ollama вернул ошибку при построении embeddings: "
+                "Ollama вернул ошибку "
+                "при построении embeddings: "
                 f"{error.response.status_code}: "
                 f"{error.response.text[:1000]}",
             ) from error
+
         except httpx.HTTPError as error:
             raise EmbeddingProviderError(
                 f"Не удалось обратиться к Ollama embeddings: {error}",
@@ -88,9 +94,13 @@ class OllamaEmbeddingProvider:
                 "Ollama вернул некорректный список embeddings.",
             )
 
-        if len(embeddings) != len(prepared):
+        if len(
+            embeddings,
+        ) != len(
+            prepared,
+        ):
             raise EmbeddingProviderError(
-                "Количество embeddings не совпадает с количеством запросов.",
+                "Количество embeddings не совпадает с количеством текстов.",
             )
 
         result: list[list[float]] = []
@@ -108,7 +118,14 @@ class OllamaEmbeddingProvider:
                 )
 
             try:
-                result.append([float(value) for value in vector])
+                result.append(
+                    [
+                        float(
+                            value,
+                        )
+                        for value in vector
+                    ]
+                )
             except (
                 TypeError,
                 ValueError,
@@ -119,17 +136,20 @@ class OllamaEmbeddingProvider:
 
         return result
 
-    async def is_ready(self) -> bool:
-        """Проверяет доступность требуемой Ollama-модели."""
+    async def is_ready(
+        self,
+    ) -> bool:
+        """Проверяет наличие требуемой Ollama-модели."""
         try:
             async with httpx.AsyncClient(
-                timeout=self._health_timeout_seconds,
+                timeout=(self._health_timeout_seconds),
             ) as client:
                 response = await client.get(
-                    f"{self._base_url}/api/tags",
+                    (f"{self._base_url}/api/tags"),
                 )
 
                 response.raise_for_status()
+
         except httpx.HTTPError:
             return False
 

@@ -36,6 +36,7 @@ class DatabaseSettings(BaseModel):
     )
 
     name: str = "pdrd"
+
     user: str = "pdrd"
 
     password: SecretStr = SecretStr(
@@ -93,7 +94,9 @@ class BrokerSettings(BaseModel):
     virtual_host: str = "pdrd-validation"
 
     queue_name: str = "pdrd.analysis"
+
     exchange_name: str = "pdrd.analysis"
+
     routing_key: str = "analysis.execute"
 
     connect_timeout_seconds: float = Field(
@@ -116,7 +119,7 @@ class BrokerSettings(BaseModel):
 
 
 class OutboxSettings(BaseModel):
-    """Настройки фонового transactional outbox dispatcher."""
+    """Настройки transactional outbox dispatcher."""
 
     poll_interval_seconds: float = Field(
         default=1.0,
@@ -132,7 +135,7 @@ class OutboxSettings(BaseModel):
 
 
 class StorageSettings(BaseModel):
-    """Настройки временного хранения документов анализа."""
+    """Настройки временного хранения документов."""
 
     root_path: str = "/data/analyses"
 
@@ -144,12 +147,12 @@ class StorageSettings(BaseModel):
 
     @property
     def max_upload_bytes(self) -> int:
-        """Возвращает максимальный размер одного файла."""
+        """Возвращает максимальный размер файла."""
         return self.max_upload_mb * 1024 * 1024
 
 
 class OrchestrationSettings(BaseModel):
-    """Настройки вызова опубликованных PDRD workflow в n8n."""
+    """Настройки опубликованных PDRD n8n workflows."""
 
     base_url: str = "http://n8n:5678"
 
@@ -172,6 +175,24 @@ class OrchestrationSettings(BaseModel):
     )
 
 
+class ProjectContextCleanupSettings(BaseModel):
+    """Настройки страховочного cleanup через Knowledge Service."""
+
+    base_url: str = "http://pdrd-knowledge-service:8401"
+
+    request_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        le=300,
+    )
+
+    connect_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=120,
+    )
+
+
 class Settings(BaseSettings):
     """Описывает runtime-конфигурацию API Gateway."""
 
@@ -187,7 +208,9 @@ class Settings(BaseSettings):
     )
 
     service_name: str = "PDRD API Gateway"
+
     service_version: str = "0.1.0"
+
     environment: EnvironmentName = "local"
 
     host: str = "0.0.0.0"
@@ -217,11 +240,15 @@ class Settings(BaseSettings):
     )
 
     orchestration: OrchestrationSettings = Field(
-        default_factory=OrchestrationSettings,
+        default_factory=(OrchestrationSettings),
+    )
+
+    project_context_cleanup: ProjectContextCleanupSettings = Field(
+        default_factory=(ProjectContextCleanupSettings),
     )
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Возвращает единственный экземпляр конфигурации процесса."""
+    """Возвращает единственный экземпляр конфигурации."""
     return Settings()

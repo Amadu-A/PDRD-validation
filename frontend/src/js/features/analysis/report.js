@@ -98,6 +98,70 @@ function appendRenderSummary(
 }
 
 
+function appendProjectContextSummary(
+  payload,
+  lines,
+) {
+  const context = (
+    payload.explanatory_note_context
+  );
+
+  if (!context?.enabled) {
+    lines.push(
+      "Контекст ПЗ: выключен",
+    );
+
+    return;
+  }
+
+  lines.push(
+    "Контекст ПЗ: включён",
+  );
+
+  if (
+    context.start_page
+    && context.end_page
+  ) {
+    lines.push(
+      "Диапазон ПЗ: "
+      + `${context.start_page}-${context.end_page}`,
+    );
+  }
+
+  if (
+    context.pages_count !== null
+    && context.pages_count !== undefined
+  ) {
+    lines.push(
+      `Страниц ПЗ: ${context.pages_count}`,
+    );
+  }
+
+  if (
+    context.indexed_chunks !== null
+    && context.indexed_chunks !== undefined
+  ) {
+    lines.push(
+      "Фрагментов ПЗ проиндексировано: "
+      + `${context.indexed_chunks}`,
+    );
+  }
+
+  const warnings = (
+    context.validation?.warnings
+  );
+
+  if (
+    Array.isArray(warnings)
+    && warnings.length
+  ) {
+    lines.push(
+      `Предупреждений проверки ПЗ: ${warnings.length}`,
+    );
+  }
+}
+
+
 function appendNormativeSources(
   finding,
   lines,
@@ -132,6 +196,34 @@ function appendNormativeSources(
 
     lines.push(
       `  - ${fileName}, стр. ${page}`,
+    );
+  });
+}
+
+
+function appendProjectContextSources(
+  finding,
+  lines,
+) {
+  const sources = (
+    finding.project_context_sources
+    || []
+  );
+
+  if (!sources.length) {
+    return;
+  }
+
+  lines.push(
+    "Контекст ПЗ:",
+  );
+
+  sources.forEach((source) => {
+    lines.push(
+      "  - "
+      + `${source.source_id || "PZ"}`
+      + `, стр. ${source.page ?? "?"}`
+      + `, score=${source.score ?? "?"}`,
     );
   });
 }
@@ -197,6 +289,11 @@ function renderFinding(
   }
 
   appendNormativeSources(
+    finding,
+    lines,
+  );
+
+  appendProjectContextSources(
     finding,
     lines,
   );
@@ -287,6 +384,11 @@ export function renderAnalysisReport(
       `Итог: ${payload.summary}`,
     );
   }
+
+  appendProjectContextSummary(
+    payload,
+    lines,
+  );
 
   appendCadSummary(
     payload,

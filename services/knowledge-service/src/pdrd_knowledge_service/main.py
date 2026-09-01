@@ -11,6 +11,9 @@ from pdrd_knowledge_service.core.container import (
 from pdrd_knowledge_service.transport.http.routers.health import (
     router as health_router,
 )
+from pdrd_knowledge_service.transport.http.routers.project_context import (
+    router as project_context_router,
+)
 from pdrd_knowledge_service.transport.http.routers.search import (
     router as search_router,
 )
@@ -40,6 +43,10 @@ def create_app(
 
     application.include_router(
         search_router,
+    )
+
+    application.include_router(
+        project_context_router,
     )
 
     return application

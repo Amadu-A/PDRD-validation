@@ -24,6 +24,7 @@ class VisionSettings(BaseModel):
     """Настройки shared Ollama VLM."""
 
     base_url: str = "http://ollama:11434"
+
     model: str = "qwen3-vl:8b-instruct"
 
     request_timeout_seconds: float = Field(
@@ -129,6 +130,46 @@ class PipelineSettings(BaseModel):
     )
 
 
+class ProjectContextSettings(BaseModel):
+    """Настройки анализа диапазона ПЗ."""
+
+    classify_batch_size: int = Field(
+        default=8,
+        ge=1,
+        le=50,
+    )
+
+    classify_num_predict: int = Field(
+        default=1200,
+        ge=100,
+        le=10000,
+    )
+
+    min_text_length: int = Field(
+        default=80,
+        ge=1,
+        le=10000,
+    )
+
+    reject_confidence: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=1.0,
+    )
+
+    context_text_limit: int = Field(
+        default=900,
+        ge=100,
+        le=5000,
+    )
+
+    query_source_text_limit: int = Field(
+        default=1500,
+        ge=100,
+        le=10000,
+    )
+
+
 class Settings(BaseSettings):
     """Runtime settings Analysis Service."""
 
@@ -165,6 +206,10 @@ class Settings(BaseSettings):
 
     pipeline: PipelineSettings = Field(
         default_factory=PipelineSettings,
+    )
+
+    project_context: ProjectContextSettings = Field(
+        default_factory=(ProjectContextSettings),
     )
 
 

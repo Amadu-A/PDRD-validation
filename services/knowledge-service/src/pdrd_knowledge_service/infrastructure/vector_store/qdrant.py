@@ -9,11 +9,14 @@ import httpx
 from pdrd_knowledge_service.application.ports.vector_store import (
     VectorStoreError,
 )
+from pdrd_knowledge_service.domain.project_context import (
+    VectorRecord,
+)
 from pdrd_knowledge_service.domain.search import VectorPoint
 
 
 class QdrantVectorStore:
-    """Выполняет vector search через Qdrant REST API."""
+    """Выполняет vector operations через Qdrant REST API."""
 
     def __init__(
         self,
@@ -41,7 +44,7 @@ class QdrantVectorStore:
         """Ищет ближайшие Qdrant points."""
         try:
             async with httpx.AsyncClient(
-                timeout=self._request_timeout_seconds,
+                timeout=(self._request_timeout_seconds),
             ) as client:
                 response = await client.post(
                     (f"{self._base_url}/collections/{collection}/points/query"),
@@ -54,6 +57,7 @@ class QdrantVectorStore:
                 )
 
                 response.raise_for_status()
+
         except httpx.HTTPStatusError as error:
             raise VectorStoreError(
                 f"Qdrant collection {collection} "
@@ -61,6 +65,7 @@ class QdrantVectorStore:
                 f"{error.response.status_code}: "
                 f"{error.response.text[:1000]}",
             ) from error
+
         except httpx.HTTPError as error:
             raise VectorStoreError(
                 f"Не удалось обратиться к Qdrant collection {collection}: {error}",
@@ -97,17 +102,125 @@ class QdrantVectorStore:
             )
         ]
 
-    async def is_ready(self) -> bool:
+    async def create_collection(
+        self,
+        *,
+        collection: str,
+        vector_size: int,
+    ) -> None:
+        """Создаёт Cosine collection."""
+        try:
+            async with httpx.AsyncClient(
+                timeout=(self._request_timeout_seconds),
+            ) as client:
+                response = await client.put(
+                    (f"{self._base_url}/collections/{collection}"),
+                    json={
+                        "vectors": {
+                            "size": vector_size,
+                            "distance": "Cosine",
+                        }
+                    },
+                )
+
+                response.raise_for_status()
+
+        except httpx.HTTPError as error:
+            raise VectorStoreError(
+                f"Не удалось создать Qdrant collection {collection}: {error}",
+            ) from error
+
+    async def upsert(
+        self,
+        *,
+        collection: str,
+        records: tuple[
+            VectorRecord,
+            ...,
+        ],
+    ) -> None:
+        """Сохраняет vector records."""
+        if not records:
+            return
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=(self._request_timeout_seconds),
+            ) as client:
+                response = await client.put(
+                    (f"{self._base_url}/collections/{collection}/points"),
+                    params={
+                        "wait": "true",
+                    },
+                    json={
+                        "points": [
+                            {
+                                "id": (record.point_id),
+                                "vector": (record.vector),
+                                "payload": (record.payload),
+                            }
+                            for record in records
+                        ]
+                    },
+                )
+
+                response.raise_for_status()
+
+        except httpx.HTTPError as error:
+            raise VectorStoreError(
+                "Не удалось сохранить points "
+                f"в Qdrant collection {collection}: "
+                f"{error}",
+            ) from error
+
+    async def delete_collection(
+        self,
+        *,
+        collection: str,
+    ) -> bool:
+        """Идемпотентно удаляет Qdrant collection."""
+        try:
+            async with httpx.AsyncClient(
+                timeout=(self._request_timeout_seconds),
+            ) as client:
+                response = await client.delete(
+                    f"{self._base_url}/collections/{collection}"
+                )
+
+        except httpx.HTTPError as error:
+            raise VectorStoreError(
+                f"Не удалось удалить Qdrant collection {collection}: {error}",
+            ) from error
+
+        if response.status_code == 404:
+            return False
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as error:
+            raise VectorStoreError(
+                "Qdrant вернул ошибку удаления "
+                f"collection {collection}: "
+                f"{response.status_code}: "
+                f"{response.text[:1000]}",
+            ) from error
+
+        return True
+
+    async def is_ready(
+        self,
+    ) -> bool:
         """Проверяет readiness Qdrant."""
         try:
             async with httpx.AsyncClient(
-                timeout=self._health_timeout_seconds,
+                timeout=(self._health_timeout_seconds),
             ) as client:
                 response = await client.get(
                     f"{self._base_url}/readyz",
                 )
 
             return response.is_success
+
         except httpx.HTTPError:
             return False
 
@@ -115,14 +228,15 @@ class QdrantVectorStore:
         self,
         collection: str,
     ) -> bool:
-        """Проверяет существование Qdrant collection."""
+        """Проверяет существование vector collection."""
         try:
             async with httpx.AsyncClient(
-                timeout=self._health_timeout_seconds,
+                timeout=(self._health_timeout_seconds),
             ) as client:
                 response = await client.get(
                     f"{self._base_url}/collections/{collection}"
                 )
+
         except httpx.HTTPError:
             return False
 
@@ -135,6 +249,7 @@ class QdrantVectorStore:
     def _build_point(
         point: dict[str, Any],
     ) -> VectorPoint:
+        """Преобразует Qdrant point в Domain."""
         payload = point.get(
             "payload",
             {},

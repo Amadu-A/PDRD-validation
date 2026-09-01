@@ -13,6 +13,9 @@ from pdrd_document_service.application.use_cases.combined import (
 from pdrd_document_service.application.use_cases.extract import (
     ExtractPdfDocument,
 )
+from pdrd_document_service.application.use_cases.project_context import (
+    ExtractPdfProjectContext,
+)
 from pdrd_document_service.core.settings import (
     Settings,
     get_settings,
@@ -47,6 +50,8 @@ class ApplicationContainer:
     extract_cad: ExtractCadDocument
     extract_combined: ExtractCombinedDocument
 
+    extract_pdf_project_context: ExtractPdfProjectContext | None = None
+
 
 def build_container() -> ApplicationContainer:
     """Собирает concrete dependencies сервиса."""
@@ -61,6 +66,12 @@ def build_container() -> ApplicationContainer:
         reader=pdf_reader,
         max_upload_bytes=(settings.pdf.max_upload_bytes),
         max_analysis_pages=(settings.pdf.max_analysis_pages),
+    )
+
+    extract_pdf_project_context = ExtractPdfProjectContext(
+        reader=pdf_reader,
+        max_upload_bytes=(settings.pdf.max_upload_bytes),
+        max_context_pages=(settings.pdf.max_context_pages),
     )
 
     cad_normalizer = LibreDwgNormalizer(
@@ -111,4 +122,5 @@ def build_container() -> ApplicationContainer:
         extract_pdf=extract_pdf,
         extract_cad=extract_cad,
         extract_combined=extract_combined,
+        extract_pdf_project_context=(extract_pdf_project_context),
     )

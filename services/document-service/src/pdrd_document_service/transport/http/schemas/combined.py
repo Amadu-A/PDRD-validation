@@ -8,6 +8,7 @@ from pdrd_document_service.transport.http.schemas.cad import (
     CadExtractionResponse,
 )
 from pdrd_document_service.transport.http.schemas.pdf import (
+    ExplanatoryNoteContextResponse,
     PdfPageResponse,
 )
 
@@ -31,3 +32,5 @@ class CombinedExtractionResponse(BaseModel):
     cad: CadExtractionResponse
 
     combined_image_base64: str
+
+    explanatory_note_context: ExplanatoryNoteContextResponse

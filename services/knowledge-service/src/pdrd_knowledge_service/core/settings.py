@@ -21,6 +21,7 @@ class EmbeddingSettings(BaseModel):
     """Настройки embedding provider."""
 
     base_url: str = "http://ollama:11434"
+
     model: str = "qwen3-embedding:4b"
 
     request_timeout_seconds: float = Field(
@@ -86,6 +87,42 @@ class SearchSettings(BaseModel):
     )
 
 
+class ProjectContextSettings(BaseModel):
+    """Настройки временного Project Context RAG."""
+
+    chunk_size: int = Field(
+        default=1800,
+        ge=100,
+        le=20000,
+    )
+
+    chunk_overlap: int = Field(
+        default=250,
+        ge=0,
+        le=10000,
+    )
+
+    top_k: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+    )
+
+    embed_batch_size: int = Field(
+        default=12,
+        ge=1,
+        le=100,
+    )
+
+    upsert_batch_size: int = Field(
+        default=64,
+        ge=1,
+        le=1000,
+    )
+
+    collection_prefix: str = "pdrd_project_context"
+
+
 class Settings(BaseSettings):
     """Настройки процесса Knowledge Service."""
 
@@ -101,6 +138,7 @@ class Settings(BaseSettings):
     )
 
     service_name: str = "PDRD Knowledge Service"
+
     service_version: str = "0.1.0"
 
     environment: EnvironmentName = "local"
@@ -116,7 +154,7 @@ class Settings(BaseSettings):
     docs_enabled: bool = True
 
     embedding: EmbeddingSettings = Field(
-        default_factory=EmbeddingSettings,
+        default_factory=(EmbeddingSettings),
     )
 
     qdrant: QdrantSettings = Field(
@@ -125,6 +163,10 @@ class Settings(BaseSettings):
 
     search: SearchSettings = Field(
         default_factory=SearchSettings,
+    )
+
+    project_context: ProjectContextSettings = Field(
+        default_factory=(ProjectContextSettings),
     )
 
 

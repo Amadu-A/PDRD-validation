@@ -25,6 +25,34 @@ class PdfPageResponse(BaseModel):
     image_base64: str
 
 
+class ProjectContextTextPageResponse(BaseModel):
+    """Text-only страница выбранного диапазона ПЗ."""
+
+    model_config = ConfigDict(
+        frozen=True,
+    )
+
+    page_number: int
+    text: str
+
+
+class ExplanatoryNoteContextResponse(BaseModel):
+    """Извлечённый контекст Пояснительной записки."""
+
+    model_config = ConfigDict(
+        frozen=True,
+    )
+
+    enabled: bool
+
+    start_page: int | None = None
+    end_page: int | None = None
+
+    pages_count: int = 0
+
+    pages: list[ProjectContextTextPageResponse]
+
+
 class PdfExtractionResponse(BaseModel):
     """Результат подготовки PDF."""
 
@@ -39,3 +67,5 @@ class PdfExtractionResponse(BaseModel):
     selected_pages: list[int]
 
     pages: list[PdfPageResponse]
+
+    explanatory_note_context: ExplanatoryNoteContextResponse

@@ -5,11 +5,14 @@
 from dataclasses import dataclass
 
 from pdrd_analysis_service.application.use_cases import (
+    AugmentProjectContext,
     BuildNormativeQueries,
+    BuildProjectContextQuery,
     CheckPageAgainstNorms,
     CheckReadiness,
     FinalizeFindings,
     UnderstandPage,
+    ValidateProjectContext,
 )
 from pdrd_analysis_service.core.settings import (
     Settings,
@@ -35,6 +38,12 @@ class ApplicationContainer:
     finalize_findings: FinalizeFindings
 
     check_readiness: CheckReadiness
+
+    validate_project_context: ValidateProjectContext | None = None
+
+    build_project_context_query: BuildProjectContextQuery | None = None
+
+    augment_project_context: AugmentProjectContext | None = None
 
 
 def build_container() -> ApplicationContainer:
@@ -81,5 +90,24 @@ def build_container() -> ApplicationContainer:
         ),
         check_readiness=CheckReadiness(
             vision_model=vision_model,
+        ),
+        validate_project_context=(
+            ValidateProjectContext(
+                vision_model=vision_model,
+                classify_batch_size=(settings.project_context.classify_batch_size),
+                classify_num_predict=(settings.project_context.classify_num_predict),
+                min_text_length=(settings.project_context.min_text_length),
+                reject_confidence=(settings.project_context.reject_confidence),
+            )
+        ),
+        build_project_context_query=(
+            BuildProjectContextQuery(
+                source_text_limit=(settings.project_context.query_source_text_limit),
+            )
+        ),
+        augment_project_context=(
+            AugmentProjectContext(
+                context_text_limit=(settings.project_context.context_text_limit),
+            )
         ),
     )
