@@ -1,0 +1,392 @@
+{
+  "name": "[PDRD] Drawing Validation AI - Analysis V2 PDF",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analysis/v2/pdf",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "29bc1bd4-b716-4519-91ea-02861b176931",
+      "name": "POST /analysis/v2/pdf",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1200,
+        0
+      ],
+      "webhookId": "99805167-a7b7-436d-9787-f8dd52b73e5d"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-document-service:8301/internal/v1/pdf/extract",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "pdf"
+            },
+            {
+              "name": "pages",
+              "value": "={{ $json.body?.pages ?? '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "fd40ae22-cbc0-45cf-94c6-7ed434ca3a8c",
+      "name": "Document Extract PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const document = $input.first().json;\nconst pages = Array.isArray(document.pages) ? document.pages : [];\n\nreturn pages.map((page) => ({\n  json: {\n    document: {\n      file_name: document.file_name ?? 'document.pdf',\n      total_pages: document.total_pages ?? pages.length,\n      selected_pages: document.selected_pages ?? pages.map((item) => item.page_number),\n    },\n    page,\n  },\n}));"
+      },
+      "id": "d12cc456-a599-402e-a888-53549dc7fc03",
+      "name": "Expand PDF Pages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/understand",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ page_number: $json.page.page_number, heuristic_page_type: $json.page.page_type, extracted_text: $json.page.text, image_base64: $json.page.image_base64 }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "01b78383-64e6-43a4-9311-a7dc280df797",
+      "name": "Understand Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/normative-queries",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ page_facts: $json.facts, extracted_text: $('Expand PDF Pages').item.json.page.text, project_context_texts: [] }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "4394bc80-5dca-4648-97ab-b8e714145feb",
+      "name": "Build Normative Queries",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/search/normative",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ queries: $json.queries ?? [] }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "4e826ee3-c7df-4c45-a5b8-593fae866de5",
+      "name": "Search Normative",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/check-norms",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ page_number: $('Expand PDF Pages').item.json.page.page_number, extracted_text: $('Expand PDF Pages').item.json.page.text, page_facts: $('Understand Page').item.json.facts, normative_sources: $json.sources ?? [], image_base64: $('Expand PDF Pages').item.json.page.image_base64 }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "58cf4afc-6455-403a-bbd3-74ead2312d50",
+      "name": "Check Norms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\n\nconst experienceQueries = findings\n  .map((finding) => String(finding.experience_query ?? '').trim())\n  .filter((query) => query.length > 0);\n\nreturn {\n  json: {\n    findings,\n    normative_check_summary: $json.summary ?? '',\n    normative_check_metrics: $json.metrics ?? {},\n    experience_queries: experienceQueries,\n  },\n};"
+      },
+      "id": "e377240b-1553-4e42-aa82-18ed01d3c74d",
+      "name": "Prepare Experience Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        340,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/search/experience",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ queries: $json.experience_queries ?? [] }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "a8776027-35ed-4fe8-aa96-411b36edc4b5",
+      "name": "Search Experience",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const prepared = $('Prepare Experience Queries').item.json;\nconst findings = Array.isArray(prepared.findings) ? prepared.findings : [];\nconst results = Array.isArray($json.results) ? $json.results : [];\n\nconst experienceByFinding = {};\n\nfor (let index = 0; index < findings.length; index += 1) {\n  const finding = findings[index];\n  const result = results[index] ?? {};\n\n  experienceByFinding[finding.finding_id] = Array.isArray(result.sources)\n    ? result.sources\n    : [];\n}\n\nreturn {\n  json: {\n    findings,\n    experience_by_finding: experienceByFinding,\n  },\n};"
+      },
+      "id": "331b23e4-b04e-4601-a6ff-a205bc42167d",
+      "name": "Build Experience Map",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/findings/finalize",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ findings: $json.findings ?? [], experience_by_finding: $json.experience_by_finding ?? {} }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "36031dfa-ce9e-47a7-87e6-3d10541db03e",
+      "name": "Finalize Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const expanded = $('Expand PDF Pages').item.json;\nconst understanding = $('Understand Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst normative = $('Search Normative').item.json;\nconst check = $('Check Norms').item.json;\nconst finalization = $json;\n\nreturn {\n  json: {\n    document: expanded.document,\n    page_number: expanded.page.page_number,\n    heuristic_page_type: expanded.page.page_type,\n    width_points: expanded.page.width_points,\n    height_points: expanded.page.height_points,\n    extracted_text: expanded.page.text,\n    facts: understanding.facts ?? {},\n    understanding_metrics: understanding.metrics ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: normative.sources ?? [],\n    normative_embedding_model: normative.embedding_model ?? '',\n    normative_check: {\n      summary: check.summary ?? '',\n      findings: check.findings ?? [],\n      metrics: check.metrics ?? {},\n    },\n    finalization: {\n      summary: finalization.summary ?? '',\n      metrics: finalization.metrics ?? {},\n    },\n    findings: finalization.findings ?? [],\n  },\n};"
+      },
+      "id": "ce166e19-bad5-46eb-a751-cd240160cb23",
+      "name": "Build Page Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const pageItems = $input.all().map((item) => item.json);\n\npageItems.sort((left, right) => left.page_number - right.page_number);\n\nconst document = pageItems[0]?.document ?? {\n  file_name: 'document.pdf',\n  total_pages: 0,\n  selected_pages: [],\n};\n\nconst pages = pageItems.map((item) => {\n  const { document: _document, ...page } = item;\n  return page;\n});\n\nconst findings = pages.flatMap((page) =>\n  Array.isArray(page.findings) ? page.findings : [],\n);\n\nreturn [\n  {\n    json: {\n      status: 'completed',\n      source_mode: 'pdf_only',\n      file_name: document.file_name,\n      total_pages: document.total_pages,\n      selected_pages: document.selected_pages,\n      analyzed_pages: pages.length,\n      findings_count: findings.length,\n      summary:\n        findings.length > 0\n          ? `Найдено замечаний: ${findings.length}.`\n          : 'Замечания по выбранным листам не найдены.',\n      findings,\n      pages,\n      pipeline: [\n        'document_extract',\n        'page_understanding',\n        'normative_queries',\n        'normative_search',\n        'normative_check',\n        'experience_search',\n        'finalization',\n      ],\n      limitations: [\n        'В этом workflow пока не подключён контекст пояснительной записки.',\n        'В этом workflow пока не объединяются PDF и CAD.',\n        'Workflow является v2-контуром для E2E-проверки до переключения frontend.',\n      ],\n    },\n  },\n];"
+      },
+      "id": "d74cfecf-f74f-42f5-8ba4-6232191d71d5",
+      "name": "Aggregate PDF Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "POST /analysis/v2/pdf": {
+      "main": [
+        [
+          {
+            "node": "Document Extract PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document Extract PDF": {
+      "main": [
+        [
+          {
+            "node": "Expand PDF Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expand PDF Pages": {
+      "main": [
+        [
+          {
+            "node": "Understand Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Understand Page": {
+      "main": [
+        [
+          {
+            "node": "Build Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Normative Queries": {
+      "main": [
+        [
+          {
+            "node": "Search Normative",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Normative": {
+      "main": [
+        [
+          {
+            "node": "Check Norms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Norms": {
+      "main": [
+        [
+          {
+            "node": "Prepare Experience Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Experience Queries": {
+      "main": [
+        [
+          {
+            "node": "Search Experience",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Experience": {
+      "main": [
+        [
+          {
+            "node": "Build Experience Map",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Experience Map": {
+      "main": [
+        [
+          {
+            "node": "Finalize Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Findings": {
+      "main": [
+        [
+          {
+            "node": "Build Page Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Page Result": {
+      "main": [
+        [
+          {
+            "node": "Aggregate PDF Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "67ed1374-c3e8-4195-bc33-a310a3707488",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
