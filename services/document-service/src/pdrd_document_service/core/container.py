@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from pdrd_document_service.application.use_cases.cad import (
     ExtractCadDocument,
 )
+from pdrd_document_service.application.use_cases.combined import (
+    ExtractCombinedDocument,
+)
 from pdrd_document_service.application.use_cases.extract import (
     ExtractPdfDocument,
 )
@@ -26,6 +29,9 @@ from pdrd_document_service.infrastructure.cad.processor import (
 from pdrd_document_service.infrastructure.cad.renderer import (
     EzdxfCadRenderer,
 )
+from pdrd_document_service.infrastructure.image_composer import (
+    PillowCombinedImageComposer,
+)
 from pdrd_document_service.infrastructure.pdf.pymupdf import (
     PyMuPdfReader,
 )
@@ -39,6 +45,7 @@ class ApplicationContainer:
 
     extract_pdf: ExtractPdfDocument
     extract_cad: ExtractCadDocument
+    extract_combined: ExtractCombinedDocument
 
 
 def build_container() -> ApplicationContainer:
@@ -47,7 +54,7 @@ def build_container() -> ApplicationContainer:
 
     pdf_reader = PyMuPdfReader(
         render_max_side=(settings.pdf.render_max_side),
-        text_limit=settings.pdf.text_limit,
+        text_limit=(settings.pdf.text_limit),
     )
 
     extract_pdf = ExtractPdfDocument(
@@ -70,7 +77,7 @@ def build_container() -> ApplicationContainer:
     )
 
     cad_renderer = EzdxfCadRenderer(
-        render_dpi=settings.cad.render_dpi,
+        render_dpi=(settings.cad.render_dpi),
         render_max_side=(settings.cad.render_max_side),
     )
 
@@ -86,8 +93,22 @@ def build_container() -> ApplicationContainer:
         max_upload_bytes=(settings.cad.max_upload_bytes),
     )
 
+    image_composer = PillowCombinedImageComposer(
+        max_side=max(
+            settings.pdf.render_max_side,
+            settings.cad.render_max_side,
+        ),
+    )
+
+    extract_combined = ExtractCombinedDocument(
+        extract_pdf=extract_pdf,
+        extract_cad=extract_cad,
+        image_composer=image_composer,
+    )
+
     return ApplicationContainer(
         settings=settings,
         extract_pdf=extract_pdf,
         extract_cad=extract_cad,
+        extract_combined=extract_combined,
     )

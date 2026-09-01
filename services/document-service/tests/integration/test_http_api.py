@@ -11,6 +11,9 @@ from fastapi.testclient import TestClient
 from pdrd_document_service.application.use_cases.cad import (
     ExtractCadDocument,
 )
+from pdrd_document_service.application.use_cases.combined import (
+    ExtractCombinedDocument,
+)
 from pdrd_document_service.application.use_cases.extract import (
     ExtractPdfDocument,
 )
@@ -33,6 +36,9 @@ from pdrd_document_service.infrastructure.cad.processor import (
 )
 from pdrd_document_service.infrastructure.cad.renderer import (
     EzdxfCadRenderer,
+)
+from pdrd_document_service.infrastructure.image_composer import (
+    PillowCombinedImageComposer,
 )
 from pdrd_document_service.infrastructure.pdf.pymupdf import (
     PyMuPdfReader,
@@ -135,7 +141,7 @@ def build_client() -> TestClient:
 
     settings = Settings(
         _env_file=None,
-        service_name="PDRD Document Service Test",
+        service_name=("PDRD Document Service Test"),
         service_version="0.1.0-test",
         environment="test",
         pdf=pdf_settings,
@@ -144,7 +150,13 @@ def build_client() -> TestClient:
 
     pdf_reader = PyMuPdfReader(
         render_max_side=(pdf_settings.render_max_side),
-        text_limit=pdf_settings.text_limit,
+        text_limit=(pdf_settings.text_limit),
+    )
+
+    extract_pdf = ExtractPdfDocument(
+        reader=pdf_reader,
+        max_upload_bytes=(pdf_settings.max_upload_bytes),
+        max_analysis_pages=(pdf_settings.max_analysis_pages),
     )
 
     cad_processor = EzdxfCadProcessor(
@@ -166,17 +178,26 @@ def build_client() -> TestClient:
         machine_text_limit=(cad_settings.machine_text_limit),
     )
 
+    extract_cad = ExtractCadDocument(
+        processor=cad_processor,
+        max_upload_bytes=(cad_settings.max_upload_bytes),
+    )
+
+    extract_combined = ExtractCombinedDocument(
+        extract_pdf=extract_pdf,
+        extract_cad=extract_cad,
+        image_composer=(
+            PillowCombinedImageComposer(
+                max_side=1000,
+            )
+        ),
+    )
+
     container = ApplicationContainer(
         settings=settings,
-        extract_pdf=ExtractPdfDocument(
-            reader=pdf_reader,
-            max_upload_bytes=(pdf_settings.max_upload_bytes),
-            max_analysis_pages=(pdf_settings.max_analysis_pages),
-        ),
-        extract_cad=ExtractCadDocument(
-            processor=cad_processor,
-            max_upload_bytes=(cad_settings.max_upload_bytes),
-        ),
+        extract_pdf=extract_pdf,
+        extract_cad=extract_cad,
+        extract_combined=extract_combined,
     )
 
     return TestClient(
@@ -201,7 +222,7 @@ def test_health_endpoints() -> None:
 
     assert live_response.json() == {
         "status": "ok",
-        "service": "PDRD Document Service Test",
+        "service": ("PDRD Document Service Test"),
         "version": "0.1.0-test",
     }
 
@@ -209,7 +230,7 @@ def test_health_endpoints() -> None:
 
     assert ready_response.json() == {
         "status": "ready",
-        "service": "PDRD Document Service Test",
+        "service": ("PDRD Document Service Test"),
         "version": "0.1.0-test",
         "capabilities": {
             "pdf": True,
@@ -241,7 +262,9 @@ def test_extract_pdf_endpoint() -> None:
     payload = response.json()
 
     assert payload["file_name"] == "test.pdf"
+
     assert payload["total_pages"] == 2
+
     assert payload["selected_pages"] == [
         2,
     ]
@@ -256,6 +279,7 @@ def test_extract_pdf_endpoint() -> None:
     page = payload["pages"][0]
 
     assert page["page_number"] == 2
+
     assert "Second page" in page["text"]
 
     png = base64.b64decode(
@@ -339,3 +363,86 @@ def test_extract_cad_rejects_wrong_extension() -> None:
         )
 
     assert response.status_code == 422
+
+
+def test_extract_combined_endpoint() -> None:
+    """Проверяет полный HTTP PDF + CAD extraction contract."""
+    with build_client() as client:
+        response = client.post(
+            "/internal/v1/combined/extract",
+            files={
+                "pdf": (
+                    "test.pdf",
+                    build_pdf(),
+                    "application/pdf",
+                ),
+                "cad": (
+                    "drawing.dxf",
+                    build_dxf(),
+                    "application/dxf",
+                ),
+            },
+            data={
+                "pages": "2",
+            },
+        )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["pdf_file_name"] == "test.pdf"
+
+    assert payload["cad_file_name"] == "drawing.dxf"
+
+    assert payload["total_pdf_pages"] == 2
+
+    assert payload["selected_page"] == 2
+
+    assert payload["pdf"]["page_number"] == 2
+
+    assert "Second page" in payload["analysis_text"]
+
+    assert "TEST-CAD" in payload["analysis_text"]
+
+    assert payload["cad"]["original_format"] == "dxf"
+
+    for image_field in (
+        payload["pdf"]["image_base64"],
+        payload["cad"]["image_base64"],
+        payload["combined_image_base64"],
+    ):
+        png = base64.b64decode(
+            image_field,
+        )
+
+        assert png.startswith(
+            b"\x89PNG\r\n\x1a\n",
+        )
+
+
+def test_extract_combined_requires_one_pdf_page() -> None:
+    """Проверяет требование одного PDF-листа для PDF + CAD."""
+    with build_client() as client:
+        response = client.post(
+            "/internal/v1/combined/extract",
+            files={
+                "pdf": (
+                    "test.pdf",
+                    build_pdf(),
+                    "application/pdf",
+                ),
+                "cad": (
+                    "drawing.dxf",
+                    build_dxf(),
+                    "application/dxf",
+                ),
+            },
+            data={
+                "pages": "1-2",
+            },
+        )
+
+    assert response.status_code == 422
+
+    assert "ровно одну PDF-страницу" in response.json()["detail"]
