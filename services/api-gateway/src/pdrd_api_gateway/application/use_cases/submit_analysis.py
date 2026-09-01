@@ -37,6 +37,9 @@ class SubmitAnalysis:
         cad_content: bytes | None,
         cad_file_name: str | None,
         pages: str | None,
+        use_explanatory_note: bool = False,
+        note_start_page: str | int | None = None,
+        note_end_page: str | int | None = None,
     ) -> AnalysisJob:
         """Принимает документы и создаёт надёжное задание."""
         self._validate_file_content(
@@ -55,6 +58,9 @@ class SubmitAnalysis:
             pages=pages,
             pdf_file_name=pdf_file_name,
             cad_file_name=cad_file_name,
+            use_explanatory_note=use_explanatory_note,
+            note_start_page=note_start_page,
+            note_end_page=note_end_page,
         )
 
         await self.artifact_store.save_request(
@@ -67,6 +73,7 @@ class SubmitAnalysis:
             return await self.create_analysis_job.execute(
                 document_id=submission.document_id,
             )
+
         except BaseException:
             await self.artifact_store.delete_request(
                 document_id=submission.document_id,

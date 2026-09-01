@@ -32,6 +32,10 @@ class AnalysisSubmission:
     pdf_file_name: str | None
     cad_file_name: str | None
 
+    use_explanatory_note: bool
+    note_start_page: int | None
+    note_end_page: int | None
+
     @classmethod
     def create(
         cls,
@@ -41,6 +45,9 @@ class AnalysisSubmission:
         pages: str | None,
         pdf_file_name: str | None,
         cad_file_name: str | None,
+        use_explanatory_note: bool = False,
+        note_start_page: str | int | None = None,
+        note_end_page: str | int | None = None,
     ) -> "AnalysisSubmission":
         """Создаёт и валидирует заявку на анализ."""
         source_mode = cls._resolve_source_mode(
@@ -53,12 +60,26 @@ class AnalysisSubmission:
             pages=pages,
         )
 
+        (
+            normalized_use_note,
+            normalized_note_start,
+            normalized_note_end,
+        ) = cls._normalize_explanatory_note(
+            source_mode=source_mode,
+            enabled=use_explanatory_note,
+            start_page=note_start_page,
+            end_page=note_end_page,
+        )
+
         return cls(
             document_id=uuid4(),
             source_mode=source_mode,
             pages=normalized_pages,
             pdf_file_name=(pdf_file_name if pdf_present else None),
             cad_file_name=(cad_file_name if cad_present else None),
+            use_explanatory_note=normalized_use_note,
+            note_start_page=normalized_note_start,
+            note_end_page=normalized_note_end,
         )
 
     @staticmethod
@@ -107,3 +128,69 @@ class AnalysisSubmission:
             return normalized
 
         return normalized or None
+
+    @staticmethod
+    def _normalize_explanatory_note(
+        *,
+        source_mode: AnalysisSourceMode,
+        enabled: bool,
+        start_page: str | int | None,
+        end_page: str | int | None,
+    ) -> tuple[
+        bool,
+        int | None,
+        int | None,
+    ]:
+        """Проверяет пользовательские параметры контекста ПЗ."""
+        if not enabled:
+            return (
+                False,
+                None,
+                None,
+            )
+
+        if source_mode is AnalysisSourceMode.CAD_ONLY:
+            raise InvalidAnalysisSubmissionError(
+                "Контекст ПЗ доступен только при наличии PDF.",
+            )
+
+        if (
+            start_page is None
+            or end_page is None
+            or not str(start_page).strip()
+            or not str(end_page).strip()
+        ):
+            raise InvalidAnalysisSubmissionError(
+                "При включённом контексте ПЗ необходимо "
+                "указать начальную и конечную страницы.",
+            )
+
+        try:
+            start = int(
+                str(start_page).strip(),
+            )
+
+            end = int(
+                str(end_page).strip(),
+            )
+
+        except ValueError as error:
+            raise InvalidAnalysisSubmissionError(
+                "Номера страниц ПЗ должны быть целыми числами.",
+            ) from error
+
+        if start < 1 or end < 1:
+            raise InvalidAnalysisSubmissionError(
+                "Номера страниц ПЗ должны быть положительными.",
+            )
+
+        if end <= start:
+            raise InvalidAnalysisSubmissionError(
+                "Конечная страница ПЗ должна быть больше начальной.",
+            )
+
+        return (
+            True,
+            start,
+            end,
+        )

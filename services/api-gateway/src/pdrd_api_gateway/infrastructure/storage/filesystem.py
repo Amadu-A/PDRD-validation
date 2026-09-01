@@ -126,6 +126,9 @@ class LocalFilesystemAnalysisArtifactStore:
                 "pages": submission.pages,
                 "pdf_file_name": (submission.pdf_file_name),
                 "cad_file_name": (submission.cad_file_name),
+                "use_explanatory_note": (submission.use_explanatory_note),
+                "note_start_page": (submission.note_start_page),
+                "note_end_page": (submission.note_end_page),
             }
 
             self._write_json_atomic(
@@ -195,6 +198,18 @@ class LocalFilesystemAnalysisArtifactStore:
                 cad_file_name=manifest.get(
                     "cad_file_name",
                 ),
+                use_explanatory_note=bool(
+                    manifest.get(
+                        "use_explanatory_note",
+                        False,
+                    )
+                ),
+                note_start_page=manifest.get(
+                    "note_start_page",
+                ),
+                note_end_page=manifest.get(
+                    "note_end_page",
+                ),
             )
 
             pdf_path = directory / self._PDF_FILE
@@ -235,6 +250,7 @@ class LocalFilesystemAnalysisArtifactStore:
                 directory,
                 ignore_errors=True,
             )
+
         except OSError as error:
             raise AnalysisArtifactStorageError(
                 "Не удалось удалить артефакты анализа.",
@@ -259,6 +275,7 @@ class LocalFilesystemAnalysisArtifactStore:
                 directory / self._RESULT_FILE,
                 result,
             )
+
         except (
             OSError,
             TypeError,

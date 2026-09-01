@@ -46,6 +46,10 @@ class SubmitAnalysisStub:
 
         self.pages: str | None = None
 
+        self.use_explanatory_note = False
+        self.note_start_page: str | int | None = None
+        self.note_end_page: str | int | None = None
+
         self.document_id: UUID | None = None
 
     async def execute(
@@ -56,6 +60,9 @@ class SubmitAnalysisStub:
         cad_content: bytes | None,
         cad_file_name: str | None,
         pages: str | None,
+        use_explanatory_note: bool = False,
+        note_start_page: str | int | None = None,
+        note_end_page: str | int | None = None,
     ) -> AnalysisJob:
         """Создаёт fake job и сохраняет аргументы."""
         self.pdf_content = pdf_content
@@ -65,6 +72,11 @@ class SubmitAnalysisStub:
         self.cad_file_name = cad_file_name
 
         self.pages = pages
+
+        self.use_explanatory_note = use_explanatory_note
+
+        self.note_start_page = note_start_page
+        self.note_end_page = note_end_page
 
         self.document_id = uuid4()
 
@@ -178,6 +190,41 @@ def test_create_pdf_analysis_returns_202() -> None:
 
     assert submit_stub.cad_content is None
     assert submit_stub.pages == "1,3"
+
+    assert submit_stub.use_explanatory_note is False
+
+
+def test_create_pdf_analysis_with_note_returns_202() -> None:
+    """Проверяет HTTP transport параметров ПЗ."""
+    submit_stub = SubmitAnalysisStub()
+
+    with build_client(
+        submit_stub=submit_stub,
+        get_stub=GetAnalysisStub(None),
+    ) as client:
+        response = client.post(
+            "/api/v1/analyses",
+            files={
+                "pdf": (
+                    "drawing.pdf",
+                    b"pdf-content",
+                    "application/pdf",
+                ),
+            },
+            data={
+                "pages": "10",
+                "use_explanatory_note": "true",
+                "note_start_page": "2",
+                "note_end_page": "8",
+            },
+        )
+
+    assert response.status_code == 202
+
+    assert submit_stub.use_explanatory_note is True
+
+    assert submit_stub.note_start_page == "2"
+    assert submit_stub.note_end_page == "8"
 
 
 def test_create_pdf_cad_analysis_returns_202() -> None:

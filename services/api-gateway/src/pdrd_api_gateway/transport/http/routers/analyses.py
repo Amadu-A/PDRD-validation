@@ -103,6 +103,7 @@ async def read_upload(
         content = await upload.read(
             max_upload_bytes + 1,
         )
+
     finally:
         await upload.close()
 
@@ -140,6 +141,18 @@ async def create_analysis(
         str | None,
         Form(),
     ] = None,
+    use_explanatory_note: Annotated[
+        bool,
+        Form(),
+    ] = False,
+    note_start_page: Annotated[
+        str | None,
+        Form(),
+    ] = None,
+    note_end_page: Annotated[
+        str | None,
+        Form(),
+    ] = None,
 ) -> AnalysisAcceptedResponse:
     """Принимает документы и создаёт asynchronous analysis job."""
     max_upload_bytes = container.settings.storage.max_upload_bytes
@@ -165,7 +178,11 @@ async def create_analysis(
             cad_content=cad_content,
             cad_file_name=cad_file_name,
             pages=pages,
+            use_explanatory_note=use_explanatory_note,
+            note_start_page=note_start_page,
+            note_end_page=note_end_page,
         )
+
     except EmptyAnalysisFileError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -173,6 +190,7 @@ async def create_analysis(
                 error,
             ),
         ) from error
+
     except InvalidAnalysisSubmissionError as error:
         raise HTTPException(
             status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),

@@ -38,18 +38,41 @@ class N8nAnalysisOrchestrator:
         artifacts: AnalysisRequestArtifacts,
     ) -> dict[str, Any]:
         """Передаёт исходные файлы в нужный n8n webhook."""
+        submission = artifacts.submission
+
         endpoint = self._resolve_endpoint(
-            artifacts.submission.source_mode,
+            submission.source_mode,
         )
 
         files = self._build_files(
             artifacts,
         )
 
-        data: dict[str, str] = {}
+        data: dict[str, str] = {
+            "document_id": str(
+                submission.document_id,
+            ),
+            "use_explanatory_note": (
+                "true" if submission.use_explanatory_note else "false"
+            ),
+        }
 
-        if artifacts.submission.pages is not None:
-            data["pages"] = artifacts.submission.pages
+        if submission.pages is not None:
+            data["pages"] = submission.pages
+
+        if submission.use_explanatory_note:
+            if submission.note_start_page is None or submission.note_end_page is None:
+                raise AnalysisOrchestrationError(
+                    "Для включённого контекста ПЗ отсутствует диапазон страниц.",
+                )
+
+            data["note_start_page"] = str(
+                submission.note_start_page,
+            )
+
+            data["note_end_page"] = str(
+                submission.note_end_page,
+            )
 
         url = self._settings.base_url.rstrip("/") + endpoint
 
@@ -87,6 +110,7 @@ class N8nAnalysisOrchestrator:
 
         try:
             payload = response.json()
+
         except ValueError as error:
             raise AnalysisOrchestrationError(
                 "n8n вернул невалидный JSON.",
