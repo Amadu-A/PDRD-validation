@@ -1,9 +1,5 @@
 # pyproject.toml
 # Единая конфигурация linting, formatting и pytest для monorepo PDRD.
-#
-# Конфигурация применяется к новому коду микросервисов и общим тестам.
-# Legacy-код временно исключён из строгих проверок на этапе миграции,
-# чтобы code-style refactoring не смешивался с архитектурным переносом.
 
 [tool.ruff]
 target-version = "py312"
@@ -14,9 +10,8 @@ extend-exclude = [
     ".venv-dev",
     "data",
 
-    # Legacy исключён только на время этапа 1A.
-    # После переноса функциональности исключения должны быть удалены.
-    "services/pdf-service",
+    # Standalone scripts подготовки/индексации данных не входят
+    # в runtime packages микросервисов и обслуживаются отдельно.
     "scripts",
 ]
 

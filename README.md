@@ -1,6 +1,6 @@
 # PDRD Validation — Drawing Validation AI
 
-MVP-сервис проверки проектной и рабочей документации по нормативной базе с локальными VLM/embeddings, RAG и Базой Опыта.
+MVP-сервис проверки проектной и рабочей документации по нормативной базе с локальными VLM/embeddings, RAG, Базой Опыта и контекстом Пояснительной записки.
 
 ## Архитектура
 
@@ -33,29 +33,17 @@ Browser
 
 Pipeline ПЗ:
 
-1. Document Service валидирует физический диапазон PDF-страниц и извлекает текст без рендера.
+1. Document Service валидирует физический диапазон PDF-страниц и извлекает text-only содержимое.
 2. Analysis Service классифицирует выбранные страницы. Страницы, уверенно определённые как чертёж, спецификация или другой материал вместо ПЗ, отклоняют диапазон.
-3. Knowledge Service нормализует текст, разбивает его на перекрывающиеся chunks и строит document embeddings.
+3. Knowledge Service нормализует текст, разбивает его на перекрывающиеся chunks и строит embeddings.
 4. Chunks помещаются во временную Qdrant collection, детерминированную по `document_id`.
-5. Для каждого анализируемого листа строится отдельный Project Context query по фактам листа.
-6. Semantic search возвращает наиболее релевантные PZ-фрагменты.
+5. Для каждого анализируемого листа строится отдельный semantic query.
+6. Semantic search возвращает наиболее релевантные фрагменты ПЗ.
 7. ПЗ добавляется как контекст проекта, но не считается нормативным доказательством.
 8. Нормативное нарушение должно подтверждаться реальным нормативным `N-id`.
 9. Временная collection удаляется после анализа. n8n выполняет штатный cleanup, Gateway worker — идемпотентный страховочный cleanup.
 
 ## API Gateway
-
-Ответственность:
-
-- публичный multipart API;
-- валидация заявки;
-- временное хранение документов через application port;
-- PostgreSQL job state;
-- transactional outbox;
-- RabbitMQ/Celery;
-- запуск опубликованного n8n V2 workflow;
-- status/result API;
-- страховочный cleanup Project Context.
 
 Публичные endpoints:
 
@@ -71,16 +59,6 @@ RabbitMQ получает только `job_id`. PDF/DWG/DXF bytes через о
 
 ## Document Service
 
-Ответственность:
-
-- PDF page selection;
-- PDF text extraction и PNG render;
-- text-only extraction диапазона ПЗ;
-- DXF parsing;
-- DWG -> DXF normalization;
-- CAD machine context и render;
-- combined PDF + CAD render.
-
 Internal endpoints:
 
 ```text
@@ -92,14 +70,6 @@ GET  /health/ready
 ```
 
 ## Knowledge Service
-
-Ответственность:
-
-- embeddings через shared Ollama;
-- нормативный semantic search;
-- Experience semantic search;
-- временный Project Context create/search/delete;
-- Qdrant только через infrastructure adapter.
 
 Internal endpoints:
 
@@ -115,21 +85,9 @@ GET    /health/ready
 
 ## Analysis Service
 
-Ответственность:
-
-- structured understanding листа;
-- классификация диапазона ПЗ;
-- построение Project Context query;
-- безопасное добавление ПЗ к analysis text;
-- построение normative queries;
-- нормативная VLM-проверка;
-- финализация findings с Базой Опыта.
-
-Analysis Service не обращается напрямую к Qdrant или Knowledge Service. Оркестрацию выполняет n8n.
+Analysis Service отвечает за structured understanding листа, классификацию ПЗ, Project Context query, normative queries, нормативную VLM-проверку и финализацию findings. Он не обращается напрямую к Qdrant или Knowledge Service: orchestration выполняет n8n.
 
 ## n8n
-
-n8n является shared infrastructure.
 
 Рабочие V2 workflow:
 
@@ -139,7 +97,7 @@ n8n/workflows/analysis-v2-cad.json
 n8n/workflows/analysis-v2-pdf-cad.json
 ```
 
-Публичный клиент их не вызывает: n8n вызывается Gateway worker.
+Публичный клиент их не вызывает: n8n вызывается только Gateway worker.
 
 ## Frontend
 
@@ -185,18 +143,9 @@ Project-specific:
 - Analysis Service;
 - Frontend.
 
-Сети:
-
-```text
-app-net
-ai-shared
-```
-
 Frontend подключается только к `app-net`. Shared network получают только сервисы, которым действительно нужны shared dependencies.
 
 ## Модели
-
-Server defaults:
 
 ```text
 qwen3-vl:8b-instruct
@@ -242,16 +191,7 @@ test -f .env || cp .env.example .env
 
 Реальные пароли не коммитить.
 
-Основные Pydantic Settings prefixes:
-
-```text
-API_GATEWAY_*
-DOCUMENT_SERVICE_*
-KNOWLEDGE_SERVICE_*
-ANALYSIS_SERVICE_*
-```
-
-Nested settings используют `__`, например:
+Nested Pydantic Settings используют `__`, например:
 
 ```text
 DOCUMENT_SERVICE_PDF__MAX_CONTEXT_PAGES
@@ -265,6 +205,7 @@ ANALYSIS_SERVICE_PROJECT_CONTEXT__CLASSIFY_BATCH_SIZE
 cd ~/projects/PDRD-validation
 git pull --ff-only
 docker compose config --quiet
+
 docker compose build   api-gateway   api-gateway-worker   api-gateway-outbox   document-service   knowledge-service   analysis-service   frontend
 
 docker compose up -d   --force-recreate   api-gateway   api-gateway-worker   api-gateway-outbox   document-service   knowledge-service   analysis-service   frontend
@@ -274,10 +215,7 @@ docker compose up -d   --force-recreate   api-gateway   api-gateway-worker   api
 
 ```bash
 docker compose ps
-curl -fsS http://127.0.0.1:8200/health/ready
-curl -fsS http://127.0.0.1:8301/health/ready
-curl -fsS http://127.0.0.1:8401/health/ready
-curl -fsS http://127.0.0.1:8501/health/ready
+bash scripts/check-stack.sh
 ```
 
 ## Quality
@@ -295,17 +233,11 @@ docker compose --profile test build --no-cache quality-tests
 docker compose --profile test run --rm quality-tests
 ```
 
-Architecture tests контролируют:
+Architecture tests контролируют направление backend dependencies, relative-path headers, frontend `src` structure, CSS layering и отсутствие удалённого legacy runtime.
 
-- направление backend dependencies;
-- relative-path headers Python source-файлов;
-- frontend `src` structure;
-- отсутствие browser -> n8n/legacy references;
-- CSS layering.
+## Stage 1
 
-## Финальная Stage 1 parity matrix
-
-Перед удалением legacy необходимо подтвердить:
+Stage 1 подтверждает:
 
 ```text
 PDF
@@ -314,23 +246,13 @@ CAD
 PDF + CAD
 PDF + ПЗ
 PDF + CAD + ПЗ
-invalid PZ range
+валидацию неправильного диапазона ПЗ
 CAD + ПЗ -> 422
-browser E2E
-temporary Qdrant context cleanup
+Gateway asynchronous job lifecycle
+Browser -> Gateway
+temporary Qdrant Project Context cleanup
 ```
 
-## Legacy transition
+Legacy `pdf-service` удалён. Рабочий runtime использует только V2-архитектуру.
 
-На переходном коммите `services/pdf-service` и `n8n/workflows/analysis-main.json` могут физически оставаться только как rollback/parity reference. Публичный Browser -> Gateway -> V2 runtime их не использует.
-
-После успешной parity matrix Stage 1 завершается отдельным cleanup commit:
-
-- удалить `services/pdf-service`;
-- удалить `analysis-main.json`;
-- удалить legacy compose/env settings;
-- удалить временный Ruff exclude;
-- поднять stack без legacy;
-- повторить smoke tests.
-
-После этого Stage 1 считается завершённым. Следующий этап — viewer/render/location.
+Следующий этап — viewer/render/location: визуализация листа, выбор finding, normalized bbox/location и overlay.

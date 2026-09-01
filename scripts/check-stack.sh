@@ -51,9 +51,24 @@ curl -fsS \
     "http://127.0.0.1:${FRONTEND_PORT:-8080}/"
 
 curl -fsS \
-    -o /dev/null \
-    -w 'PDF service HTTP %{http_code}\n' \
-    "http://127.0.0.1:${PDF_SERVICE_PORT:-8101}/health/live"
+    "http://127.0.0.1:${API_GATEWAY_HOST_PORT:-8200}/health/ready"
+
+echo
+
+curl -fsS \
+    "http://127.0.0.1:${DOCUMENT_SERVICE_HOST_PORT:-8301}/health/ready"
+
+echo
+
+curl -fsS \
+    "http://127.0.0.1:${KNOWLEDGE_SERVICE_HOST_PORT:-8401}/health/ready"
+
+echo
+
+curl -fsS \
+    "http://127.0.0.1:${ANALYSIS_SERVICE_HOST_PORT:-8501}/health/ready"
+
+echo
 
 curl -fsS \
     "http://127.0.0.1:${QDRANT_HTTP_PORT:-6333}/readyz"
