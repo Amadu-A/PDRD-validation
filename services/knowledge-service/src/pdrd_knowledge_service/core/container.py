@@ -5,6 +5,9 @@
 from dataclasses import dataclass
 from functools import partial
 
+from pdrd_knowledge_service.application.normative_catalog_defaults import (
+    DEFAULT_SECTION_SYSTEM_PROMPT,
+)
 from pdrd_knowledge_service.application.ports.persistence import (
     NormativeCatalogUnitOfWorkFactory,
 )
@@ -16,6 +19,14 @@ from pdrd_knowledge_service.application.use_cases.health import (
 )
 from pdrd_knowledge_service.application.use_cases.normative import (
     SearchNormative,
+)
+from pdrd_knowledge_service.application.use_cases.normative_sections import (
+    CreateNormativeSection,
+    DeleteNormativeSection,
+    GetNormativeSection,
+    ListNormativeSections,
+    NormativeSectionUseCases,
+    UpdateNormativeSection,
 )
 from pdrd_knowledge_service.application.use_cases.project_context import (
     CreateProjectContext,
@@ -56,6 +67,8 @@ class ApplicationContainer:
 
     normative_catalog_uow_factory: NormativeCatalogUnitOfWorkFactory | None = None
 
+    normative_sections: NormativeSectionUseCases | None = None
+
     create_project_context: CreateProjectContext | None = None
 
     search_project_context: SearchProjectContext | None = None
@@ -78,6 +91,25 @@ def build_container() -> ApplicationContainer:
     normative_catalog_uow_factory = partial(
         SqlAlchemyNormativeCatalogUnitOfWork,
         session_factory,
+    )
+
+    normative_sections = NormativeSectionUseCases(
+        list_sections=ListNormativeSections(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+        ),
+        get_section=GetNormativeSection(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+        ),
+        create_section=CreateNormativeSection(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+            default_system_prompt=(DEFAULT_SECTION_SYSTEM_PROMPT),
+        ),
+        update_section=UpdateNormativeSection(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+        ),
+        delete_section=DeleteNormativeSection(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+        ),
     )
 
     database_probe = DatabaseReadinessProbe(
@@ -132,6 +164,7 @@ def build_container() -> ApplicationContainer:
         search_experience=search_experience,
         check_readiness=check_readiness,
         normative_catalog_uow_factory=(normative_catalog_uow_factory),
+        normative_sections=normative_sections,
         create_project_context=CreateProjectContext(
             embedding_provider=embedding_provider,
             vector_store=vector_store,
