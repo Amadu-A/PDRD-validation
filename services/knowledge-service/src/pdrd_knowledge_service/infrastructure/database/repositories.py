@@ -37,7 +37,7 @@ class SqlAlchemyNormativeSectionRepository:
         self,
         section: NormativeSection,
     ) -> None:
-        """Добавляет новый раздел."""
+        """Добавляет новый раздел и flush-ит его внутри transaction."""
         self._session.add(
             NormativeSectionModel(
                 id=section.section_id,
@@ -47,6 +47,8 @@ class SqlAlchemyNormativeSectionRepository:
                 updated_at=section.updated_at,
             )
         )
+
+        await self._session.flush()
 
     async def get(
         self,
@@ -145,7 +147,7 @@ class SqlAlchemyNormativeCategoryRepository:
         self,
         category: NormativeCategory,
     ) -> None:
-        """Добавляет категорию."""
+        """Добавляет категорию и flush-ит её внутри transaction."""
         self._session.add(
             NormativeCategoryModel(
                 id=category.category_id,
@@ -156,6 +158,8 @@ class SqlAlchemyNormativeCategoryRepository:
                 updated_at=category.updated_at,
             )
         )
+
+        await self._session.flush()
 
     async def get(
         self,
@@ -261,7 +265,7 @@ class SqlAlchemyNormativeDocumentRepository:
         self,
         document: NormativeDocument,
     ) -> None:
-        """Добавляет metadata документа."""
+        """Добавляет metadata документа и flush-ит внутри transaction."""
         self._session.add(
             NormativeDocumentModel(
                 id=document.document_id,
@@ -279,6 +283,8 @@ class SqlAlchemyNormativeDocumentRepository:
                 updated_at=document.updated_at,
             )
         )
+
+        await self._session.flush()
 
     async def get(
         self,

@@ -3,11 +3,16 @@
 """Unit tests PostgreSQL persistence нормативного каталога."""
 
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
 from pdrd_knowledge_service.core.settings import DatabaseSettings
 from pdrd_knowledge_service.domain.normative_catalog import (
     IndexingStatus,
+    NormativeCategory,
+    NormativeDocument,
+    NormativeSection,
 )
 from pdrd_knowledge_service.infrastructure.database.base import (
     KNOWLEDGE_SCHEMA,
@@ -27,6 +32,7 @@ from pdrd_knowledge_service.infrastructure.database.repositories import (
     SqlAlchemyNormativeSectionRepository,
 )
 from pydantic import SecretStr
+from sqlalchemy.ext.asyncio import AsyncSession
 
 BASE_TIME = datetime(
     2026,
@@ -155,3 +161,78 @@ def test_document_model_maps_indexing_state_back_to_domain() -> None:
     assert entity.category_id == category_id
     assert entity.index_status is IndexingStatus.READY
     assert entity.ready_for_analysis is True
+
+
+@pytest.mark.asyncio
+async def test_repository_adds_flush_entities_inside_transaction() -> None:
+    """Repository add делает flush, но не управляет commit transaction."""
+    session = AsyncMock(
+        spec=AsyncSession,
+    )
+
+    section_id = uuid4()
+    category_id = uuid4()
+    document_id = uuid4()
+
+    section = NormativeSection(
+        section_id=section_id,
+        name="ЭОМ",
+        system_prompt="Проверяй нормативные требования.",
+        created_at=BASE_TIME,
+        updated_at=BASE_TIME,
+    )
+
+    category = NormativeCategory(
+        category_id=category_id,
+        section_id=section_id,
+        parent_id=None,
+        name="СП",
+        created_at=BASE_TIME,
+        updated_at=BASE_TIME,
+    )
+
+    document = NormativeDocument(
+        document_id=document_id,
+        section_id=section_id,
+        category_id=category_id,
+        original_name="СП 256.pdf",
+        storage_key=f"{document_id}.pdf",
+        mime_type="application/pdf",
+        size_bytes=4096,
+        sha256="a" * 64,
+        index_status=IndexingStatus.UPLOADED,
+        index_error=None,
+        indexed_at=None,
+        created_at=BASE_TIME,
+        updated_at=BASE_TIME,
+    )
+
+    section_repository = SqlAlchemyNormativeSectionRepository(
+        session,
+    )
+
+    category_repository = SqlAlchemyNormativeCategoryRepository(
+        session,
+    )
+
+    document_repository = SqlAlchemyNormativeDocumentRepository(
+        session,
+    )
+
+    await section_repository.add(
+        section,
+    )
+
+    await category_repository.add(
+        category,
+    )
+
+    await document_repository.add(
+        document,
+    )
+
+    assert session.add.call_count == 3
+
+    assert session.flush.await_count == 3
+
+    session.commit.assert_not_awaited()
