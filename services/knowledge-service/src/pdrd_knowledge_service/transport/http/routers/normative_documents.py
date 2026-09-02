@@ -19,8 +19,12 @@ from fastapi import (
 from pdrd_knowledge_service.application.ports.document_storage import (
     NormativeDocumentStorageError,
 )
+from pdrd_knowledge_service.application.ports.vector_store import (
+    VectorStoreError,
+)
 from pdrd_knowledge_service.application.use_cases.normative_documents import (
     NormativeDocumentCategoryError,
+    NormativeDocumentMutationConflictError,
     NormativeDocumentNotFoundError,
     NormativeDocumentUploadError,
     NormativeDocumentUseCases,
@@ -39,6 +43,8 @@ from pdrd_knowledge_service.transport.http.dependencies import (
     get_container,
 )
 from pdrd_knowledge_service.transport.http.schemas.normative_documents import (
+    DeleteNormativeDocumentResponse,
+    MoveNormativeDocumentRequest,
     NormativeDocumentResponse,
 )
 
@@ -109,10 +115,22 @@ def _unprocessable(
     )
 
 
-def _storage_unavailable(
+def _conflict(
     error: Exception,
 ) -> HTTPException:
-    """Преобразует storage error в HTTP 503."""
+    """Преобразует lifecycle conflict в HTTP 409."""
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=str(
+            error,
+        ),
+    )
+
+
+def _dependency_unavailable(
+    error: Exception,
+) -> HTTPException:
+    """Преобразует infrastructure error в HTTP 503."""
     return HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail=str(
@@ -215,7 +233,7 @@ async def upload_normative_document(
     try:
         content = await _read_upload_content(
             file,
-            max_upload_bytes=(container.settings.storage.max_upload_bytes),
+            max_upload_bytes=container.settings.storage.max_upload_bytes,
         )
 
         document = await use_cases.upload_document.execute(
@@ -239,7 +257,7 @@ async def upload_normative_document(
         ) from error
 
     except NormativeDocumentStorageError as error:
-        raise _storage_unavailable(
+        raise _dependency_unavailable(
             error,
         ) from error
 
@@ -279,6 +297,87 @@ async def get_normative_document(
     )
 
 
+@router.patch(
+    "/documents/{document_id}",
+    response_model=NormativeDocumentResponse,
+)
+async def move_normative_document(
+    document_id: UUID,
+    request: MoveNormativeDocumentRequest,
+    container: ContainerDependency,
+) -> NormativeDocumentResponse:
+    """Перемещает документ в category или корень section."""
+    use_cases = _require_use_cases(
+        container,
+    )
+
+    try:
+        document = await use_cases.move_document.execute(
+            document_id=document_id,
+            category_id=request.category_id,
+        )
+
+    except NormativeDocumentNotFoundError as error:
+        raise _not_found(
+            error,
+        ) from error
+
+    except NormativeDocumentCategoryError as error:
+        raise _unprocessable(
+            error,
+        ) from error
+
+    except NormativeDocumentMutationConflictError as error:
+        raise _conflict(
+            error,
+        ) from error
+
+    except VectorStoreError as error:
+        raise _dependency_unavailable(
+            error,
+        ) from error
+
+    return NormativeDocumentResponse.from_domain(
+        document,
+    )
+
+
+@router.delete(
+    "/documents/{document_id}",
+    response_model=DeleteNormativeDocumentResponse,
+)
+async def delete_normative_document(
+    document_id: UUID,
+    container: ContainerDependency,
+) -> DeleteNormativeDocumentResponse:
+    """Идемпотентно удаляет document из Qdrant, storage и PostgreSQL."""
+    use_cases = _require_use_cases(
+        container,
+    )
+
+    try:
+        deleted_id = await use_cases.delete_document.execute(
+            document_id=document_id,
+        )
+
+    except NormativeDocumentMutationConflictError as error:
+        raise _conflict(
+            error,
+        ) from error
+
+    except (
+        NormativeDocumentStorageError,
+        VectorStoreError,
+    ) as error:
+        raise _dependency_unavailable(
+            error,
+        ) from error
+
+    return DeleteNormativeDocumentResponse(
+        document_id=deleted_id,
+    )
+
+
 @router.post(
     "/documents/{document_id}/index",
     response_model=NormativeDocumentResponse,
@@ -304,11 +403,8 @@ async def queue_normative_document(
         ) from error
 
     except NormativeDocumentIndexingConflictError as error:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(
-                error,
-            ),
+        raise _conflict(
+            error,
         ) from error
 
     return NormativeDocumentResponse.from_domain(
@@ -339,7 +435,7 @@ async def get_normative_document_content(
         ) from error
 
     except NormativeDocumentStorageError as error:
-        raise _storage_unavailable(
+        raise _dependency_unavailable(
             error,
         ) from error
 

@@ -97,6 +97,15 @@ class FakeDocumentRepository:
             document_id,
         )
 
+    async def get_for_update(
+        self,
+        document_id: UUID,
+    ) -> NormativeDocument | None:
+        """Эмулирует locked read."""
+        return await self.get(
+            document_id,
+        )
+
     async def update(
         self,
         document: NormativeDocument,
@@ -205,7 +214,7 @@ def make_document(
         section_id=SECTION_ID,
         category_id=None,
         original_name="test.pdf",
-        storage_key=(f"{SECTION_ID}/{DOCUMENT_ID}.pdf"),
+        storage_key=f"{SECTION_ID}/{DOCUMENT_ID}.pdf",
         mime_type="application/pdf",
         size_bytes=1024,
         sha256="a" * 64,

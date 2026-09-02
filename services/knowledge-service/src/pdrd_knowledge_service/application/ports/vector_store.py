@@ -2,7 +2,10 @@
 
 """Application port vector storage."""
 
-from typing import Protocol
+from typing import (
+    Any,
+    Protocol,
+)
 
 from pdrd_knowledge_service.domain.project_context import (
     VectorRecord,
@@ -46,6 +49,20 @@ class VectorStore(Protocol):
         ],
     ) -> None:
         """Сохраняет vector records."""
+        ...
+
+    async def set_payload_by_filter(
+        self,
+        *,
+        collection: str,
+        key: str,
+        value: str,
+        payload: dict[
+            str,
+            Any,
+        ],
+    ) -> None:
+        """Изменяет payload всех points по точному фильтру."""
         ...
 
     async def delete_by_filter(

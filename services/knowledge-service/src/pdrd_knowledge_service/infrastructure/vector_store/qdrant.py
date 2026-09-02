@@ -47,7 +47,7 @@ class QdrantVectorStore:
                 timeout=self._request_timeout_seconds,
             ) as client:
                 response = await client.post(
-                    (f"{self._base_url}/collections/{collection}/points/query"),
+                    f"{self._base_url}/collections/{collection}/points/query",
                     json={
                         "query": vector,
                         "limit": limit,
@@ -114,7 +114,7 @@ class QdrantVectorStore:
                 timeout=self._request_timeout_seconds,
             ) as client:
                 response = await client.put(
-                    (f"{self._base_url}/collections/{collection}"),
+                    f"{self._base_url}/collections/{collection}",
                     json={
                         "vectors": {
                             "size": vector_size,
@@ -148,7 +148,7 @@ class QdrantVectorStore:
                 timeout=self._request_timeout_seconds,
             ) as client:
                 response = await client.put(
-                    (f"{self._base_url}/collections/{collection}/points"),
+                    f"{self._base_url}/collections/{collection}/points",
                     params={
                         "wait": "true",
                     },
@@ -173,6 +173,51 @@ class QdrantVectorStore:
                 f"{error}",
             ) from error
 
+    async def set_payload_by_filter(
+        self,
+        *,
+        collection: str,
+        key: str,
+        value: str,
+        payload: dict[
+            str,
+            Any,
+        ],
+    ) -> None:
+        """Изменяет payload Qdrant points по точному match."""
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._request_timeout_seconds,
+            ) as client:
+                response = await client.post(
+                    f"{self._base_url}/collections/{collection}/points/payload",
+                    params={
+                        "wait": "true",
+                    },
+                    json={
+                        "payload": payload,
+                        "filter": {
+                            "must": [
+                                {
+                                    "key": key,
+                                    "match": {
+                                        "value": value,
+                                    },
+                                }
+                            ]
+                        },
+                    },
+                )
+
+                response.raise_for_status()
+
+        except httpx.HTTPError as error:
+            raise VectorStoreError(
+                "Не удалось изменить payload points "
+                f"в Qdrant collection {collection}: "
+                f"{error}",
+            ) from error
+
     async def delete_by_filter(
         self,
         *,
@@ -186,7 +231,7 @@ class QdrantVectorStore:
                 timeout=self._request_timeout_seconds,
             ) as client:
                 response = await client.post(
-                    (f"{self._base_url}/collections/{collection}/points/delete"),
+                    f"{self._base_url}/collections/{collection}/points/delete",
                     params={
                         "wait": "true",
                     },

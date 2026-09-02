@@ -114,6 +114,13 @@ class NormativeDocumentRepository(Protocol):
         """Возвращает документ по идентификатору."""
         ...
 
+    async def get_for_update(
+        self,
+        document_id: UUID,
+    ) -> NormativeDocument | None:
+        """Возвращает документ с PostgreSQL row lock."""
+        ...
+
     async def list_by_section(
         self,
         section_id: UUID,

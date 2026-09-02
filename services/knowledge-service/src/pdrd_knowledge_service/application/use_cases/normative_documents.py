@@ -23,6 +23,10 @@ from pdrd_knowledge_service.application.ports.persistence import (
     NormativeCatalogUnitOfWork,
     NormativeCatalogUnitOfWorkFactory,
 )
+from pdrd_knowledge_service.application.ports.vector_store import (
+    VectorStore,
+    VectorStoreError,
+)
 from pdrd_knowledge_service.application.use_cases.normative_sections import (
     NormativeSectionNotFoundError,
 )
@@ -43,6 +47,21 @@ IdentifierFactory = Callable[
 
 _PDF_SIGNATURE_WINDOW = 1024
 
+_MUTATION_BLOCKED_STATUSES = frozenset(
+    {
+        IndexingStatus.QUEUED,
+        IndexingStatus.INDEXING,
+        IndexingStatus.DELETING,
+    }
+)
+
+_DELETE_BLOCKED_STATUSES = frozenset(
+    {
+        IndexingStatus.QUEUED,
+        IndexingStatus.INDEXING,
+    }
+)
+
 
 class NormativeDocumentNotFoundError(LookupError):
     """Запрошенный нормативный документ не найден."""
@@ -54,6 +73,10 @@ class NormativeDocumentUploadError(ValueError):
 
 class NormativeDocumentCategoryError(ValueError):
     """Некорректная категория нормативного документа."""
+
+
+class NormativeDocumentMutationConflictError(RuntimeError):
+    """Текущее состояние документа запрещает изменение или удаление."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -373,6 +396,179 @@ class GetNormativeDocumentContent:
 
 
 @dataclass(frozen=True, slots=True)
+class MoveNormativeDocument:
+    """Перемещает документ между категориями того же раздела."""
+
+    unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
+
+    vector_store: VectorStore
+
+    collection: str
+
+    clock: Clock = utc_now
+
+    async def execute(
+        self,
+        *,
+        document_id: UUID,
+        category_id: UUID | None,
+    ) -> NormativeDocument:
+        """Синхронизирует category в PostgreSQL и Qdrant payload."""
+        async with self.unit_of_work_factory() as unit_of_work:
+            document = await unit_of_work.documents.get_for_update(
+                document_id,
+            )
+
+            if document is None:
+                raise NormativeDocumentNotFoundError(
+                    f"Нормативный документ {document_id} не найден.",
+                )
+
+            if document.index_status in _MUTATION_BLOCKED_STATUSES:
+                raise NormativeDocumentMutationConflictError(
+                    "Документ нельзя перемещать из состояния "
+                    f"{document.index_status.value}.",
+                )
+
+            await _validate_category(
+                unit_of_work,
+                section_id=document.section_id,
+                category_id=category_id,
+            )
+
+            if document.category_id == category_id:
+                return document
+
+            moved_document = document.moved_to_category(
+                category_id=category_id,
+                changed_at=self.clock(),
+            )
+
+            payload_changed = False
+
+            try:
+                if document.index_status is IndexingStatus.READY:
+                    await self.vector_store.set_payload_by_filter(
+                        collection=self.collection,
+                        key="document_id",
+                        value=str(
+                            document.document_id,
+                        ),
+                        payload={
+                            "category_id": (
+                                str(
+                                    category_id,
+                                )
+                                if category_id is not None
+                                else None
+                            )
+                        },
+                    )
+
+                    payload_changed = True
+
+                await unit_of_work.documents.update(
+                    moved_document,
+                )
+
+                await unit_of_work.commit()
+
+            except Exception:
+                if payload_changed:
+                    with suppress(
+                        VectorStoreError,
+                    ):
+                        await self.vector_store.set_payload_by_filter(
+                            collection=self.collection,
+                            key="document_id",
+                            value=str(
+                                document.document_id,
+                            ),
+                            payload={
+                                "category_id": (
+                                    str(
+                                        document.category_id,
+                                    )
+                                    if document.category_id is not None
+                                    else None
+                                )
+                            },
+                        )
+
+                raise
+
+        return moved_document
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteNormativeDocument:
+    """Идемпотентно удаляет document из всех managed storages."""
+
+    unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
+
+    storage: NormativeDocumentStorage
+
+    vector_store: VectorStore
+
+    collection: str
+
+    clock: Clock = utc_now
+
+    async def execute(
+        self,
+        *,
+        document_id: UUID,
+    ) -> UUID:
+        """Удаляет Qdrant points, physical PDF и PostgreSQL metadata."""
+        async with self.unit_of_work_factory() as unit_of_work:
+            document = await unit_of_work.documents.get_for_update(
+                document_id,
+            )
+
+            if document is None:
+                return document_id
+
+            if document.index_status in _DELETE_BLOCKED_STATUSES:
+                raise NormativeDocumentMutationConflictError(
+                    "Документ нельзя удалить из состояния "
+                    f"{document.index_status.value}.",
+                )
+
+            if document.index_status is not IndexingStatus.DELETING:
+                document = document.transition_indexing(
+                    target_status=IndexingStatus.DELETING,
+                    changed_at=self.clock(),
+                )
+
+                await unit_of_work.documents.update(
+                    document,
+                )
+
+                await unit_of_work.commit()
+
+        await self.vector_store.delete_by_filter(
+            collection=self.collection,
+            key="document_id",
+            value=str(
+                document_id,
+            ),
+        )
+
+        await self.storage.delete(
+            storage_key=document.storage_key,
+        )
+
+        async with self.unit_of_work_factory() as unit_of_work:
+            await unit_of_work.documents.delete(
+                document_id,
+            )
+
+            await unit_of_work.commit()
+
+        return document_id
+
+
+@dataclass(frozen=True, slots=True)
 class NormativeDocumentUseCases:
     """Группирует operations нормативных документов."""
 
@@ -383,3 +579,7 @@ class NormativeDocumentUseCases:
     upload_document: UploadNormativeDocument
 
     get_document_content: GetNormativeDocumentContent
+
+    move_document: MoveNormativeDocument
+
+    delete_document: DeleteNormativeDocument

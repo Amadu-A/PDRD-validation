@@ -74,7 +74,7 @@ class QueueNormativeDocument:
     ) -> NormativeDocument:
         """Создаёт durable indexing request одной DB transaction."""
         async with self.unit_of_work_factory() as unit_of_work:
-            document = await unit_of_work.documents.get(
+            document = await unit_of_work.documents.get_for_update(
                 document_id,
             )
 

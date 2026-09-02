@@ -303,6 +303,28 @@ class SqlAlchemyNormativeDocumentRepository:
             model,
         )
 
+    async def get_for_update(
+        self,
+        document_id: UUID,
+    ) -> NormativeDocument | None:
+        """Возвращает документ и блокирует строку до конца transaction."""
+        model = await self._session.scalar(
+            select(
+                NormativeDocumentModel,
+            )
+            .where(
+                NormativeDocumentModel.id == document_id,
+            )
+            .with_for_update()
+        )
+
+        if model is None:
+            return None
+
+        return self._to_domain(
+            model,
+        )
+
     async def list_by_section(
         self,
         section_id: UUID,

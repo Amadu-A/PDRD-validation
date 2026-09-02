@@ -29,9 +29,11 @@ from pdrd_knowledge_service.application.use_cases.normative_categories import (
     UpdateNormativeCategory,
 )
 from pdrd_knowledge_service.application.use_cases.normative_documents import (
+    DeleteNormativeDocument,
     GetNormativeDocument,
     GetNormativeDocumentContent,
     ListNormativeDocuments,
+    MoveNormativeDocument,
     NormativeDocumentUseCases,
     UploadNormativeDocument,
 )
@@ -124,68 +126,85 @@ def build_container() -> ApplicationContainer:
         root_path=settings.storage.root_path,
     )
 
+    vector_store = QdrantVectorStore(
+        base_url=settings.qdrant.base_url,
+        request_timeout_seconds=(settings.qdrant.request_timeout_seconds),
+        health_timeout_seconds=(settings.qdrant.health_timeout_seconds),
+    )
+
     normative_sections = NormativeSectionUseCases(
         list_sections=ListNormativeSections(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         get_section=GetNormativeSection(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         create_section=CreateNormativeSection(
-            unit_of_work_factory=(normative_catalog_uow_factory),
-            default_system_prompt=(DEFAULT_SECTION_SYSTEM_PROMPT),
+            unit_of_work_factory=normative_catalog_uow_factory,
+            default_system_prompt=DEFAULT_SECTION_SYSTEM_PROMPT,
         ),
         update_section=UpdateNormativeSection(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         delete_section=DeleteNormativeSection(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
     )
 
     normative_categories = NormativeCategoryUseCases(
         list_categories=ListNormativeCategories(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         get_category=GetNormativeCategory(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         create_category=CreateNormativeCategory(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         update_category=UpdateNormativeCategory(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         delete_category=DeleteNormativeCategory(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
     )
 
     normative_documents = NormativeDocumentUseCases(
         list_documents=ListNormativeDocuments(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         get_document=GetNormativeDocument(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         upload_document=UploadNormativeDocument(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
             storage=document_storage,
             max_upload_bytes=settings.storage.max_upload_bytes,
         ),
         get_document_content=GetNormativeDocumentContent(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
             storage=document_storage,
+        ),
+        move_document=MoveNormativeDocument(
+            unit_of_work_factory=normative_catalog_uow_factory,
+            vector_store=vector_store,
+            collection=settings.qdrant.normative_collection,
+        ),
+        delete_document=DeleteNormativeDocument(
+            unit_of_work_factory=normative_catalog_uow_factory,
+            storage=document_storage,
+            vector_store=vector_store,
+            collection=settings.qdrant.normative_collection,
         ),
     )
 
     queue_normative_document = QueueNormativeDocument(
-        unit_of_work_factory=(normative_catalog_uow_factory),
+        unit_of_work_factory=normative_catalog_uow_factory,
     )
 
     database_probe = DatabaseReadinessProbe(
         engine=database_engine,
-        timeout_seconds=(settings.database.health_timeout_seconds),
+        timeout_seconds=settings.database.health_timeout_seconds,
     )
 
     embedding_provider = OllamaEmbeddingProvider(
@@ -194,12 +213,6 @@ def build_container() -> ApplicationContainer:
         request_timeout_seconds=(settings.embedding.request_timeout_seconds),
         connect_timeout_seconds=(settings.embedding.connect_timeout_seconds),
         health_timeout_seconds=(settings.embedding.health_timeout_seconds),
-    )
-
-    vector_store = QdrantVectorStore(
-        base_url=settings.qdrant.base_url,
-        request_timeout_seconds=(settings.qdrant.request_timeout_seconds),
-        health_timeout_seconds=(settings.qdrant.health_timeout_seconds),
     )
 
     search_normative = SearchNormative(
@@ -223,8 +236,8 @@ def build_container() -> ApplicationContainer:
         database_probe=database_probe,
         embedding_provider=embedding_provider,
         vector_store=vector_store,
-        normative_collection=(settings.qdrant.normative_collection),
-        experience_collection=(settings.qdrant.experience_collection),
+        normative_collection=settings.qdrant.normative_collection,
+        experience_collection=settings.qdrant.experience_collection,
     )
 
     project_settings = settings.project_context
@@ -234,7 +247,7 @@ def build_container() -> ApplicationContainer:
         search_normative=search_normative,
         search_experience=search_experience,
         check_readiness=check_readiness,
-        normative_catalog_uow_factory=(normative_catalog_uow_factory),
+        normative_catalog_uow_factory=normative_catalog_uow_factory,
         normative_sections=normative_sections,
         normative_categories=normative_categories,
         normative_documents=normative_documents,
@@ -242,22 +255,22 @@ def build_container() -> ApplicationContainer:
         create_project_context=CreateProjectContext(
             embedding_provider=embedding_provider,
             vector_store=vector_store,
-            collection_prefix=(project_settings.collection_prefix),
+            collection_prefix=project_settings.collection_prefix,
             embedding_model=settings.embedding.model,
             chunk_size=project_settings.chunk_size,
             chunk_overlap=project_settings.chunk_overlap,
-            embed_batch_size=(project_settings.embed_batch_size),
-            upsert_batch_size=(project_settings.upsert_batch_size),
+            embed_batch_size=project_settings.embed_batch_size,
+            upsert_batch_size=project_settings.upsert_batch_size,
         ),
         search_project_context=SearchProjectContext(
             embedding_provider=embedding_provider,
             vector_store=vector_store,
-            collection_prefix=(project_settings.collection_prefix),
+            collection_prefix=project_settings.collection_prefix,
             embedding_model=settings.embedding.model,
             top_k=project_settings.top_k,
         ),
         delete_project_context=DeleteProjectContext(
             vector_store=vector_store,
-            collection_prefix=(project_settings.collection_prefix),
+            collection_prefix=project_settings.collection_prefix,
         ),
     )

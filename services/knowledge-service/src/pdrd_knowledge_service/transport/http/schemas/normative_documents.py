@@ -16,6 +16,16 @@ from pdrd_knowledge_service.domain.normative_catalog import (
 )
 
 
+class MoveNormativeDocumentRequest(BaseModel):
+    """Запрос перемещения document в category или корень раздела."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    category_id: UUID | None
+
+
 class NormativeDocumentResponse(BaseModel):
     """Безопасная metadata нормативного документа для API."""
 
@@ -67,3 +77,15 @@ class NormativeDocumentResponse(BaseModel):
             created_at=document.created_at,
             updated_at=document.updated_at,
         )
+
+
+class DeleteNormativeDocumentResponse(BaseModel):
+    """Результат идемпотентного удаления document."""
+
+    model_config = ConfigDict(
+        frozen=True,
+    )
+
+    document_id: UUID
+
+    deleted: bool = True
