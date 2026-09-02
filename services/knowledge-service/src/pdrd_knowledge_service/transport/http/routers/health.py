@@ -56,11 +56,12 @@ async def health_ready(
         Depends(get_container),
     ],
 ) -> ReadyHealthResponse:
-    """Проверяет embedding model и Qdrant collections."""
+    """Проверяет PostgreSQL, embedding model и Qdrant."""
     report = await container.check_readiness.execute()
 
     dependencies = {
-        "embedding_model": (report.embedding_model),
+        "database": report.database,
+        "embedding_model": report.embedding_model,
         "qdrant": report.qdrant,
         "normative_collection": (report.normative_collection),
         "experience_collection": (report.experience_collection),
@@ -68,7 +69,7 @@ async def health_ready(
 
     if not report.ready:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "status": "not_ready",
                 "dependencies": dependencies,

@@ -20,6 +20,16 @@ from pdrd_knowledge_service.domain.search import VectorPoint
 from pdrd_knowledge_service.main import create_app
 
 
+class FakeDatabaseReadinessProbe:
+    """Fake PostgreSQL readiness probe HTTP tests."""
+
+    async def is_ready(
+        self,
+    ) -> bool:
+        """Возвращает готовую database schema."""
+        return True
+
+
 class FakeEmbeddingProvider:
     """Fake embedding provider HTTP tests."""
 
@@ -42,7 +52,9 @@ class FakeEmbeddingProvider:
             )
         ]
 
-    async def is_ready(self) -> bool:
+    async def is_ready(
+        self,
+    ) -> bool:
         """Возвращает готовую embedding model."""
         return True
 
@@ -71,7 +83,7 @@ class FakeVectorStore:
                         "source_path": "/norms/СП-test.pdf",
                         "page": 12,
                         "chunk_index": 3,
-                        "text": "Тестовое нормативное требование.",
+                        "text": ("Тестовое нормативное требование."),
                     },
                 )
             ]
@@ -91,7 +103,9 @@ class FakeVectorStore:
             )
         ]
 
-    async def is_ready(self) -> bool:
+    async def is_ready(
+        self,
+    ) -> bool:
         """Возвращает готовый Qdrant."""
         return True
 
@@ -107,13 +121,15 @@ class FakeVectorStore:
 
 
 def build_client() -> TestClient:
-    """Создаёт TestClient без реальных Ollama/Qdrant."""
+    """Создаёт TestClient без реальных infrastructure dependencies."""
     settings = Settings(
         _env_file=None,
         service_name="PDRD Knowledge Service Test",
         service_version="0.1.0-test",
         environment="test",
     )
+
+    database_probe = FakeDatabaseReadinessProbe()
 
     embedding_provider = FakeEmbeddingProvider()
 
@@ -137,6 +153,7 @@ def build_client() -> TestClient:
             top_k=3,
         ),
         check_readiness=CheckReadiness(
+            database_probe=database_probe,
             embedding_provider=embedding_provider,
             vector_store=vector_store,
             normative_collection="normative-test",
@@ -177,6 +194,7 @@ def test_health_endpoints() -> None:
         "service": "PDRD Knowledge Service Test",
         "version": "0.1.0-test",
         "dependencies": {
+            "database": True,
             "embedding_model": True,
             "qdrant": True,
             "normative_collection": True,
@@ -234,7 +252,7 @@ def test_experience_search_endpoint() -> None:
 
     result = payload["results"][0]
 
-    assert result["query"] == "нет защитного заземления"
+    assert result["query"] == ("нет защитного заземления")
 
     source = result["sources"][0]
 

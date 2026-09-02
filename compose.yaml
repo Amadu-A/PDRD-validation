@@ -27,6 +27,13 @@ x-api-gateway-environment: &api-gateway-environment
   API_GATEWAY_BROKER__PASSWORD: ${PDRD_RABBITMQ_PASSWORD:?PDRD_RABBITMQ_PASSWORD must be set in .env}
   API_GATEWAY_BROKER__VIRTUAL_HOST: ${PDRD_RABBITMQ_VHOST:-pdrd-validation}
 
+x-knowledge-service-environment: &knowledge-service-environment
+  KNOWLEDGE_SERVICE_DATABASE__HOST: postgres
+  KNOWLEDGE_SERVICE_DATABASE__PORT: 5432
+  KNOWLEDGE_SERVICE_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
+  KNOWLEDGE_SERVICE_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
+  KNOWLEDGE_SERVICE_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+
 services:
   postgres:
     image: postgres:${PDRD_POSTGRES_VERSION:-16-alpine}
@@ -276,6 +283,8 @@ services:
 
     env_file: *app-env-files
 
+    environment: *knowledge-service-environment
+
     ports:
       - "${KNOWLEDGE_SERVICE_BIND_IP:-127.0.0.1}:${KNOWLEDGE_SERVICE_HOST_PORT:-8401}:8401"
 
@@ -293,7 +302,11 @@ services:
       start_period: 15s
 
     depends_on:
-      - qdrant
+      postgres:
+        condition: service_healthy
+
+      qdrant:
+        condition: service_started
 
     logging: *default-logging
 
@@ -302,6 +315,35 @@ services:
       ai-shared:
         aliases:
           - pdrd-knowledge-service
+
+  knowledge-service-tests:
+    build:
+      context: ./services/knowledge-service
+      target: test
+
+    profiles:
+      - test
+
+    env_file: *app-env-files
+
+    environment:
+      <<: *knowledge-service-environment
+      KNOWLEDGE_SERVICE_ENVIRONMENT: test
+      PDRD_RUN_DATABASE_TESTS: "1"
+
+    command:
+      [
+        "pytest",
+        "-q",
+        "/app/tests"
+      ]
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    networks:
+      - app-net
 
   analysis-service:
     build:

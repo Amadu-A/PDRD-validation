@@ -76,6 +76,8 @@ class ExperienceSearchResult:
 class ReadinessReport:
     """Состояние внешних зависимостей Knowledge Service."""
 
+    database: bool
+
     embedding_model: bool
     qdrant: bool
 
@@ -83,10 +85,13 @@ class ReadinessReport:
     experience_collection: bool
 
     @property
-    def ready(self) -> bool:
+    def ready(
+        self,
+    ) -> bool:
         """Возвращает полную готовность Knowledge Service."""
         return all(
             (
+                self.database,
                 self.embedding_model,
                 self.qdrant,
                 self.normative_collection,
