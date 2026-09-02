@@ -1,7 +1,12 @@
 // frontend/src/js/app.js
 
 /**
- * Composition root браузерного приложения.
+ * Composition root браузерного приложения PDRD Validation.
+ *
+ * Модуль находит DOM-зависимости по стабильным data-* hooks, собирает
+ * компоненты формы, результата и модального состояния, после чего связывает
+ * их с публичным Analysis API Gateway. Бизнес-валидация формы, polling
+ * и форматирование результата остаются в отдельных feature-модулях.
  */
 
 import {
@@ -34,64 +39,101 @@ import {
 } from "./features/analysis/report.js";
 
 
-const analysisFormElement = document.getElementById(
-  "analysisForm",
+/**
+ * Возвращает обязательный DOM-элемент по стабильному data-* selector.
+ *
+ * Ошибка считается проблемой сборки frontend: приложение не должно
+ * продолжать работу с неполной HTML-разметкой.
+ *
+ * @param {string} selector CSS selector обязательного элемента.
+ * @returns {Element} Найденный DOM-элемент.
+ * @throws {Error} Если ожидаемый элемент отсутствует.
+ */
+function requireElement(
+  selector,
+) {
+  const element = document.querySelector(
+    selector,
+  );
+
+  if (!element) {
+    throw new Error(
+      `Не найден обязательный DOM-элемент: ${selector}`,
+    );
+  }
+
+  return element;
+}
+
+
+const analysisFormElement = requireElement(
+  "[data-analysis-form]",
 );
 
-const submitButton = document.getElementById(
-  "submitButton",
+const submitButton = requireElement(
+  "[data-submit-button]",
 );
 
 
 const modal = createModal({
-  modalElement: document.getElementById(
-    "modal",
+  modalElement: requireElement(
+    "[data-analysis-modal]",
   ),
-  textElement: document.getElementById(
-    "modalText",
+
+  textElement: requireElement(
+    "[data-analysis-modal-text]",
   ),
+
   submitButton,
 });
 
 
 const resultView = createResultView(
-  document.getElementById(
-    "result",
+  requireElement(
+    "[data-analysis-result]",
   ),
 );
 
 
 const analysisForm = createAnalysisForm({
-  pdfInput: document.getElementById(
-    "pdfFile",
+  pdfInput: requireElement(
+    "[data-pdf-input]",
   ),
 
-  cadInput: document.getElementById(
-    "cadFile",
+  cadInput: requireElement(
+    "[data-cad-input]",
   ),
 
-  pagesInput: document.getElementById(
-    "pages",
+  pagesInput: requireElement(
+    "[data-pages-input]",
   ),
 
-  pagesHint: document.getElementById(
-    "pagesHint",
+  pagesHint: requireElement(
+    "[data-pages-hint]",
   ),
 
-  useExplanatoryNoteInput: document.getElementById(
-    "useExplanatoryNote",
+  useExplanatoryNoteInput: requireElement(
+    "[data-explanatory-note-input]",
   ),
 
-  noteStartPageInput: document.getElementById(
-    "noteStartPage",
+  noteStartPageInput: requireElement(
+    "[data-note-start-input]",
   ),
 
-  noteEndPageInput: document.getElementById(
-    "noteEndPage",
+  noteEndPageInput: requireElement(
+    "[data-note-end-input]",
   ),
 });
 
 
+/**
+ * Показывает пользователю текущее состояние фонового analysis job.
+ *
+ * @param {string} jobId Идентификатор задания API Gateway.
+ * @param {object} payload Последний status payload задания.
+ * @param {number} elapsedSeconds Время ожидания результата в секундах.
+ * @returns {void}
+ */
 function renderProgress(
   jobId,
   payload,
@@ -114,6 +156,15 @@ function renderProgress(
 }
 
 
+/**
+ * Валидирует форму, создаёт analysis job и ожидает готовый результат.
+ *
+ * Все HTTP-вызовы выполняются только через публичный API Gateway.
+ * Модуль не обращается напрямую к n8n или внутренним application services.
+ *
+ * @param {SubmitEvent} event Событие отправки формы анализа.
+ * @returns {Promise<void>}
+ */
 async function handleAnalysisSubmit(
   event,
 ) {
@@ -182,11 +233,15 @@ async function handleAnalysisSubmit(
     );
 
     resultView.show(
-      renderAnalysisReport(payload),
+      renderAnalysisReport(
+        payload,
+      ),
     );
 
   } catch (error) {
-    resultView.showError(error);
+    resultView.showError(
+      error,
+    );
 
   } finally {
     modal.hide();

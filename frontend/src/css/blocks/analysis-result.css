@@ -1,0 +1,25 @@
+/* frontend/src/css/blocks/analysis-result.css */
+
+/*
+ * BEM-блок текущего текстового результата анализа.
+ *
+ * На данном этапе результат остаётся текстовым. Позже этот блок будет
+ * заменён структурированным представлением findings с кликабельными
+ * нормативными источниками и viewer, не затрагивая форму запуска.
+ */
+
+.analysis-result {
+  min-height: 100px;
+
+  margin-bottom: 0;
+  padding: var(--space-6);
+
+  overflow-x: auto;
+
+  border-radius: var(--radius-control);
+
+  background: var(--color-surface-muted);
+
+  white-space: pre-wrap;
+  word-break: break-word;
+}

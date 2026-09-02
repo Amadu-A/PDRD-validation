@@ -1,0 +1,78 @@
+/* frontend/src/css/blocks/analysis-modal.css */
+
+/*
+ * BEM-блок модального состояния длительного анализа.
+ *
+ * Модальное окно блокирует взаимодействие с основной страницей во время
+ * выполнения job и отображает текущий этап. Видимость управляется только
+ * общим state-классом is-hidden.
+ */
+
+.analysis-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--modal-z-index);
+
+  display: grid;
+  place-items: center;
+
+  padding: var(--space-6);
+
+  background: var(--color-overlay);
+}
+
+.analysis-modal__dialog {
+  width: min(
+    var(--modal-max-width),
+    100%
+  );
+
+  padding: var(--space-10);
+
+  border-radius: var(--radius-card);
+
+  background: var(--color-surface);
+
+  text-align: center;
+}
+
+.analysis-modal__spinner {
+  width: var(--spinner-size);
+  height: var(--spinner-size);
+
+  margin: 0 auto var(--space-7);
+
+  border:
+    var(--spinner-border-width)
+    solid
+    var(--color-spinner-track);
+
+  border-top-color: var(--color-spinner-active);
+  border-radius: 50%;
+
+  animation:
+    analysis-modal-rotation
+    var(--spinner-duration)
+    linear
+    infinite;
+}
+
+.analysis-modal__title {
+  margin-bottom: var(--space-4);
+}
+
+.analysis-modal__text {
+  margin-bottom: var(--space-4);
+}
+
+.analysis-modal__hint {
+  margin-bottom: 0;
+
+  color: var(--color-text-secondary);
+}
+
+@keyframes analysis-modal-rotation {
+  to {
+    transform: rotate(360deg);
+  }
+}

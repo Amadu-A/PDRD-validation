@@ -1,0 +1,22 @@
+/* frontend/src/css/blocks/page.css */
+
+/*
+ * BEM-блок основной страницы приложения.
+ *
+ * Блок задаёт внешний фон и ограничивает ширину рабочего содержимого.
+ * В дальнейшем page__content станет контейнером для sidebar и основной
+ * области анализа без необходимости менять глобальные стили.
+ */
+
+.page {
+  min-width: 320px;
+}
+
+.page__content {
+  width: min(
+    var(--page-max-width),
+    calc(100% - 32px)
+  );
+
+  margin: var(--space-page) auto;
+}

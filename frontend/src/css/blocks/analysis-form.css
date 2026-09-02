@@ -1,0 +1,129 @@
+/* frontend/src/css/blocks/analysis-form.css */
+
+/*
+ * BEM-блок формы запуска анализа.
+ *
+ * Файл оформляет поля загрузки, выбор PDF-страниц, настройки пояснительной
+ * записки и кнопку запуска. Состояния доступности controls задаются через
+ * стандартный disabled, а JavaScript не использует CSS-классы как DOM API.
+ */
+
+.analysis-form {
+  display: grid;
+  gap: var(--space-7);
+}
+
+.analysis-form__field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.analysis-form__label {
+  font-weight: var(--font-weight-semibold);
+}
+
+.analysis-form__control {
+  width: 100%;
+  padding: var(--control-padding);
+
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+}
+
+.analysis-form__control:disabled {
+  color: var(--color-text-disabled);
+  background: var(--color-disabled);
+
+  cursor: not-allowed;
+}
+
+.analysis-form__hint {
+  margin-bottom: 0;
+
+  color: var(--color-text-secondary);
+}
+
+.analysis-form__required {
+  color: var(--color-danger);
+}
+
+.analysis-form__context {
+  display: grid;
+  gap: var(--space-5);
+
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-6);
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-block);
+
+  background: var(--color-surface-secondary);
+}
+
+.analysis-form__context-title {
+  padding: 0 var(--space-2);
+
+  font-weight: var(--font-weight-semibold);
+}
+
+.analysis-form__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+
+  width: fit-content;
+
+  cursor: pointer;
+}
+
+.analysis-form__toggle-control {
+  width: auto;
+  margin: 0;
+}
+
+.analysis-form__toggle-control:disabled {
+  cursor: not-allowed;
+}
+
+.analysis-form__toggle-label {
+  font-weight: var(--font-weight-semibold);
+}
+
+.analysis-form__note-range {
+  display: grid;
+
+  grid-template-columns: repeat(
+    2,
+    minmax(0, 1fr)
+  );
+
+  gap: var(--space-5);
+}
+
+.analysis-form__submit {
+  width: fit-content;
+  min-width: var(--button-min-width);
+
+  padding: var(--space-4) var(--space-7);
+
+  border: 0;
+  border-radius: var(--radius-control);
+
+  cursor: pointer;
+}
+
+.analysis-form__submit:disabled {
+  opacity: 0.6;
+
+  cursor: wait;
+}
+
+@media (max-width: 640px) {
+  .analysis-form__note-range {
+    grid-template-columns: 1fr;
+  }
+}

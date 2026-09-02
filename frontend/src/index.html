@@ -1,7 +1,14 @@
 <!-- frontend/src/index.html -->
 
-<!doctype html>
+<!--
+  Главная страница PDRD Validation.
 
+  Разметка содержит публичную форму запуска анализа, область результата
+  и модальное состояние длительной фоновой операции. Визуальные классы
+  следуют BEM, а JavaScript привязывается к DOM только через data-* hooks.
+-->
+
+<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
@@ -11,172 +18,257 @@
     content="width=device-width, initial-scale=1"
   >
 
-  <title>Drawing Validation AI</title>
+  <title>PDRD Validation</title>
 
   <link
     rel="stylesheet"
-    href="/css/main.css"
+    href="/css/style.css"
   >
-</head>
-
-<body>
-  <main class="container">
-    <section class="card">
-      <h1>
-        Проверка проектной документации
-      </h1>
-
-      <p class="muted">
-        PDF / DWG / DXF → визуальное и машинное понимание листа →
-        нормативная база → проверка соответствия →
-        База Опыта → инженерный отчёт.
-      </p>
-
-      <form id="analysisForm">
-        <label>
-          PDF
-
-          <input
-            id="pdfFile"
-            name="pdf"
-            type="file"
-            accept=".pdf,application/pdf"
-          >
-        </label>
-
-        <label>
-          DWG / DXF
-
-          <input
-            id="cadFile"
-            name="cad"
-            type="file"
-            accept=".dwg,.dxf"
-          >
-        </label>
-
-        <p class="muted">
-          Нужно загрузить хотя бы один источник: PDF или DWG/DXF.
-          Если загружены PDF и CAD одновременно, они считаются двумя
-          представлениями одного и того же листа.
-        </p>
-
-        <label>
-          Страницы PDF для анализа
-
-          <input
-            id="pages"
-            name="pages"
-            type="text"
-            placeholder="PDF-only: 3,5,8-12. Пусто = весь PDF"
-          >
-        </label>
-
-        <p
-          id="pagesHint"
-          class="muted"
-        >
-          Для PDF-only можно анализировать одну или несколько страниц.
-        </p>
-
-        <section class="context-box">
-          <label class="checkbox-label">
-            <input
-              id="useExplanatoryNote"
-              type="checkbox"
-              disabled
-            >
-
-            <span>
-              Учитывать контекст Пояснительной записки
-            </span>
-          </label>
-
-          <div class="note-range">
-            <label>
-              Начальная страница ПЗ
-
-              <input
-                id="noteStartPage"
-                type="number"
-                min="1"
-                disabled
-              >
-            </label>
-
-            <label>
-              Конечная страница ПЗ
-
-              <input
-                id="noteEndPage"
-                type="number"
-                min="1"
-                disabled
-              >
-            </label>
-          </div>
-
-          <p class="muted">
-            Укажите физический диапазон страниц PDF,
-            содержащий Пояснительную записку.
-            Перед анализом диапазон будет проверен,
-            а его релевантные фрагменты будут использоваться
-            как контекст текущего проекта.
-          </p>
-        </section>
-
-        <p class="muted">
-          При CAD-only анализе CAD-файл считается одним листом.
-          При PDF + CAD необходимо явно указать одну страницу PDF,
-          соответствующую CAD-файлу.
-        </p>
-
-        <button
-          id="submitButton"
-          type="submit"
-        >
-          Анализировать
-        </button>
-      </form>
-    </section>
-
-    <section class="card">
-      <h2>
-        Результат проверки
-      </h2>
-
-      <pre
-        id="result"
-        class="report"
-      >Пока нет результата.</pre>
-    </section>
-  </main>
-
-  <div
-    id="modal"
-    class="modal hidden"
-    aria-hidden="true"
-  >
-    <div class="modal-card">
-      <div class="spinner"></div>
-
-      <h2>
-        Идёт анализ документа
-      </h2>
-
-      <p id="modalText">
-        Задание передаётся в очередь…
-      </p>
-
-      <p class="muted">
-        Анализ выполняется асинхронно через API Gateway.
-      </p>
-    </div>
-  </div>
 
   <script
     type="module"
     src="/js/app.js"
+    defer
   ></script>
+</head>
+
+<body class="page">
+  <main class="page__content">
+    <section
+      class="analysis-panel"
+      aria-labelledby="analysisTitle"
+    >
+      <h1
+        id="analysisTitle"
+        class="analysis-panel__title"
+      >
+        Проверка проектной и рабочей документации
+      </h1>
+
+      <p class="analysis-panel__description">
+        Загрузите PDF, DWG/DXF или PDF вместе с соответствующим CAD-файлом.
+        Анализ выполняется асинхронно через API Gateway.
+      </p>
+
+      <form
+        id="analysisForm"
+        class="analysis-form"
+        data-analysis-form
+      >
+        <div class="analysis-form__field">
+          <label
+            class="analysis-form__label"
+            for="pdfFile"
+          >
+            PDF
+          </label>
+
+          <input
+            id="pdfFile"
+            class="analysis-form__control"
+            data-pdf-input
+            type="file"
+            name="pdf"
+            accept=".pdf,application/pdf"
+          >
+
+          <p class="analysis-form__hint">
+            Для PDF-only можно анализировать одну или несколько физических
+            страниц документа.
+          </p>
+        </div>
+
+        <div class="analysis-form__field">
+          <label
+            class="analysis-form__label"
+            for="cadFile"
+          >
+            DWG / DXF
+          </label>
+
+          <input
+            id="cadFile"
+            class="analysis-form__control"
+            data-cad-input
+            type="file"
+            name="cad"
+            accept=".dwg,.dxf"
+          >
+
+          <p class="analysis-form__hint">
+            CAD-only считается одним анализируемым листом.
+          </p>
+        </div>
+
+        <div class="analysis-form__field">
+          <label
+            class="analysis-form__label"
+            for="pages"
+          >
+            Страницы PDF
+          </label>
+
+          <input
+            id="pages"
+            class="analysis-form__control"
+            data-pages-input
+            type="text"
+            name="pages"
+            autocomplete="off"
+            placeholder="PDF-only: 3,5,8-12. Пусто = весь PDF"
+          >
+
+          <p
+            class="analysis-form__hint"
+            data-pages-hint
+          >
+            Для PDF-only можно анализировать одну или несколько страниц.
+          </p>
+        </div>
+
+        <fieldset class="analysis-form__context">
+          <legend class="analysis-form__context-title">
+            Контекст проекта
+          </legend>
+
+          <label class="analysis-form__toggle">
+            <input
+              class="analysis-form__toggle-control"
+              data-explanatory-note-input
+              type="checkbox"
+              name="use_explanatory_note"
+            >
+
+            <span class="analysis-form__toggle-label">
+              Использовать пояснительную записку
+            </span>
+          </label>
+
+          <p class="analysis-form__hint">
+            Пояснительная записка используется только как контекст проекта
+            и не является нормативным доказательством.
+          </p>
+
+          <div class="analysis-form__note-range">
+            <div class="analysis-form__field">
+              <label
+                class="analysis-form__label"
+                for="noteStartPage"
+              >
+                Начальная страница ПЗ
+                <span
+                  class="analysis-form__required"
+                  aria-hidden="true"
+                >
+                  *
+                </span>
+              </label>
+
+              <input
+                id="noteStartPage"
+                class="analysis-form__control"
+                data-note-start-input
+                type="number"
+                name="note_start_page"
+                min="1"
+                step="1"
+                disabled
+              >
+            </div>
+
+            <div class="analysis-form__field">
+              <label
+                class="analysis-form__label"
+                for="noteEndPage"
+              >
+                Конечная страница ПЗ
+                <span
+                  class="analysis-form__required"
+                  aria-hidden="true"
+                >
+                  *
+                </span>
+              </label>
+
+              <input
+                id="noteEndPage"
+                class="analysis-form__control"
+                data-note-end-input
+                type="number"
+                name="note_end_page"
+                min="1"
+                step="1"
+                disabled
+              >
+            </div>
+          </div>
+        </fieldset>
+
+        <button
+          class="analysis-form__submit"
+          data-submit-button
+          type="submit"
+        >
+          Запустить анализ
+        </button>
+      </form>
+    </section>
+
+    <section
+      class="analysis-panel analysis-panel--result"
+      aria-labelledby="resultTitle"
+    >
+      <h2
+        id="resultTitle"
+        class="analysis-panel__title"
+      >
+        Результат
+      </h2>
+
+      <pre
+        class="analysis-result"
+        data-analysis-result
+        role="status"
+        aria-live="polite"
+      >Результат анализа появится здесь.</pre>
+    </section>
+  </main>
+
+  <div
+    class="analysis-modal is-hidden"
+    data-analysis-modal
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="analysisModalTitle"
+    aria-describedby="analysisModalText"
+    aria-hidden="true"
+  >
+    <div class="analysis-modal__dialog">
+      <div
+        class="analysis-modal__spinner"
+        aria-hidden="true"
+      ></div>
+
+      <h2
+        id="analysisModalTitle"
+        class="analysis-modal__title"
+      >
+        Выполняется анализ
+      </h2>
+
+      <p
+        id="analysisModalText"
+        class="analysis-modal__text"
+        data-analysis-modal-text
+      >
+        Идёт анализ документа…
+      </p>
+
+      <p class="analysis-modal__hint">
+        Обработка может занять некоторое время.
+        Страница автоматически покажет готовый результат.
+      </p>
+    </div>
+  </div>
 </body>
 </html>
