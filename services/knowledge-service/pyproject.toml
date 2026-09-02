@@ -12,9 +12,12 @@ description = "Поиск нормативов и экспертного опы�
 requires-python = ">=3.12"
 
 dependencies = [
+    "alembic==1.19.1",
+    "asyncpg==0.31.0",
     "fastapi==0.141.1",
     "httpx==0.28.1",
     "pydantic-settings==2.15.0",
+    "SQLAlchemy==2.0.52",
     "uvicorn[standard]==0.52.4",
 ]
 
@@ -38,6 +41,10 @@ addopts = [
 
 testpaths = [
     "tests",
+]
+
+markers = [
+    "database: integration tests requiring a real PostgreSQL instance",
 ]
 
 asyncio_mode = "auto"

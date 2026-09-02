@@ -5,8 +5,15 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import (
+    BaseModel,
+    Field,
+    SecretStr,
+)
+from pydantic_settings import (
+    BaseSettings,
+    SettingsConfigDict,
+)
 
 EnvironmentName = Literal[
     "local",
@@ -15,6 +22,56 @@ EnvironmentName = Literal[
     "stage",
     "prod",
 ]
+
+
+class DatabaseSettings(BaseModel):
+    """Настройки project-specific PostgreSQL Knowledge Service."""
+
+    host: str = "postgres"
+
+    port: int = Field(
+        default=5432,
+        ge=1,
+        le=65535,
+    )
+
+    name: str = "pdrd"
+
+    user: str = "pdrd"
+
+    password: SecretStr = SecretStr(
+        "change-me",
+    )
+
+    pool_size: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+    )
+
+    max_overflow: int = Field(
+        default=10,
+        ge=0,
+        le=100,
+    )
+
+    pool_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=120,
+    )
+
+    connect_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        le=60,
+    )
+
+    health_timeout_seconds: float = Field(
+        default=3.0,
+        gt=0,
+        le=30,
+    )
 
 
 class EmbeddingSettings(BaseModel):
@@ -153,8 +210,12 @@ class Settings(BaseSettings):
 
     docs_enabled: bool = True
 
+    database: DatabaseSettings = Field(
+        default_factory=DatabaseSettings,
+    )
+
     embedding: EmbeddingSettings = Field(
-        default_factory=(EmbeddingSettings),
+        default_factory=EmbeddingSettings,
     )
 
     qdrant: QdrantSettings = Field(
@@ -166,7 +227,7 @@ class Settings(BaseSettings):
     )
 
     project_context: ProjectContextSettings = Field(
-        default_factory=(ProjectContextSettings),
+        default_factory=ProjectContextSettings,
     )
 
 
