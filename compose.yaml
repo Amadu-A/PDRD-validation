@@ -12,10 +12,14 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "5"
 
+x-app-env-files: &app-env-files
+  - .env
+
 x-api-gateway-environment: &api-gateway-environment
   API_GATEWAY_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
   API_GATEWAY_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
   API_GATEWAY_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+
   API_GATEWAY_BROKER__HOST: ${PDRD_RABBITMQ_HOST:-rabbitmq}
   API_GATEWAY_BROKER__PORT: ${PDRD_RABBITMQ_PORT:-5672}
   API_GATEWAY_BROKER__USER: ${PDRD_RABBITMQ_USER:-pdrd_validation}
@@ -86,6 +90,8 @@ services:
 
     restart: unless-stopped
 
+    env_file: *app-env-files
+
     environment: *api-gateway-environment
 
     volumes:
@@ -124,14 +130,16 @@ services:
 
     restart: unless-stopped
 
+    env_file: *app-env-files
+
+    environment: *api-gateway-environment
+
     command:
       [
         "python",
         "-m",
         "pdrd_api_gateway.infrastructure.messaging.dispatcher"
       ]
-
-    environment: *api-gateway-environment
 
     depends_on:
       postgres:
@@ -150,6 +158,10 @@ services:
 
     restart: unless-stopped
 
+    env_file: *app-env-files
+
+    environment: *api-gateway-environment
+
     command:
       [
         "celery",
@@ -160,8 +172,6 @@ services:
         "--concurrency=${PDRD_CELERY_CONCURRENCY:-1}",
         "--hostname=pdrd-analysis@%h"
       ]
-
-    environment: *api-gateway-environment
 
     volumes:
       - analysis_artifacts:/data/analyses
@@ -197,6 +207,8 @@ services:
     profiles:
       - test
 
+    env_file: *app-env-files
+
     environment:
       <<: *api-gateway-environment
       API_GATEWAY_ENVIRONMENT: test
@@ -228,6 +240,8 @@ services:
 
     restart: unless-stopped
 
+    env_file: *app-env-files
+
     ports:
       - "${DOCUMENT_SERVICE_BIND_IP:-127.0.0.1}:${DOCUMENT_SERVICE_HOST_PORT:-8301}:8301"
 
@@ -258,6 +272,8 @@ services:
       target: runtime
 
     restart: unless-stopped
+
+    env_file: *app-env-files
 
     ports:
       - "${KNOWLEDGE_SERVICE_BIND_IP:-127.0.0.1}:${KNOWLEDGE_SERVICE_HOST_PORT:-8401}:8401"
@@ -292,6 +308,8 @@ services:
       target: runtime
 
     restart: unless-stopped
+
+    env_file: *app-env-files
 
     ports:
       - "${ANALYSIS_SERVICE_BIND_IP:-127.0.0.1}:${ANALYSIS_SERVICE_HOST_PORT:-8501}:8501"
