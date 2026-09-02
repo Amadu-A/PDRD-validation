@@ -1,5 +1,5 @@
 # ops/Dockerfile.quality
-# Python 3.12 environment для server-side lint, format и architecture tests.
+# Python 3.12 environment для server-side lint, format и полного test suite.
 
 FROM python:3.12.13-slim-bookworm
 
@@ -12,14 +12,10 @@ WORKDIR /workspace
 COPY pyproject.toml /workspace/pyproject.toml
 COPY requirements-dev.txt /workspace/requirements-dev.txt
 
-COPY services/api-gateway /workspace/services/api-gateway
-COPY services/document-service /workspace/services/document-service
-COPY services/knowledge-service /workspace/services/knowledge-service
-COPY services/analysis-service /workspace/services/analysis-service
-COPY tests /workspace/tests
-
 RUN pip install \
     --no-cache-dir \
     -r /workspace/requirements-dev.txt
+
+COPY . /workspace
 
 CMD ["/bin/sh", "-c", "python -m ruff check . && python -m ruff format --check . && python -m pytest -q --import-mode=importlib"]
