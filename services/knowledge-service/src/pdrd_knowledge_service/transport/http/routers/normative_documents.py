@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/transport/http/routers/normative_documents.py
 
-"""Internal HTTP read API нормативных документов."""
+"""Internal HTTP API нормативных документов."""
 
 from typing import Annotated
 from uuid import UUID
@@ -8,13 +8,22 @@ from uuid import UUID
 from fastapi import (
     APIRouter,
     Depends,
+    File,
+    Form,
     HTTPException,
+    Response,
+    UploadFile,
     status,
 )
 
+from pdrd_knowledge_service.application.ports.document_storage import (
+    NormativeDocumentStorageError,
+)
 from pdrd_knowledge_service.application.use_cases.normative_documents import (
+    NormativeDocumentCategoryError,
     NormativeDocumentNotFoundError,
-    NormativeDocumentQueryUseCases,
+    NormativeDocumentUploadError,
+    NormativeDocumentUseCases,
 )
 from pdrd_knowledge_service.application.use_cases.normative_sections import (
     NormativeSectionNotFoundError,
@@ -39,11 +48,13 @@ ContainerDependency = Annotated[
     Depends(get_container),
 ]
 
+_UPLOAD_CHUNK_SIZE = 1024 * 1024
+
 
 def _require_use_cases(
     container: ApplicationContainer,
-) -> NormativeDocumentQueryUseCases:
-    """Возвращает настроенные document query use cases."""
+) -> NormativeDocumentUseCases:
+    """Возвращает настроенные document use cases."""
     use_cases = container.normative_documents
 
     if use_cases is None:
@@ -64,6 +75,68 @@ def _not_found(
         detail=str(
             error,
         ),
+    )
+
+
+def _unprocessable(
+    error: Exception,
+) -> HTTPException:
+    """Преобразует validation error в HTTP 422."""
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=str(
+            error,
+        ),
+    )
+
+
+def _storage_unavailable(
+    error: Exception,
+) -> HTTPException:
+    """Преобразует storage error в HTTP 503."""
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=str(
+            error,
+        ),
+    )
+
+
+async def _read_upload_content(
+    upload: UploadFile,
+    *,
+    max_upload_bytes: int,
+) -> bytes:
+    """Читает multipart upload порциями с ранним size limit."""
+    content = bytearray()
+
+    while True:
+        chunk = await upload.read(
+            _UPLOAD_CHUNK_SIZE,
+        )
+
+        if not chunk:
+            break
+
+        if (
+            len(
+                content,
+            )
+            + len(
+                chunk,
+            )
+            > max_upload_bytes
+        ):
+            raise NormativeDocumentUploadError(
+                "Размер нормативного PDF превышает допустимый лимит.",
+            )
+
+        content.extend(
+            chunk,
+        )
+
+    return bytes(
+        content,
     )
 
 
@@ -98,6 +171,67 @@ async def list_normative_documents(
     ]
 
 
+@router.post(
+    "/sections/{section_id}/documents",
+    response_model=NormativeDocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_normative_document(
+    section_id: UUID,
+    file: Annotated[
+        UploadFile,
+        File(),
+    ],
+    container: ContainerDependency,
+    category_id: Annotated[
+        UUID | None,
+        Form(),
+    ] = None,
+) -> NormativeDocumentResponse:
+    """Загружает managed PDF в нормативный каталог."""
+    use_cases = _require_use_cases(
+        container,
+    )
+
+    try:
+        content = await _read_upload_content(
+            file,
+            max_upload_bytes=(container.settings.storage.max_upload_bytes),
+        )
+
+        document = await use_cases.upload_document.execute(
+            section_id=section_id,
+            category_id=category_id,
+            original_name=file.filename or "",
+            content=content,
+        )
+
+    except NormativeSectionNotFoundError as error:
+        raise _not_found(
+            error,
+        ) from error
+
+    except (
+        NormativeDocumentCategoryError,
+        NormativeDocumentUploadError,
+    ) as error:
+        raise _unprocessable(
+            error,
+        ) from error
+
+    except NormativeDocumentStorageError as error:
+        raise _storage_unavailable(
+            error,
+        ) from error
+
+    finally:
+        await file.close()
+
+    return NormativeDocumentResponse.from_domain(
+        document,
+    )
+
+
 @router.get(
     "/documents/{document_id}",
     response_model=NormativeDocumentResponse,
@@ -123,4 +257,42 @@ async def get_normative_document(
 
     return NormativeDocumentResponse.from_domain(
         document,
+    )
+
+
+@router.get(
+    "/documents/{document_id}/content",
+)
+async def get_normative_document_content(
+    document_id: UUID,
+    container: ContainerDependency,
+) -> Response:
+    """Возвращает PDF inline для просмотра пользователем."""
+    use_cases = _require_use_cases(
+        container,
+    )
+
+    try:
+        result = await use_cases.get_document_content.execute(
+            document_id=document_id,
+        )
+
+    except NormativeDocumentNotFoundError as error:
+        raise _not_found(
+            error,
+        ) from error
+
+    except NormativeDocumentStorageError as error:
+        raise _storage_unavailable(
+            error,
+        ) from error
+
+    return Response(
+        content=result.content,
+        media_type=result.document.mime_type,
+        headers={
+            "Content-Disposition": (f'inline; filename="{document_id}.pdf"'),
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     )

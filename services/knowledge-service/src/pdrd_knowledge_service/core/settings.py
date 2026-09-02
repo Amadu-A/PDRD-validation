@@ -3,6 +3,7 @@
 """Runtime-конфигурация Knowledge Service."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import (
@@ -72,6 +73,27 @@ class DatabaseSettings(BaseModel):
         gt=0,
         le=30,
     )
+
+
+class NormativeStorageSettings(BaseModel):
+    """Настройки managed storage нормативных PDF."""
+
+    root_path: Path = Path(
+        "/data/normative",
+    )
+
+    max_upload_mb: int = Field(
+        default=200,
+        ge=1,
+        le=1024,
+    )
+
+    @property
+    def max_upload_bytes(
+        self,
+    ) -> int:
+        """Возвращает upload limit в bytes."""
+        return self.max_upload_mb * 1024 * 1024
 
 
 class EmbeddingSettings(BaseModel):
@@ -212,6 +234,10 @@ class Settings(BaseSettings):
 
     database: DatabaseSettings = Field(
         default_factory=DatabaseSettings,
+    )
+
+    storage: NormativeStorageSettings = Field(
+        default_factory=NormativeStorageSettings,
     )
 
     embedding: EmbeddingSettings = Field(

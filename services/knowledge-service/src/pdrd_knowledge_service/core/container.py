@@ -30,8 +30,10 @@ from pdrd_knowledge_service.application.use_cases.normative_categories import (
 )
 from pdrd_knowledge_service.application.use_cases.normative_documents import (
     GetNormativeDocument,
+    GetNormativeDocumentContent,
     ListNormativeDocuments,
-    NormativeDocumentQueryUseCases,
+    NormativeDocumentUseCases,
+    UploadNormativeDocument,
 )
 from pdrd_knowledge_service.application.use_cases.normative_sections import (
     CreateNormativeSection,
@@ -63,6 +65,9 @@ from pdrd_knowledge_service.infrastructure.database.unit_of_work import (
 from pdrd_knowledge_service.infrastructure.embedding.ollama import (
     OllamaEmbeddingProvider,
 )
+from pdrd_knowledge_service.infrastructure.storage.filesystem import (
+    LocalFilesystemNormativeDocumentStorage,
+)
 from pdrd_knowledge_service.infrastructure.vector_store.qdrant import (
     QdrantVectorStore,
 )
@@ -84,7 +89,7 @@ class ApplicationContainer:
 
     normative_categories: NormativeCategoryUseCases | None = None
 
-    normative_documents: NormativeDocumentQueryUseCases | None = None
+    normative_documents: NormativeDocumentUseCases | None = None
 
     create_project_context: CreateProjectContext | None = None
 
@@ -108,6 +113,10 @@ def build_container() -> ApplicationContainer:
     normative_catalog_uow_factory = partial(
         SqlAlchemyNormativeCatalogUnitOfWork,
         session_factory,
+    )
+
+    document_storage = LocalFilesystemNormativeDocumentStorage(
+        root_path=settings.storage.root_path,
     )
 
     normative_sections = NormativeSectionUseCases(
@@ -147,12 +156,21 @@ def build_container() -> ApplicationContainer:
         ),
     )
 
-    normative_documents = NormativeDocumentQueryUseCases(
+    normative_documents = NormativeDocumentUseCases(
         list_documents=ListNormativeDocuments(
             unit_of_work_factory=(normative_catalog_uow_factory),
         ),
         get_document=GetNormativeDocument(
             unit_of_work_factory=(normative_catalog_uow_factory),
+        ),
+        upload_document=UploadNormativeDocument(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+            storage=document_storage,
+            max_upload_bytes=settings.storage.max_upload_bytes,
+        ),
+        get_document_content=GetNormativeDocumentContent(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+            storage=document_storage,
         ),
     )
 
