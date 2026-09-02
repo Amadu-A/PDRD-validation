@@ -13,6 +13,7 @@ x-logging: &default-logging
     max-file: "5"
 
 x-app-env-files: &app-env-files
+  - .env.example
   - .env
 
 x-api-gateway-environment: &api-gateway-environment
