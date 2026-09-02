@@ -1,0 +1,49 @@
+/* frontend/src/css/global.css */
+
+/* Базовые правила документа и глобальные utility-классы. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-base);
+
+  color: var(--color-text-primary);
+  background: var(--color-background);
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.muted {
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-normal);
+}
+
+.required {
+  color: var(--color-danger);
+}

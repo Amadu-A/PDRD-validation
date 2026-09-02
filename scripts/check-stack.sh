@@ -13,11 +13,6 @@ if [[ -f .env ]]; then
 fi
 
 
-SHARED_DOCKER_NETWORK="${SHARED_DOCKER_NETWORK:-ai-shared}"
-SHARED_N8N_URL="${SHARED_N8N_URL:-http://127.0.0.1:5678}"
-KB_OLLAMA_URL="${KB_OLLAMA_URL:-http://127.0.0.1:11434}"
-
-
 echo "=== Docker ==="
 
 docker version \
@@ -30,10 +25,10 @@ echo
 echo "=== Shared network ==="
 
 docker network inspect \
-    "${SHARED_DOCKER_NETWORK}" \
+    "${SHARED_DOCKER_NETWORK:-ai-shared}" \
     >/dev/null
 
-echo "Network ${SHARED_DOCKER_NETWORK}: OK"
+echo "Shared network: OK"
 
 
 echo
@@ -51,9 +46,24 @@ curl -fsS \
     "http://127.0.0.1:${FRONTEND_PORT:-8080}/"
 
 curl -fsS \
-    -o /dev/null \
-    -w 'PDF service HTTP %{http_code}\n' \
-    "http://127.0.0.1:${PDF_SERVICE_PORT:-8101}/health/live"
+    "http://127.0.0.1:${API_GATEWAY_HOST_PORT:-8200}/health/ready"
+
+echo
+
+curl -fsS \
+    "http://127.0.0.1:${DOCUMENT_SERVICE_HOST_PORT:-8301}/health/ready"
+
+echo
+
+curl -fsS \
+    "http://127.0.0.1:${KNOWLEDGE_SERVICE_HOST_PORT:-8401}/health/ready"
+
+echo
+
+curl -fsS \
+    "http://127.0.0.1:${ANALYSIS_SERVICE_HOST_PORT:-8501}/health/ready"
+
+echo
 
 curl -fsS \
     "http://127.0.0.1:${QDRANT_HTTP_PORT:-6333}/readyz"
@@ -62,18 +72,20 @@ echo
 
 
 echo
-echo "=== Shared services ==="
+echo "=== API Gateway -> shared n8n ==="
 
-curl -fsS \
-    -o /dev/null \
-    -w 'Shared n8n HTTP %{http_code}\n' \
-    "${SHARED_N8N_URL}/healthz"
+docker compose exec -T api-gateway \
+    python - <<'PY'
+import urllib.request
 
-curl -fsS \
-    "${KB_OLLAMA_URL}/api/tags" \
-    >/dev/null
-
-echo "Shared Ollama HTTP: OK"
+with urllib.request.urlopen(
+    "http://n8n:5678/healthz",
+    timeout=10,
+) as response:
+    print(
+        f"Shared n8n HTTP {response.status}",
+    )
+PY
 
 
 echo

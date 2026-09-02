@@ -1,8 +1,60 @@
 # compose.yaml
+# Project-specific Docker stack PDRD.
+#
+# Shared: RabbitMQ, n8n, Ollama.
+# Project-specific: PostgreSQL, Qdrant и application services.
 
 name: ${COMPOSE_PROJECT_NAME:-pdrd-validation-ai}
 
+x-logging: &default-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-api-gateway-environment: &api-gateway-environment
+  API_GATEWAY_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
+  API_GATEWAY_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
+  API_GATEWAY_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+  API_GATEWAY_BROKER__HOST: ${PDRD_RABBITMQ_HOST:-rabbitmq}
+  API_GATEWAY_BROKER__PORT: ${PDRD_RABBITMQ_PORT:-5672}
+  API_GATEWAY_BROKER__USER: ${PDRD_RABBITMQ_USER:-pdrd_validation}
+  API_GATEWAY_BROKER__PASSWORD: ${PDRD_RABBITMQ_PASSWORD:?PDRD_RABBITMQ_PASSWORD must be set in .env}
+  API_GATEWAY_BROKER__VIRTUAL_HOST: ${PDRD_RABBITMQ_VHOST:-pdrd-validation}
+
 services:
+  postgres:
+    image: postgres:${PDRD_POSTGRES_VERSION:-16-alpine}
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${PDRD_POSTGRES_DB:-pdrd}
+      POSTGRES_USER: ${PDRD_POSTGRES_USER:-pdrd}
+      POSTGRES_PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_INITDB_ARGS: --data-checksums
+
+    ports:
+      - "${PDRD_POSTGRES_BIND_IP:-0.0.0.0}:${PDRD_POSTGRES_HOST_PORT:-5432}:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${PDRD_POSTGRES_USER:-pdrd} -d ${PDRD_POSTGRES_DB:-pdrd}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+    logging: *default-logging
+
+    networks:
+      - app-net
+
   qdrant:
     image: qdrant/qdrant:${QDRANT_VERSION:-v1.19.0}
     restart: unless-stopped
@@ -14,72 +66,33 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+    logging: *default-logging
+
     networks:
       - app-net
 
-  pdf-service:
+  quality-tests:
     build:
-      context: ./services/pdf-service
+      context: .
+      dockerfile: ops/Dockerfile.quality
+
+    profiles:
+      - test
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      target: runtime
 
     restart: unless-stopped
 
-    environment:
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      OLLAMA_VISION_MODEL: ${OLLAMA_VISION_MODEL:-qwen3-vl:8b-instruct}
-      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:4b}
-      OLLAMA_REQUEST_TIMEOUT: ${OLLAMA_REQUEST_TIMEOUT:-1800}
-
-      OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-16384}
-      OLLAMA_MAX_ISSUES: ${OLLAMA_MAX_ISSUES:-10}
-      OLLAMA_MAX_RETRIES: ${OLLAMA_MAX_RETRIES:-2}
-      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-1m}
-
-      OLLAMA_PAGE_FACTS_NUM_PREDICT: ${OLLAMA_PAGE_FACTS_NUM_PREDICT:-1600}
-      OLLAMA_NORM_CHECK_NUM_PREDICT: ${OLLAMA_NORM_CHECK_NUM_PREDICT:-2600}
-      OLLAMA_FINAL_NUM_PREDICT: ${OLLAMA_FINAL_NUM_PREDICT:-1800}
-
-      QDRANT_URL: http://qdrant:6333
-      QDRANT_NORMATIVE_COLLECTION: ${QDRANT_NORMATIVE_COLLECTION:-dva_normative_v2}
-      QDRANT_EXPERIENCE_COLLECTION: ${QDRANT_EXPERIENCE_COLLECTION:-dva_experience_v2}
-
-      RAG_NORMATIVE_TOP_K: ${RAG_NORMATIVE_TOP_K:-4}
-      RAG_NORMATIVE_MAX_SOURCES: ${RAG_NORMATIVE_MAX_SOURCES:-12}
-      RAG_EXPERIENCE_TOP_K: ${RAG_EXPERIENCE_TOP_K:-3}
-      RAG_NORMATIVE_TEXT_LIMIT: ${RAG_NORMATIVE_TEXT_LIMIT:-700}
-      RAG_EXPERIENCE_CONTEXT_LIMIT: ${RAG_EXPERIENCE_CONTEXT_LIMIT:-600}
-
-      PROJECT_CONTEXT_CHUNK_SIZE: ${PROJECT_CONTEXT_CHUNK_SIZE:-1800}
-      PROJECT_CONTEXT_CHUNK_OVERLAP: ${PROJECT_CONTEXT_CHUNK_OVERLAP:-250}
-      PROJECT_CONTEXT_TOP_K: ${PROJECT_CONTEXT_TOP_K:-5}
-      PROJECT_CONTEXT_TEXT_LIMIT: ${PROJECT_CONTEXT_TEXT_LIMIT:-900}
-      PROJECT_CONTEXT_CLASSIFY_BATCH_SIZE: ${PROJECT_CONTEXT_CLASSIFY_BATCH_SIZE:-8}
-      PROJECT_CONTEXT_CLASSIFY_NUM_PREDICT: ${PROJECT_CONTEXT_CLASSIFY_NUM_PREDICT:-1200}
-      PROJECT_CONTEXT_EMBED_BATCH_SIZE: ${PROJECT_CONTEXT_EMBED_BATCH_SIZE:-12}
-      PROJECT_CONTEXT_COLLECTION_PREFIX: ${PROJECT_CONTEXT_COLLECTION_PREFIX:-pdrd_project_context}
-
-      CAD_MAX_UPLOAD_MB: ${CAD_MAX_UPLOAD_MB:-200}
-      CAD_DWG_CONVERTER_COMMAND: ${CAD_DWG_CONVERTER_COMMAND:-dwg2dxf}
-      CAD_DWG_CONVERTER_TIMEOUT: ${CAD_DWG_CONVERTER_TIMEOUT:-180}
-      CAD_RENDER_DPI: ${CAD_RENDER_DPI:-180}
-      CAD_RENDER_MAX_SIDE: ${CAD_RENDER_MAX_SIDE:-2600}
-      CAD_COMBINED_MAX_SIDE: ${CAD_COMBINED_MAX_SIDE:-3200}
-      CAD_MACHINE_TEXT_LIMIT: ${CAD_MACHINE_TEXT_LIMIT:-14000}
-      CAD_TEXT_SAMPLE_LIMIT: ${CAD_TEXT_SAMPLE_LIMIT:-160}
-      CAD_BLOCK_SAMPLE_LIMIT: ${CAD_BLOCK_SAMPLE_LIMIT:-120}
-      CAD_DANGLING_SAMPLE_LIMIT: ${CAD_DANGLING_SAMPLE_LIMIT:-120}
-      CAD_CONNECTIVITY_TOLERANCE: ${CAD_CONNECTIVITY_TOLERANCE:-0.5}
-      CAD_VIRTUAL_INSERT_DEPTH: ${CAD_VIRTUAL_INSERT_DEPTH:-2}
-
-      PDF_RENDER_MAX_SIDE: ${PDF_RENDER_MAX_SIDE:-2400}
-      PDF_MAX_ANALYSIS_PAGES: ${PDF_MAX_ANALYSIS_PAGES:-50}
-      PDF_TEXT_LIMIT: ${PDF_TEXT_LIMIT:-12000}
+    environment: *api-gateway-environment
 
     volumes:
-      - ./data/knowledge:/data/knowledge
-      - ./scripts:/scripts:ro
+      - analysis_artifacts:/data/analyses
 
     ports:
-      - "${PDF_SERVICE_PORT:-8101}:8101"
+      - "${API_GATEWAY_BIND_IP:-127.0.0.1}:${API_GATEWAY_HOST_PORT:-8200}:8000"
 
     healthcheck:
       test:
@@ -87,7 +100,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8101/health/live', timeout=5)",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"
         ]
       interval: 10s
       timeout: 5s
@@ -95,13 +108,214 @@ services:
       start_period: 10s
 
     depends_on:
-      - qdrant
+      postgres:
+        condition: service_healthy
+
+    logging: *default-logging
+
+    networks:
+      - app-net
+      - ai-shared
+
+  api-gateway-outbox:
+    build:
+      context: ./services/api-gateway
+      target: runtime
+
+    restart: unless-stopped
+
+    command:
+      [
+        "python",
+        "-m",
+        "pdrd_api_gateway.infrastructure.messaging.dispatcher"
+      ]
+
+    environment: *api-gateway-environment
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    logging: *default-logging
+
+    networks:
+      - app-net
+      - ai-shared
+
+  api-gateway-worker:
+    build:
+      context: ./services/api-gateway
+      target: runtime
+
+    restart: unless-stopped
+
+    command:
+      [
+        "celery",
+        "-A",
+        "pdrd_api_gateway.infrastructure.messaging.celery_app:celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--concurrency=${PDRD_CELERY_CONCURRENCY:-1}",
+        "--hostname=pdrd-analysis@%h"
+      ]
+
+    environment: *api-gateway-environment
+
+    volumes:
+      - analysis_artifacts:/data/analyses
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A pdrd_api_gateway.infrastructure.messaging.celery_app:celery_app inspect ping -d \"pdrd-analysis@$$HOSTNAME\" --timeout=5 | grep -q pong"
+        ]
+      interval: 10s
+      timeout: 8s
+      retries: 10
+      start_period: 10s
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    stop_grace_period: 30s
+
+    logging: *default-logging
+
+    networks:
+      - app-net
+      - ai-shared
+
+  api-gateway-tests:
+    build:
+      context: ./services/api-gateway
+      target: test
+
+    profiles:
+      - test
+
+    environment:
+      <<: *api-gateway-environment
+      API_GATEWAY_ENVIRONMENT: test
+      PDRD_RUN_DATABASE_TESTS: "1"
+      PDRD_RUN_BROKER_TESTS: "1"
+
+    command:
+      [
+        "/bin/sh",
+        "-c",
+        "alembic upgrade head && pytest -q /app/tests"
+      ]
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      api-gateway-worker:
+        condition: service_healthy
+
+    networks:
+      - app-net
+      - ai-shared
+
+  document-service:
+    build:
+      context: ./services/document-service
+      target: runtime
+
+    restart: unless-stopped
+
+    ports:
+      - "${DOCUMENT_SERVICE_BIND_IP:-127.0.0.1}:${DOCUMENT_SERVICE_HOST_PORT:-8301}:8301"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8301/health/ready', timeout=5)"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+    logging: *default-logging
 
     networks:
       app-net:
       ai-shared:
         aliases:
-          - pdrd-pdf-service
+          - pdrd-document-service
+
+  knowledge-service:
+    build:
+      context: ./services/knowledge-service
+      target: runtime
+
+    restart: unless-stopped
+
+    ports:
+      - "${KNOWLEDGE_SERVICE_BIND_IP:-127.0.0.1}:${KNOWLEDGE_SERVICE_HOST_PORT:-8401}:8401"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8401/health/ready', timeout=5)"
+        ]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 15s
+
+    depends_on:
+      - qdrant
+
+    logging: *default-logging
+
+    networks:
+      app-net:
+      ai-shared:
+        aliases:
+          - pdrd-knowledge-service
+
+  analysis-service:
+    build:
+      context: ./services/analysis-service
+      target: runtime
+
+    restart: unless-stopped
+
+    ports:
+      - "${ANALYSIS_SERVICE_BIND_IP:-127.0.0.1}:${ANALYSIS_SERVICE_HOST_PORT:-8501}:8501"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/health/ready', timeout=5)"
+        ]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 15s
+
+    logging: *default-logging
+
+    networks:
+      app-net:
+      ai-shared:
+        aliases:
+          - pdrd-analysis-service
 
   frontend:
     build:
@@ -109,19 +323,18 @@ services:
 
     restart: unless-stopped
 
-    environment:
-      N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
-      NGINX_ENVSUBST_FILTER: ^N8N_BASE_URL$
-
     ports:
       - "${FRONTEND_PORT:-8080}:80"
 
+    logging: *default-logging
+
     networks:
       - app-net
-      - ai-shared
 
 volumes:
+  postgres_data:
   qdrant_data:
+  analysis_artifacts:
 
 networks:
   app-net:

@@ -1,0 +1,43 @@
+# services/knowledge-service/pyproject.toml
+# Runtime и test dependencies Knowledge Service.
+
+[build-system]
+requires = ["setuptools>=80,<82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdrd-knowledge-service"
+version = "0.1.0"
+description = "Поиск нормативов и экспертного опыта проекта PDRD."
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi==0.141.1",
+    "httpx==0.28.1",
+    "pydantic-settings==2.15.0",
+    "uvicorn[standard]==0.52.4",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.4,<10.0",
+    "pytest-asyncio>=1.1,<2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+]
+
+testpaths = [
+    "tests",
+]
+
+asyncio_mode = "auto"

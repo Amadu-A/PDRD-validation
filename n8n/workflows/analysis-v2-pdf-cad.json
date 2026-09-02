@@ -1,0 +1,397 @@
+{
+  "name": "[PDRD] Drawing Validation AI - Analysis V2 PDF CAD",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analysis/v2/pdf-cad",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "20000000-0000-4000-8000-000000000001",
+      "name": "POST /analysis/v2/pdf-cad",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-1900, 0],
+      "webhookId": "20000000-0000-4000-8000-000000000002"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-document-service:8301/internal/v1/combined/extract",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "pdf",
+              "inputDataFieldName": "pdf"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "cad",
+              "inputDataFieldName": "cad"
+            },
+            {
+              "name": "pages",
+              "value": "={{ $json.body?.pages ?? '' }}"
+            },
+            {
+              "name": "use_explanatory_note",
+              "value": "={{ $json.body?.use_explanatory_note ?? 'false' }}"
+            },
+            {
+              "name": "note_start_page",
+              "value": "={{ $json.body?.note_start_page ?? '' }}"
+            },
+            {
+              "name": "note_end_page",
+              "value": "={{ $json.body?.note_end_page ?? '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000003",
+      "name": "Document Extract PDF CAD",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1680, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/project-context/validate",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ enabled: $('Document Extract PDF CAD').item.json.explanatory_note_context?.enabled ?? false, pages: ($('Document Extract PDF CAD').item.json.explanatory_note_context?.pages ?? []).map((page) => ({ page_number: page.page_number, text: page.text })) }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000004",
+      "name": "Validate Project Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1460, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/project-contexts",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ context_id: $('POST /analysis/v2/pdf-cad').first().json.body?.document_id, enabled: $json.enabled ?? false, pages: ($('Document Extract PDF CAD').first().json.explanatory_note_context?.pages ?? []).map((page) => ({ page_number: page.page_number, text: page.text })) }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000005",
+      "name": "Create Project Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1240, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const combined = $('Document Extract PDF CAD').first().json;\nconst validation = $('Validate Project Context').first().json;\nconst context = $input.first().json;\nconst pdf = combined.pdf ?? {};\nconst cad = combined.cad ?? {};\n\nreturn [{ json: {\n  source: {\n    pdf_file_name: combined.pdf_file_name ?? 'document.pdf',\n    cad_file_name: combined.cad_file_name ?? 'drawing.dxf',\n    total_pdf_pages: combined.total_pdf_pages ?? 0,\n    selected_page: combined.selected_page ?? 1,\n  },\n  project_context: {\n    context_id: context.context_id,\n    enabled: context.enabled ?? false,\n    start_page: combined.explanatory_note_context?.start_page ?? null,\n    end_page: combined.explanatory_note_context?.end_page ?? null,\n    pages_count: context.pages_count ?? 0,\n    indexed_chunks: context.chunks_count ?? 0,\n    vector_size: context.vector_size ?? 0,\n    validation,\n  },\n  page: {\n    page_number: combined.selected_page ?? 1,\n    page_type: pdf.page_type ?? 'unknown',\n    text: combined.analysis_text ?? '',\n    width_points: pdf.width_points ?? 0,\n    height_points: pdf.height_points ?? 0,\n    image_base64: combined.combined_image_base64 ?? '',\n  },\n  cad: {\n    original_file_name: cad.original_file_name ?? '',\n    original_format: cad.original_format ?? '',\n    normalized_format: cad.normalized_format ?? '',\n    converted_from_dwg: cad.converted_from_dwg ?? false,\n    selected_layout: cad.selected_layout ?? '',\n    warnings: Array.isArray(cad.warnings) ? cad.warnings : [],\n    machine_data: cad.machine_data ?? {},\n    machine_context: cad.machine_context ?? '',\n  },\n  render: {\n    mime_type: 'image/png',\n    image_base64: combined.combined_image_base64 ?? '',\n    pdf_image_base64: pdf.image_base64 ?? '',\n    cad_image_base64: cad.image_base64 ?? '',\n  },\n} }];"
+      },
+      "id": "20000000-0000-4000-8000-000000000006",
+      "name": "Prepare Combined Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-1020, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/understand",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ page_number: $json.page.page_number, heuristic_page_type: $json.page.page_type, extracted_text: $json.page.text, image_base64: $json.page.image_base64 }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000007",
+      "name": "Understand Combined Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-800, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/project-context/query",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ page_facts: $json.facts, extracted_text: $('Prepare Combined Context').item.json.page.text }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000008",
+      "name": "Build Project Context Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-580, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/project-contexts/search",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ context_id: $('Prepare Combined Context').item.json.project_context.context_id, enabled: $('Prepare Combined Context').item.json.project_context.enabled, query: $json.query ?? '' }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000009",
+      "name": "Search Project Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-360, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/project-context/augment",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ extracted_text: $('Prepare Combined Context').item.json.page.text, sources: $json.sources ?? [] }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000010",
+      "name": "Augment Project Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-140, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/normative-queries",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ page_facts: $('Understand Combined Page').item.json.facts, extracted_text: $('Prepare Combined Context').item.json.page.text, project_context_texts: $json.project_context_texts ?? [] }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000011",
+      "name": "Build Normative Queries",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [80, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/search/normative",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ queries: $json.queries ?? [] }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000012",
+      "name": "Search Normative",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [300, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/check-norms",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ page_number: $('Prepare Combined Context').item.json.page.page_number, extracted_text: $('Augment Project Context').item.json.analysis_text, page_facts: $('Understand Combined Page').item.json.facts, normative_sources: $json.sources ?? [], image_base64: $('Prepare Combined Context').item.json.page.image_base64 }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000013",
+      "name": "Check Norms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\nreturn { json: { findings, experience_queries: findings.map((finding) => String(finding.experience_query ?? '').trim()).filter((query) => query.length > 0) } };"
+      },
+      "id": "20000000-0000-4000-8000-000000000014",
+      "name": "Prepare Experience Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/search/experience",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ queries: $json.experience_queries ?? [] }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000015",
+      "name": "Search Experience",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const prepared = $('Prepare Experience Queries').item.json;\nconst findings = Array.isArray(prepared.findings) ? prepared.findings : [];\nconst results = Array.isArray($json.results) ? $json.results : [];\nconst experienceByFinding = {};\nfor (let index = 0; index < findings.length; index += 1) {\n  experienceByFinding[findings[index].finding_id] = Array.isArray(results[index]?.sources) ? results[index].sources : [];\n}\nreturn { json: { findings, experience_by_finding: experienceByFinding } };"
+      },
+      "id": "20000000-0000-4000-8000-000000000016",
+      "name": "Build Experience Map",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/findings/finalize",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ findings: $json.findings ?? [], experience_by_finding: $json.experience_by_finding ?? {} }) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000017",
+      "name": "Finalize Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const prepared = $('Prepare Combined Context').item.json;\nconst understanding = $('Understand Combined Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst normative = $('Search Normative').item.json;\nconst check = $('Check Norms').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\nconst findings = (finalization.findings ?? []).map((finding) => ({ ...finding, project_context_sources: augmentation.sources ?? [] }));\n\nreturn { json: {\n  status: 'completed',\n  source_mode: 'pdf_cad',\n  file_name: prepared.source.pdf_file_name,\n  pdf_file_name: prepared.source.pdf_file_name,\n  cad_file_name: prepared.source.cad_file_name,\n  total_pages: prepared.source.total_pdf_pages,\n  selected_pages: [prepared.source.selected_page],\n  analyzed_pages: 1,\n  findings_count: findings.length,\n  summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранному PDF + CAD листу не найдены.',\n  findings,\n  render: prepared.render,\n  cad: prepared.cad,\n  explanatory_note_context: prepared.project_context,\n  page: {\n    page_number: prepared.page.page_number,\n    heuristic_page_type: prepared.page.page_type,\n    width_points: prepared.page.width_points,\n    height_points: prepared.page.height_points,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: normative.sources ?? [],\n    normative_check: { summary: check.summary ?? '', findings: check.findings ?? [], metrics: check.metrics ?? {} },\n    project_context_sources: augmentation.sources ?? [],\n  },\n  pipeline: ['combined_document_extract','explanatory_note_validation','temporary_project_context_index','page_understanding','project_context_retrieval','normative_queries','normative_search','normative_check','experience_search','finalization','project_context_cleanup'],\n  limitations: ['Контекст ПЗ является контекстом проекта, а не нормативным доказательством.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n} };"
+      },
+      "id": "20000000-0000-4000-8000-000000000018",
+      "name": "Build PDF CAD Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1620, 0]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'http://pdrd-knowledge-service:8401/internal/v1/project-contexts/' + $json.explanatory_note_context.context_id }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000019",
+      "name": "Cleanup Project Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1840, 0],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $('Build PDF CAD Result').first().json }];"
+      },
+      "id": "20000000-0000-4000-8000-000000000020",
+      "name": "Return PDF CAD Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2060, 0]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "POST /analysis/v2/pdf-cad": {
+      "main": [[{"node":"Document Extract PDF CAD","type":"main","index":0}]]
+    },
+    "Document Extract PDF CAD": {
+      "main": [[{"node":"Validate Project Context","type":"main","index":0}]]
+    },
+    "Validate Project Context": {
+      "main": [[{"node":"Create Project Context","type":"main","index":0}]]
+    },
+    "Create Project Context": {
+      "main": [[{"node":"Prepare Combined Context","type":"main","index":0}]]
+    },
+    "Prepare Combined Context": {
+      "main": [[{"node":"Understand Combined Page","type":"main","index":0}]]
+    },
+    "Understand Combined Page": {
+      "main": [[{"node":"Build Project Context Query","type":"main","index":0}]]
+    },
+    "Build Project Context Query": {
+      "main": [[{"node":"Search Project Context","type":"main","index":0}]]
+    },
+    "Search Project Context": {
+      "main": [[{"node":"Augment Project Context","type":"main","index":0}]]
+    },
+    "Augment Project Context": {
+      "main": [[{"node":"Build Normative Queries","type":"main","index":0}]]
+    },
+    "Build Normative Queries": {
+      "main": [[{"node":"Search Normative","type":"main","index":0}]]
+    },
+    "Search Normative": {
+      "main": [[{"node":"Check Norms","type":"main","index":0}]]
+    },
+    "Check Norms": {
+      "main": [[{"node":"Prepare Experience Queries","type":"main","index":0}]]
+    },
+    "Prepare Experience Queries": {
+      "main": [[{"node":"Search Experience","type":"main","index":0}]]
+    },
+    "Search Experience": {
+      "main": [[{"node":"Build Experience Map","type":"main","index":0}]]
+    },
+    "Build Experience Map": {
+      "main": [[{"node":"Finalize Findings","type":"main","index":0}]]
+    },
+    "Finalize Findings": {
+      "main": [[{"node":"Build PDF CAD Result","type":"main","index":0}]]
+    },
+    "Build PDF CAD Result": {
+      "main": [[{"node":"Cleanup Project Context","type":"main","index":0}]]
+    },
+    "Cleanup Project Context": {
+      "main": [[{"node":"Return PDF CAD Result","type":"main","index":0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "20000000-0000-4000-8000-000000000021",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

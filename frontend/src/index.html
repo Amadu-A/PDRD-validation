@@ -1,0 +1,182 @@
+<!-- frontend/src/index.html -->
+
+<!doctype html>
+
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+
+  <title>Drawing Validation AI</title>
+
+  <link
+    rel="stylesheet"
+    href="/css/main.css"
+  >
+</head>
+
+<body>
+  <main class="container">
+    <section class="card">
+      <h1>
+        Проверка проектной документации
+      </h1>
+
+      <p class="muted">
+        PDF / DWG / DXF → визуальное и машинное понимание листа →
+        нормативная база → проверка соответствия →
+        База Опыта → инженерный отчёт.
+      </p>
+
+      <form id="analysisForm">
+        <label>
+          PDF
+
+          <input
+            id="pdfFile"
+            name="pdf"
+            type="file"
+            accept=".pdf,application/pdf"
+          >
+        </label>
+
+        <label>
+          DWG / DXF
+
+          <input
+            id="cadFile"
+            name="cad"
+            type="file"
+            accept=".dwg,.dxf"
+          >
+        </label>
+
+        <p class="muted">
+          Нужно загрузить хотя бы один источник: PDF или DWG/DXF.
+          Если загружены PDF и CAD одновременно, они считаются двумя
+          представлениями одного и того же листа.
+        </p>
+
+        <label>
+          Страницы PDF для анализа
+
+          <input
+            id="pages"
+            name="pages"
+            type="text"
+            placeholder="PDF-only: 3,5,8-12. Пусто = весь PDF"
+          >
+        </label>
+
+        <p
+          id="pagesHint"
+          class="muted"
+        >
+          Для PDF-only можно анализировать одну или несколько страниц.
+        </p>
+
+        <section class="context-box">
+          <label class="checkbox-label">
+            <input
+              id="useExplanatoryNote"
+              type="checkbox"
+              disabled
+            >
+
+            <span>
+              Учитывать контекст Пояснительной записки
+            </span>
+          </label>
+
+          <div class="note-range">
+            <label>
+              Начальная страница ПЗ
+
+              <input
+                id="noteStartPage"
+                type="number"
+                min="1"
+                disabled
+              >
+            </label>
+
+            <label>
+              Конечная страница ПЗ
+
+              <input
+                id="noteEndPage"
+                type="number"
+                min="1"
+                disabled
+              >
+            </label>
+          </div>
+
+          <p class="muted">
+            Укажите физический диапазон страниц PDF,
+            содержащий Пояснительную записку.
+            Перед анализом диапазон будет проверен,
+            а его релевантные фрагменты будут использоваться
+            как контекст текущего проекта.
+          </p>
+        </section>
+
+        <p class="muted">
+          При CAD-only анализе CAD-файл считается одним листом.
+          При PDF + CAD необходимо явно указать одну страницу PDF,
+          соответствующую CAD-файлу.
+        </p>
+
+        <button
+          id="submitButton"
+          type="submit"
+        >
+          Анализировать
+        </button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>
+        Результат проверки
+      </h2>
+
+      <pre
+        id="result"
+        class="report"
+      >Пока нет результата.</pre>
+    </section>
+  </main>
+
+  <div
+    id="modal"
+    class="modal hidden"
+    aria-hidden="true"
+  >
+    <div class="modal-card">
+      <div class="spinner"></div>
+
+      <h2>
+        Идёт анализ документа
+      </h2>
+
+      <p id="modalText">
+        Задание передаётся в очередь…
+      </p>
+
+      <p class="muted">
+        Анализ выполняется асинхронно через API Gateway.
+      </p>
+    </div>
+  </div>
+
+  <script
+    type="module"
+    src="/js/app.js"
+  ></script>
+</body>
+</html>

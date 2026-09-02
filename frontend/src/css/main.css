@@ -1,0 +1,11 @@
+/* frontend/src/css/main.css */
+
+/* Единая точка подключения frontend-стилей. */
+
+@import url("./variables.css");
+@import url("./global.css");
+
+@import url("./blocks/card.css");
+@import url("./blocks/form.css");
+@import url("./blocks/report.css");
+@import url("./blocks/modal.css");

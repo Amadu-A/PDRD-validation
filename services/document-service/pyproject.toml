@@ -1,0 +1,44 @@
+# services/document-service/pyproject.toml
+# Runtime и test dependencies Document Service.
+
+[build-system]
+requires = ["setuptools>=80,<82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdrd-document-service"
+version = "0.1.0"
+description = "Извлечение и подготовка PDF/CAD документов проекта PDRD."
+requires-python = ">=3.12"
+
+dependencies = [
+    "ezdxf==1.4.4",
+    "fastapi==0.141.1",
+    "Pillow==11.3.0",
+    "pydantic-settings==2.15.0",
+    "pymupdf==1.28.0",
+    "python-multipart==0.0.32",
+    "uvicorn[standard]==0.52.4",
+]
+
+[project.optional-dependencies]
+test = [
+    "httpx2>=2.12,<3.0",
+    "pytest>=8.4,<10.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+]
+
+testpaths = [
+    "tests",
+]

@@ -1,0 +1,82 @@
+# pyproject.toml
+# Единая конфигурация linting, formatting и pytest для monorepo PDRD.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+extend-exclude = [
+    ".venv",
+    ".venv-dev",
+    "data",
+
+    # Standalone scripts подготовки/индексации данных не входят
+    # в runtime packages микросервисов и обслуживаются отдельно.
+    "scripts",
+]
+
+[tool.ruff.lint]
+select = [
+    "ASYNC",
+    "B",
+    "C4",
+    "D",
+    "E",
+    "F",
+    "I",
+    "RUF",
+    "SIM",
+    "UP",
+    "W",
+]
+
+# Русские строки, комментарии и docstring являются обязательной частью
+# project code-style. RUF001-RUF003 считают отдельные кириллические символы
+# визуально похожими на латиницу, поэтому эти проверки несовместимы
+# с принятой русскоязычной документацией проекта.
+ignore = [
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+fixable = ["ALL"]
+
+[tool.ruff.lint.pycodestyle]
+# Formatter по-прежнему стремится к 88 символам.
+# Более высокий предел E501 нужен для машинно-проверяемой первой строки
+# с полным относительным путём к Python-файлу.
+max-line-length = 120
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+    "--import-mode=importlib",
+]
+
+testpaths = [
+    "tests",
+    "services/api-gateway/tests",
+    "services/document-service/tests",
+    "services/knowledge-service/tests",
+    "services/analysis-service/tests",
+]
+
+markers = [
+    "database: integration tests requiring a real PostgreSQL instance",
+]
+
+asyncio_mode = "auto"
