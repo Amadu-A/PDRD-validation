@@ -3,10 +3,10 @@
 /**
  * Composition root браузерного приложения PDRD Validation.
  *
- * Модуль находит DOM-зависимости по стабильным data-* hooks, собирает
- * компоненты формы, результата и модального состояния, после чего связывает
- * их с публичным Analysis API Gateway. Бизнес-валидация формы, polling
- * и форматирование результата остаются в отдельных feature-модулях.
+ * Модуль получает обязательные DOM-зависимости через общий helper,
+ * собирает компоненты формы, результата и модального состояния, после чего
+ * связывает их с публичным Analysis API Gateway. Бизнес-валидация формы,
+ * polling и форматирование результата остаются в feature-модулях.
  */
 
 import {
@@ -16,6 +16,10 @@ import {
 import {
   createResultView,
 } from "./components/result.js";
+
+import {
+  requireElement,
+} from "./dom.js";
 
 import {
   getAnalysisResult,
@@ -37,33 +41,6 @@ import {
 import {
   renderAnalysisReport,
 } from "./features/analysis/report.js";
-
-
-/**
- * Возвращает обязательный DOM-элемент по стабильному data-* selector.
- *
- * Ошибка считается проблемой сборки frontend: приложение не должно
- * продолжать работу с неполной HTML-разметкой.
- *
- * @param {string} selector CSS selector обязательного элемента.
- * @returns {Element} Найденный DOM-элемент.
- * @throws {Error} Если ожидаемый элемент отсутствует.
- */
-function requireElement(
-  selector,
-) {
-  const element = document.querySelector(
-    selector,
-  );
-
-  if (!element) {
-    throw new Error(
-      `Не найден обязательный DOM-элемент: ${selector}`,
-    );
-  }
-
-  return element;
-}
 
 
 const analysisFormElement = requireElement(

@@ -1,7 +1,6 @@
 # tests/architecture/test_frontend_structure.py
 
-"""
-Architecture tests структуры vanilla frontend.
+"""Architecture tests структуры vanilla frontend.
 
 Модуль закрепляет актуальные frontend-инварианты проекта: единый CSS
 entrypoint, модульную BEM-структуру, data-* hooks для JavaScript,
@@ -158,9 +157,7 @@ def test_frontend_source_headers_match_paths() -> None:
 
         if actual != expected:
             violations.append(
-                f"{relative_path}: "
-                f"expected={expected!r}; "
-                f"actual={actual!r}"
+                f"{relative_path}: expected={expected!r}; actual={actual!r}"
             )
 
     assert not violations, "\n".join(
@@ -170,11 +167,7 @@ def test_frontend_source_headers_match_paths() -> None:
 
 def test_css_layer_order() -> None:
     """Проверяет порядок variables -> global -> BEM blocks."""
-    content = (
-        FRONTEND_SOURCE
-        / "css"
-        / "style.css"
-    ).read_text(
+    content = (FRONTEND_SOURCE / "css" / "style.css").read_text(
         encoding="utf-8",
     )
 
@@ -194,24 +187,16 @@ def test_css_layer_order() -> None:
     assert global_position >= 0
     assert first_block_position >= 0
 
-    assert (
-        variables_position
-        < global_position
-        < first_block_position
-    )
+    assert variables_position < global_position < first_block_position
 
 
 def test_frontend_loads_styles_then_module_in_head() -> None:
-    """
-    Проверяет CSS entrypoint и deferred module script внутри HTML head.
+    """Проверяет CSS entrypoint и deferred module script внутри HTML head.
 
     Скрипт должен быть объявлен после CSS, чтобы точка подключения
     ресурсов оставалась предсказуемой и не расползалась по body.
     """
-    content = (
-        FRONTEND_SOURCE
-        / "index.html"
-    ).read_text(
+    content = (FRONTEND_SOURCE / "index.html").read_text(
         encoding="utf-8",
     )
 
@@ -237,15 +222,9 @@ def test_frontend_loads_styles_then_module_in_head() -> None:
     assert script_start >= 0
     assert script_end >= 0
 
-    assert (
-        style_position
-        < script_start
-        < head_end
-    )
+    assert style_position < script_start < head_end
 
-    script_markup = content[
-        script_start:script_end
-    ]
+    script_markup = content[script_start:script_end]
 
     assert 'src="/js/app.js"' in script_markup
     assert 'type="module"' in script_markup
@@ -256,24 +235,16 @@ def test_frontend_loads_styles_then_module_in_head() -> None:
 
 
 def test_frontend_uses_data_hooks_for_javascript() -> None:
-    """
-    Закрепляет data-* hooks как стабильный DOM API frontend.
+    """Закрепляет data-* hooks как стабильный DOM API frontend.
 
     JavaScript не должен зависеть от визуальных BEM-классов или id,
     которые могут меняться при редизайне.
     """
-    html = (
-        FRONTEND_SOURCE
-        / "index.html"
-    ).read_text(
+    html = (FRONTEND_SOURCE / "index.html").read_text(
         encoding="utf-8",
     )
 
-    missing_hooks = [
-        hook
-        for hook in REQUIRED_DATA_HOOKS
-        if hook not in html
-    ]
+    missing_hooks = [hook for hook in REQUIRED_DATA_HOOKS if hook not in html]
 
     assert not missing_hooks, (
         "Отсутствуют обязательные frontend data hooks:\n"
@@ -282,11 +253,7 @@ def test_frontend_uses_data_hooks_for_javascript() -> None:
         )
     )
 
-    app_js = (
-        FRONTEND_SOURCE
-        / "js"
-        / "app.js"
-    ).read_text(
+    app_js = (FRONTEND_SOURCE / "js" / "app.js").read_text(
         encoding="utf-8",
     )
 
@@ -295,10 +262,7 @@ def test_frontend_uses_data_hooks_for_javascript() -> None:
 
 def test_frontend_has_no_legacy_visual_classes() -> None:
     """Не допускает возврат прежних не-BEM visual class names."""
-    html = (
-        FRONTEND_SOURCE
-        / "index.html"
-    ).read_text(
+    html = (FRONTEND_SOURCE / "index.html").read_text(
         encoding="utf-8",
     )
 
@@ -308,21 +272,13 @@ def test_frontend_has_no_legacy_visual_classes() -> None:
     )
 
     actual_classes = {
-        class_name
-        for value in class_values
-        for class_name in value.split()
+        class_name for value in class_values for class_name in value.split()
     }
 
-    violations = sorted(
-        actual_classes
-        & FORBIDDEN_LEGACY_VISUAL_CLASSES
-    )
+    violations = sorted(actual_classes & FORBIDDEN_LEGACY_VISUAL_CLASSES)
 
-    assert not violations, (
-        "Найдены legacy visual classes:\n"
-        + "\n".join(
-            violations,
-        )
+    assert not violations, "Найдены legacy visual classes:\n" + "\n".join(
+        violations,
     )
 
 
@@ -365,11 +321,7 @@ def test_frontend_has_no_legacy_runtime_route() -> None:
 
 def test_frontend_app_is_composition_root() -> None:
     """Не позволяет app.js снова превратиться в frontend god-file."""
-    path = (
-        FRONTEND_SOURCE
-        / "js"
-        / "app.js"
-    )
+    path = FRONTEND_SOURCE / "js" / "app.js"
 
     line_count = len(
         path.read_text(
