@@ -20,6 +20,19 @@ from pdrd_knowledge_service.application.use_cases.health import (
 from pdrd_knowledge_service.application.use_cases.normative import (
     SearchNormative,
 )
+from pdrd_knowledge_service.application.use_cases.normative_categories import (
+    CreateNormativeCategory,
+    DeleteNormativeCategory,
+    GetNormativeCategory,
+    ListNormativeCategories,
+    NormativeCategoryUseCases,
+    UpdateNormativeCategory,
+)
+from pdrd_knowledge_service.application.use_cases.normative_documents import (
+    GetNormativeDocument,
+    ListNormativeDocuments,
+    NormativeDocumentQueryUseCases,
+)
 from pdrd_knowledge_service.application.use_cases.normative_sections import (
     CreateNormativeSection,
     DeleteNormativeSection,
@@ -69,6 +82,10 @@ class ApplicationContainer:
 
     normative_sections: NormativeSectionUseCases | None = None
 
+    normative_categories: NormativeCategoryUseCases | None = None
+
+    normative_documents: NormativeDocumentQueryUseCases | None = None
+
     create_project_context: CreateProjectContext | None = None
 
     search_project_context: SearchProjectContext | None = None
@@ -108,6 +125,33 @@ def build_container() -> ApplicationContainer:
             unit_of_work_factory=(normative_catalog_uow_factory),
         ),
         delete_section=DeleteNormativeSection(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+        ),
+    )
+
+    normative_categories = NormativeCategoryUseCases(
+        list_categories=ListNormativeCategories(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+        ),
+        get_category=GetNormativeCategory(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+        ),
+        create_category=CreateNormativeCategory(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+        ),
+        update_category=UpdateNormativeCategory(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+        ),
+        delete_category=DeleteNormativeCategory(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+        ),
+    )
+
+    normative_documents = NormativeDocumentQueryUseCases(
+        list_documents=ListNormativeDocuments(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+        ),
+        get_document=GetNormativeDocument(
             unit_of_work_factory=(normative_catalog_uow_factory),
         ),
     )
@@ -165,6 +209,8 @@ def build_container() -> ApplicationContainer:
         check_readiness=check_readiness,
         normative_catalog_uow_factory=(normative_catalog_uow_factory),
         normative_sections=normative_sections,
+        normative_categories=normative_categories,
+        normative_documents=normative_documents,
         create_project_context=CreateProjectContext(
             embedding_provider=embedding_provider,
             vector_store=vector_store,
