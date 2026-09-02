@@ -144,6 +144,34 @@ class NormativeStorageSettings(BaseModel):
         return self.max_upload_mb * 1024 * 1024
 
 
+class NormativeIndexingSettings(BaseModel):
+    """Параметры managed нормативной индексации."""
+
+    chunk_size: int = Field(
+        default=3500,
+        ge=100,
+        le=20000,
+    )
+
+    chunk_overlap: int = Field(
+        default=500,
+        ge=0,
+        le=10000,
+    )
+
+    embed_batch_size: int = Field(
+        default=8,
+        ge=1,
+        le=100,
+    )
+
+    upsert_batch_size: int = Field(
+        default=64,
+        ge=1,
+        le=1000,
+    )
+
+
 class EmbeddingSettings(BaseModel):
     """Настройки embedding provider."""
 
@@ -294,6 +322,10 @@ class Settings(BaseSettings):
 
     storage: NormativeStorageSettings = Field(
         default_factory=NormativeStorageSettings,
+    )
+
+    indexing: NormativeIndexingSettings = Field(
+        default_factory=NormativeIndexingSettings,
     )
 
     embedding: EmbeddingSettings = Field(

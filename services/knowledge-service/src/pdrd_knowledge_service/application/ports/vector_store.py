@@ -48,6 +48,16 @@ class VectorStore(Protocol):
         """Сохраняет vector records."""
         ...
 
+    async def delete_by_filter(
+        self,
+        *,
+        collection: str,
+        key: str,
+        value: str,
+    ) -> None:
+        """Удаляет points, payload которых соответствует фильтру."""
+        ...
+
     async def delete_collection(
         self,
         *,

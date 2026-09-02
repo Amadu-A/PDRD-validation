@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/infrastructure/messaging/celery_app.py
 
-"""Celery producer configuration normative indexing queue."""
+"""Celery configuration normative indexing queue."""
 
 from celery import Celery
 from kombu import (
@@ -37,6 +37,9 @@ celery_app = Celery(
     broker=build_broker_url(
         broker_settings,
     ),
+    include=[
+        "pdrd_knowledge_service.infrastructure.messaging.tasks",
+    ],
 )
 
 celery_app.conf.update(
@@ -44,6 +47,7 @@ celery_app.conf.update(
         "json",
     ],
     task_serializer="json",
+    result_serializer="json",
     timezone="UTC",
     enable_utc=True,
     task_queues=(index_queue,),
@@ -53,6 +57,12 @@ celery_app.conf.update(
     task_default_routing_key=broker_settings.routing_key,
     task_default_delivery_mode="persistent",
     task_create_missing_queues=False,
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    worker_prefetch_multiplier=1,
+    task_track_started=True,
+    task_send_sent_event=True,
+    worker_send_task_events=True,
     task_ignore_result=True,
     broker_connection_retry_on_startup=True,
     broker_connection_timeout=(broker_settings.connect_timeout_seconds),

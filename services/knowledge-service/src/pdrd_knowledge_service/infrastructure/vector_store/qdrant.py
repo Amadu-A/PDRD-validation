@@ -44,7 +44,7 @@ class QdrantVectorStore:
         """Ищет ближайшие Qdrant points."""
         try:
             async with httpx.AsyncClient(
-                timeout=(self._request_timeout_seconds),
+                timeout=self._request_timeout_seconds,
             ) as client:
                 response = await client.post(
                     (f"{self._base_url}/collections/{collection}/points/query"),
@@ -111,7 +111,7 @@ class QdrantVectorStore:
         """Создаёт Cosine collection."""
         try:
             async with httpx.AsyncClient(
-                timeout=(self._request_timeout_seconds),
+                timeout=self._request_timeout_seconds,
             ) as client:
                 response = await client.put(
                     (f"{self._base_url}/collections/{collection}"),
@@ -145,7 +145,7 @@ class QdrantVectorStore:
 
         try:
             async with httpx.AsyncClient(
-                timeout=(self._request_timeout_seconds),
+                timeout=self._request_timeout_seconds,
             ) as client:
                 response = await client.put(
                     (f"{self._base_url}/collections/{collection}/points"),
@@ -155,9 +155,9 @@ class QdrantVectorStore:
                     json={
                         "points": [
                             {
-                                "id": (record.point_id),
-                                "vector": (record.vector),
-                                "payload": (record.payload),
+                                "id": record.point_id,
+                                "vector": record.vector,
+                                "payload": record.payload,
                             }
                             for record in records
                         ]
@@ -173,6 +173,46 @@ class QdrantVectorStore:
                 f"{error}",
             ) from error
 
+    async def delete_by_filter(
+        self,
+        *,
+        collection: str,
+        key: str,
+        value: str,
+    ) -> None:
+        """Удаляет Qdrant points по точному payload match."""
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._request_timeout_seconds,
+            ) as client:
+                response = await client.post(
+                    (f"{self._base_url}/collections/{collection}/points/delete"),
+                    params={
+                        "wait": "true",
+                    },
+                    json={
+                        "filter": {
+                            "must": [
+                                {
+                                    "key": key,
+                                    "match": {
+                                        "value": value,
+                                    },
+                                }
+                            ]
+                        }
+                    },
+                )
+
+                response.raise_for_status()
+
+        except httpx.HTTPError as error:
+            raise VectorStoreError(
+                "Не удалось удалить filtered points "
+                f"из Qdrant collection {collection}: "
+                f"{error}",
+            ) from error
+
     async def delete_collection(
         self,
         *,
@@ -181,7 +221,7 @@ class QdrantVectorStore:
         """Идемпотентно удаляет Qdrant collection."""
         try:
             async with httpx.AsyncClient(
-                timeout=(self._request_timeout_seconds),
+                timeout=self._request_timeout_seconds,
             ) as client:
                 response = await client.delete(
                     f"{self._base_url}/collections/{collection}"
@@ -197,6 +237,7 @@ class QdrantVectorStore:
 
         try:
             response.raise_for_status()
+
         except httpx.HTTPStatusError as error:
             raise VectorStoreError(
                 "Qdrant вернул ошибку удаления "
@@ -213,7 +254,7 @@ class QdrantVectorStore:
         """Проверяет readiness Qdrant."""
         try:
             async with httpx.AsyncClient(
-                timeout=(self._health_timeout_seconds),
+                timeout=self._health_timeout_seconds,
             ) as client:
                 response = await client.get(
                     f"{self._base_url}/readyz",
@@ -231,7 +272,7 @@ class QdrantVectorStore:
         """Проверяет существование vector collection."""
         try:
             async with httpx.AsyncClient(
-                timeout=(self._health_timeout_seconds),
+                timeout=self._health_timeout_seconds,
             ) as client:
                 response = await client.get(
                     f"{self._base_url}/collections/{collection}"
