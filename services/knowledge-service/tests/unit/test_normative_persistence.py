@@ -2,12 +2,17 @@
 
 """Unit tests PostgreSQL persistence нормативного каталога."""
 
-from datetime import UTC, datetime
+from datetime import (
+    UTC,
+    datetime,
+)
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from pdrd_knowledge_service.core.settings import DatabaseSettings
+from pdrd_knowledge_service.core.settings import (
+    DatabaseSettings,
+)
 from pdrd_knowledge_service.domain.normative_catalog import (
     IndexingStatus,
     NormativeCategory,
@@ -26,6 +31,9 @@ from pdrd_knowledge_service.infrastructure.database.models import (
     NormativeDocumentModel,
     NormativeSectionModel,
 )
+from pdrd_knowledge_service.infrastructure.database.outbox_model import (
+    NormativeOutboxMessageModel,
+)
 from pdrd_knowledge_service.infrastructure.database.repositories import (
     SqlAlchemyNormativeCategoryRepository,
     SqlAlchemyNormativeDocumentRepository,
@@ -33,6 +41,8 @@ from pdrd_knowledge_service.infrastructure.database.repositories import (
 )
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
+
+del NormativeOutboxMessageModel
 
 BASE_TIME = datetime(
     2026,
@@ -74,6 +84,7 @@ def test_normative_tables_belong_to_knowledge_schema() -> None:
         f"{KNOWLEDGE_SCHEMA}.normative_sections",
         f"{KNOWLEDGE_SCHEMA}.normative_categories",
         f"{KNOWLEDGE_SCHEMA}.normative_documents",
+        f"{KNOWLEDGE_SCHEMA}.normative_outbox_messages",
     }
 
     assert (

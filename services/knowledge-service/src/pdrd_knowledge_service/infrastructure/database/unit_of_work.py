@@ -9,6 +9,9 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 
+from pdrd_knowledge_service.infrastructure.database.outbox_repository import (
+    SqlAlchemyNormativeOutboxRepository,
+)
 from pdrd_knowledge_service.infrastructure.database.repositories import (
     SqlAlchemyNormativeCategoryRepository,
     SqlAlchemyNormativeDocumentRepository,
@@ -35,6 +38,10 @@ class SqlAlchemyNormativeCatalogUnitOfWork:
         )
 
         self.documents = SqlAlchemyNormativeDocumentRepository(
+            self._session,
+        )
+
+        self.outbox = SqlAlchemyNormativeOutboxRepository(
             self._session,
         )
 

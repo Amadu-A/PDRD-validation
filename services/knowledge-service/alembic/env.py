@@ -15,12 +15,16 @@ from pdrd_knowledge_service.infrastructure.database.models import (
     NormativeDocumentModel,
     NormativeSectionModel,
 )
+from pdrd_knowledge_service.infrastructure.database.outbox_model import (
+    NormativeOutboxMessageModel,
+)
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 del NormativeCategoryModel
 del NormativeDocumentModel
 del NormativeSectionModel
+del NormativeOutboxMessageModel
 
 config = context.config
 

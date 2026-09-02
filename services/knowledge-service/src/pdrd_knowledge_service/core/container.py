@@ -35,6 +35,9 @@ from pdrd_knowledge_service.application.use_cases.normative_documents import (
     NormativeDocumentUseCases,
     UploadNormativeDocument,
 )
+from pdrd_knowledge_service.application.use_cases.normative_indexing_queue import (
+    QueueNormativeDocument,
+)
 from pdrd_knowledge_service.application.use_cases.normative_sections import (
     CreateNormativeSection,
     DeleteNormativeSection,
@@ -90,6 +93,8 @@ class ApplicationContainer:
     normative_categories: NormativeCategoryUseCases | None = None
 
     normative_documents: NormativeDocumentUseCases | None = None
+
+    queue_normative_document: QueueNormativeDocument | None = None
 
     create_project_context: CreateProjectContext | None = None
 
@@ -174,6 +179,10 @@ def build_container() -> ApplicationContainer:
         ),
     )
 
+    queue_normative_document = QueueNormativeDocument(
+        unit_of_work_factory=(normative_catalog_uow_factory),
+    )
+
     database_probe = DatabaseReadinessProbe(
         engine=database_engine,
         timeout_seconds=(settings.database.health_timeout_seconds),
@@ -229,6 +238,7 @@ def build_container() -> ApplicationContainer:
         normative_sections=normative_sections,
         normative_categories=normative_categories,
         normative_documents=normative_documents,
+        queue_normative_document=queue_normative_document,
         create_project_context=CreateProjectContext(
             embedding_provider=embedding_provider,
             vector_store=vector_store,

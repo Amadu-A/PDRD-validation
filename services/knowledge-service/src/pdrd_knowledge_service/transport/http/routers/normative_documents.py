@@ -25,6 +25,10 @@ from pdrd_knowledge_service.application.use_cases.normative_documents import (
     NormativeDocumentUploadError,
     NormativeDocumentUseCases,
 )
+from pdrd_knowledge_service.application.use_cases.normative_indexing_queue import (
+    NormativeDocumentIndexingConflictError,
+    QueueNormativeDocument,
+)
 from pdrd_knowledge_service.application.use_cases.normative_sections import (
     NormativeSectionNotFoundError,
 )
@@ -64,6 +68,21 @@ def _require_use_cases(
         )
 
     return use_cases
+
+
+def _require_queue_use_case(
+    container: ApplicationContainer,
+) -> QueueNormativeDocument:
+    """Возвращает use case постановки документа в indexing queue."""
+    use_case = container.queue_normative_document
+
+    if use_case is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Normative indexing queue не настроена.",
+        )
+
+    return use_case
 
 
 def _not_found(
@@ -253,6 +272,43 @@ async def get_normative_document(
     except NormativeDocumentNotFoundError as error:
         raise _not_found(
             error,
+        ) from error
+
+    return NormativeDocumentResponse.from_domain(
+        document,
+    )
+
+
+@router.post(
+    "/documents/{document_id}/index",
+    response_model=NormativeDocumentResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def queue_normative_document(
+    document_id: UUID,
+    container: ContainerDependency,
+) -> NormativeDocumentResponse:
+    """Ставит document в durable очередь нормативной индексации."""
+    use_case = _require_queue_use_case(
+        container,
+    )
+
+    try:
+        document = await use_case.execute(
+            document_id=document_id,
+        )
+
+    except NormativeDocumentNotFoundError as error:
+        raise _not_found(
+            error,
+        ) from error
+
+    except NormativeDocumentIndexingConflictError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(
+                error,
+            ),
         ) from error
 
     return NormativeDocumentResponse.from_domain(

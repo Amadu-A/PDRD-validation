@@ -34,6 +34,12 @@ x-knowledge-service-environment: &knowledge-service-environment
   KNOWLEDGE_SERVICE_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
   KNOWLEDGE_SERVICE_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
 
+  KNOWLEDGE_SERVICE_BROKER__HOST: ${PDRD_RABBITMQ_HOST:-rabbitmq}
+  KNOWLEDGE_SERVICE_BROKER__PORT: ${PDRD_RABBITMQ_PORT:-5672}
+  KNOWLEDGE_SERVICE_BROKER__USER: ${PDRD_RABBITMQ_USER:-pdrd_validation}
+  KNOWLEDGE_SERVICE_BROKER__PASSWORD: ${PDRD_RABBITMQ_PASSWORD:?PDRD_RABBITMQ_PASSWORD must be set in .env}
+  KNOWLEDGE_SERVICE_BROKER__VIRTUAL_HOST: ${PDRD_RABBITMQ_VHOST:-pdrd-validation}
+
 services:
   postgres:
     image: postgres:${PDRD_POSTGRES_VERSION:-16-alpine}
@@ -319,6 +325,34 @@ services:
         aliases:
           - pdrd-knowledge-service
 
+  knowledge-service-outbox:
+    build:
+      context: ./services/knowledge-service
+      target: runtime
+
+    restart: unless-stopped
+
+    env_file: *app-env-files
+
+    environment: *knowledge-service-environment
+
+    command:
+      [
+        "python",
+        "-m",
+        "pdrd_knowledge_service.infrastructure.messaging.dispatcher"
+      ]
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    logging: *default-logging
+
+    networks:
+      - app-net
+      - ai-shared
+
   knowledge-service-tests:
     build:
       context: ./services/knowledge-service
@@ -336,9 +370,9 @@ services:
 
     command:
       [
-        "pytest",
-        "-q",
-        "/app/tests"
+        "/bin/sh",
+        "-c",
+        "alembic upgrade head && pytest -q /app/tests"
       ]
 
     depends_on:

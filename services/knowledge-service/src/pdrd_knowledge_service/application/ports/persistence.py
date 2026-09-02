@@ -4,13 +4,19 @@
 
 from collections.abc import Callable
 from types import TracebackType
-from typing import Protocol, Self
+from typing import (
+    Protocol,
+    Self,
+)
 from uuid import UUID
 
 from pdrd_knowledge_service.domain.normative_catalog import (
     NormativeCategory,
     NormativeDocument,
     NormativeSection,
+)
+from pdrd_knowledge_service.domain.normative_outbox import (
+    NormativeOutboxMessage,
 )
 
 
@@ -130,12 +136,39 @@ class NormativeDocumentRepository(Protocol):
         ...
 
 
+class NormativeOutboxRepository(Protocol):
+    """Контракт persistence transactional outbox."""
+
+    async def add(
+        self,
+        message: NormativeOutboxMessage,
+    ) -> None:
+        """Добавляет outbox message в текущую transaction."""
+        ...
+
+    async def get_pending(
+        self,
+        *,
+        limit: int,
+    ) -> list[NormativeOutboxMessage]:
+        """Возвращает ещё не опубликованные сообщения."""
+        ...
+
+    async def update(
+        self,
+        message: NormativeOutboxMessage,
+    ) -> None:
+        """Обновляет состояние outbox message."""
+        ...
+
+
 class NormativeCatalogUnitOfWork(Protocol):
     """Транзакционная граница операций нормативного каталога."""
 
     sections: NormativeSectionRepository
     categories: NormativeCategoryRepository
     documents: NormativeDocumentRepository
+    outbox: NormativeOutboxRepository
 
     async def __aenter__(
         self,

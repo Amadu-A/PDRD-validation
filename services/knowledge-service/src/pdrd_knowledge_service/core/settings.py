@@ -75,6 +75,54 @@ class DatabaseSettings(BaseModel):
     )
 
 
+class BrokerSettings(BaseModel):
+    """Настройки RabbitMQ нормативной индексации."""
+
+    host: str = "rabbitmq"
+
+    port: int = Field(
+        default=5672,
+        ge=1,
+        le=65535,
+    )
+
+    user: str = "pdrd_validation"
+
+    password: SecretStr = SecretStr(
+        "change-me",
+    )
+
+    virtual_host: str = "pdrd-validation"
+
+    queue_name: str = "pdrd.knowledge.indexing"
+
+    exchange_name: str = "pdrd.knowledge.indexing"
+
+    routing_key: str = "normative.index"
+
+    connect_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        le=60,
+    )
+
+
+class OutboxSettings(BaseModel):
+    """Настройки Knowledge transactional outbox."""
+
+    poll_interval_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        le=60,
+    )
+
+    batch_size: int = Field(
+        default=20,
+        ge=1,
+        le=1000,
+    )
+
+
 class NormativeStorageSettings(BaseModel):
     """Настройки managed storage нормативных PDF."""
 
@@ -234,6 +282,14 @@ class Settings(BaseSettings):
 
     database: DatabaseSettings = Field(
         default_factory=DatabaseSettings,
+    )
+
+    broker: BrokerSettings = Field(
+        default_factory=BrokerSettings,
+    )
+
+    outbox: OutboxSettings = Field(
+        default_factory=OutboxSettings,
     )
 
     storage: NormativeStorageSettings = Field(
