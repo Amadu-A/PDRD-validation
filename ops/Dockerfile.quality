@@ -12,10 +12,17 @@ WORKDIR /workspace
 COPY pyproject.toml /workspace/pyproject.toml
 COPY requirements-dev.txt /workspace/requirements-dev.txt
 
+# requirements-dev.txt содержит editable dependencies вида
+# ./services/api-gateway[test], поэтому каталоги сервисов должны существовать
+# до запуска pip install.
+COPY services /workspace/services
+
 RUN pip install \
     --no-cache-dir \
     -r /workspace/requirements-dev.txt
 
+# Полный repository snapshot нужен architecture tests:
+# frontend, n8n, scripts, compose.yaml и другим repository-level проверкам.
 COPY . /workspace
 
 CMD ["/bin/sh", "-c", "python -m ruff check . && python -m ruff format --check . && python -m pytest -q --import-mode=importlib"]

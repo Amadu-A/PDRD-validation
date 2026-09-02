@@ -6,6 +6,9 @@
 Architecture tests внутри Docker должны видеть frontend, n8n, runtime scripts
 и корневые configuration files, при этом тяжёлые runtime data не должны
 попадать в build context.
+
+Также тесты контролируют подготовку локальных editable dependencies до
+запуска pip install.
 """
 
 from pathlib import Path
@@ -43,6 +46,31 @@ def test_quality_dockerfile_copies_repository() -> None:
     )
 
     assert "COPY . /workspace" in content
+
+
+def test_quality_dockerfile_prepares_editable_services_before_pip() -> None:
+    """Требует наличие локальных сервисов до установки editable packages."""
+    content = QUALITY_DOCKERFILE.read_text(
+        encoding="utf-8",
+    )
+
+    services_position = content.find(
+        "COPY services /workspace/services",
+    )
+
+    pip_install_position = content.find(
+        "RUN pip install",
+    )
+
+    repository_position = content.find(
+        "COPY . /workspace",
+    )
+
+    assert services_position >= 0
+    assert pip_install_position >= 0
+    assert repository_position >= 0
+
+    assert services_position < pip_install_position < repository_position
 
 
 def test_quality_context_keeps_architecture_inputs() -> None:
