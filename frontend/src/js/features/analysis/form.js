@@ -17,6 +17,7 @@ export function createAnalysisForm({
   useExplanatoryNoteInput,
   noteStartPageInput,
   noteEndPageInput,
+  getNormativeSelection = () => null,
 }) {
   function hasPdf() {
     return Boolean(
@@ -244,6 +245,29 @@ export function createAnalysisForm({
   }
 
 
+  function appendNormativeSelection(
+    body,
+  ) {
+    const selection = getNormativeSelection();
+
+    if (!selection) {
+      return;
+    }
+
+    body.append(
+      "normative_section_id",
+      selection.sectionId,
+    );
+
+    body.append(
+      "normative_document_ids",
+      JSON.stringify(
+        selection.documentIds,
+      ),
+    );
+  }
+
+
   function toFormData() {
     const body = new FormData();
 
@@ -293,6 +317,10 @@ export function createAnalysisForm({
         noteEndPageInput.value.trim(),
       );
     }
+
+    appendNormativeSelection(
+      body,
+    );
 
     return body;
   }

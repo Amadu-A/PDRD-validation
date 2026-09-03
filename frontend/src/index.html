@@ -3,9 +3,8 @@
 <!--
   Главная страница PDRD Validation.
 
-  Разметка содержит публичную форму запуска анализа, область результата
-  и модальное состояние длительной фоновой операции. Визуальные классы
-  следуют BEM, а JavaScript привязывается к DOM только через data-* hooks.
+  Browser взаимодействует только с публичным API Gateway.
+  Normative sidebar управляет разделами, папками, документами и selection.
 -->
 
 <!doctype html>
@@ -34,204 +33,349 @@
 
 <body class="page">
   <main class="page__content">
-    <section
-      class="analysis-panel"
-      aria-labelledby="analysisTitle"
+    <aside
+      class="normative-sidebar"
+      data-normative-sidebar
+      aria-labelledby="normativeTitle"
     >
-      <h1
-        id="analysisTitle"
-        class="analysis-panel__title"
+      <div class="normative-sidebar__header">
+        <div>
+          <h2
+            id="normativeTitle"
+            class="normative-sidebar__title"
+          >
+            Нормативная база
+          </h2>
+
+          <p class="normative-sidebar__description">
+            Выберите документы, которые будут участвовать
+            в нормативной проверке.
+          </p>
+        </div>
+      </div>
+
+      <div class="normative-sidebar__section-control">
+        <label
+          class="normative-sidebar__label"
+          for="normativeSection"
+        >
+          Раздел
+        </label>
+
+        <select
+          id="normativeSection"
+          class="normative-sidebar__select"
+          data-normative-section-select
+        ></select>
+      </div>
+
+      <div
+        class="normative-sidebar__toolbar"
+        aria-label="Управление разделом"
       >
-        Проверка проектной и рабочей документации
-      </h1>
-
-      <p class="analysis-panel__description">
-        Загрузите PDF, DWG/DXF или PDF вместе с соответствующим CAD-файлом.
-        Анализ выполняется асинхронно через API Gateway.
-      </p>
-
-      <form
-        id="analysisForm"
-        class="analysis-form"
-        data-analysis-form
-      >
-        <div class="analysis-form__field">
-          <label
-            class="analysis-form__label"
-            for="pdfFile"
-          >
-            PDF
-          </label>
-
-          <input
-            id="pdfFile"
-            class="analysis-form__control"
-            data-pdf-input
-            type="file"
-            name="pdf"
-            accept=".pdf,application/pdf"
-          >
-
-          <p class="analysis-form__hint">
-            Для PDF-only можно анализировать одну или несколько физических
-            страниц документа.
-          </p>
-        </div>
-
-        <div class="analysis-form__field">
-          <label
-            class="analysis-form__label"
-            for="cadFile"
-          >
-            DWG / DXF
-          </label>
-
-          <input
-            id="cadFile"
-            class="analysis-form__control"
-            data-cad-input
-            type="file"
-            name="cad"
-            accept=".dwg,.dxf"
-          >
-
-          <p class="analysis-form__hint">
-            CAD-only считается одним анализируемым листом.
-          </p>
-        </div>
-
-        <div class="analysis-form__field">
-          <label
-            class="analysis-form__label"
-            for="pages"
-          >
-            Страницы PDF
-          </label>
-
-          <input
-            id="pages"
-            class="analysis-form__control"
-            data-pages-input
-            type="text"
-            name="pages"
-            autocomplete="off"
-            placeholder="PDF-only: 3,5,8-12. Пусто = весь PDF"
-          >
-
-          <p
-            class="analysis-form__hint"
-            data-pages-hint
-          >
-            Для PDF-only можно анализировать одну или несколько страниц.
-          </p>
-        </div>
-
-        <fieldset class="analysis-form__context">
-          <legend class="analysis-form__context-title">
-            Контекст проекта
-          </legend>
-
-          <label class="analysis-form__toggle">
-            <input
-              class="analysis-form__toggle-control"
-              data-explanatory-note-input
-              type="checkbox"
-              name="use_explanatory_note"
-            >
-
-            <span class="analysis-form__toggle-label">
-              Использовать пояснительную записку
-            </span>
-          </label>
-
-          <p class="analysis-form__hint">
-            Пояснительная записка используется только как контекст проекта
-            и не является нормативным доказательством.
-          </p>
-
-          <div class="analysis-form__note-range">
-            <div class="analysis-form__field">
-              <label
-                class="analysis-form__label"
-                for="noteStartPage"
-              >
-                Начальная страница ПЗ
-                <span
-                  class="analysis-form__required"
-                  aria-hidden="true"
-                >
-                  *
-                </span>
-              </label>
-
-              <input
-                id="noteStartPage"
-                class="analysis-form__control"
-                data-note-start-input
-                type="number"
-                name="note_start_page"
-                min="1"
-                step="1"
-                disabled
-              >
-            </div>
-
-            <div class="analysis-form__field">
-              <label
-                class="analysis-form__label"
-                for="noteEndPage"
-              >
-                Конечная страница ПЗ
-                <span
-                  class="analysis-form__required"
-                  aria-hidden="true"
-                >
-                  *
-                </span>
-              </label>
-
-              <input
-                id="noteEndPage"
-                class="analysis-form__control"
-                data-note-end-input
-                type="number"
-                name="note_end_page"
-                min="1"
-                step="1"
-                disabled
-              >
-            </div>
-          </div>
-        </fieldset>
+        <button
+          class="normative-sidebar__button"
+          data-normative-section-create
+          type="button"
+        >
+          + Раздел
+        </button>
 
         <button
-          class="analysis-form__submit"
-          data-submit-button
-          type="submit"
+          class="normative-sidebar__button"
+          data-normative-section-rename
+          type="button"
         >
-          Запустить анализ
+          Переименовать
         </button>
-      </form>
-    </section>
 
-    <section
-      class="analysis-panel analysis-panel--result"
-      aria-labelledby="resultTitle"
-    >
-      <h2
-        id="resultTitle"
-        class="analysis-panel__title"
+        <button
+          class="normative-sidebar__button normative-sidebar__button--danger"
+          data-normative-section-delete
+          type="button"
+        >
+          Удалить
+        </button>
+      </div>
+
+      <div
+        class="normative-sidebar__toolbar"
+        aria-label="Выбор нормативных документов"
       >
-        Результат
-      </h2>
+        <button
+          class="normative-sidebar__button"
+          data-normative-select-all
+          type="button"
+        >
+          Выбрать всё
+        </button>
 
-      <pre
-        class="analysis-result"
-        data-analysis-result
+        <button
+          class="normative-sidebar__button"
+          data-normative-clear-all
+          type="button"
+        >
+          Очистить
+        </button>
+
+        <button
+          class="normative-sidebar__button"
+          data-normative-category-create
+          type="button"
+        >
+          + Папка
+        </button>
+      </div>
+
+      <div
+        class="normative-sidebar__upload"
+        data-normative-upload-zone
+        data-disabled="false"
+        role="button"
+        tabindex="0"
+        aria-label="Загрузить нормативные PDF"
+      >
+        <strong class="normative-sidebar__upload-title">
+          Добавить PDF
+        </strong>
+
+        <span class="normative-sidebar__upload-text">
+          Перетащите файлы сюда или нажмите для выбора.
+        </span>
+
+        <span class="normative-sidebar__upload-text">
+          После загрузки индексация запускается автоматически.
+        </span>
+
+        <input
+          class="normative-sidebar__file-input"
+          data-normative-file-input
+          type="file"
+          accept=".pdf,application/pdf"
+          multiple
+          tabindex="-1"
+        >
+      </div>
+
+      <div
+        class="normative-sidebar__tree"
+        data-normative-tree
+        aria-label="Документы нормативного раздела"
+      ></div>
+
+      <p
+        class="normative-sidebar__status"
+        data-normative-status
+        data-state="normal"
         role="status"
         aria-live="polite"
-      >Результат анализа появится здесь.</pre>
-    </section>
+      >
+        Загружаем нормативный каталог…
+      </p>
+    </aside>
+
+    <div class="page__main">
+      <section
+        class="analysis-panel"
+        aria-labelledby="analysisTitle"
+      >
+        <h1
+          id="analysisTitle"
+          class="analysis-panel__title"
+        >
+          Проверка проектной и рабочей документации
+        </h1>
+
+        <p class="analysis-panel__description">
+          Загрузите PDF, DWG/DXF или PDF вместе с соответствующим CAD-файлом.
+          Анализ выполняется асинхронно через API Gateway.
+        </p>
+
+        <form
+          id="analysisForm"
+          class="analysis-form"
+          data-analysis-form
+        >
+          <div class="analysis-form__field">
+            <label
+              class="analysis-form__label"
+              for="pdfFile"
+            >
+              PDF
+            </label>
+
+            <input
+              id="pdfFile"
+              class="analysis-form__control"
+              data-pdf-input
+              type="file"
+              name="pdf"
+              accept=".pdf,application/pdf"
+            >
+
+            <p class="analysis-form__hint">
+              Для PDF-only можно анализировать одну или несколько физических
+              страниц документа.
+            </p>
+          </div>
+
+          <div class="analysis-form__field">
+            <label
+              class="analysis-form__label"
+              for="cadFile"
+            >
+              DWG / DXF
+            </label>
+
+            <input
+              id="cadFile"
+              class="analysis-form__control"
+              data-cad-input
+              type="file"
+              name="cad"
+              accept=".dwg,.dxf"
+            >
+
+            <p class="analysis-form__hint">
+              CAD-only считается одним анализируемым листом.
+            </p>
+          </div>
+
+          <div class="analysis-form__field">
+            <label
+              class="analysis-form__label"
+              for="pages"
+            >
+              Страницы PDF
+            </label>
+
+            <input
+              id="pages"
+              class="analysis-form__control"
+              data-pages-input
+              type="text"
+              name="pages"
+              autocomplete="off"
+              placeholder="PDF-only: 3,5,8-12. Пусто = весь PDF"
+            >
+
+            <p
+              class="analysis-form__hint"
+              data-pages-hint
+            >
+              Для PDF-only можно анализировать одну или несколько страниц.
+            </p>
+          </div>
+
+          <fieldset class="analysis-form__context">
+            <legend class="analysis-form__context-title">
+              Контекст проекта
+            </legend>
+
+            <label class="analysis-form__toggle">
+              <input
+                class="analysis-form__toggle-control"
+                data-explanatory-note-input
+                type="checkbox"
+                name="use_explanatory_note"
+              >
+
+              <span class="analysis-form__toggle-label">
+                Использовать пояснительную записку
+              </span>
+            </label>
+
+            <p class="analysis-form__hint">
+              Пояснительная записка используется только как контекст проекта
+              и не является нормативным доказательством.
+            </p>
+
+            <div class="analysis-form__note-range">
+              <div class="analysis-form__field">
+                <label
+                  class="analysis-form__label"
+                  for="noteStartPage"
+                >
+                  Начальная страница ПЗ
+
+                  <span
+                    class="analysis-form__required"
+                    aria-hidden="true"
+                  >
+                    *
+                  </span>
+                </label>
+
+                <input
+                  id="noteStartPage"
+                  class="analysis-form__control"
+                  data-note-start-input
+                  type="number"
+                  name="note_start_page"
+                  min="1"
+                  step="1"
+                  disabled
+                >
+              </div>
+
+              <div class="analysis-form__field">
+                <label
+                  class="analysis-form__label"
+                  for="noteEndPage"
+                >
+                  Конечная страница ПЗ
+
+                  <span
+                    class="analysis-form__required"
+                    aria-hidden="true"
+                  >
+                    *
+                  </span>
+                </label>
+
+                <input
+                  id="noteEndPage"
+                  class="analysis-form__control"
+                  data-note-end-input
+                  type="number"
+                  name="note_end_page"
+                  min="1"
+                  step="1"
+                  disabled
+                >
+              </div>
+            </div>
+          </fieldset>
+
+          <button
+            class="analysis-form__submit"
+            data-submit-button
+            type="submit"
+          >
+            Запустить анализ
+          </button>
+        </form>
+      </section>
+
+      <section
+        class="analysis-panel analysis-panel--result"
+        aria-labelledby="resultTitle"
+      >
+        <h2
+          id="resultTitle"
+          class="analysis-panel__title"
+        >
+          Результат
+        </h2>
+
+        <pre
+          class="analysis-result"
+          data-analysis-result
+          role="status"
+          aria-live="polite"
+        >Результат анализа появится здесь.</pre>
+      </section>
+    </div>
   </main>
 
   <div

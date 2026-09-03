@@ -4,14 +4,14 @@
  * Единая точка входа CSS браузерного приложения.
  *
  * Импорты расположены от общих design tokens и глобальных правил
- * к независимым BEM-блокам интерфейса. Компонентные стили не должны
- * возвращаться в этот файл.
+ * к независимым BEM-блокам интерфейса.
  */
 
 @import url("./variables.css");
 @import url("./global.css");
 
 @import url("./blocks/page.css");
+@import url("./blocks/normative-sidebar.css");
 @import url("./blocks/analysis-panel.css");
 @import url("./blocks/analysis-form.css");
 @import url("./blocks/analysis-result.css");

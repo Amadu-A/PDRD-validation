@@ -2,11 +2,6 @@
 
 /**
  * Composition root браузерного приложения PDRD Validation.
- *
- * Модуль получает обязательные DOM-зависимости через общий helper,
- * собирает компоненты формы, результата и модального состояния, после чего
- * связывает их с публичным Analysis API Gateway. Бизнес-валидация формы,
- * polling и форматирование результата остаются в feature-модулях.
  */
 
 import {
@@ -42,6 +37,10 @@ import {
   renderAnalysisReport,
 } from "./features/analysis/report.js";
 
+import {
+  createNormativeCatalog,
+} from "./features/normative/catalog.js";
+
 
 const analysisFormElement = requireElement(
   "[data-analysis-form]",
@@ -49,6 +48,13 @@ const analysisFormElement = requireElement(
 
 const submitButton = requireElement(
   "[data-submit-button]",
+);
+
+
+const normativeCatalog = createNormativeCatalog(
+  requireElement(
+    "[data-normative-sidebar]",
+  ),
 );
 
 
@@ -100,17 +106,13 @@ const analysisForm = createAnalysisForm({
   noteEndPageInput: requireElement(
     "[data-note-end-input]",
   ),
+
+  getNormativeSelection: () => (
+    normativeCatalog.getSelection()
+  ),
 });
 
 
-/**
- * Показывает пользователю текущее состояние фонового analysis job.
- *
- * @param {string} jobId Идентификатор задания API Gateway.
- * @param {object} payload Последний status payload задания.
- * @param {number} elapsedSeconds Время ожидания результата в секундах.
- * @returns {void}
- */
 function renderProgress(
   jobId,
   payload,
@@ -133,15 +135,6 @@ function renderProgress(
 }
 
 
-/**
- * Валидирует форму, создаёт analysis job и ожидает готовый результат.
- *
- * Все HTTP-вызовы выполняются только через публичный API Gateway.
- * Модуль не обращается напрямую к n8n или внутренним application services.
- *
- * @param {SubmitEvent} event Событие отправки формы анализа.
- * @returns {Promise<void>}
- */
 async function handleAnalysisSubmit(
   event,
 ) {
@@ -232,3 +225,5 @@ analysisFormElement.addEventListener(
   "submit",
   handleAnalysisSubmit,
 );
+
+void normativeCatalog.start();
