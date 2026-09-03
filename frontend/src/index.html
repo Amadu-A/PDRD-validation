@@ -4,8 +4,8 @@
   Главная страница PDRD Validation.
 
   Browser взаимодействует только с публичным API Gateway.
-  Normative sidebar управляет разделами, папками, документами,
-  prompt и selection.
+  Normative sidebar управляет разделами, нормативными документами,
+  пользовательскими пакетами, prompt и selection.
 -->
 
 <!doctype html>
@@ -49,29 +49,13 @@
           </h2>
 
           <p class="normative-sidebar__description">
-            Выберите документы, которые будут участвовать
-            в нормативной проверке.
+            Управление разделом и документами проверки.
           </p>
         </div>
       </div>
 
-      <div class="normative-sidebar__section-control">
-        <label
-          class="normative-sidebar__label"
-          for="normativeSection"
-        >
-          Раздел
-        </label>
-
-        <select
-          id="normativeSection"
-          class="normative-sidebar__select"
-          data-normative-section-select
-        ></select>
-      </div>
-
       <div
-        class="normative-sidebar__toolbar"
+        class="normative-sidebar__toolbar normative-sidebar__section-actions"
         aria-label="Управление разделом"
       >
         <button
@@ -99,7 +83,262 @@
         </button>
       </div>
 
-      <section class="normative-sidebar__prompt">
+      <div class="normative-sidebar__section-control">
+        <label
+          class="normative-sidebar__label"
+          for="normativeSection"
+        >
+          Раздел
+        </label>
+
+        <select
+          id="normativeSection"
+          class="normative-sidebar__select"
+          data-normative-section-select
+        ></select>
+      </div>
+
+      <section
+        class="normative-sidebar__block normative-sidebar__specification"
+        data-specification-placeholder
+        aria-disabled="true"
+      >
+        <div class="normative-sidebar__block-header">
+          <h3 class="normative-sidebar__block-title">
+            ТЗ
+          </h3>
+
+          <span class="normative-sidebar__disabled-badge">
+            Пока недоступно
+          </span>
+        </div>
+
+        <div class="normative-sidebar__disabled-surface">
+          <div class="normative-sidebar__file-picker">
+            <label
+              class="normative-sidebar__file-picker-button"
+              for="specificationFile"
+            >
+              Выбрать файл
+            </label>
+
+            <span class="normative-sidebar__file-picker-name">
+              Файл не выбран
+            </span>
+
+            <input
+              id="specificationFile"
+              class="normative-sidebar__file-input"
+              type="file"
+              disabled
+              tabindex="-1"
+            >
+          </div>
+        </div>
+
+        <p class="normative-sidebar__block-hint">
+          Функциональность загрузки ТЗ будет подключена позже.
+        </p>
+      </section>
+
+      <section
+        class="normative-sidebar__block normative-sidebar__documents"
+        data-normative-documents-block
+      >
+        <div class="normative-sidebar__block-header">
+          <div>
+            <h3 class="normative-sidebar__block-title">
+              Нормативные документы
+            </h3>
+
+            <p class="normative-sidebar__block-hint">
+              Все готовые документы раздела автоматически
+              участвуют в анализе.
+            </p>
+          </div>
+
+          <button
+            class="normative-sidebar__button"
+            data-normative-category-create
+            type="button"
+          >
+            + Папка
+          </button>
+        </div>
+
+        <div
+          class="normative-sidebar__toolbar is-hidden"
+          data-normative-admin-selection
+          aria-label="Административный выбор нормативных документов"
+        >
+          <button
+            class="normative-sidebar__button"
+            data-normative-select-all
+            type="button"
+          >
+            Выбрать всё
+          </button>
+
+          <button
+            class="normative-sidebar__button"
+            data-normative-clear-all
+            type="button"
+          >
+            Очистить
+          </button>
+        </div>
+
+        <div
+          class="normative-sidebar__upload"
+          data-normative-upload-zone
+          data-disabled="false"
+          role="button"
+          tabindex="0"
+          aria-label="Загрузить нормативные документы"
+        >
+          <strong class="normative-sidebar__upload-title">
+            Добавить норматив
+          </strong>
+
+          <span class="normative-sidebar__upload-text">
+            PDF, DOC или DOCX.
+          </span>
+
+          <span class="normative-sidebar__upload-text">
+            Перетащите файлы сюда или нажмите для выбора.
+          </span>
+
+          <span class="normative-sidebar__upload-text">
+            После загрузки индексация запускается автоматически.
+          </span>
+
+          <input
+            class="normative-sidebar__file-input"
+            data-normative-file-input
+            type="file"
+            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            multiple
+            tabindex="-1"
+          >
+        </div>
+
+        <div
+          class="normative-sidebar__tree"
+          data-normative-tree
+          aria-label="Документы нормативного раздела"
+        ></div>
+
+        <p
+          class="normative-sidebar__status"
+          data-normative-status
+          data-state="normal"
+          role="status"
+          aria-live="polite"
+        >
+          Загружаем нормативный каталог…
+        </p>
+      </section>
+
+      <section
+        class="normative-sidebar__block normative-sidebar__user-packages"
+        data-user-packages-block
+      >
+        <div class="normative-sidebar__block-header">
+          <div>
+            <h3 class="normative-sidebar__block-title">
+              Пользовательские пакеты документов
+            </h3>
+
+            <p class="normative-sidebar__block-hint">
+              Дополнительные документы выбранного раздела.
+            </p>
+          </div>
+
+          <div
+            class="normative-sidebar__utility-actions"
+            aria-label="Выбор пользовательских пакетов"
+          >
+            <button
+              class="normative-sidebar__utility-button"
+              data-user-packages-select-all
+              type="button"
+              title="Выбрать все пакеты"
+              aria-label="Выбрать все пакеты"
+              disabled
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                aria-hidden="true"
+              >
+                <rect
+                  x="3"
+                  y="3"
+                  width="18"
+                  height="18"
+                  rx="3"
+                ></rect>
+
+                <path
+                  d="M7 12.5l3.2 3.2L17.5 8.5"
+                ></path>
+              </svg>
+            </button>
+
+            <button
+              class="normative-sidebar__utility-button"
+              data-user-packages-clear
+              type="button"
+              title="Снять выбор со всех пакетов"
+              aria-label="Снять выбор со всех пакетов"
+              disabled
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                aria-hidden="true"
+              >
+                <rect
+                  x="3"
+                  y="3"
+                  width="18"
+                  height="18"
+                  rx="3"
+                ></rect>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="normative-sidebar__toolbar">
+          <button
+            class="normative-sidebar__button"
+            data-user-package-create
+            type="button"
+            disabled
+          >
+            + Пакет
+          </button>
+        </div>
+
+        <div
+          class="normative-sidebar__packages-placeholder"
+          data-user-packages-placeholder
+          aria-disabled="true"
+        >
+          <p class="normative-sidebar__empty">
+            Пользовательские пакеты будут подключены
+            следующим этапом.
+          </p>
+        </div>
+      </section>
+
+      <section
+        class="normative-sidebar__prompt"
+        data-normative-prompt-block
+      >
         <label
           class="normative-sidebar__label"
           for="normativePrompt"
@@ -146,85 +385,6 @@
           Выберите нормативный раздел.
         </p>
       </section>
-
-      <div
-        class="normative-sidebar__toolbar"
-        aria-label="Выбор нормативных документов"
-      >
-        <button
-          class="normative-sidebar__button"
-          data-normative-select-all
-          type="button"
-        >
-          Выбрать всё
-        </button>
-
-        <button
-          class="normative-sidebar__button"
-          data-normative-clear-all
-          type="button"
-        >
-          Очистить
-        </button>
-
-        <button
-          class="normative-sidebar__button"
-          data-normative-category-create
-          type="button"
-        >
-          + Папка
-        </button>
-      </div>
-
-      <div
-        class="normative-sidebar__upload"
-        data-normative-upload-zone
-        data-disabled="false"
-        role="button"
-        tabindex="0"
-        aria-label="Загрузить нормативные документы"
-      >
-        <strong class="normative-sidebar__upload-title">
-          Добавить норматив
-        </strong>
-
-        <span class="normative-sidebar__upload-text">
-          PDF, DOC или DOCX.
-        </span>
-
-        <span class="normative-sidebar__upload-text">
-          Перетащите файлы сюда или нажмите для выбора.
-        </span>
-
-        <span class="normative-sidebar__upload-text">
-          После загрузки индексация запускается автоматически.
-        </span>
-
-        <input
-          class="normative-sidebar__file-input"
-          data-normative-file-input
-          type="file"
-          accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-          multiple
-          tabindex="-1"
-        >
-      </div>
-
-      <div
-        class="normative-sidebar__tree"
-        data-normative-tree
-        aria-label="Документы нормативного раздела"
-      ></div>
-
-      <p
-        class="normative-sidebar__status"
-        data-normative-status
-        data-state="normal"
-        role="status"
-        aria-live="polite"
-      >
-        Загружаем нормативный каталог…
-      </p>
     </aside>
 
     <div class="page__main">

@@ -284,6 +284,8 @@ export function createNormativeCatalog(
 
     selectedBySection: new Map(),
 
+    readySeenBySection: new Map(),
+
     pollTimer: null,
   };
 
@@ -320,6 +322,28 @@ export function createNormativeCatalog(
   }
 
 
+  function readySeenSet() {
+    if (!state.sectionId) {
+      return new Set();
+    }
+
+    if (
+      !state.readySeenBySection.has(
+        state.sectionId,
+      )
+    ) {
+      state.readySeenBySection.set(
+        state.sectionId,
+        new Set(),
+      );
+    }
+
+    return state.readySeenBySection.get(
+      state.sectionId,
+    );
+  }
+
+
   function pruneSelection() {
     const selected = selectedSet();
 
@@ -344,6 +368,51 @@ export function createNormativeCatalog(
         );
       }
     }
+  }
+
+
+  function selectNewReadyDocumentsByDefault() {
+    if (!state.sectionId) {
+      return;
+    }
+
+    const selected = selectedSet();
+
+    const previouslyReady = readySeenSet();
+
+    const currentlyReady = new Set();
+
+    for (
+      const documentItem
+      of state.documents
+    ) {
+      if (!isReady(
+        documentItem,
+      )) {
+        continue;
+      }
+
+      currentlyReady.add(
+        documentItem.document_id,
+      );
+
+      if (
+        !previouslyReady.has(
+          documentItem.document_id,
+        )
+      ) {
+        selected.add(
+          documentItem.document_id,
+        );
+      }
+    }
+
+    state.readySeenBySection.set(
+      state.sectionId,
+      currentlyReady,
+    );
+
+    pruneSelection();
   }
 
 
@@ -605,7 +674,7 @@ export function createNormativeCatalog(
     checkbox.type = "checkbox";
 
     checkbox.className = (
-      "normative-sidebar__checkbox"
+      "normative-sidebar__checkbox is-hidden"
     );
 
     checkbox.disabled = !isReady(
@@ -917,7 +986,7 @@ export function createNormativeCatalog(
     selection.type = "checkbox";
 
     selection.className = (
-      "normative-sidebar__checkbox"
+      "normative-sidebar__checkbox is-hidden"
     );
 
     const categoryDocuments = (
@@ -1439,7 +1508,7 @@ export function createNormativeCatalog(
 
     state.documents = documents;
 
-    pruneSelection();
+    selectNewReadyDocumentsByDefault();
 
     renderTree();
 
@@ -1838,6 +1907,10 @@ export function createNormativeCatalog(
             );
 
             state.selectedBySection.delete(
+              section.section_id,
+            );
+
+            state.readySeenBySection.delete(
               section.section_id,
             );
 
