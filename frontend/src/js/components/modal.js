@@ -2,33 +2,79 @@
 
 /**
  * Компонент модального состояния длительной операции.
- *
- * Компонент отвечает только за видимость modal, текст текущего состояния
- * и временную блокировку submit-кнопки. Он не знает ничего о polling,
- * Analysis API или бизнес-статусах задания.
  */
 
 
+async function copyText(
+  value,
+) {
+  if (
+    navigator.clipboard
+    && typeof navigator.clipboard.writeText
+    === "function"
+  ) {
+    try {
+      await navigator.clipboard.writeText(
+        value,
+      );
+
+      return;
+
+    } catch {
+      // Для HTTP-host fallback ниже.
+    }
+  }
+
+  const temporary = document.createElement(
+    "textarea",
+  );
+
+  temporary.value = value;
+
+  temporary.setAttribute(
+    "readonly",
+    "",
+  );
+
+  temporary.style.position = "fixed";
+
+  temporary.style.opacity = "0";
+
+  document.body.append(
+    temporary,
+  );
+
+  temporary.select();
+
+  const copied = document.execCommand(
+    "copy",
+  );
+
+  temporary.remove();
+
+  if (!copied) {
+    throw new Error(
+      "Не удалось скопировать номер задания.",
+    );
+  }
+}
+
+
 /**
- * Создаёт контроллер модального состояния анализа.
- *
- * @param {object} dependencies DOM-зависимости компонента.
- * @param {Element} dependencies.modalElement Корневой modal-элемент.
- * @param {Element} dependencies.textElement Элемент текста состояния.
- * @param {Element} dependencies.submitButton Кнопка запуска анализа.
- * @returns {{show: Function, hide: Function}} Контроллер modal.
+ * Создаёт контроллер modal анализа.
  */
 export function createModal({
   modalElement,
   textElement,
   submitButton,
+  jobElement,
+  jobIdElement,
+  copyButton,
+  copyStatusElement,
 }) {
-  /**
-   * Показывает modal и блокирует повторный запуск анализа.
-   *
-   * @param {string} text Текст текущего состояния операции.
-   * @returns {void}
-   */
+  let jobId = null;
+
+
   function show(
     text = "Идёт анализ документа…",
   ) {
@@ -47,11 +93,6 @@ export function createModal({
   }
 
 
-  /**
-   * Скрывает modal и снова разрешает запуск анализа.
-   *
-   * @returns {void}
-   */
   function hide() {
     modalElement.classList.add(
       "is-hidden",
@@ -66,8 +107,64 @@ export function createModal({
   }
 
 
+  function setJobId(
+    value,
+  ) {
+    jobId = value;
+
+    jobIdElement.textContent = value;
+
+    jobElement.hidden = false;
+
+    copyStatusElement.textContent = "";
+  }
+
+
+  function clearJobId() {
+    jobId = null;
+
+    jobIdElement.textContent = "";
+
+    jobElement.hidden = true;
+
+    copyStatusElement.textContent = "";
+  }
+
+
+  copyButton.addEventListener(
+    "click",
+    async () => {
+      if (!jobId) {
+        return;
+      }
+
+      try {
+        await copyText(
+          jobId,
+        );
+
+        copyStatusElement.textContent = (
+          "Скопировано"
+        );
+
+      } catch (error) {
+        copyStatusElement.textContent = (
+          error instanceof Error
+            ? error.message
+            : String(error)
+        );
+      }
+    },
+  );
+
+
+  clearJobId();
+
+
   return {
     show,
     hide,
+    setJobId,
+    clearJobId,
   };
 }

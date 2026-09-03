@@ -59,11 +59,13 @@ function appendCadSummary(
       "Предупреждения CAD:",
     );
 
-    cad.warnings.forEach((warning) => {
-      lines.push(
-        `  - ${warning}`,
-      );
-    });
+    cad.warnings.forEach(
+      (warning) => {
+        lines.push(
+          `  - ${warning}`,
+        );
+      },
+    );
   }
 }
 
@@ -152,7 +154,9 @@ function appendProjectContextSummary(
   );
 
   if (
-    Array.isArray(warnings)
+    Array.isArray(
+      warnings,
+    )
     && warnings.length
   ) {
     lines.push(
@@ -180,24 +184,26 @@ function appendNormativeSources(
     "Нормативные источники:",
   );
 
-  sources.forEach((source) => {
-    const fileName = (
-      source.source_file
-      || source.file_name
-      || source.source
-      || "источник"
-    );
+  sources.forEach(
+    (source) => {
+      const fileName = (
+        source.source_file
+        || source.file_name
+        || source.source
+        || "источник"
+      );
 
-    const page = (
-      source.page
-      ?? source.page_number
-      ?? "?"
-    );
+      const page = (
+        source.page
+        ?? source.page_number
+        ?? "?"
+      );
 
-    lines.push(
-      `  - ${fileName}, стр. ${page}`,
-    );
-  });
+      lines.push(
+        `  - ${fileName}, стр. ${page}`,
+      );
+    },
+  );
 }
 
 
@@ -218,14 +224,16 @@ function appendProjectContextSources(
     "Контекст ПЗ:",
   );
 
-  sources.forEach((source) => {
-    lines.push(
-      "  - "
-      + `${source.source_id || "PZ"}`
-      + `, стр. ${source.page ?? "?"}`
-      + `, score=${source.score ?? "?"}`,
-    );
-  });
+  sources.forEach(
+    (source) => {
+      lines.push(
+        "  - "
+        + `${source.source_id || "PZ"}`
+        + `, стр. ${source.page ?? "?"}`
+        + `, score=${source.score ?? "?"}`,
+      );
+    },
+  );
 }
 
 
@@ -317,16 +325,31 @@ function renderFinding(
 
 export function renderAnalysisReport(
   payload,
+  {
+    jobId = null,
+  } = {},
 ) {
   if (payload.status !== "completed") {
-    return JSON.stringify(
+    const result = JSON.stringify(
       payload,
       null,
       2,
     );
+
+    return (
+      jobId
+        ? `Задание: ${jobId}\n${result}`
+        : result
+    );
   }
 
   const lines = [];
+
+  if (jobId) {
+    lines.push(
+      `Задание: ${jobId}`,
+    );
+  }
 
   lines.push(
     `Режим: ${sourceModeLabel(payload.source_mode)}`,
@@ -409,7 +432,9 @@ export function renderAnalysisReport(
   lines.push("");
 
   const findings = (
-    Array.isArray(payload.findings)
+    Array.isArray(
+      payload.findings,
+    )
       ? payload.findings
       : []
   );
@@ -432,7 +457,10 @@ export function renderAnalysisReport(
     );
 
     findings.forEach(
-      (finding, index) => {
+      (
+        finding,
+        index,
+      ) => {
         lines.push(
           ...renderFinding(
             finding,
@@ -460,5 +488,7 @@ export function renderAnalysisReport(
     );
   }
 
-  return lines.join("\n");
+  return lines.join(
+    "\n",
+  );
 }

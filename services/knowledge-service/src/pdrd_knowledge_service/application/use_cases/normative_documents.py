@@ -10,11 +10,25 @@ from datetime import (
     datetime,
 )
 from hashlib import sha256
+from io import BytesIO
 from uuid import (
     UUID,
     uuid4,
 )
+from zipfile import (
+    BadZipFile,
+    ZipFile,
+)
 
+from pdrd_knowledge_service.application.normative_document_formats import (
+    DOC_EXTENSION,
+    DOCX_EXTENSION,
+    PDF_EXTENSION,
+    PDF_MIME_TYPE,
+    SUPPORTED_DOCUMENT_MIME_BY_EXTENSION,
+    is_word_mime_type,
+    preview_storage_key,
+)
 from pdrd_knowledge_service.application.ports.document_storage import (
     NormativeDocumentStorage,
     NormativeDocumentStorageError,
@@ -46,6 +60,10 @@ IdentifierFactory = Callable[
 ]
 
 _PDF_SIGNATURE_WINDOW = 1024
+
+_DOC_SIGNATURE = bytes.fromhex(
+    "D0CF11E0A1B11AE1",
+)
 
 _MUTATION_BLOCKED_STATUSES = frozenset(
     {
@@ -79,6 +97,10 @@ class NormativeDocumentMutationConflictError(RuntimeError):
     """Текущее состояние документа запрещает изменение или удаление."""
 
 
+class NormativeDocumentContentUnavailableError(RuntimeError):
+    """PDF-preview документа пока недоступен."""
+
+
 @dataclass(frozen=True, slots=True)
 class NormativeDocumentContent:
     """Документ вместе с физическим содержимым."""
@@ -86,6 +108,8 @@ class NormativeDocumentContent:
     document: NormativeDocument
 
     content: bytes
+
+    mime_type: str
 
 
 def utc_now() -> datetime:
@@ -152,10 +176,14 @@ async def _validate_category(
         )
 
 
-def _normalize_pdf_name(
+def _normalize_document_name(
     original_name: str,
-) -> str:
-    """Оставляет безопасное пользовательское имя PDF."""
+) -> tuple[
+    str,
+    str,
+    str,
+]:
+    """Нормализует имя и определяет поддерживаемый формат."""
     file_name = (
         original_name.replace(
             "\\",
@@ -178,22 +206,99 @@ def _normalize_pdf_name(
             "Имя нормативного документа содержит NUL-символ.",
         )
 
-    if not file_name.lower().endswith(
-        ".pdf",
-    ):
+    lowered_name = file_name.lower()
+
+    extension = next(
+        (
+            candidate
+            for candidate in (
+                DOCX_EXTENSION,
+                PDF_EXTENSION,
+                DOC_EXTENSION,
+            )
+            if lowered_name.endswith(
+                candidate,
+            )
+        ),
+        None,
+    )
+
+    if extension is None:
         raise NormativeDocumentUploadError(
-            "На текущем этапе поддерживаются только PDF-файлы.",
+            "Поддерживаются только PDF, DOC и DOCX.",
         )
 
-    return file_name
+    return (
+        file_name,
+        extension,
+        SUPPORTED_DOCUMENT_MIME_BY_EXTENSION[extension],
+    )
 
 
 def _validate_pdf_content(
     content: bytes,
+) -> None:
+    """Проверяет PDF signature."""
+    if b"%PDF-" not in content[:_PDF_SIGNATURE_WINDOW]:
+        raise NormativeDocumentUploadError(
+            "Загруженный файл не содержит PDF signature.",
+        )
+
+
+def _validate_doc_content(
+    content: bytes,
+) -> None:
+    """Проверяет Compound File Binary signature старого DOC."""
+    if not content.startswith(
+        _DOC_SIGNATURE,
+    ):
+        raise NormativeDocumentUploadError(
+            "Загруженный файл не содержит корректную DOC signature.",
+        )
+
+
+def _validate_docx_content(
+    content: bytes,
+) -> None:
+    """Проверяет базовую структуру OOXML DOCX."""
+    try:
+        with ZipFile(
+            BytesIO(
+                content,
+            )
+        ) as archive:
+            names = set(
+                archive.namelist(),
+            )
+
+    except (
+        BadZipFile,
+        OSError,
+    ) as error:
+        raise NormativeDocumentUploadError(
+            "Загруженный DOCX не является корректным OOXML ZIP.",
+        ) from error
+
+    required_entries = {
+        "[Content_Types].xml",
+        "word/document.xml",
+    }
+
+    if not required_entries.issubset(
+        names,
+    ):
+        raise NormativeDocumentUploadError(
+            "DOCX не содержит обязательную структуру Word-документа.",
+        )
+
+
+def _validate_document_content(
+    content: bytes,
     *,
+    extension: str,
     max_upload_bytes: int,
 ) -> None:
-    """Проверяет размер и PDF signature."""
+    """Проверяет размер и signature загруженного документа."""
     if max_upload_bytes <= 0:
         raise NormativeDocumentUploadError(
             "Лимит размера upload настроен некорректно.",
@@ -201,7 +306,7 @@ def _validate_pdf_content(
 
     if not content:
         raise NormativeDocumentUploadError(
-            "Загружаемый PDF пуст.",
+            "Загружаемый нормативный документ пуст.",
         )
 
     if (
@@ -211,13 +316,33 @@ def _validate_pdf_content(
         > max_upload_bytes
     ):
         raise NormativeDocumentUploadError(
-            "Размер нормативного PDF превышает допустимый лимит.",
+            "Размер нормативного документа превышает допустимый лимит.",
         )
 
-    if b"%PDF-" not in content[:_PDF_SIGNATURE_WINDOW]:
-        raise NormativeDocumentUploadError(
-            "Загруженный файл не содержит PDF signature.",
+    if extension == PDF_EXTENSION:
+        _validate_pdf_content(
+            content,
         )
+
+        return
+
+    if extension == DOC_EXTENSION:
+        _validate_doc_content(
+            content,
+        )
+
+        return
+
+    if extension == DOCX_EXTENSION:
+        _validate_docx_content(
+            content,
+        )
+
+        return
+
+    raise NormativeDocumentUploadError(
+        "Формат нормативного документа не поддерживается.",
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,7 +396,7 @@ class GetNormativeDocument:
 
 @dataclass(frozen=True, slots=True)
 class UploadNormativeDocument:
-    """Сохраняет managed PDF и его metadata."""
+    """Сохраняет managed нормативный документ и metadata."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -291,13 +416,18 @@ class UploadNormativeDocument:
         original_name: str,
         content: bytes,
     ) -> NormativeDocument:
-        """Валидирует PDF и атомарно регистрирует metadata."""
-        normalized_name = _normalize_pdf_name(
+        """Валидирует документ и регистрирует metadata."""
+        (
+            normalized_name,
+            extension,
+            mime_type,
+        ) = _normalize_document_name(
             original_name,
         )
 
-        _validate_pdf_content(
+        _validate_document_content(
             content,
+            extension=extension,
             max_upload_bytes=self.max_upload_bytes,
         )
 
@@ -317,7 +447,7 @@ class UploadNormativeDocument:
 
         created_at = self.clock()
 
-        storage_key = f"{section_id}/{document_id}.pdf"
+        storage_key = f"{section_id}/{document_id}{extension}"
 
         document = NormativeDocument(
             document_id=document_id,
@@ -325,7 +455,7 @@ class UploadNormativeDocument:
             category_id=category_id,
             original_name=normalized_name,
             storage_key=storage_key,
-            mime_type="application/pdf",
+            mime_type=mime_type,
             size_bytes=len(
                 content,
             ),
@@ -367,7 +497,7 @@ class UploadNormativeDocument:
 
 @dataclass(frozen=True, slots=True)
 class GetNormativeDocumentContent:
-    """Возвращает физическое содержимое managed документа."""
+    """Возвращает browser-viewable содержимое managed документа."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -378,20 +508,39 @@ class GetNormativeDocumentContent:
         *,
         document_id: UUID,
     ) -> NormativeDocumentContent:
-        """Загружает metadata и соответствующий physical file."""
+        """Для Word возвращает ready PDF-preview."""
         async with self.unit_of_work_factory() as unit_of_work:
             document = await _require_document(
                 unit_of_work,
                 document_id,
             )
 
+        storage_key = document.storage_key
+
+        mime_type = document.mime_type
+
+        if is_word_mime_type(
+            document.mime_type,
+        ):
+            if document.index_status is not IndexingStatus.READY:
+                raise NormativeDocumentContentUnavailableError(
+                    "PDF-preview Word-документа станет доступен после индексации.",
+                )
+
+            storage_key = preview_storage_key(
+                document.storage_key,
+            )
+
+            mime_type = PDF_MIME_TYPE
+
         content = await self.storage.read(
-            storage_key=document.storage_key,
+            storage_key=storage_key,
         )
 
         return NormativeDocumentContent(
             document=document,
             content=content,
+            mime_type=mime_type,
         )
 
 
@@ -519,7 +668,7 @@ class DeleteNormativeDocument:
         *,
         document_id: UUID,
     ) -> UUID:
-        """Удаляет Qdrant points, physical PDF и PostgreSQL metadata."""
+        """Удаляет Qdrant, original/preview files и SQL metadata."""
         async with self.unit_of_work_factory() as unit_of_work:
             document = await unit_of_work.documents.get_for_update(
                 document_id,
@@ -557,6 +706,15 @@ class DeleteNormativeDocument:
         await self.storage.delete(
             storage_key=document.storage_key,
         )
+
+        if is_word_mime_type(
+            document.mime_type,
+        ):
+            await self.storage.delete(
+                storage_key=preview_storage_key(
+                    document.storage_key,
+                ),
+            )
 
         async with self.unit_of_work_factory() as unit_of_work:
             await unit_of_work.documents.delete(

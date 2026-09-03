@@ -17,29 +17,20 @@ import {
 } from "./dom.js";
 
 import {
-  getAnalysisResult,
-  submitAnalysis,
-} from "./features/analysis/api.js";
+  createAnalysisController,
+} from "./features/analysis/controller.js";
 
 import {
   createAnalysisForm,
 } from "./features/analysis/form.js";
 
 import {
-  statusLabel,
-} from "./features/analysis/labels.js";
-
-import {
-  waitForAnalysis,
-} from "./features/analysis/polling.js";
-
-import {
-  renderAnalysisReport,
-} from "./features/analysis/report.js";
-
-import {
   createNormativeCatalog,
 } from "./features/normative/catalog.js";
+
+import {
+  createNormativePromptEditor,
+} from "./features/normative/prompt.js";
 
 
 const analysisFormElement = requireElement(
@@ -50,11 +41,27 @@ const submitButton = requireElement(
   "[data-submit-button]",
 );
 
+const normativeRoot = requireElement(
+  "[data-normative-sidebar]",
+);
+
+
+const promptEditor = createNormativePromptEditor(
+  normativeRoot,
+);
+
 
 const normativeCatalog = createNormativeCatalog(
-  requireElement(
-    "[data-normative-sidebar]",
-  ),
+  normativeRoot,
+  {
+    onSectionChange: async (
+      sectionId,
+    ) => {
+      await promptEditor.setSection(
+        sectionId,
+      );
+    },
+  },
 );
 
 
@@ -68,6 +75,22 @@ const modal = createModal({
   ),
 
   submitButton,
+
+  jobElement: requireElement(
+    "[data-analysis-modal-job]",
+  ),
+
+  jobIdElement: requireElement(
+    "[data-analysis-modal-job-id]",
+  ),
+
+  copyButton: requireElement(
+    "[data-analysis-modal-copy]",
+  ),
+
+  copyStatusElement: requireElement(
+    "[data-analysis-modal-copy-status]",
+  ),
 });
 
 
@@ -76,6 +99,26 @@ const resultView = createResultView(
     "[data-analysis-result]",
   ),
 );
+
+
+function getNormativeSelection() {
+  const selection = (
+    normativeCatalog.getSelection()
+  );
+
+  if (!selection) {
+    return null;
+  }
+
+  const prompt = promptEditor.getOverride(
+    selection.sectionId,
+  );
+
+  return {
+    ...selection,
+    ...prompt,
+  };
+}
 
 
 const analysisForm = createAnalysisForm({
@@ -107,123 +150,22 @@ const analysisForm = createAnalysisForm({
     "[data-note-end-input]",
   ),
 
-  getNormativeSelection: () => (
-    normativeCatalog.getSelection()
-  ),
+  getNormativeSelection,
 });
 
 
-function renderProgress(
-  jobId,
-  payload,
-  elapsedSeconds,
-) {
-  const status = statusLabel(
-    payload.status,
-  );
-
-  modal.show(
-    `${status}. Прошло ${elapsedSeconds} сек.`,
-  );
-
-  resultView.show(
-    `Задание: ${jobId}\n`
-    + `Статус: ${status}\n`
-    + `Попытка worker: ${payload.attempt_count ?? 0}\n`
-    + `Прошло: ${elapsedSeconds} сек.`,
-  );
-}
-
-
-async function handleAnalysisSubmit(
-  event,
-) {
-  event.preventDefault();
-
-  const validation = analysisForm.validate();
-
-  if (!validation.valid) {
-    if (validation.message) {
-      resultView.show(
-        validation.message,
-      );
-    }
-
-    return;
-  }
-
-  modal.show(
-    "Документы загружаются в API Gateway…",
-  );
-
-  resultView.show(
-    "Отправляем документы в API Gateway…",
-  );
-
-  try {
-    const accepted = await submitAnalysis(
-      analysisForm.toFormData(),
-    );
-
-    const jobId = accepted.job_id;
-
-    if (!jobId) {
-      throw new Error(
-        "API Gateway не вернул job_id.",
-      );
-    }
-
-    resultView.show(
-      `Задание создано: ${jobId}\n`
-      + `Статус: ${statusLabel(accepted.status)}`,
-    );
-
-    await waitForAnalysis(
-      jobId,
-      {
-        onProgress: ({
-          payload,
-          elapsedSeconds,
-        }) => {
-          renderProgress(
-            jobId,
-            payload,
-            elapsedSeconds,
-          );
-        },
-      },
-    );
-
-    modal.show(
-      "Анализ завершён. Загружаем результат…",
-    );
-
-    const payload = await getAnalysisResult(
-      jobId,
-    );
-
-    resultView.show(
-      renderAnalysisReport(
-        payload,
-      ),
-    );
-
-  } catch (error) {
-    resultView.showError(
-      error,
-    );
-
-  } finally {
-    modal.hide();
-  }
-}
+const analysisController = createAnalysisController({
+  analysisForm,
+  modal,
+  resultView,
+});
 
 
 analysisForm.bind();
 
 analysisFormElement.addEventListener(
   "submit",
-  handleAnalysisSubmit,
+  analysisController.submit,
 );
 
 void normativeCatalog.start();

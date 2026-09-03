@@ -34,6 +34,19 @@ const DOCUMENT_DRAG_TYPE = (
   "application/x-pdrd-normative-document"
 );
 
+const SUPPORTED_FILE_ACCEPT = (
+  ".pdf,.doc,.docx,"
+  + "application/pdf,"
+  + "application/msword,"
+  + "application/vnd.openxmlformats-officedocument."
+  + "wordprocessingml.document"
+);
+
+const SUPPORTED_EXTENSIONS = [
+  ".pdf",
+  ".doc",
+  ".docx",
+];
 
 const STATUS_LABELS = {
   uploaded: "Загружен",
@@ -60,7 +73,13 @@ function createTextButton(
   );
 
   button.textContent = text;
+
   button.title = title;
+
+  button.setAttribute(
+    "aria-label",
+    title,
+  );
 
   return button;
 }
@@ -105,7 +124,8 @@ function createTrashIcon() {
     "d",
     (
       "M9 3h6l1 2h4v2h-1l-1 14H6L5 7H4V5h4l1-2zm"
-      + "1.2 2h3.6l-.5-1h-2.6l-.5 1zM7 7l.86 12h8.28L17 7H7z"
+      + "1.2 2h3.6l-.5-1h-2.6l-.5 1z"
+      + "M7 7l.86 12h8.28L17 7H7z"
     ),
   );
 
@@ -131,6 +151,7 @@ function createTrashButton(
   );
 
   button.title = title;
+
   button.setAttribute(
     "aria-label",
     title,
@@ -164,24 +185,37 @@ function isIndexing(
 }
 
 
-function normalizePdfFiles(
-  fileList,
+function isSupportedFile(
+  file,
 ) {
-  return Array.from(
-    fileList,
-  ).filter(
-    (file) => (
-      file.type === "application/pdf"
-      || file.name.toLowerCase().endsWith(
-        ".pdf",
+  const lowerName = file.name.toLowerCase();
+
+  return SUPPORTED_EXTENSIONS.some(
+    (extension) => (
+      lowerName.endsWith(
+        extension,
       )
     ),
   );
 }
 
 
+function normalizeNormativeFiles(
+  fileList,
+) {
+  return Array.from(
+    fileList || [],
+  ).filter(
+    isSupportedFile,
+  );
+}
+
+
 export function createNormativeCatalog(
   root,
+  {
+    onSectionChange = async () => {},
+  } = {},
 ) {
   const sectionSelect = requireElementWithin(
     root,
@@ -241,10 +275,15 @@ export function createNormativeCatalog(
 
   const state = {
     sections: [],
+
     sectionId: null,
+
     categories: [],
+
     documents: [],
+
     selectedBySection: new Map(),
+
     pollTimer: null,
   };
 
@@ -295,7 +334,11 @@ export function createNormativeCatalog(
     );
 
     for (const documentId of selected) {
-      if (!available.has(documentId)) {
+      if (
+        !available.has(
+          documentId,
+        )
+      ) {
         selected.delete(
           documentId,
         );
@@ -321,8 +364,12 @@ export function createNormativeCatalog(
       for (const category of state.categories) {
         if (
           category.parent_id
-          && result.has(category.parent_id)
-          && !result.has(category.category_id)
+          && result.has(
+            category.parent_id,
+          )
+          && !result.has(
+            category.category_id,
+          )
         ) {
           result.add(
             category.category_id,
@@ -346,7 +393,9 @@ export function createNormativeCatalog(
 
     return state.documents.filter(
       (documentItem) => (
-        isReady(documentItem)
+        isReady(
+          documentItem,
+        )
         && documentItem.category_id
         && categoryIds.has(
           documentItem.category_id,
@@ -364,7 +413,9 @@ export function createNormativeCatalog(
 
     for (
       const documentItem
-      of documentsInCategoryTree(categoryId)
+      of documentsInCategoryTree(
+        categoryId,
+      )
     ) {
       if (checked) {
         selected.add(
@@ -409,12 +460,16 @@ export function createNormativeCatalog(
 
     return {
       checked: (
-        selectedCount === readyDocuments.length
+        selectedCount
+        === readyDocuments.length
       ),
+
       indeterminate: (
         selectedCount > 0
-        && selectedCount < readyDocuments.length
+        && selectedCount
+        < readyDocuments.length
       ),
+
       disabled: false,
     };
   }
@@ -429,10 +484,12 @@ export function createNormativeCatalog(
       );
 
       option.value = section.section_id;
+
       option.textContent = section.name;
 
       option.selected = (
-        section.section_id === state.sectionId
+        section.section_id
+        === state.sectionId
       );
 
       sectionSelect.append(
@@ -447,19 +504,79 @@ export function createNormativeCatalog(
     );
 
     renameSectionButton.disabled = disabled;
+
     deleteSectionButton.disabled = disabled;
 
     createCategoryButton.disabled = disabled;
+
     selectAllButton.disabled = disabled;
+
     clearSelectionButton.disabled = disabled;
 
     fileInput.disabled = disabled;
 
     uploadZone.dataset.disabled = (
       disabled
-      ? "true"
-      : "false"
+        ? "true"
+        : "false"
     );
+  }
+
+
+  function createDocumentName(
+    documentItem,
+  ) {
+    const canOpen = (
+      documentItem.mime_type
+      === "application/pdf"
+      || isReady(
+        documentItem,
+      )
+    );
+
+    if (canOpen) {
+      const link = document.createElement(
+        "a",
+      );
+
+      link.className = (
+        "normative-sidebar__document-link"
+      );
+
+      link.href = documentContentUrl(
+        documentItem.document_id,
+      );
+
+      link.target = "_blank";
+
+      link.rel = "noopener noreferrer";
+
+      link.textContent = (
+        documentItem.original_name
+      );
+
+      return link;
+    }
+
+    const text = document.createElement(
+      "span",
+    );
+
+    text.className = (
+      "normative-sidebar__document-link "
+      + "normative-sidebar__document-link--disabled"
+    );
+
+    text.textContent = (
+      documentItem.original_name
+    );
+
+    text.title = (
+      "Word preview станет доступен "
+      + "после завершения индексации."
+    );
+
+    return text;
   }
 
 
@@ -496,7 +613,9 @@ export function createNormativeCatalog(
     );
 
     checkbox.checked = (
-      isReady(documentItem)
+      isReady(
+        documentItem,
+      )
       && selectedSet().has(
         documentItem.document_id,
       )
@@ -504,8 +623,8 @@ export function createNormativeCatalog(
 
     checkbox.title = (
       checkbox.disabled
-      ? "Документ станет доступен после индексации."
-      : "Использовать документ при анализе."
+        ? "Документ станет доступен после индексации."
+        : "Использовать документ при анализе."
     );
 
     checkbox.addEventListener(
@@ -538,23 +657,8 @@ export function createNormativeCatalog(
     );
 
 
-    const link = document.createElement(
-      "a",
-    );
-
-    link.className = (
-      "normative-sidebar__document-link"
-    );
-
-    link.href = documentContentUrl(
-      documentItem.document_id,
-    );
-
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-
-    link.textContent = (
-      documentItem.original_name
+    const documentName = createDocumentName(
+      documentItem,
     );
 
 
@@ -615,7 +719,7 @@ export function createNormativeCatalog(
 
 
     content.append(
-      link,
+      documentName,
       meta,
     );
 
@@ -667,8 +771,11 @@ export function createNormativeCatalog(
     );
 
     trashButton.disabled = (
-      isIndexing(documentItem)
-      || documentItem.index_status === "deleting"
+      isIndexing(
+        documentItem,
+      )
+      || documentItem.index_status
+      === "deleting"
     );
 
     trashButton.addEventListener(
@@ -736,6 +843,46 @@ export function createNormativeCatalog(
   }
 
 
+  function openCategoryFilePicker(
+    categoryId,
+  ) {
+    const picker = document.createElement(
+      "input",
+    );
+
+    picker.type = "file";
+
+    picker.multiple = true;
+
+    picker.accept = SUPPORTED_FILE_ACCEPT;
+
+    picker.className = (
+      "normative-sidebar__file-input"
+    );
+
+    picker.addEventListener(
+      "change",
+      async () => {
+        await uploadFiles(
+          picker.files,
+          categoryId,
+        );
+
+        picker.remove();
+      },
+      {
+        once: true,
+      },
+    );
+
+    root.append(
+      picker,
+    );
+
+    picker.click();
+  }
+
+
   function createCategoryNode(
     category,
   ) {
@@ -759,6 +906,8 @@ export function createNormativeCatalog(
     header.className = (
       "normative-sidebar__category-header"
     );
+
+    header.dataset.dragOver = "false";
 
 
     const selection = document.createElement(
@@ -827,6 +976,25 @@ export function createNormativeCatalog(
 
     actions.className = (
       "normative-sidebar__category-actions"
+    );
+
+
+    const uploadButton = createTextButton(
+      "⇧",
+      "Добавить PDF/DOC/DOCX в эту папку",
+    );
+
+    uploadButton.dataset.normativeCategoryUpload = (
+      category.category_id
+    );
+
+    uploadButton.addEventListener(
+      "click",
+      () => {
+        openCategoryFilePicker(
+          category.category_id,
+        );
+      },
     );
 
 
@@ -922,6 +1090,7 @@ export function createNormativeCatalog(
 
 
     actions.append(
+      uploadButton,
       createChildButton,
       renameButton,
       deleteButton,
@@ -936,22 +1105,56 @@ export function createNormativeCatalog(
 
 
     header.addEventListener(
+      "dragenter",
+      (event) => {
+        event.preventDefault();
+
+        header.dataset.dragOver = "true";
+      },
+    );
+
+
+    header.addEventListener(
       "dragover",
       (event) => {
         event.preventDefault();
 
+        header.dataset.dragOver = "true";
+
         if (event.dataTransfer) {
           event.dataTransfer.dropEffect = (
-            "move"
+            event.dataTransfer.files.length
+              ? "copy"
+              : "move"
           );
         }
       },
     );
 
+
+    header.addEventListener(
+      "dragleave",
+      (event) => {
+        if (
+          event.relatedTarget
+          && header.contains(
+            event.relatedTarget,
+          )
+        ) {
+          return;
+        }
+
+        header.dataset.dragOver = "false";
+      },
+    );
+
+
     header.addEventListener(
       "drop",
       async (event) => {
         event.preventDefault();
+
+        header.dataset.dragOver = "false";
 
         await handleDrop(
           event,
@@ -1050,17 +1253,43 @@ export function createNormativeCatalog(
 
     rootHeader.textContent = "Без папки";
 
+    rootHeader.dataset.dragOver = "false";
+
+
+    rootHeader.addEventListener(
+      "dragenter",
+      (event) => {
+        event.preventDefault();
+
+        rootHeader.dataset.dragOver = "true";
+      },
+    );
+
+
     rootHeader.addEventListener(
       "dragover",
       (event) => {
         event.preventDefault();
+
+        rootHeader.dataset.dragOver = "true";
       },
     );
+
+
+    rootHeader.addEventListener(
+      "dragleave",
+      () => {
+        rootHeader.dataset.dragOver = "false";
+      },
+    );
+
 
     rootHeader.addEventListener(
       "drop",
       async (event) => {
         event.preventDefault();
+
+        rootHeader.dataset.dragOver = "false";
 
         await handleDrop(
           event,
@@ -1068,6 +1297,7 @@ export function createNormativeCatalog(
         );
       },
     );
+
 
     tree.append(
       rootHeader,
@@ -1180,9 +1410,11 @@ export function createNormativeCatalog(
   ) {
     if (!state.sectionId) {
       state.categories = [];
+
       state.documents = [];
 
       pruneSelection();
+
       renderTree();
 
       return;
@@ -1196,6 +1428,7 @@ export function createNormativeCatalog(
         listCategories(
           state.sectionId,
         ),
+
         listDocuments(
           state.sectionId,
         ),
@@ -1203,10 +1436,13 @@ export function createNormativeCatalog(
     );
 
     state.categories = categories;
+
     state.documents = documents;
 
     pruneSelection();
+
     renderTree();
+
     schedulePolling();
 
     if (!silent) {
@@ -1230,13 +1466,17 @@ export function createNormativeCatalog(
 
     if (
       preferredSectionId
-      && availableIds.has(preferredSectionId)
+      && availableIds.has(
+        preferredSectionId,
+      )
     ) {
       state.sectionId = preferredSectionId;
 
     } else if (
       state.sectionId
-      && availableIds.has(state.sectionId)
+      && availableIds.has(
+        state.sectionId,
+      )
     ) {
       // Сохраняем текущий section.
 
@@ -1250,6 +1490,10 @@ export function createNormativeCatalog(
     }
 
     renderSectionSelect();
+
+    await onSectionChange(
+      state.sectionId,
+    );
 
     await refreshSectionData(
       true,
@@ -1298,13 +1542,15 @@ export function createNormativeCatalog(
       return;
     }
 
-    const pdfFiles = normalizePdfFiles(
-      files,
+    const normativeFiles = (
+      normalizeNormativeFiles(
+        files,
+      )
     );
 
-    if (!pdfFiles.length) {
+    if (!normativeFiles.length) {
       setStatus(
-        "Для нормативной базы поддерживаются PDF-файлы.",
+        "Поддерживаются PDF, DOC и DOCX.",
         "error",
       );
 
@@ -1313,7 +1559,7 @@ export function createNormativeCatalog(
 
     const failures = [];
 
-    for (const file of pdfFiles) {
+    for (const file of normativeFiles) {
       try {
         setStatus(
           `Загружаем ${file.name}…`,
@@ -1369,7 +1615,8 @@ export function createNormativeCatalog(
     }
 
     setStatus(
-      "PDF загружен и поставлен в очередь индексации.",
+      "Документы загружены и поставлены "
+      + "в очередь индексации.",
     );
   }
 
@@ -1378,8 +1625,9 @@ export function createNormativeCatalog(
     event,
     categoryId,
   ) {
-    const files = normalizePdfFiles(
-      event.dataTransfer?.files || [],
+    const files = normalizeNormativeFiles(
+      event.dataTransfer?.files
+      || [],
     );
 
     if (files.length) {
@@ -1468,6 +1716,10 @@ export function createNormativeCatalog(
 
         await runAction(
           async () => {
+            await onSectionChange(
+              state.sectionId,
+            );
+
             await refreshSectionData(
               true,
             );
@@ -1610,7 +1862,11 @@ export function createNormativeCatalog(
           const documentItem
           of state.documents
         ) {
-          if (isReady(documentItem)) {
+          if (
+            isReady(
+              documentItem,
+            )
+          ) {
             selected.add(
               documentItem.document_id,
             );
@@ -1722,7 +1978,9 @@ export function createNormativeCatalog(
 
   async function start() {
     bindSectionControls();
+
     bindSelectionControls();
+
     bindUploadControls();
 
     try {
@@ -1762,7 +2020,9 @@ export function createNormativeCatalog(
       documentIds: state.documents
         .filter(
           (documentItem) => (
-            isReady(documentItem)
+            isReady(
+              documentItem,
+            )
             && selected.has(
               documentItem.document_id,
             )

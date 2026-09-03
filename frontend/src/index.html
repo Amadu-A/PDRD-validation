@@ -4,7 +4,8 @@
   Главная страница PDRD Validation.
 
   Browser взаимодействует только с публичным API Gateway.
-  Normative sidebar управляет разделами, папками, документами и selection.
+  Normative sidebar управляет разделами, папками, документами,
+  prompt и selection.
 -->
 
 <!doctype html>
@@ -98,6 +99,54 @@
         </button>
       </div>
 
+      <section class="normative-sidebar__prompt">
+        <label
+          class="normative-sidebar__label"
+          for="normativePrompt"
+        >
+          Рабочий system prompt
+        </label>
+
+        <textarea
+          id="normativePrompt"
+          class="normative-sidebar__prompt-textarea"
+          data-normative-prompt
+          rows="7"
+          spellcheck="false"
+          disabled
+        ></textarea>
+
+        <div class="normative-sidebar__toolbar">
+          <button
+            class="normative-sidebar__button"
+            data-normative-prompt-save
+            type="button"
+            disabled
+          >
+            Сохранить как системный
+          </button>
+
+          <button
+            class="normative-sidebar__button"
+            data-normative-prompt-restore
+            type="button"
+            disabled
+          >
+            Восстановить системный
+          </button>
+        </div>
+
+        <p
+          class="normative-sidebar__prompt-status"
+          data-normative-prompt-status
+          data-state="normal"
+          role="status"
+          aria-live="polite"
+        >
+          Выберите нормативный раздел.
+        </p>
+      </section>
+
       <div
         class="normative-sidebar__toolbar"
         aria-label="Выбор нормативных документов"
@@ -133,11 +182,15 @@
         data-disabled="false"
         role="button"
         tabindex="0"
-        aria-label="Загрузить нормативные PDF"
+        aria-label="Загрузить нормативные документы"
       >
         <strong class="normative-sidebar__upload-title">
-          Добавить PDF
+          Добавить норматив
         </strong>
+
+        <span class="normative-sidebar__upload-text">
+          PDF, DOC или DOCX.
+        </span>
 
         <span class="normative-sidebar__upload-text">
           Перетащите файлы сюда или нажмите для выбора.
@@ -151,7 +204,7 @@
           class="normative-sidebar__file-input"
           data-normative-file-input
           type="file"
-          accept=".pdf,application/pdf"
+          accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           multiple
           tabindex="-1"
         >
@@ -407,6 +460,36 @@
       >
         Идёт анализ документа…
       </p>
+
+      <div
+        class="analysis-modal__job"
+        data-analysis-modal-job
+        hidden
+      >
+        <span class="analysis-modal__job-label">
+          Задание:
+        </span>
+
+        <code
+          class="analysis-modal__job-id"
+          data-analysis-modal-job-id
+        ></code>
+
+        <button
+          class="analysis-modal__copy-button"
+          data-analysis-modal-copy
+          type="button"
+        >
+          Копировать
+        </button>
+
+        <span
+          class="analysis-modal__copy-status"
+          data-analysis-modal-copy-status
+          role="status"
+          aria-live="polite"
+        ></span>
+      </div>
 
       <p class="analysis-modal__hint">
         Обработка может занять некоторое время.

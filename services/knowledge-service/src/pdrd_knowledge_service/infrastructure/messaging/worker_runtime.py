@@ -24,6 +24,9 @@ from pdrd_knowledge_service.infrastructure.database.unit_of_work import (
 from pdrd_knowledge_service.infrastructure.embedding.ollama import (
     OllamaEmbeddingProvider,
 )
+from pdrd_knowledge_service.infrastructure.office.libreoffice import (
+    LibreOfficeNormativeOfficeToPdfConverter,
+)
 from pdrd_knowledge_service.infrastructure.pdf.pymupdf import (
     PyMuPdfNormativePdfExtractor,
 )
@@ -73,6 +76,11 @@ async def execute_normative_indexing(
         health_timeout_seconds=(settings.qdrant.health_timeout_seconds),
     )
 
+    office_converter = LibreOfficeNormativeOfficeToPdfConverter(
+        executable=(settings.office_conversion.executable),
+        timeout_seconds=(settings.office_conversion.timeout_seconds),
+    )
+
     use_case = IndexNormativeDocument(
         unit_of_work_factory=unit_of_work_factory,
         storage=storage,
@@ -84,6 +92,7 @@ async def execute_normative_indexing(
         chunk_overlap=settings.indexing.chunk_overlap,
         embed_batch_size=settings.indexing.embed_batch_size,
         upsert_batch_size=settings.indexing.upsert_batch_size,
+        office_converter=office_converter,
     )
 
     try:

@@ -9,6 +9,15 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install \
+        --yes \
+        --no-install-recommends \
+        libreoffice-writer \
+        fonts-dejavu-core \
+        fonts-liberation2 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml /app/pyproject.toml
 COPY alembic.ini /app/alembic.ini
 COPY alembic /app/alembic
@@ -38,6 +47,8 @@ RUN useradd \
     app \
     && mkdir -p /data/normative \
     && chown -R app:app /data/normative
+
+ENV HOME=/home/app
 
 USER app
 

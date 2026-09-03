@@ -24,6 +24,7 @@ from pdrd_knowledge_service.application.ports.vector_store import (
 )
 from pdrd_knowledge_service.application.use_cases.normative_documents import (
     NormativeDocumentCategoryError,
+    NormativeDocumentContentUnavailableError,
     NormativeDocumentMutationConflictError,
     NormativeDocumentNotFoundError,
     NormativeDocumentUploadError,
@@ -55,7 +56,9 @@ router = APIRouter(
 
 ContainerDependency = Annotated[
     ApplicationContainer,
-    Depends(get_container),
+    Depends(
+        get_container,
+    ),
 ]
 
 _UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -165,7 +168,7 @@ async def _read_upload_content(
             > max_upload_bytes
         ):
             raise NormativeDocumentUploadError(
-                "Размер нормативного PDF превышает допустимый лимит.",
+                "Размер нормативного документа превышает допустимый лимит.",
             )
 
         content.extend(
@@ -225,7 +228,7 @@ async def upload_normative_document(
         Form(),
     ] = None,
 ) -> NormativeDocumentResponse:
-    """Загружает managed PDF в нормативный каталог."""
+    """Загружает managed PDF/DOC/DOCX в нормативный каталог."""
     use_cases = _require_use_cases(
         container,
     )
@@ -233,7 +236,7 @@ async def upload_normative_document(
     try:
         content = await _read_upload_content(
             file,
-            max_upload_bytes=container.settings.storage.max_upload_bytes,
+            max_upload_bytes=(container.settings.storage.max_upload_bytes),
         )
 
         document = await use_cases.upload_document.execute(
@@ -350,7 +353,7 @@ async def delete_normative_document(
     document_id: UUID,
     container: ContainerDependency,
 ) -> DeleteNormativeDocumentResponse:
-    """Идемпотентно удаляет document из Qdrant, storage и PostgreSQL."""
+    """Идемпотентно удаляет document из Qdrant, storage и SQL."""
     use_cases = _require_use_cases(
         container,
     )
@@ -419,7 +422,7 @@ async def get_normative_document_content(
     document_id: UUID,
     container: ContainerDependency,
 ) -> Response:
-    """Возвращает PDF inline для просмотра пользователем."""
+    """Возвращает browser-viewable PDF документа."""
     use_cases = _require_use_cases(
         container,
     )
@@ -434,6 +437,11 @@ async def get_normative_document_content(
             error,
         ) from error
 
+    except NormativeDocumentContentUnavailableError as error:
+        raise _conflict(
+            error,
+        ) from error
+
     except NormativeDocumentStorageError as error:
         raise _dependency_unavailable(
             error,
@@ -441,7 +449,7 @@ async def get_normative_document_content(
 
     return Response(
         content=result.content,
-        media_type=result.document.mime_type,
+        media_type=result.mime_type,
         headers={
             "Content-Disposition": (f'inline; filename="{document_id}.pdf"'),
             "Cache-Control": "no-store",

@@ -34,7 +34,10 @@ export function createAnalysisForm({
 
 
   function getMode() {
-    if (hasPdf() && hasCad()) {
+    if (
+      hasPdf()
+      && hasCad()
+    ) {
       return "pdf_cad";
     }
 
@@ -59,7 +62,9 @@ export function createAnalysisForm({
       && mode !== "empty"
     );
 
-    useExplanatoryNoteInput.disabled = !available;
+    useExplanatoryNoteInput.disabled = (
+      !available
+    );
 
     if (!available) {
       useExplanatoryNoteInput.checked = false;
@@ -71,9 +76,11 @@ export function createAnalysisForm({
     );
 
     noteStartPageInput.disabled = !enabled;
+
     noteEndPageInput.disabled = !enabled;
 
     noteStartPageInput.required = enabled;
+
     noteEndPageInput.required = enabled;
   }
 
@@ -85,7 +92,9 @@ export function createAnalysisForm({
 
     if (mode === "cad_only") {
       pagesInput.value = "";
+
       pagesInput.disabled = true;
+
       pagesInput.required = false;
 
       pagesInput.placeholder = (
@@ -98,6 +107,7 @@ export function createAnalysisForm({
 
     } else if (mode === "pdf_cad") {
       pagesInput.disabled = false;
+
       pagesInput.required = true;
 
       pagesInput.placeholder = (
@@ -111,6 +121,7 @@ export function createAnalysisForm({
 
     } else {
       pagesInput.disabled = false;
+
       pagesInput.required = false;
 
       pagesInput.placeholder = (
@@ -168,7 +179,9 @@ export function createAnalysisForm({
     );
 
     if (
-      !Number.isInteger(start)
+      !Number.isInteger(
+        start,
+      )
       || start < 1
     ) {
       noteStartPageInput.setCustomValidity(
@@ -182,7 +195,9 @@ export function createAnalysisForm({
     }
 
     if (
-      !Number.isInteger(end)
+      !Number.isInteger(
+        end,
+      )
       || end < 1
     ) {
       noteEndPageInput.setCustomValidity(
@@ -214,32 +229,44 @@ export function createAnalysisForm({
     const mode = getMode();
 
     pagesInput.setCustomValidity("");
+
     noteStartPageInput.setCustomValidity("");
+
     noteEndPageInput.setCustomValidity("");
 
     if (mode === "empty") {
       return {
         valid: false,
+
         message: "Загрузите PDF и/или DWG/DXF.",
       };
     }
 
-    if (!validatePdfCadPage(mode)) {
+    if (
+      !validatePdfCadPage(
+        mode,
+      )
+    ) {
       return {
         valid: false,
+
         message: null,
       };
     }
 
-    if (!validateExplanatoryNote()) {
+    if (
+      !validateExplanatoryNote()
+    ) {
       return {
         valid: false,
+
         message: null,
       };
     }
 
     return {
       valid: true,
+
       message: null,
     };
   }
@@ -248,7 +275,9 @@ export function createAnalysisForm({
   function appendNormativeSelection(
     body,
   ) {
-    const selection = getNormativeSelection();
+    const selection = (
+      getNormativeSelection()
+    );
 
     if (!selection) {
       return;
@@ -265,6 +294,24 @@ export function createAnalysisForm({
         selection.documentIds,
       ),
     );
+
+    body.append(
+      "normative_prompt_override_enabled",
+      (
+        selection.promptOverrideEnabled
+          ? "true"
+          : "false"
+      ),
+    );
+
+    if (
+      selection.promptOverrideEnabled
+    ) {
+      body.append(
+        "normative_prompt_override",
+        selection.promptOverride ?? "",
+      );
+    }
   }
 
 
@@ -272,6 +319,7 @@ export function createAnalysisForm({
     const body = new FormData();
 
     const pdf = pdfInput.files[0];
+
     const cad = cadInput.files[0];
 
     if (pdf) {

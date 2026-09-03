@@ -65,9 +65,11 @@ function jsonRequest(
 ) {
   return {
     method,
+
     headers: {
       "Content-Type": "application/json",
     },
+
     body: JSON.stringify(
       body,
     ),
@@ -78,6 +80,15 @@ function jsonRequest(
 export function listSections() {
   return requestJson(
     "/sections",
+  );
+}
+
+
+export function getSection(
+  sectionId,
+) {
+  return requestJson(
+    `/sections/${encodeURIComponent(sectionId)}`,
   );
 }
 

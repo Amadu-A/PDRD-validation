@@ -124,7 +124,7 @@ class OutboxSettings(BaseModel):
 
 
 class NormativeStorageSettings(BaseModel):
-    """Настройки managed storage нормативных PDF."""
+    """Настройки managed storage нормативных документов."""
 
     root_path: Path = Path(
         "/data/normative",
@@ -169,6 +169,18 @@ class NormativeIndexingSettings(BaseModel):
         default=64,
         ge=1,
         le=1000,
+    )
+
+
+class OfficeConversionSettings(BaseModel):
+    """Настройки нормализации Word через LibreOffice."""
+
+    executable: str = "soffice"
+
+    timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        le=900,
     )
 
 
@@ -326,6 +338,10 @@ class Settings(BaseSettings):
 
     indexing: NormativeIndexingSettings = Field(
         default_factory=NormativeIndexingSettings,
+    )
+
+    office_conversion: OfficeConversionSettings = Field(
+        default_factory=OfficeConversionSettings,
     )
 
     embedding: EmbeddingSettings = Field(

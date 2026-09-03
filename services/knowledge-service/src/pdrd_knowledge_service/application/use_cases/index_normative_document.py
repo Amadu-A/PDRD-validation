@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/application/use_cases/index_normative_document.py
 
-"""Use case полной индексации managed нормативного PDF."""
+"""Use case полной индексации managed нормативного документа."""
 
 from collections.abc import Callable
 from contextlib import suppress
@@ -11,6 +11,11 @@ from datetime import (
 )
 from uuid import UUID
 
+from pdrd_knowledge_service.application.normative_document_formats import (
+    PDF_MIME_TYPE,
+    is_word_mime_type,
+    preview_storage_key,
+)
 from pdrd_knowledge_service.application.ports.document_storage import (
     NormativeDocumentStorage,
 )
@@ -19,6 +24,9 @@ from pdrd_knowledge_service.application.ports.embedding import (
 )
 from pdrd_knowledge_service.application.ports.normative_pdf import (
     NormativePdfExtractor,
+)
+from pdrd_knowledge_service.application.ports.office_conversion import (
+    NormativeOfficeToPdfConverter,
 )
 from pdrd_knowledge_service.application.ports.persistence import (
     NormativeCatalogUnitOfWorkFactory,
@@ -67,7 +75,7 @@ def utc_now() -> datetime:
 
 @dataclass(frozen=True, slots=True)
 class IndexNormativeDocument:
-    """Извлекает PDF, строит embeddings и сохраняет Qdrant points."""
+    """Нормализует документ, строит embeddings и Qdrant points."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -89,6 +97,8 @@ class IndexNormativeDocument:
 
     upsert_batch_size: int
 
+    office_converter: NormativeOfficeToPdfConverter | None = None
+
     clock: Clock = utc_now
 
     async def execute(
@@ -109,8 +119,13 @@ class IndexNormativeDocument:
                 storage_key=document.storage_key,
             )
 
-            pages = await self.pdf_extractor.extract_pages(
+            pdf_content = await self._prepare_pdf_content(
+                document=document,
                 content=content,
+            )
+
+            pages = await self.pdf_extractor.extract_pages(
+                content=pdf_content,
             )
 
             chunks = chunk_normative_pages(
@@ -121,7 +136,7 @@ class IndexNormativeDocument:
 
             if not chunks:
                 raise NormativeIndexingPreparationError(
-                    "PDF не содержит извлекаемого текста для индексации.",
+                    "Документ не содержит извлекаемого текста для индексации.",
                 )
 
             if self.embed_batch_size <= 0:
@@ -184,6 +199,48 @@ class IndexNormativeDocument:
                 "Не удалось проиндексировать нормативный документ "
                 f"{document_id}: {type(error).__name__}: {error}",
             ) from error
+
+    async def _prepare_pdf_content(
+        self,
+        *,
+        document: NormativeDocument,
+        content: bytes,
+    ) -> bytes:
+        """Возвращает PDF bytes для общего page extraction pipeline."""
+        if document.mime_type == PDF_MIME_TYPE:
+            return content
+
+        if not is_word_mime_type(
+            document.mime_type,
+        ):
+            raise NormativeIndexingPreparationError(
+                "MIME type нормативного документа не поддерживается.",
+            )
+
+        if self.office_converter is None:
+            raise NormativeIndexingPreparationError(
+                "Word → PDF converter не настроен.",
+            )
+
+        pdf_content = await self.office_converter.convert_to_pdf(
+            content=content,
+            original_name=document.original_name,
+        )
+
+        preview_key = preview_storage_key(
+            document.storage_key,
+        )
+
+        await self.storage.delete(
+            storage_key=preview_key,
+        )
+
+        await self.storage.save(
+            storage_key=preview_key,
+            content=pdf_content,
+        )
+
+        return pdf_content
 
     async def _build_vector_records(
         self,
