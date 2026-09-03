@@ -125,14 +125,20 @@ def test_job_id_is_visible_and_copyable() -> None:
 
 
 def test_final_report_preserves_job_id() -> None:
-    """Финальный результат не теряет номер задания."""
+    """Структурированный финальный результат сохраняет номер задания."""
     content = REPORT_JS.read_text(
         encoding="utf-8",
     )
 
     assert "jobId = null" in content
 
-    assert "`Задание: ${jobId}`" in content
+    assert "appendOverview(" in content
+
+    assert '"Задание"' in content
+
+    assert "jobId," in content
+
+    assert "analysis-result__job-id" in content
 
 
 def test_knowledge_image_contains_libreoffice_writer() -> None:

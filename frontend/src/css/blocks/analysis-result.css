@@ -1,25 +1,284 @@
 /* frontend/src/css/blocks/analysis-result.css */
 
 /*
- * BEM-блок текущего текстового результата анализа.
+ * BEM-блок структурированного результата анализа.
  *
- * На данном этапе результат остаётся текстовым. Позже этот блок будет
- * заменён структурированным представлением findings с кликабельными
- * нормативными источниками и viewer, не затрагивая форму запуска.
+ * Финальные findings отображаются карточками.
+ * Managed normative citations открывают PDF/Word-preview
+ * через публичный API Gateway.
  */
 
 .analysis-result {
+  display: grid;
+
+  gap: var(--space-6);
+
   min-height: 100px;
 
   margin-bottom: 0;
   padding: var(--space-6);
 
-  overflow-x: auto;
-
   border-radius: var(--radius-control);
 
   background: var(--color-surface-muted);
 
-  white-space: pre-wrap;
+  color: var(--color-text-primary);
+
   word-break: break-word;
+}
+
+
+.analysis-result__placeholder,
+.analysis-result__message,
+.analysis-result__empty {
+  margin: 0;
+
+  white-space: pre-wrap;
+}
+
+
+.analysis-result__message--error {
+  padding: var(--space-4);
+
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-control);
+
+  background: var(--color-danger-soft);
+
+  color: var(--color-danger);
+}
+
+
+.analysis-result__summary,
+.analysis-result__findings,
+.analysis-result__limitations {
+  display: grid;
+
+  gap: var(--space-4);
+}
+
+
+.analysis-result__section-title {
+  margin: 0;
+
+  font-size: 1.05rem;
+}
+
+
+.analysis-result__meta {
+  display: grid;
+
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(
+        180px,
+        1fr
+      )
+    );
+
+  gap: var(--space-3);
+
+  margin: 0;
+}
+
+
+.analysis-result__meta-item {
+  min-width: 0;
+
+  padding: var(--space-3);
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+
+  background: var(--color-surface);
+}
+
+
+.analysis-result__meta-label {
+  margin-bottom: var(--space-1);
+
+  color: var(--color-text-secondary);
+
+  font-size: 0.85rem;
+}
+
+
+.analysis-result__meta-value {
+  margin: 0;
+
+  font-weight: var(--font-weight-semibold);
+
+  overflow-wrap: anywhere;
+}
+
+
+.analysis-result__job-id {
+  font-weight: var(--font-weight-normal);
+
+  user-select: text;
+}
+
+
+.analysis-result__finding {
+  display: grid;
+
+  gap: var(--space-4);
+
+  padding: var(--space-6);
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+
+  background: var(--color-surface);
+}
+
+
+.analysis-result__finding-header {
+  display: flex;
+
+  flex-wrap: wrap;
+
+  align-items: flex-start;
+  justify-content: space-between;
+
+  gap: var(--space-3);
+}
+
+
+.analysis-result__finding-title {
+  margin: 0;
+
+  font-size: 1rem;
+}
+
+
+.analysis-result__badges {
+  display: flex;
+
+  flex-wrap: wrap;
+
+  gap: var(--space-2);
+}
+
+
+.analysis-result__badge {
+  padding:
+    var(--space-1)
+    var(--space-2);
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+
+  background: var(--color-surface-secondary);
+
+  font-size: 0.8rem;
+}
+
+
+.analysis-result__field {
+  display: grid;
+
+  gap: var(--space-1);
+}
+
+
+.analysis-result__field-label {
+  font-size: 0.9rem;
+}
+
+
+.analysis-result__field-value {
+  margin: 0;
+
+  white-space: pre-wrap;
+}
+
+
+.analysis-result__sources {
+  display: grid;
+
+  gap: var(--space-2);
+
+  padding: var(--space-4);
+
+  border-radius: var(--radius-control);
+
+  background: var(--color-accent-soft);
+}
+
+
+.analysis-result__source-list,
+.analysis-result__limitation-list {
+  display: grid;
+
+  gap: var(--space-2);
+
+  margin: 0;
+  padding-left: var(--space-8);
+}
+
+
+.analysis-result__source-item,
+.analysis-result__limitation {
+  min-width: 0;
+}
+
+
+.analysis-result__source-link {
+  color: var(--color-accent);
+
+  font-weight: var(--font-weight-semibold);
+
+  overflow-wrap: anywhere;
+}
+
+
+.analysis-result__source-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+
+.analysis-result__source-link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+
+  border-radius: var(--radius-control);
+}
+
+
+.analysis-result__source-text {
+  color: var(--color-text-secondary);
+}
+
+
+.analysis-result__limitations {
+  padding: var(--space-4);
+
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-control);
+
+  background: var(--color-warning-soft);
+}
+
+
+@media (max-width: 640px) {
+  .analysis-result {
+    padding: var(--space-4);
+  }
+
+
+  .analysis-result__finding {
+    padding: var(--space-4);
+  }
+
+
+  .analysis-result__finding-header {
+    flex-direction: column;
+  }
+
+
+  .analysis-result__meta {
+    grid-template-columns: 1fr;
+  }
 }

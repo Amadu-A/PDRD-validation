@@ -136,7 +136,7 @@ export function createAnalysisController({
         jobId,
       );
 
-      resultView.show(
+      resultView.showReport(
         renderAnalysisReport(
           payload,
           {
