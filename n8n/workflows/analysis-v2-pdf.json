@@ -199,7 +199,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ queries: $json.queries ?? [] }) }}",
+        "body": "={{ JSON.stringify({ queries: $json.queries ?? [], ...($('POST /analysis/v2/pdf').first().json.body?.normative_section_id ? { section_id: $('POST /analysis/v2/pdf').first().json.body.normative_section_id, document_ids: JSON.parse($('POST /analysis/v2/pdf').first().json.body?.normative_document_ids ?? '[]') } : {}) }) }}",
         "options": {
           "timeout": 900000
         }
@@ -217,7 +217,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_number: $('Expand PDF Pages').item.json.page.page_number, extracted_text: $('Augment Project Context').item.json.analysis_text, page_facts: $('Understand Page').item.json.facts, normative_sources: $json.sources ?? [], image_base64: $('Expand PDF Pages').item.json.page.image_base64 }) }}",
+        "body": "={{ JSON.stringify({ page_number: $('Expand PDF Pages').item.json.page.page_number, extracted_text: $('Augment Project Context').item.json.analysis_text, page_facts: $('Understand Page').item.json.facts, normative_sources: $json.sources ?? [], image_base64: $('Expand PDF Pages').item.json.page.image_base64, normative_system_prompt: $('POST /analysis/v2/pdf').first().json.body?.normative_system_prompt ?? null }) }}",
         "options": {
           "timeout": 1800000
         }

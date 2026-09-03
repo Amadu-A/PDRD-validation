@@ -35,7 +35,9 @@ class PageFactsPayload(BaseModel):
 
     normative_queries: list[str]
 
-    def to_domain(self) -> PageFacts:
+    def to_domain(
+        self,
+    ) -> PageFacts:
         """Преобразует payload в Domain."""
         return PageFacts(
             discipline=self.discipline,
@@ -65,7 +67,14 @@ class NormativeSourcePayload(BaseModel):
 
     source_id: str
     point_id: str = ""
+
     score: float
+
+    document_id: str | None = None
+    section_id: str | None = None
+    category_id: str | None = None
+
+    source_sha256: str | None = None
 
     source_file: str | None = None
     source_path: str | None = None
@@ -88,6 +97,10 @@ class NormativeSourcePayload(BaseModel):
             page=self.page,
             chunk_index=self.chunk_index,
             text=self.text,
+            document_id=self.document_id,
+            section_id=self.section_id,
+            category_id=self.category_id,
+            source_sha256=self.source_sha256,
         )
 
 
@@ -127,11 +140,11 @@ class ExperienceSourcePayload(BaseModel):
             issue_id=self.issue_id,
             issue_text=self.issue_text,
             status=self.status,
-            verified_fixed=(self.verified_fixed),
+            verified_fixed=self.verified_fixed,
             before_page=self.before_page,
             after_page=self.after_page,
-            before_context=(self.before_context),
-            after_context=(self.after_context),
+            before_context=self.before_context,
+            after_context=self.after_context,
         )
 
 
@@ -160,6 +173,7 @@ class FindingDraftPayload(BaseModel):
     normative_source_ids: list[str]
 
     basis: str
+
     basis_sources: list[NormativeSourcePayload]
 
     experience_query: str
@@ -177,14 +191,14 @@ class FindingDraftPayload(BaseModel):
             status=self.status,  # type: ignore[arg-type]
             comment=self.comment,
             evidence=self.evidence,
-            recommendation_draft=(self.recommendation_draft),
+            recommendation_draft=self.recommendation_draft,
             confidence=self.confidence,
             normative_source_ids=tuple(
                 self.normative_source_ids,
             ),
             basis=self.basis,
-            basis_sources=tuple(source.to_domain() for source in (self.basis_sources)),
-            experience_query=(self.experience_query),
+            basis_sources=tuple(source.to_domain() for source in self.basis_sources),
+            experience_query=self.experience_query,
         )
 
 
@@ -212,7 +226,11 @@ class UnderstandPageResponse(BaseModel):
     """Ответ page understanding."""
 
     facts: PageFactsPayload
-    metrics: dict[str, Any]
+
+    metrics: dict[
+        str,
+        Any,
+    ]
 
 
 class NormativeQueriesRequest(BaseModel):
@@ -256,6 +274,8 @@ class CheckNormsRequest(BaseModel):
         min_length=1,
     )
 
+    normative_system_prompt: str | None = None
+
 
 class CheckNormsResponse(BaseModel):
     """Ответ normative check."""
@@ -264,7 +284,10 @@ class CheckNormsResponse(BaseModel):
 
     findings: list[FindingDraftPayload]
 
-    metrics: dict[str, Any]
+    metrics: dict[
+        str,
+        Any,
+    ]
 
 
 class FinalizeRequest(BaseModel):
@@ -308,13 +331,16 @@ class FinalFindingPayload(BaseModel):
 
 
 class FinalizeResponse(BaseModel):
-    """Ответ финализации."""
+    """Ответ финализации findings."""
 
     summary: str
 
     findings: list[FinalFindingPayload]
 
-    metrics: dict[str, Any]
+    metrics: dict[
+        str,
+        Any,
+    ]
 
 
 class LiveHealthResponse(BaseModel):
@@ -332,4 +358,7 @@ class ReadyHealthResponse(BaseModel):
     service: str
     version: str
 
-    dependencies: dict[str, bool]
+    dependencies: dict[
+        str,
+        bool,
+    ]

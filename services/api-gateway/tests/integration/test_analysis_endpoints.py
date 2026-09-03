@@ -6,7 +6,10 @@ from collections.abc import (
     Awaitable,
     Callable,
 )
-from uuid import UUID, uuid4
+from uuid import (
+    UUID,
+    uuid4,
+)
 
 from fastapi.testclient import TestClient
 from pdrd_api_gateway.application.use_cases.check_readiness import (
@@ -22,13 +25,18 @@ from pdrd_api_gateway.core.settings import (
 from pdrd_api_gateway.domain.analysis_job import (
     AnalysisJob,
 )
+from pdrd_api_gateway.domain.normative_snapshot import (
+    NormativeAnalysisSnapshot,
+)
 from pdrd_api_gateway.main import create_app
 
 
 class StaticReadiness:
     """Fake infrastructure readiness."""
 
-    async def is_ready(self) -> bool:
+    async def is_ready(
+        self,
+    ) -> bool:
         """Всегда сообщает готовность."""
         return True
 
@@ -36,7 +44,9 @@ class StaticReadiness:
 class SubmitAnalysisStub:
     """Fake SubmitAnalysis."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+    ) -> None:
         """Подготавливает stub."""
         self.pdf_content: bytes | None = None
         self.pdf_file_name: str | None = None
@@ -47,8 +57,23 @@ class SubmitAnalysisStub:
         self.pages: str | None = None
 
         self.use_explanatory_note = False
+
         self.note_start_page: str | int | None = None
         self.note_end_page: str | int | None = None
+
+        self.normative_section_id: UUID | None = None
+
+        self.normative_document_ids: (
+            tuple[
+                UUID,
+                ...,
+            ]
+            | None
+        ) = None
+
+        self.normative_prompt_override_enabled = False
+
+        self.normative_prompt_override = ""
 
         self.document_id: UUID | None = None
 
@@ -63,6 +88,14 @@ class SubmitAnalysisStub:
         use_explanatory_note: bool = False,
         note_start_page: str | int | None = None,
         note_end_page: str | int | None = None,
+        normative_section_id: UUID | None = None,
+        normative_document_ids: tuple[
+            UUID,
+            ...,
+        ]
+        | None = None,
+        normative_prompt_override_enabled: bool = False,
+        normative_prompt_override: str = "",
     ) -> AnalysisJob:
         """Создаёт fake job и сохраняет аргументы."""
         self.pdf_content = pdf_content
@@ -78,10 +111,34 @@ class SubmitAnalysisStub:
         self.note_start_page = note_start_page
         self.note_end_page = note_end_page
 
+        self.normative_section_id = normative_section_id
+
+        self.normative_document_ids = normative_document_ids
+
+        self.normative_prompt_override_enabled = normative_prompt_override_enabled
+
+        self.normative_prompt_override = normative_prompt_override
+
         self.document_id = uuid4()
+
+        normative_snapshot = None
+
+        if normative_section_id is not None and normative_document_ids is not None:
+            active_prompt = (
+                normative_prompt_override
+                if normative_prompt_override_enabled
+                else "stub-db-system-prompt"
+            )
+
+            normative_snapshot = NormativeAnalysisSnapshot.create(
+                section_id=normative_section_id,
+                document_ids=normative_document_ids,
+                system_prompt=active_prompt,
+            )
 
         return AnalysisJob.create(
             document_id=self.document_id,
+            normative_snapshot=normative_snapshot,
         )
 
 
@@ -156,7 +213,9 @@ def test_create_pdf_analysis_returns_202() -> None:
 
     with build_client(
         submit_stub=submit_stub,
-        get_stub=GetAnalysisStub(None),
+        get_stub=GetAnalysisStub(
+            None,
+        ),
     ) as client:
         response = client.post(
             "/api/v1/analyses",
@@ -184,14 +243,23 @@ def test_create_pdf_analysis_returns_202() -> None:
 
     assert payload["status_url"] == (f"/api/v1/analyses/{payload['job_id']}")
 
+    assert payload["normative_section_id"] is None
+
+    assert payload["normative_document_ids"] == []
+
     assert submit_stub.pdf_content == b"pdf-content"
 
     assert submit_stub.pdf_file_name == "drawing.pdf"
 
     assert submit_stub.cad_content is None
+
     assert submit_stub.pages == "1,3"
 
     assert submit_stub.use_explanatory_note is False
+
+    assert submit_stub.normative_section_id is None
+
+    assert submit_stub.normative_document_ids is None
 
 
 def test_create_pdf_analysis_with_note_returns_202() -> None:
@@ -200,7 +268,9 @@ def test_create_pdf_analysis_with_note_returns_202() -> None:
 
     with build_client(
         submit_stub=submit_stub,
-        get_stub=GetAnalysisStub(None),
+        get_stub=GetAnalysisStub(
+            None,
+        ),
     ) as client:
         response = client.post(
             "/api/v1/analyses",
@@ -224,6 +294,7 @@ def test_create_pdf_analysis_with_note_returns_202() -> None:
     assert submit_stub.use_explanatory_note is True
 
     assert submit_stub.note_start_page == "2"
+
     assert submit_stub.note_end_page == "8"
 
 
@@ -233,7 +304,9 @@ def test_create_pdf_cad_analysis_returns_202() -> None:
 
     with build_client(
         submit_stub=submit_stub,
-        get_stub=GetAnalysisStub(None),
+        get_stub=GetAnalysisStub(
+            None,
+        ),
     ) as client:
         response = client.post(
             "/api/v1/analyses",
@@ -263,6 +336,72 @@ def test_create_pdf_cad_analysis_returns_202() -> None:
     assert submit_stub.pages == "7"
 
 
+def test_create_analysis_with_normative_snapshot_returns_202() -> None:
+    """Проверяет multipart transport managed normative snapshot."""
+    submit_stub = SubmitAnalysisStub()
+
+    section_id = uuid4()
+
+    document_a_id = uuid4()
+    document_b_id = uuid4()
+
+    active_prompt = "  transient prompt\nsecond line  "
+
+    with build_client(
+        submit_stub=submit_stub,
+        get_stub=GetAnalysisStub(
+            None,
+        ),
+    ) as client:
+        response = client.post(
+            "/api/v1/analyses",
+            files={
+                "pdf": (
+                    "drawing.pdf",
+                    b"pdf-content",
+                    "application/pdf",
+                ),
+            },
+            data={
+                "pages": "1",
+                "normative_section_id": str(
+                    section_id,
+                ),
+                "normative_document_ids": (f'["{document_a_id}","{document_b_id}"]'),
+                "normative_prompt_override_enabled": "true",
+                "normative_prompt_override": active_prompt,
+            },
+        )
+
+    assert response.status_code == 202
+
+    payload = response.json()
+
+    assert payload["normative_section_id"] == str(
+        section_id,
+    )
+
+    assert payload["normative_document_ids"] == [
+        str(
+            document_a_id,
+        ),
+        str(
+            document_b_id,
+        ),
+    ]
+
+    assert submit_stub.normative_section_id == section_id
+
+    assert submit_stub.normative_document_ids == (
+        document_a_id,
+        document_b_id,
+    )
+
+    assert submit_stub.normative_prompt_override_enabled is True
+
+    assert submit_stub.normative_prompt_override == active_prompt
+
+
 def test_get_analysis_returns_job() -> None:
     """Проверяет получение состояния существующего job."""
     job = AnalysisJob.create(
@@ -271,7 +410,9 @@ def test_get_analysis_returns_job() -> None:
 
     with build_client(
         submit_stub=SubmitAnalysisStub(),
-        get_stub=GetAnalysisStub(job),
+        get_stub=GetAnalysisStub(
+            job,
+        ),
     ) as client:
         response = client.get(
             f"/api/v1/analyses/{job.id}",
@@ -291,12 +432,18 @@ def test_get_analysis_returns_job() -> None:
 
     assert payload["status"] == "pending"
 
+    assert payload["normative_section_id"] is None
+
+    assert payload["normative_document_ids"] == []
+
 
 def test_get_unknown_analysis_returns_404() -> None:
     """Проверяет HTTP 404 для неизвестного job."""
     with build_client(
         submit_stub=SubmitAnalysisStub(),
-        get_stub=GetAnalysisStub(None),
+        get_stub=GetAnalysisStub(
+            None,
+        ),
     ) as client:
         response = client.get(
             f"/api/v1/analyses/{uuid4()}",

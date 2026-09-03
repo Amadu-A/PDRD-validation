@@ -12,10 +12,7 @@
       "name": "POST /analysis/v2/cad",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [
-        -1200,
-        0
-      ],
+      "position": [-1200, 0],
       "webhookId": "ad01c934-a691-45da-8c3a-b986f3e70ce1"
     },
     {
@@ -41,23 +38,17 @@
       "name": "Document Extract CAD",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        -980,
-        0
-      ]
+      "position": [-980, 0]
     },
     {
       "parameters": {
-        "jsCode": "const cad = $input.first().json;\n\nreturn [\n  {\n    json: {\n      cad: {\n        original_file_name: cad.original_file_name ?? 'drawing.dxf',\n        original_format: cad.original_format ?? '',\n        normalized_format: cad.normalized_format ?? '',\n        converted_from_dwg: cad.converted_from_dwg ?? false,\n        selected_layout: cad.selected_layout ?? '',\n        warnings: Array.isArray(cad.warnings) ? cad.warnings : [],\n        machine_data: cad.machine_data ?? {},\n        machine_context: cad.machine_context ?? '',\n      },\n      page: {\n        page_number: 1,\n        page_type: 'cad',\n        text: cad.machine_context ?? '',\n        image_base64: cad.image_base64 ?? '',\n      },\n    },\n  },\n];"
+        "jsCode": "const cad = $input.first().json;\n\nreturn [{\n  json: {\n    cad: {\n      original_file_name: cad.original_file_name ?? 'drawing.dxf',\n      original_format: cad.original_format ?? '',\n      normalized_format: cad.normalized_format ?? '',\n      converted_from_dwg: cad.converted_from_dwg ?? false,\n      selected_layout: cad.selected_layout ?? '',\n      warnings: Array.isArray(cad.warnings) ? cad.warnings : [],\n      machine_data: cad.machine_data ?? {},\n      machine_context: cad.machine_context ?? '',\n    },\n    page: {\n      page_number: 1,\n      page_type: 'cad',\n      text: cad.machine_context ?? '',\n      image_base64: cad.image_base64 ?? '',\n    },\n  },\n}];"
       },
       "id": "f55504e8-af30-4abd-8214-a3f9403101d8",
       "name": "Prepare CAD Context",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        -760,
-        0
-      ]
+      "position": [-760, 0]
     },
     {
       "parameters": {
@@ -75,10 +66,7 @@
       "name": "Understand CAD",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        -540,
-        0
-      ]
+      "position": [-540, 0]
     },
     {
       "parameters": {
@@ -96,10 +84,7 @@
       "name": "Build Normative Queries",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        -320,
-        0
-      ]
+      "position": [-320, 0]
     },
     {
       "parameters": {
@@ -108,7 +93,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ queries: $json.queries ?? [] }) }}",
+        "body": "={{ JSON.stringify({ queries: $json.queries ?? [], ...($('POST /analysis/v2/cad').first().json.body?.normative_section_id ? { section_id: $('POST /analysis/v2/cad').first().json.body.normative_section_id, document_ids: JSON.parse($('POST /analysis/v2/cad').first().json.body?.normative_document_ids ?? '[]') } : {}) }) }}",
         "options": {
           "timeout": 900000
         }
@@ -117,10 +102,7 @@
       "name": "Search Normative",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        -100,
-        0
-      ]
+      "position": [-100, 0]
     },
     {
       "parameters": {
@@ -129,7 +111,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_number: 1, extracted_text: $('Prepare CAD Context').item.json.page.text, page_facts: $('Understand CAD').item.json.facts, normative_sources: $json.sources ?? [], image_base64: $('Prepare CAD Context').item.json.page.image_base64 }) }}",
+        "body": "={{ JSON.stringify({ page_number: 1, extracted_text: $('Prepare CAD Context').item.json.page.text, page_facts: $('Understand CAD').item.json.facts, normative_sources: $json.sources ?? [], image_base64: $('Prepare CAD Context').item.json.page.image_base64, normative_system_prompt: $('POST /analysis/v2/cad').first().json.body?.normative_system_prompt ?? null }) }}",
         "options": {
           "timeout": 1800000
         }
@@ -138,10 +120,7 @@
       "name": "Check Norms",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        120,
-        0
-      ]
+      "position": [120, 0]
     },
     {
       "parameters": {
@@ -152,10 +131,7 @@
       "name": "Prepare Experience Queries",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        340,
-        0
-      ]
+      "position": [340, 0]
     },
     {
       "parameters": {
@@ -173,10 +149,7 @@
       "name": "Search Experience",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        560,
-        0
-      ]
+      "position": [560, 0]
     },
     {
       "parameters": {
@@ -187,10 +160,7 @@
       "name": "Build Experience Map",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        780,
-        0
-      ]
+      "position": [780, 0]
     },
     {
       "parameters": {
@@ -208,10 +178,7 @@
       "name": "Finalize Findings",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        1000,
-        0
-      ]
+      "position": [1000, 0]
     },
     {
       "parameters": {
@@ -222,134 +189,43 @@
       "name": "Build CAD Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1220,
-        0
-      ]
+      "position": [1220, 0]
     }
   ],
   "pinData": {},
   "connections": {
     "POST /analysis/v2/cad": {
-      "main": [
-        [
-          {
-            "node": "Document Extract CAD",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node":"Document Extract CAD","type":"main","index":0}]]
     },
     "Document Extract CAD": {
-      "main": [
-        [
-          {
-            "node": "Prepare CAD Context",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node":"Prepare CAD Context","type":"main","index":0}]]
     },
     "Prepare CAD Context": {
-      "main": [
-        [
-          {
-            "node": "Understand CAD",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node":"Understand CAD","type":"main","index":0}]]
     },
     "Understand CAD": {
-      "main": [
-        [
-          {
-            "node": "Build Normative Queries",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node":"Build Normative Queries","type":"main","index":0}]]
     },
     "Build Normative Queries": {
-      "main": [
-        [
-          {
-            "node": "Search Normative",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node":"Search Normative","type":"main","index":0}]]
     },
     "Search Normative": {
-      "main": [
-        [
-          {
-            "node": "Check Norms",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node":"Check Norms","type":"main","index":0}]]
     },
     "Check Norms": {
-      "main": [
-        [
-          {
-            "node": "Prepare Experience Queries",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node":"Prepare Experience Queries","type":"main","index":0}]]
     },
     "Prepare Experience Queries": {
-      "main": [
-        [
-          {
-            "node": "Search Experience",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node":"Search Experience","type":"main","index":0}]]
     },
     "Search Experience": {
-      "main": [
-        [
-          {
-            "node": "Build Experience Map",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node":"Build Experience Map","type":"main","index":0}]]
     },
     "Build Experience Map": {
-      "main": [
-        [
-          {
-            "node": "Finalize Findings",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node":"Finalize Findings","type":"main","index":0}]]
     },
     "Finalize Findings": {
-      "main": [
-        [
-          {
-            "node": "Build CAD Result",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node":"Build CAD Result","type":"main","index":0}]]
     }
   },
   "active": false,

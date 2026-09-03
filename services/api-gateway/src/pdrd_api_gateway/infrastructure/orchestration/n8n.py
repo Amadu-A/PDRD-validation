@@ -2,6 +2,7 @@
 
 """HTTP adapter запуска PDRD workflow через n8n."""
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -36,8 +37,11 @@ class N8nAnalysisOrchestrator:
         self,
         *,
         artifacts: AnalysisRequestArtifacts,
-    ) -> dict[str, Any]:
-        """Передаёт исходные файлы в нужный n8n webhook."""
+    ) -> dict[
+        str,
+        Any,
+    ]:
+        """Передаёт исходные файлы и immutable snapshot в n8n."""
         submission = artifacts.submission
 
         endpoint = self._resolve_endpoint(
@@ -48,37 +52,20 @@ class N8nAnalysisOrchestrator:
             artifacts,
         )
 
-        data: dict[str, str] = {
-            "document_id": str(
-                submission.document_id,
-            ),
-            "use_explanatory_note": (
-                "true" if submission.use_explanatory_note else "false"
-            ),
-        }
+        data = self._build_data(
+            artifacts,
+        )
 
-        if submission.pages is not None:
-            data["pages"] = submission.pages
-
-        if submission.use_explanatory_note:
-            if submission.note_start_page is None or submission.note_end_page is None:
-                raise AnalysisOrchestrationError(
-                    "Для включённого контекста ПЗ отсутствует диапазон страниц.",
-                )
-
-            data["note_start_page"] = str(
-                submission.note_start_page,
+        url = (
+            self._settings.base_url.rstrip(
+                "/",
             )
-
-            data["note_end_page"] = str(
-                submission.note_end_page,
-            )
-
-        url = self._settings.base_url.rstrip("/") + endpoint
+            + endpoint
+        )
 
         timeout = httpx.Timeout(
-            timeout=(self._settings.request_timeout_seconds),
-            connect=(self._settings.connect_timeout_seconds),
+            timeout=self._settings.request_timeout_seconds,
+            connect=self._settings.connect_timeout_seconds,
         )
 
         try:
@@ -99,13 +86,13 @@ class N8nAnalysisOrchestrator:
             raise AnalysisOrchestrationError(
                 "n8n workflow завершился HTTP ошибкой: "
                 f"{error.response.status_code}. "
-                f"Ответ: {response_text}"
+                f"Ответ: {response_text}",
             ) from error
 
         except httpx.HTTPError as error:
             raise AnalysisOrchestrationError(
                 "Не удалось выполнить HTTP-запрос к n8n: "
-                f"{type(error).__name__}: {error}"
+                f"{type(error).__name__}: {error}",
             ) from error
 
         try:
@@ -124,12 +111,81 @@ class N8nAnalysisOrchestrator:
                 "n8n должен вернуть JSON object.",
             )
 
-        if payload.get("status") != "completed":
+        if (
+            payload.get(
+                "status",
+            )
+            != "completed"
+        ):
             raise AnalysisOrchestrationError(
                 "n8n workflow не подтвердил успешное завершение анализа.",
             )
 
         return payload
+
+    @staticmethod
+    def _build_data(
+        artifacts: AnalysisRequestArtifacts,
+    ) -> dict[
+        str,
+        str,
+    ]:
+        """Формирует multipart form fields для orchestration."""
+        submission = artifacts.submission
+
+        data: dict[
+            str,
+            str,
+        ] = {
+            "document_id": str(
+                submission.document_id,
+            ),
+            "use_explanatory_note": (
+                "true" if submission.use_explanatory_note else "false"
+            ),
+        }
+
+        if submission.pages is not None:
+            data["pages"] = submission.pages
+
+        if submission.use_explanatory_note:
+            if submission.note_start_page is None or submission.note_end_page is None:
+                raise AnalysisOrchestrationError(
+                    ("Для включённого контекста ПЗ отсутствует диапазон страниц."),
+                )
+
+            data["note_start_page"] = str(
+                submission.note_start_page,
+            )
+
+            data["note_end_page"] = str(
+                submission.note_end_page,
+            )
+
+        snapshot = artifacts.normative_snapshot
+
+        if snapshot is not None:
+            data["normative_section_id"] = str(
+                snapshot.section_id,
+            )
+
+            data["normative_document_ids"] = json.dumps(
+                [
+                    str(
+                        document_id,
+                    )
+                    for document_id in snapshot.document_ids
+                ],
+                ensure_ascii=False,
+                separators=(
+                    ",",
+                    ":",
+                ),
+            )
+
+            data["normative_system_prompt"] = snapshot.system_prompt
+
+        return data
 
     def _resolve_endpoint(
         self,

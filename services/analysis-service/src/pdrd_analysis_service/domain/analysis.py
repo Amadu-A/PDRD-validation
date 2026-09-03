@@ -3,7 +3,10 @@
 """Domain-модели VLM-анализа."""
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import (
+    Any,
+    Literal,
+)
 
 FindingCategory = Literal[
     "normative_control",
@@ -46,7 +49,12 @@ class GenerationMetrics:
     content_length: int
     thinking_length: int
 
-    def as_dict(self) -> dict[str, Any]:
+    def as_dict(
+        self,
+    ) -> dict[
+        str,
+        Any,
+    ]:
         """Возвращает transport-friendly представление."""
         return {
             "attempt": self.attempt,
@@ -65,7 +73,11 @@ class GenerationMetrics:
 class GenerationResult:
     """Structured JSON и метрики VLM."""
 
-    payload: dict[str, Any]
+    payload: dict[
+        str,
+        Any,
+    ]
+
     metrics: GenerationMetrics
 
 
@@ -77,11 +89,25 @@ class PageFacts:
     page_type: str
     summary: str
 
-    objects: tuple[str, ...]
-    connections: tuple[str, ...]
-    labels: tuple[str, ...]
+    objects: tuple[
+        str,
+        ...,
+    ]
 
-    normative_queries: tuple[str, ...]
+    connections: tuple[
+        str,
+        ...,
+    ]
+
+    labels: tuple[
+        str,
+        ...,
+    ]
+
+    normative_queries: tuple[
+        str,
+        ...,
+    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +125,14 @@ class NormativeSource:
     chunk_index: int | str | None
 
     text: str
+
+    document_id: str | None = None
+
+    section_id: str | None = None
+
+    category_id: str | None = None
+
+    source_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,10 +176,17 @@ class FindingDraft:
 
     confidence: float
 
-    normative_source_ids: tuple[str, ...]
+    normative_source_ids: tuple[
+        str,
+        ...,
+    ]
 
     basis: str
-    basis_sources: tuple[NormativeSource, ...]
+
+    basis_sources: tuple[
+        NormativeSource,
+        ...,
+    ]
 
     experience_query: str
 
@@ -170,9 +211,16 @@ class FinalFinding:
     confidence: float
 
     basis: str
-    basis_sources: tuple[NormativeSource, ...]
 
-    experience_sources: tuple[ExperienceSource, ...]
+    basis_sources: tuple[
+        NormativeSource,
+        ...,
+    ]
+
+    experience_sources: tuple[
+        ExperienceSource,
+        ...,
+    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +230,8 @@ class ReadinessReport:
     vision_model: bool
 
     @property
-    def ready(self) -> bool:
+    def ready(
+        self,
+    ) -> bool:
         """Возвращает готовность сервиса."""
         return self.vision_model

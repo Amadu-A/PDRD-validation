@@ -28,6 +28,10 @@ class AnalysisAcceptedResponse(BaseModel):
     status: AnalysisJobStatus
     status_url: str
 
+    normative_section_id: UUID | None
+
+    normative_document_ids: list[UUID]
+
 
 class AnalysisStatusResponse(BaseModel):
     """Текущее состояние задания анализа."""
@@ -45,6 +49,10 @@ class AnalysisStatusResponse(BaseModel):
 
     error_code: str | None
     error_message: str | None
+
+    normative_section_id: UUID | None
+
+    normative_document_ids: list[UUID]
 
     created_at: datetime
     updated_at: datetime

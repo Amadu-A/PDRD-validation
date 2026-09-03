@@ -61,18 +61,19 @@ def _decode_image(
             encoded,
             validate=True,
         )
+
     except (
         binascii.Error,
         ValueError,
     ) as error:
         raise HTTPException(
-            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
-            detail=("image_base64 содержит некорректный Base64."),
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="image_base64 содержит некорректный Base64.",
         ) from error
 
     if not content:
         raise HTTPException(
-            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Передано пустое изображение.",
         )
 
@@ -83,8 +84,8 @@ def _decode_image(
         > max_bytes
     ):
         raise HTTPException(
-            status_code=(status.HTTP_413_CONTENT_TOO_LARGE),
-            detail=("Изображение превышает допустимый размер."),
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="Изображение превышает допустимый размер.",
         )
 
     return content
@@ -93,6 +94,7 @@ def _decode_image(
 def _page_facts_payload(
     facts: PageFacts,
 ) -> PageFactsPayload:
+    """Преобразует PageFacts в HTTP payload."""
     return PageFactsPayload(
         discipline=facts.discipline,
         page_type=facts.page_type,
@@ -115,10 +117,15 @@ def _page_facts_payload(
 def _normative_source_payload(
     source: NormativeSource,
 ) -> NormativeSourcePayload:
+    """Преобразует managed normative source в HTTP payload."""
     return NormativeSourcePayload(
         source_id=source.source_id,
         point_id=source.point_id,
         score=source.score,
+        document_id=source.document_id,
+        section_id=source.section_id,
+        category_id=source.category_id,
+        source_sha256=source.source_sha256,
         source_file=source.source_file,
         source_path=source.source_path,
         page=source.page,
@@ -130,6 +137,7 @@ def _normative_source_payload(
 def _experience_source_payload(
     source: ExperienceSource,
 ) -> ExperienceSourcePayload:
+    """Преобразует ExperienceSource в HTTP payload."""
     return ExperienceSourcePayload(
         source_id=source.source_id,
         point_id=source.point_id,
@@ -138,17 +146,18 @@ def _experience_source_payload(
         issue_id=source.issue_id,
         issue_text=source.issue_text,
         status=source.status,
-        verified_fixed=(source.verified_fixed),
+        verified_fixed=source.verified_fixed,
         before_page=source.before_page,
         after_page=source.after_page,
-        before_context=(source.before_context),
-        after_context=(source.after_context),
+        before_context=source.before_context,
+        after_context=source.after_context,
     )
 
 
 def _finding_draft_payload(
     finding: FindingDraft,
 ) -> FindingDraftPayload:
+    """Преобразует FindingDraft в HTTP payload."""
     return FindingDraftPayload(
         finding_id=finding.finding_id,
         page=finding.page,
@@ -158,7 +167,7 @@ def _finding_draft_payload(
         status=finding.status,
         comment=finding.comment,
         evidence=finding.evidence,
-        recommendation_draft=(finding.recommendation_draft),
+        recommendation_draft=finding.recommendation_draft,
         confidence=finding.confidence,
         normative_source_ids=list(
             finding.normative_source_ids,
@@ -168,15 +177,16 @@ def _finding_draft_payload(
             _normative_source_payload(
                 source,
             )
-            for source in (finding.basis_sources)
+            for source in finding.basis_sources
         ],
-        experience_query=(finding.experience_query),
+        experience_query=finding.experience_query,
     )
 
 
 def _final_finding_payload(
     finding: FinalFinding,
 ) -> FinalFindingPayload:
+    """Преобразует FinalFinding в HTTP payload."""
     return FinalFindingPayload(
         finding_id=finding.finding_id,
         page=finding.page,
@@ -186,20 +196,20 @@ def _final_finding_payload(
         status=finding.status,
         comment=finding.comment,
         evidence=finding.evidence,
-        recommendation=(finding.recommendation),
+        recommendation=finding.recommendation,
         confidence=finding.confidence,
         basis=finding.basis,
         basis_sources=[
             _normative_source_payload(
                 source,
             )
-            for source in (finding.basis_sources)
+            for source in finding.basis_sources
         ],
         experience_sources=[
             _experience_source_payload(
                 source,
             )
-            for source in (finding.experience_sources)
+            for source in finding.experience_sources
         ],
     )
 
@@ -211,14 +221,16 @@ def _final_finding_payload(
 async def health_live(
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
 ) -> LiveHealthResponse:
     """Возвращает liveness."""
     return LiveHealthResponse(
         status="ok",
-        service=(container.settings.service_name),
-        version=(container.settings.service_version),
+        service=container.settings.service_name,
+        version=container.settings.service_version,
     )
 
 
@@ -229,17 +241,21 @@ async def health_live(
 async def health_ready(
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
 ) -> ReadyHealthResponse:
     """Проверяет configured VLM."""
     report = await container.check_readiness.execute()
 
-    dependencies = {"vision_model": (report.vision_model)}
+    dependencies = {
+        "vision_model": report.vision_model,
+    }
 
     if not report.ready:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "status": "not_ready",
                 "dependencies": dependencies,
@@ -248,8 +264,8 @@ async def health_ready(
 
     return ReadyHealthResponse(
         status="ready",
-        service=(container.settings.service_name),
-        version=(container.settings.service_version),
+        service=container.settings.service_name,
+        version=container.settings.service_version,
         dependencies=dependencies,
     )
 
@@ -262,28 +278,28 @@ async def understand_page(
     request: UnderstandPageRequest,
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
 ) -> UnderstandPageResponse:
     """Получает объективные факты листа."""
     image = _decode_image(
         encoded=request.image_base64,
-        max_bytes=(container.settings.pipeline.max_image_bytes),
+        max_bytes=container.settings.pipeline.max_image_bytes,
     )
 
     try:
-        (
-            facts,
-            metrics,
-        ) = await container.understand_page.execute(
-            page_number=(request.page_number),
-            heuristic_page_type=(request.heuristic_page_type),
-            extracted_text=(request.extracted_text),
+        facts, metrics = await container.understand_page.execute(
+            page_number=request.page_number,
+            heuristic_page_type=request.heuristic_page_type,
+            extracted_text=request.extracted_text,
             image_bytes=image,
         )
+
     except VisionModelError as error:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(
                 error,
             ),
@@ -305,13 +321,15 @@ async def normative_queries(
     request: NormativeQueriesRequest,
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
 ) -> NormativeQueriesResponse:
     """Строит retrieval queries Knowledge Service."""
     queries = container.build_normative_queries.execute(
-        page_facts=(request.page_facts.to_domain()),
-        extracted_text=(request.extracted_text),
+        page_facts=request.page_facts.to_domain(),
+        extracted_text=request.extracted_text,
         project_context_texts=tuple(
             request.project_context_texts,
         ),
@@ -320,7 +338,7 @@ async def normative_queries(
     return NormativeQueriesResponse(
         queries=list(
             queries,
-        )
+        ),
     )
 
 
@@ -332,13 +350,15 @@ async def check_norms(
     request: CheckNormsRequest,
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
 ) -> CheckNormsResponse:
     """Проверяет лист по retrieved normative sources."""
     image = _decode_image(
         encoded=request.image_base64,
-        max_bytes=(container.settings.pipeline.max_image_bytes),
+        max_bytes=container.settings.pipeline.max_image_bytes,
     )
 
     try:
@@ -347,17 +367,19 @@ async def check_norms(
             findings,
             metrics,
         ) = await container.check_page_against_norms.execute(
-            page_number=(request.page_number),
-            extracted_text=(request.extracted_text),
-            page_facts=(request.page_facts.to_domain()),
+            page_number=request.page_number,
+            extracted_text=request.extracted_text,
+            page_facts=request.page_facts.to_domain(),
             normative_sources=tuple(
-                source.to_domain() for source in (request.normative_sources)
+                source.to_domain() for source in request.normative_sources
             ),
             image_bytes=image,
+            normative_system_prompt=request.normative_system_prompt,
         )
+
     except VisionModelError as error:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(
                 error,
             ),
@@ -383,7 +405,9 @@ async def finalize_findings(
     request: FinalizeRequest,
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
 ) -> FinalizeResponse:
     """Финализирует нормативные findings."""
@@ -392,10 +416,10 @@ async def finalize_findings(
         findings,
         metrics,
     ) = await container.finalize_findings.execute(
-        findings=tuple(finding.to_domain() for finding in (request.findings)),
+        findings=tuple(finding.to_domain() for finding in request.findings),
         experience_by_finding={
             finding_id: tuple(source.to_domain() for source in sources)
-            for finding_id, sources in (request.experience_by_finding.items())
+            for finding_id, sources in request.experience_by_finding.items()
         },
     )
 

@@ -47,7 +47,10 @@ class BuildNormativeQueries:
             str,
             ...,
         ] = (),
-    ) -> tuple[str, ...]:
+    ) -> tuple[
+        str,
+        ...,
+    ]:
         """Строит нейтральные запросы к Knowledge Service."""
         queries = [
             query.strip() for query in page_facts.normative_queries if query.strip()
@@ -122,6 +125,7 @@ class CheckPageAgainstNorms:
             ...,
         ],
         image_bytes: bytes,
+        normative_system_prompt: str | None = None,
     ) -> tuple[
         str,
         tuple[
@@ -137,7 +141,7 @@ class CheckPageAgainstNorms:
 
         if not source_ids:
             return (
-                ("Нормативные источники для листа не найдены."),
+                "Нормативные источники для листа не найдены.",
                 (),
                 zero_metrics(
                     "no_normative_sources",
@@ -145,24 +149,21 @@ class CheckPageAgainstNorms:
             )
 
         result = await self.vision_model.generate_json(
-            prompt=(
-                build_normative_check_prompt(
-                    page_number=(page_number),
-                    extracted_text=(extracted_text),
-                    page_facts=(page_facts),
-                    normative_sources=(normative_sources),
-                    normative_text_limit=(self.normative_text_limit),
-                )
+            prompt=build_normative_check_prompt(
+                page_number=page_number,
+                extracted_text=extracted_text,
+                page_facts=page_facts,
+                normative_sources=normative_sources,
+                normative_text_limit=self.normative_text_limit,
+                normative_system_prompt=normative_system_prompt,
             ),
-            schema=(
-                build_normative_check_schema(
-                    source_ids=source_ids,
-                    max_issues=(self.max_issues),
-                )
+            schema=build_normative_check_schema(
+                source_ids=source_ids,
+                max_issues=self.max_issues,
             ),
             num_predict=self.num_predict,
             seed=200,
-            stage=(f"normative_check:{page_number}"),
+            stage=f"normative_check:{page_number}",
             image_bytes=image_bytes,
         )
 
@@ -223,10 +224,10 @@ class CheckPageAgainstNorms:
 
             findings.append(
                 FindingDraft(
-                    finding_id=(finding_id),
+                    finding_id=finding_id,
                     page=page_number,
-                    page_type=(page_facts.page_type),
-                    category=(finding_category),
+                    page_type=page_facts.page_type,
+                    category=finding_category,
                     severity=severity(
                         violation.get(
                             "severity",
@@ -239,26 +240,24 @@ class CheckPageAgainstNorms:
                     ),
                     comment=comment,
                     evidence=evidence,
-                    recommendation_draft=(recommendation_draft),
+                    recommendation_draft=recommendation_draft,
                     confidence=confidence(
                         violation.get(
                             "confidence",
                         )
                     ),
-                    normative_source_ids=(
-                        tuple(source.source_id for source in selected_sources)
+                    normative_source_ids=tuple(
+                        source.source_id for source in selected_sources
                     ),
                     basis=build_basis(
                         selected_sources,
                     ),
-                    basis_sources=(selected_sources),
-                    experience_query=(
-                        build_experience_query(
-                            category=(finding_category),
-                            comment=comment,
-                            evidence=evidence,
-                            recommendation_draft=(recommendation_draft),
-                        )
+                    basis_sources=selected_sources,
+                    experience_query=build_experience_query(
+                        category=finding_category,
+                        comment=comment,
+                        evidence=evidence,
+                        recommendation_draft=recommendation_draft,
                     ),
                 )
             )

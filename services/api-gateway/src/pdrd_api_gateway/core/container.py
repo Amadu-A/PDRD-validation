@@ -22,6 +22,9 @@ from pdrd_api_gateway.application.use_cases.get_analysis_job import (
 from pdrd_api_gateway.application.use_cases.get_analysis_result import (
     GetAnalysisResult,
 )
+from pdrd_api_gateway.application.use_cases.resolve_normative_snapshot import (
+    ResolveNormativeSnapshot,
+)
 from pdrd_api_gateway.application.use_cases.submit_analysis import (
     SubmitAnalysis,
 )
@@ -38,6 +41,9 @@ from pdrd_api_gateway.infrastructure.database.health import (
 )
 from pdrd_api_gateway.infrastructure.database.unit_of_work import (
     SqlAlchemyUnitOfWork,
+)
+from pdrd_api_gateway.infrastructure.knowledge.normative_catalog import (
+    HttpNormativeCatalogReader,
 )
 from pdrd_api_gateway.infrastructure.messaging.broker import (
     RabbitMqReadinessProbe,
@@ -58,15 +64,22 @@ class ApplicationContainer:
     """Хранит runtime dependencies API Gateway."""
 
     settings: Settings
+
     check_readiness: CheckReadiness
+
     shutdown_callback: ShutdownCallback
 
     create_analysis_job: CreateAnalysisJob | None = None
+
     get_analysis_job: GetAnalysisJob | None = None
+
     get_analysis_result: GetAnalysisResult | None = None
+
     submit_analysis: SubmitAnalysis | None = None
 
-    async def close(self) -> None:
+    async def close(
+        self,
+    ) -> None:
         """Корректно освобождает infrastructure resources."""
         await self.shutdown_callback()
 
@@ -90,7 +103,7 @@ def build_container() -> ApplicationContainer:
 
     database_readiness = DatabaseReadinessProbe(
         engine=engine,
-        timeout_seconds=(settings.database.health_timeout_seconds),
+        timeout_seconds=settings.database.health_timeout_seconds,
     )
 
     broker_url = build_broker_url(
@@ -99,8 +112,8 @@ def build_container() -> ApplicationContainer:
 
     broker_readiness = RabbitMqReadinessProbe(
         broker_url=broker_url,
-        connect_timeout_seconds=(settings.broker.connect_timeout_seconds),
-        health_timeout_seconds=(settings.broker.health_timeout_seconds),
+        connect_timeout_seconds=settings.broker.connect_timeout_seconds,
+        health_timeout_seconds=settings.broker.health_timeout_seconds,
     )
 
     check_readiness = CheckReadiness(
@@ -122,9 +135,18 @@ def build_container() -> ApplicationContainer:
         ),
     )
 
+    normative_catalog_reader = HttpNormativeCatalogReader(
+        settings=settings.knowledge_service,
+    )
+
+    resolve_normative_snapshot = ResolveNormativeSnapshot(
+        catalog_reader=normative_catalog_reader,
+    )
+
     submit_analysis = SubmitAnalysis(
         artifact_store=artifact_store,
         create_analysis_job=create_analysis_job,
+        resolve_normative_snapshot=resolve_normative_snapshot,
     )
 
     get_analysis_result = GetAnalysisResult(

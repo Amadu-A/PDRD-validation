@@ -11,7 +11,12 @@ from pdrd_api_gateway.domain.analysis_job import (
     AnalysisJob,
     AnalysisJobStatus,
 )
-from pdrd_api_gateway.domain.outbox import OutboxMessage
+from pdrd_api_gateway.domain.normative_snapshot import (
+    NormativeAnalysisSnapshot,
+)
+from pdrd_api_gateway.domain.outbox import (
+    OutboxMessage,
+)
 from pdrd_api_gateway.infrastructure.database.models import (
     AnalysisJobModel,
     OutboxMessageModel,
@@ -37,6 +42,11 @@ class SqlAlchemyAnalysisJobRepository:
             AnalysisJobModel(
                 id=job.id,
                 document_id=job.document_id,
+                normative_snapshot=(
+                    job.normative_snapshot.as_payload()
+                    if job.normative_snapshot is not None
+                    else None
+                ),
                 status=job.status.value,
                 attempt_count=job.attempt_count,
                 error_code=job.error_code,
@@ -67,7 +77,7 @@ class SqlAlchemyAnalysisJobRepository:
         self,
         job: AnalysisJob,
     ) -> None:
-        """Обновляет persistence model из domain entity."""
+        """Обновляет mutable lifecycle поля, не переписывая snapshot."""
         model = await self._session.get(
             AnalysisJobModel,
             job.id,
@@ -79,10 +89,13 @@ class SqlAlchemyAnalysisJobRepository:
             )
 
         model.document_id = job.document_id
+
         model.status = job.status.value
         model.attempt_count = job.attempt_count
+
         model.error_code = job.error_code
         model.error_message = job.error_message
+
         model.updated_at = job.updated_at
 
     @staticmethod
@@ -90,9 +103,18 @@ class SqlAlchemyAnalysisJobRepository:
         model: AnalysisJobModel,
     ) -> AnalysisJob:
         """Преобразует SQLAlchemy model в domain entity."""
+        snapshot = (
+            NormativeAnalysisSnapshot.from_payload(
+                model.normative_snapshot,
+            )
+            if model.normative_snapshot is not None
+            else None
+        )
+
         return AnalysisJob(
             id=model.id,
             document_id=model.document_id,
+            normative_snapshot=snapshot,
             status=AnalysisJobStatus(
                 model.status,
             ),
@@ -143,12 +165,16 @@ class SqlAlchemyOutboxRepository:
                 OutboxMessageModel,
             )
             .where(
-                OutboxMessageModel.published_at.is_(None),
+                OutboxMessageModel.published_at.is_(
+                    None,
+                ),
             )
             .order_by(
                 OutboxMessageModel.created_at,
             )
-            .limit(limit)
+            .limit(
+                limit,
+            )
             .with_for_update(
                 skip_locked=True,
             )
@@ -158,7 +184,12 @@ class SqlAlchemyOutboxRepository:
             statement,
         )
 
-        return [self._to_domain(model) for model in result.all()]
+        return [
+            self._to_domain(
+                model,
+            )
+            for model in result.all()
+        ]
 
     async def update(
         self,
@@ -183,12 +214,14 @@ class SqlAlchemyOutboxRepository:
     def _to_domain(
         model: OutboxMessageModel,
     ) -> OutboxMessage:
-        """Преобразует ORM model в domain entity."""
+        """Преобразует SQLAlchemy model в domain entity."""
         return OutboxMessage(
             id=model.id,
             aggregate_id=model.aggregate_id,
             event_type=model.event_type,
-            payload=dict(model.payload),
+            payload=dict(
+                model.payload,
+            ),
             attempt_count=model.attempt_count,
             last_error=model.last_error,
             created_at=model.created_at,

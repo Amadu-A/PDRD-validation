@@ -18,9 +18,14 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import (
+    Mapped,
+    mapped_column,
+)
 
-from pdrd_api_gateway.infrastructure.database.base import Base
+from pdrd_api_gateway.infrastructure.database.base import (
+    Base,
+)
 
 
 class AnalysisJobModel(Base):
@@ -44,6 +49,10 @@ class AnalysisJobModel(Base):
             "attempt_count >= 0",
             name="ck_analysis_jobs_attempt_count",
         ),
+        CheckConstraint(
+            "normative_snapshot IS NULL OR jsonb_typeof(normative_snapshot) = 'object'",
+            name="ck_analysis_jobs_normative_snapshot_object",
+        ),
         Index(
             "ix_analysis_jobs_status",
             "status",
@@ -55,29 +64,52 @@ class AnalysisJobModel(Base):
     )
 
     id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True),
+        Uuid(
+            as_uuid=True,
+        ),
         primary_key=True,
     )
 
     document_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
+        Uuid(
+            as_uuid=True,
+        ),
+        nullable=True,
+    )
+
+    normative_snapshot: Mapped[
+        dict[
+            str,
+            object,
+        ]
+        | None
+    ] = mapped_column(
+        JSONB,
         nullable=True,
     )
 
     status: Mapped[str] = mapped_column(
-        String(32),
+        String(
+            32,
+        ),
         nullable=False,
-        server_default=text("'pending'"),
+        server_default=text(
+            "'pending'",
+        ),
     )
 
     attempt_count: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        server_default=text("0"),
+        server_default=text(
+            "0",
+        ),
     )
 
     error_code: Mapped[str | None] = mapped_column(
-        String(128),
+        String(
+            128,
+        ),
         nullable=True,
     )
 
@@ -87,13 +119,17 @@ class AnalysisJobModel(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        DateTime(
+            timezone=True,
+        ),
         nullable=False,
         server_default=func.now(),
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        DateTime(
+            timezone=True,
+        ),
         nullable=False,
         server_default=func.now(),
     )
@@ -117,12 +153,16 @@ class OutboxMessageModel(Base):
     )
 
     id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True),
+        Uuid(
+            as_uuid=True,
+        ),
         primary_key=True,
     )
 
     aggregate_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True),
+        Uuid(
+            as_uuid=True,
+        ),
         ForeignKey(
             "analysis_jobs.id",
             ondelete="CASCADE",
@@ -131,11 +171,18 @@ class OutboxMessageModel(Base):
     )
 
     event_type: Mapped[str] = mapped_column(
-        String(128),
+        String(
+            128,
+        ),
         nullable=False,
     )
 
-    payload: Mapped[dict[str, str]] = mapped_column(
+    payload: Mapped[
+        dict[
+            str,
+            str,
+        ]
+    ] = mapped_column(
         JSONB,
         nullable=False,
     )
@@ -143,7 +190,9 @@ class OutboxMessageModel(Base):
     attempt_count: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        server_default=text("0"),
+        server_default=text(
+            "0",
+        ),
     )
 
     last_error: Mapped[str | None] = mapped_column(
@@ -152,12 +201,16 @@ class OutboxMessageModel(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        DateTime(
+            timezone=True,
+        ),
         nullable=False,
         server_default=func.now(),
     )
 
     published_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
+        DateTime(
+            timezone=True,
+        ),
         nullable=True,
     )

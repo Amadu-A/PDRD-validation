@@ -3,12 +3,16 @@
 """Use case приёма пользовательских файлов для анализа."""
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from pdrd_api_gateway.application.ports.artifacts import (
     AnalysisArtifactStore,
 )
 from pdrd_api_gateway.application.use_cases.create_analysis_job import (
     CreateAnalysisJob,
+)
+from pdrd_api_gateway.application.use_cases.resolve_normative_snapshot import (
+    ResolveNormativeSnapshot,
 )
 from pdrd_api_gateway.domain.analysis_job import (
     AnalysisJob,
@@ -22,12 +26,19 @@ class EmptyAnalysisFileError(ValueError):
     """Ошибка пустого загруженного файла."""
 
 
+class NormativeSnapshotResolverNotConfiguredError(RuntimeError):
+    """Managed normative selection передан без configured resolver."""
+
+
 @dataclass(frozen=True, slots=True)
 class SubmitAnalysis:
     """Сохраняет исходные файлы и создаёт asynchronous job."""
 
     artifact_store: AnalysisArtifactStore
+
     create_analysis_job: CreateAnalysisJob
+
+    resolve_normative_snapshot: ResolveNormativeSnapshot | None = None
 
     async def execute(
         self,
@@ -40,6 +51,14 @@ class SubmitAnalysis:
         use_explanatory_note: bool = False,
         note_start_page: str | int | None = None,
         note_end_page: str | int | None = None,
+        normative_section_id: UUID | None = None,
+        normative_document_ids: tuple[
+            UUID,
+            ...,
+        ]
+        | None = None,
+        normative_prompt_override_enabled: bool = False,
+        normative_prompt_override: str = "",
     ) -> AnalysisJob:
         """Принимает документы и создаёт надёжное задание."""
         self._validate_file_content(
@@ -51,6 +70,29 @@ class SubmitAnalysis:
             content=cad_content,
             file_kind="CAD",
         )
+
+        normative_snapshot = None
+
+        normative_selection_requested = (
+            normative_section_id is not None
+            or normative_document_ids is not None
+            or normative_prompt_override_enabled
+        )
+
+        if normative_selection_requested:
+            resolver = self.resolve_normative_snapshot
+
+            if resolver is None:
+                raise NormativeSnapshotResolverNotConfiguredError(
+                    "Normative snapshot resolver не настроен.",
+                )
+
+            normative_snapshot = await resolver.execute(
+                section_id=normative_section_id,
+                document_ids=normative_document_ids,
+                prompt_override_enabled=(normative_prompt_override_enabled),
+                prompt_override=normative_prompt_override,
+            )
 
         submission = AnalysisSubmission.create(
             pdf_present=(pdf_content is not None),
@@ -72,6 +114,7 @@ class SubmitAnalysis:
         try:
             return await self.create_analysis_job.execute(
                 document_id=submission.document_id,
+                normative_snapshot=normative_snapshot,
             )
 
         except BaseException:

@@ -3,7 +3,10 @@
 """Use case выполнения queued analysis job."""
 
 import logging
-from dataclasses import dataclass
+from dataclasses import (
+    dataclass,
+    replace,
+)
 from typing import Any
 from uuid import UUID
 
@@ -57,7 +60,10 @@ class ExecuteAnalysisJob:
         self,
         *,
         job_id: UUID,
-    ) -> dict[str, Any]:
+    ) -> dict[
+        str,
+        Any,
+    ]:
         """Запускает job, сохраняет result и очищает Project Context."""
         job = await self._prepare_job(
             job_id=job_id,
@@ -69,7 +75,7 @@ class ExecuteAnalysisJob:
             )
 
             await self._cleanup_project_context(
-                context_id=(job.document_id),
+                context_id=job.document_id,
             )
 
             return result
@@ -89,7 +95,7 @@ class ExecuteAnalysisJob:
             raise AnalysisExecutionError(
                 str(
                     error,
-                ),
+                )
             ) from error
 
         try:
@@ -106,6 +112,11 @@ class ExecuteAnalysisJob:
 
             artifacts = await self.artifact_store.load_request(
                 document_id=document_id,
+            )
+
+            artifacts = replace(
+                artifacts,
+                normative_snapshot=job.normative_snapshot,
             )
 
             result = await self.orchestrator.execute(
@@ -126,7 +137,7 @@ class ExecuteAnalysisJob:
             raise AnalysisExecutionError(
                 "Не удалось выполнить analysis job "
                 f"{job_id}: "
-                f"{type(error).__name__}: {error}"
+                f"{type(error).__name__}: {error}",
             ) from error
 
         finally:
@@ -156,7 +167,7 @@ class ExecuteAnalysisJob:
 
         except Exception as error:
             LOGGER.warning(
-                "project_context_cleanup_failed context_id=%s error_type=%s error=%s",
+                ("project_context_cleanup_failed context_id=%s error_type=%s error=%s"),
                 context_id,
                 type(
                     error,
@@ -222,7 +233,10 @@ class ExecuteAnalysisJob:
         self,
         *,
         job: AnalysisJob,
-    ) -> dict[str, Any]:
+    ) -> dict[
+        str,
+        Any,
+    ]:
         """Возвращает результат уже завершённого job."""
         if job.document_id is None:
             raise AnalysisExecutionError(
@@ -230,12 +244,12 @@ class ExecuteAnalysisJob:
             )
 
         result = await self.artifact_store.load_result(
-            document_id=(job.document_id),
+            document_id=job.document_id,
         )
 
         if result is None:
             raise AnalysisExecutionError(
-                "Analysis job имеет status=completed, но result.json отсутствует.",
+                ("Analysis job имеет status=completed, но result.json отсутствует."),
             )
 
         return result
@@ -297,7 +311,7 @@ class ExecuteAnalysisJob:
                 return
 
             job.mark_failed(
-                error_code=("analysis_execution_failed"),
+                error_code="analysis_execution_failed",
                 error_message=(f"{type(error).__name__}: {error}")[:2000],
             )
 

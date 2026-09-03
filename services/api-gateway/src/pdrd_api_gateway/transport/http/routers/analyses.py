@@ -2,6 +2,7 @@
 
 """HTTP API асинхронных заданий анализа."""
 
+import json
 from typing import (
     Annotated,
     Any,
@@ -18,6 +19,9 @@ from fastapi import (
     status,
 )
 
+from pdrd_api_gateway.application.ports.normative_catalog import (
+    NormativeCatalogReadError,
+)
 from pdrd_api_gateway.application.use_cases.get_analysis_job import (
     GetAnalysisJob,
 )
@@ -27,8 +31,13 @@ from pdrd_api_gateway.application.use_cases.get_analysis_result import (
     AnalysisResultUnavailableError,
     GetAnalysisResult,
 )
+from pdrd_api_gateway.application.use_cases.resolve_normative_snapshot import (
+    InvalidNormativeSelectionError,
+    NormativeSelectionConflictError,
+)
 from pdrd_api_gateway.application.use_cases.submit_analysis import (
     EmptyAnalysisFileError,
+    NormativeSnapshotResolverNotConfiguredError,
     SubmitAnalysis,
 )
 from pdrd_api_gateway.core.container import (
@@ -36,6 +45,9 @@ from pdrd_api_gateway.core.container import (
 )
 from pdrd_api_gateway.domain.analysis_submission import (
     InvalidAnalysisSubmissionError,
+)
+from pdrd_api_gateway.domain.normative_snapshot import (
+    InvalidNormativeAnalysisSnapshotError,
 )
 from pdrd_api_gateway.transport.http.dependencies import (
     get_container,
@@ -91,7 +103,10 @@ async def read_upload(
     *,
     upload: UploadFile | None,
     max_upload_bytes: int,
-) -> tuple[bytes | None, str | None]:
+) -> tuple[
+    bytes | None,
+    str | None,
+]:
     """Читает upload с ограничением максимального размера."""
     if upload is None:
         return (
@@ -107,15 +122,83 @@ async def read_upload(
     finally:
         await upload.close()
 
-    if len(content) > max_upload_bytes:
+    if (
+        len(
+            content,
+        )
+        > max_upload_bytes
+    ):
         raise HTTPException(
-            status_code=(status.HTTP_413_CONTENT_TOO_LARGE),
-            detail=("Размер загруженного файла превышает допустимый предел."),
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="Размер загруженного файла превышает допустимый предел.",
         )
 
     return (
         content,
         upload.filename,
+    )
+
+
+def parse_normative_document_ids(
+    raw_value: str | None,
+) -> (
+    tuple[
+        UUID,
+        ...,
+    ]
+    | None
+):
+    """Разбирает JSON array UUID из multipart form field."""
+    if raw_value is None:
+        return None
+
+    try:
+        payload = json.loads(
+            raw_value,
+        )
+
+    except json.JSONDecodeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="normative_document_ids должен быть JSON array UUID.",
+        ) from error
+
+    if not isinstance(
+        payload,
+        list,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="normative_document_ids должен быть JSON array.",
+        )
+
+    result: list[UUID] = []
+
+    for value in payload:
+        if not isinstance(
+            value,
+            str,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Каждый normative_document_id должен быть строкой UUID.",
+            )
+
+        try:
+            result.append(
+                UUID(
+                    value,
+                )
+            )
+
+        except ValueError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Некорректный normative_document_id: {value}.",
+            ) from error
+
+    return tuple(
+        result,
     )
 
 
@@ -127,7 +210,9 @@ async def read_upload(
 async def create_analysis(
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
     pdf: Annotated[
         UploadFile | None,
@@ -153,6 +238,22 @@ async def create_analysis(
         str | None,
         Form(),
     ] = None,
+    normative_section_id: Annotated[
+        UUID | None,
+        Form(),
+    ] = None,
+    normative_document_ids: Annotated[
+        str | None,
+        Form(),
+    ] = None,
+    normative_prompt_override_enabled: Annotated[
+        bool,
+        Form(),
+    ] = False,
+    normative_prompt_override: Annotated[
+        str,
+        Form(),
+    ] = "",
 ) -> AnalysisAcceptedResponse:
     """Принимает документы и создаёт asynchronous analysis job."""
     max_upload_bytes = container.settings.storage.max_upload_bytes
@@ -165,6 +266,10 @@ async def create_analysis(
     cad_content, cad_file_name = await read_upload(
         upload=cad,
         max_upload_bytes=max_upload_bytes,
+    )
+
+    parsed_normative_document_ids = parse_normative_document_ids(
+        normative_document_ids,
     )
 
     use_case = require_submit_analysis(
@@ -181,6 +286,10 @@ async def create_analysis(
             use_explanatory_note=use_explanatory_note,
             note_start_page=note_start_page,
             note_end_page=note_end_page,
+            normative_section_id=normative_section_id,
+            normative_document_ids=parsed_normative_document_ids,
+            normative_prompt_override_enabled=(normative_prompt_override_enabled),
+            normative_prompt_override=normative_prompt_override,
         )
 
     except EmptyAnalysisFileError as error:
@@ -191,9 +300,32 @@ async def create_analysis(
             ),
         ) from error
 
-    except InvalidAnalysisSubmissionError as error:
+    except (
+        InvalidAnalysisSubmissionError,
+        InvalidNormativeSelectionError,
+        InvalidNormativeAnalysisSnapshotError,
+    ) as error:
         raise HTTPException(
-            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    except NormativeSelectionConflictError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    except (
+        NormativeCatalogReadError,
+        NormativeSnapshotResolverNotConfiguredError,
+    ) as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(
                 error,
             ),
@@ -204,25 +336,43 @@ async def create_analysis(
             "Created analysis job has no document_id.",
         )
 
+    snapshot = job.normative_snapshot
+
     return AnalysisAcceptedResponse(
         job_id=job.id,
         document_id=job.document_id,
         status=job.status,
-        status_url=(f"/api/v1/analyses/{job.id}"),
+        status_url=f"/api/v1/analyses/{job.id}",
+        normative_section_id=(snapshot.section_id if snapshot is not None else None),
+        normative_document_ids=(
+            list(
+                snapshot.document_ids,
+            )
+            if snapshot is not None
+            else []
+        ),
     )
 
 
 @router.get(
     "/{job_id}/result",
-    response_model=dict[str, Any],
+    response_model=dict[
+        str,
+        Any,
+    ],
 )
 async def get_analysis_result(
     job_id: UUID,
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
-) -> dict[str, Any]:
+) -> dict[
+    str,
+    Any,
+]:
     """Возвращает JSON-результат завершённого анализа."""
     use_case = require_get_analysis_result(
         container,
@@ -254,7 +404,7 @@ async def get_analysis_result(
 
     except AnalysisResultUnavailableError as error:
         raise HTTPException(
-            status_code=(status.HTTP_500_INTERNAL_SERVER_ERROR),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(
                 error,
             ),
@@ -269,7 +419,9 @@ async def get_analysis(
     job_id: UUID,
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
 ) -> AnalysisStatusResponse:
     """Возвращает актуальное состояние задания."""
@@ -287,6 +439,8 @@ async def get_analysis(
             detail="Analysis job not found.",
         )
 
+    snapshot = job.normative_snapshot
+
     return AnalysisStatusResponse(
         job_id=job.id,
         document_id=job.document_id,
@@ -294,6 +448,14 @@ async def get_analysis(
         attempt_count=job.attempt_count,
         error_code=job.error_code,
         error_message=job.error_message,
+        normative_section_id=(snapshot.section_id if snapshot is not None else None),
+        normative_document_ids=(
+            list(
+                snapshot.document_ids,
+            )
+            if snapshot is not None
+            else []
+        ),
         created_at=job.created_at,
         updated_at=job.updated_at,
     )

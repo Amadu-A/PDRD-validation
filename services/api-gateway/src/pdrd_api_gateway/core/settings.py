@@ -146,7 +146,9 @@ class StorageSettings(BaseModel):
     )
 
     @property
-    def max_upload_bytes(self) -> int:
+    def max_upload_bytes(
+        self,
+    ) -> int:
         """Возвращает максимальный размер файла."""
         return self.max_upload_mb * 1024 * 1024
 
@@ -170,6 +172,24 @@ class OrchestrationSettings(BaseModel):
 
     connect_timeout_seconds: float = Field(
         default=20.0,
+        gt=0,
+        le=120,
+    )
+
+
+class KnowledgeServiceSettings(BaseModel):
+    """Настройки internal API Knowledge Service."""
+
+    base_url: str = "http://pdrd-knowledge-service:8401"
+
+    request_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        le=300,
+    )
+
+    connect_timeout_seconds: float = Field(
+        default=10.0,
         gt=0,
         le=120,
     )
@@ -240,11 +260,15 @@ class Settings(BaseSettings):
     )
 
     orchestration: OrchestrationSettings = Field(
-        default_factory=(OrchestrationSettings),
+        default_factory=OrchestrationSettings,
+    )
+
+    knowledge_service: KnowledgeServiceSettings = Field(
+        default_factory=KnowledgeServiceSettings,
     )
 
     project_context_cleanup: ProjectContextCleanupSettings = Field(
-        default_factory=(ProjectContextCleanupSettings),
+        default_factory=ProjectContextCleanupSettings,
     )
 
 

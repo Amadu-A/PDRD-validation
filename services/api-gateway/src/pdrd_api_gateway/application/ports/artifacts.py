@@ -3,11 +3,17 @@
 """Application port хранения файлов и результатов анализа."""
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import (
+    Any,
+    Protocol,
+)
 from uuid import UUID
 
 from pdrd_api_gateway.domain.analysis_submission import (
     AnalysisSubmission,
+)
+from pdrd_api_gateway.domain.normative_snapshot import (
+    NormativeAnalysisSnapshot,
 )
 
 
@@ -29,6 +35,8 @@ class AnalysisRequestArtifacts:
 
     pdf_content: bytes | None
     cad_content: bytes | None
+
+    normative_snapshot: NormativeAnalysisSnapshot | None = None
 
 
 class AnalysisArtifactStore(Protocol):
@@ -64,7 +72,10 @@ class AnalysisArtifactStore(Protocol):
         self,
         *,
         document_id: UUID,
-        result: dict[str, Any],
+        result: dict[
+            str,
+            Any,
+        ],
     ) -> None:
         """Сохраняет итоговый JSON анализа."""
         ...
@@ -73,6 +84,12 @@ class AnalysisArtifactStore(Protocol):
         self,
         *,
         document_id: UUID,
-    ) -> dict[str, Any] | None:
+    ) -> (
+        dict[
+            str,
+            Any,
+        ]
+        | None
+    ):
         """Возвращает итоговый JSON, если он уже сформирован."""
         ...
