@@ -199,6 +199,15 @@ def test_snapshot_rejects_nul_prompt() -> None:
         )
 
 
+def test_absent_snapshot_is_bound_as_sql_null() -> None:
+    """Python None для snapshot должен сохраняться как SQL NULL."""
+    column = AnalysisJobModel.__table__.c.normative_snapshot
+
+    assert column.nullable is True
+
+    assert column.type.none_as_null is True
+
+
 def test_repository_restores_snapshot_from_jsonb_payload() -> None:
     """Repository восстанавливает immutable snapshot из ORM model."""
     snapshot = NormativeAnalysisSnapshot.create(

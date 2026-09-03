@@ -50,7 +50,10 @@ class AnalysisJobModel(Base):
             name="ck_analysis_jobs_attempt_count",
         ),
         CheckConstraint(
-            "normative_snapshot IS NULL OR jsonb_typeof(normative_snapshot) = 'object'",
+            (
+                "normative_snapshot IS NULL "
+                "OR jsonb_typeof(normative_snapshot) = 'object'"
+            ),
             name="ck_analysis_jobs_normative_snapshot_object",
         ),
         Index(
@@ -84,7 +87,9 @@ class AnalysisJobModel(Base):
         ]
         | None
     ] = mapped_column(
-        JSONB,
+        JSONB(
+            none_as_null=True,
+        ),
         nullable=True,
     )
 
