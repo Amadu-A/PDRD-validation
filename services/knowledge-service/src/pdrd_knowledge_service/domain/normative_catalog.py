@@ -1,11 +1,12 @@
 # services/knowledge-service/src/pdrd_knowledge_service/domain/normative_catalog.py
 
-"""Domain-модель управляемого каталога нормативных документов.
+"""Domain-модель управляемого каталога документов.
 
-Модуль описывает разделы, категории, документы и lifecycle индексации.
-Здесь нет зависимостей от PostgreSQL, SQLAlchemy, Qdrant, FastAPI,
-RabbitMQ или файловой системы: persistence и внешние adapters появятся
-в infrastructure-слое следующих этапов.
+Модуль описывает разделы, области каталога, категории, документы
+и lifecycle индексации.
+
+Domain не зависит от PostgreSQL, SQLAlchemy, Qdrant, FastAPI,
+RabbitMQ или файловой системы.
 """
 
 import re
@@ -16,17 +17,30 @@ from uuid import UUID
 
 
 class NormativeCatalogError(ValueError):
-    """Нарушение бизнес-инварианта нормативного каталога."""
+    """Нарушение бизнес-инварианта managed catalog."""
+
+
+class CatalogArea(StrEnum):
+    """Логическая область документов внутри одного раздела."""
+
+    NORMATIVE = "normative"
+
+    USER_PACKAGE = "user_package"
 
 
 class IndexingStatus(StrEnum):
     """Состояние документа относительно vector index."""
 
     UPLOADED = "uploaded"
+
     QUEUED = "queued"
+
     INDEXING = "indexing"
+
     READY = "ready"
+
     FAILED = "failed"
+
     DELETING = "deleting"
 
 
@@ -162,7 +176,7 @@ def _validate_change_time(
 
 @dataclass(frozen=True, slots=True)
 class NormativeSection:
-    """Раздел нормативной базы со своим системным prompt."""
+    """Раздел managed catalog со своим системным prompt."""
 
     section_id: UUID
 
@@ -231,7 +245,7 @@ class NormativeSection:
 
 @dataclass(frozen=True, slots=True)
 class NormativeCategory:
-    """Категория нормативных документов внутри раздела."""
+    """Категория документов внутри раздела и одной catalog area."""
 
     category_id: UUID
 
@@ -244,6 +258,8 @@ class NormativeCategory:
     created_at: datetime
 
     updated_at: datetime
+
+    area: CatalogArea = CatalogArea.NORMATIVE
 
     def __post_init__(
         self,
@@ -303,7 +319,7 @@ class NormativeCategory:
 
 @dataclass(frozen=True, slots=True)
 class NormativeDocument:
-    """Метаданные управляемого нормативного документа."""
+    """Метаданные managed PDF/DOC/DOCX документа."""
 
     document_id: UUID
 
@@ -331,10 +347,12 @@ class NormativeDocument:
 
     updated_at: datetime
 
+    area: CatalogArea = CatalogArea.NORMATIVE
+
     def __post_init__(
         self,
     ) -> None:
-        """Проверяет инварианты нормативного документа."""
+        """Проверяет инварианты managed документа."""
         _validate_non_blank(
             self.original_name,
             field_name="Имя документа",
@@ -382,7 +400,7 @@ class NormativeDocument:
         category_id: UUID | None,
         changed_at: datetime,
     ) -> "NormativeDocument":
-        """Возвращает документ в другой категории того же раздела."""
+        """Возвращает документ в другой категории той же области."""
         _validate_change_time(
             changed_at=changed_at,
             current_updated_at=self.updated_at,

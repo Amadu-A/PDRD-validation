@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/infrastructure/database/models.py
 
-"""SQLAlchemy persistence models нормативного каталога."""
+"""SQLAlchemy persistence models managed catalog."""
 
 from datetime import datetime
 from uuid import UUID
@@ -30,7 +30,7 @@ from pdrd_knowledge_service.infrastructure.database.base import (
 
 
 class NormativeSectionModel(Base):
-    """ORM-представление раздела нормативной базы."""
+    """ORM-представление раздела managed catalog."""
 
     __tablename__ = "normative_sections"
 
@@ -77,7 +77,7 @@ class NormativeSectionModel(Base):
 
 
 class NormativeCategoryModel(Base):
-    """ORM-представление категории нормативных документов."""
+    """ORM-представление категории managed catalog."""
 
     __tablename__ = "normative_categories"
 
@@ -90,6 +90,10 @@ class NormativeCategoryModel(Base):
             "parent_id IS NULL OR parent_id <> id",
             name="ck_normative_categories_not_self_parent",
         ),
+        CheckConstraint(
+            "catalog_area IN ('normative', 'user_package')",
+            name="ck_normative_categories_catalog_area",
+        ),
         Index(
             "ix_normative_categories_section_id",
             "section_id",
@@ -97,6 +101,11 @@ class NormativeCategoryModel(Base):
         Index(
             "ix_normative_categories_parent_id",
             "parent_id",
+        ),
+        Index(
+            "ix_normative_categories_section_area",
+            "section_id",
+            "catalog_area",
         ),
         {
             "schema": KNOWLEDGE_SCHEMA,
@@ -131,6 +140,14 @@ class NormativeCategoryModel(Base):
         nullable=False,
     )
 
+    catalog_area: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text(
+            "'normative'",
+        ),
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -145,7 +162,7 @@ class NormativeCategoryModel(Base):
 
 
 class NormativeDocumentModel(Base):
-    """ORM-представление нормативного документа."""
+    """ORM-представление managed PDF/DOC/DOCX документа."""
 
     __tablename__ = "normative_documents"
 
@@ -169,6 +186,10 @@ class NormativeDocumentModel(Base):
         CheckConstraint(
             "sha256 ~ '^[0-9a-fA-F]{64}$'",
             name="ck_normative_documents_sha256",
+        ),
+        CheckConstraint(
+            "catalog_area IN ('normative', 'user_package')",
+            name="ck_normative_documents_catalog_area",
         ),
         CheckConstraint(
             "index_status IN ("
@@ -221,6 +242,11 @@ class NormativeDocumentModel(Base):
         Index(
             "ix_normative_documents_sha256",
             "sha256",
+        ),
+        Index(
+            "ix_normative_documents_section_area",
+            "section_id",
+            "catalog_area",
         ),
         {
             "schema": KNOWLEDGE_SCHEMA,
@@ -275,10 +301,20 @@ class NormativeDocumentModel(Base):
         nullable=False,
     )
 
+    catalog_area: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text(
+            "'normative'",
+        ),
+    )
+
     index_status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
-        server_default=text("'uploaded'"),
+        server_default=text(
+            "'uploaded'",
+        ),
     )
 
     index_error: Mapped[str | None] = mapped_column(

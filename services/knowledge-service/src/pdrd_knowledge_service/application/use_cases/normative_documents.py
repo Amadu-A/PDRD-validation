@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/application/use_cases/normative_documents.py
 
-"""Use cases документов управляемой нормативной базы."""
+"""Use cases документов managed catalog."""
 
 from collections.abc import Callable
 from contextlib import suppress
@@ -45,6 +45,7 @@ from pdrd_knowledge_service.application.use_cases.normative_sections import (
     NormativeSectionNotFoundError,
 )
 from pdrd_knowledge_service.domain.normative_catalog import (
+    CatalogArea,
     IndexingStatus,
     NormativeDocument,
 )
@@ -82,15 +83,15 @@ _DELETE_BLOCKED_STATUSES = frozenset(
 
 
 class NormativeDocumentNotFoundError(LookupError):
-    """Запрошенный нормативный документ не найден."""
+    """Запрошенный managed документ не найден."""
 
 
 class NormativeDocumentUploadError(ValueError):
-    """Некорректный загружаемый нормативный документ."""
+    """Некорректный загружаемый managed документ."""
 
 
 class NormativeDocumentCategoryError(ValueError):
-    """Некорректная категория нормативного документа."""
+    """Некорректная категория managed документа."""
 
 
 class NormativeDocumentMutationConflictError(RuntimeError):
@@ -123,7 +124,7 @@ async def _require_section(
     unit_of_work: NormativeCatalogUnitOfWork,
     section_id: UUID,
 ) -> None:
-    """Проверяет существование нормативного раздела."""
+    """Проверяет существование раздела."""
     section = await unit_of_work.sections.get(
         section_id,
     )
@@ -138,7 +139,7 @@ async def _require_document(
     unit_of_work: NormativeCatalogUnitOfWork,
     document_id: UUID,
 ) -> NormativeDocument:
-    """Возвращает нормативный документ либо application error."""
+    """Возвращает managed документ либо application error."""
     document = await unit_of_work.documents.get(
         document_id,
     )
@@ -156,8 +157,9 @@ async def _validate_category(
     *,
     section_id: UUID,
     category_id: UUID | None,
+    area: CatalogArea,
 ) -> None:
-    """Проверяет принадлежность category указанному section."""
+    """Проверяет section и area категории документа."""
     if category_id is None:
         return
 
@@ -173,6 +175,11 @@ async def _validate_category(
     if category.section_id != section_id:
         raise NormativeDocumentCategoryError(
             "Категория документа принадлежит другому разделу.",
+        )
+
+    if category.area is not area:
+        raise NormativeDocumentCategoryError(
+            "Категория документа принадлежит другой области каталога.",
         )
 
 
@@ -347,7 +354,7 @@ def _validate_document_content(
 
 @dataclass(frozen=True, slots=True)
 class ListNormativeDocuments:
-    """Возвращает документы нормативного раздела."""
+    """Возвращает документы одной catalog area раздела."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -355,11 +362,12 @@ class ListNormativeDocuments:
         self,
         *,
         section_id: UUID,
+        area: CatalogArea = CatalogArea.NORMATIVE,
     ) -> tuple[
         NormativeDocument,
         ...,
     ]:
-        """Возвращает все documents вместе с indexing status."""
+        """Возвращает documents вместе с indexing status."""
         async with self.unit_of_work_factory() as unit_of_work:
             await _require_section(
                 unit_of_work,
@@ -370,14 +378,12 @@ class ListNormativeDocuments:
                 section_id,
             )
 
-        return tuple(
-            documents,
-        )
+        return tuple(document for document in documents if document.area is area)
 
 
 @dataclass(frozen=True, slots=True)
 class GetNormativeDocument:
-    """Возвращает metadata одного нормативного документа."""
+    """Возвращает metadata одного managed документа."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -396,7 +402,7 @@ class GetNormativeDocument:
 
 @dataclass(frozen=True, slots=True)
 class UploadNormativeDocument:
-    """Сохраняет managed нормативный документ и metadata."""
+    """Сохраняет managed документ и metadata."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -415,6 +421,7 @@ class UploadNormativeDocument:
         category_id: UUID | None,
         original_name: str,
         content: bytes,
+        area: CatalogArea = CatalogArea.NORMATIVE,
     ) -> NormativeDocument:
         """Валидирует документ и регистрирует metadata."""
         (
@@ -441,6 +448,7 @@ class UploadNormativeDocument:
                 unit_of_work,
                 section_id=section_id,
                 category_id=category_id,
+                area=area,
             )
 
         document_id = self.identifier_factory()
@@ -467,6 +475,7 @@ class UploadNormativeDocument:
             indexed_at=None,
             created_at=created_at,
             updated_at=created_at,
+            area=area,
         )
 
         await self.storage.save(
@@ -546,7 +555,7 @@ class GetNormativeDocumentContent:
 
 @dataclass(frozen=True, slots=True)
 class MoveNormativeDocument:
-    """Перемещает документ между категориями того же раздела."""
+    """Перемещает документ между категориями той же catalog area."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -583,6 +592,7 @@ class MoveNormativeDocument:
                 unit_of_work,
                 section_id=document.section_id,
                 category_id=category_id,
+                area=document.area,
             )
 
             if document.category_id == category_id:
@@ -638,7 +648,7 @@ class MoveNormativeDocument:
                                     str(
                                         document.category_id,
                                     )
-                                    if document.category_id is not None
+                                    if (document.category_id is not None)
                                     else None
                                 )
                             },
@@ -728,7 +738,7 @@ class DeleteNormativeDocument:
 
 @dataclass(frozen=True, slots=True)
 class NormativeDocumentUseCases:
-    """Группирует operations нормативных документов."""
+    """Группирует operations managed документов."""
 
     list_documents: ListNormativeDocuments
 

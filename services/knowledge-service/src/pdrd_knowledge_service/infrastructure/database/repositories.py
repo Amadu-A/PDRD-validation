@@ -11,6 +11,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pdrd_knowledge_service.domain.normative_catalog import (
+    CatalogArea,
     IndexingStatus,
     NormativeCategory,
     NormativeDocument,
@@ -21,6 +22,18 @@ from pdrd_knowledge_service.infrastructure.database.models import (
     NormativeDocumentModel,
     NormativeSectionModel,
 )
+
+
+def _catalog_area_from_model(
+    value: str | None,
+) -> CatalogArea:
+    """Восстанавливает catalog area с legacy default для transient ORM model."""
+    if value is None:
+        return CatalogArea.NORMATIVE
+
+    return CatalogArea(
+        value,
+    )
 
 
 class SqlAlchemyNormativeSectionRepository:
@@ -154,6 +167,7 @@ class SqlAlchemyNormativeCategoryRepository:
                 section_id=category.section_id,
                 parent_id=category.parent_id,
                 name=category.name,
+                catalog_area=category.area.value,
                 created_at=category.created_at,
                 updated_at=category.updated_at,
             )
@@ -221,6 +235,7 @@ class SqlAlchemyNormativeCategoryRepository:
         model.section_id = category.section_id
         model.parent_id = category.parent_id
         model.name = category.name
+        model.catalog_area = category.area.value
         model.updated_at = category.updated_at
 
     async def delete(
@@ -248,6 +263,9 @@ class SqlAlchemyNormativeCategoryRepository:
             name=model.name,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            area=_catalog_area_from_model(
+                model.catalog_area,
+            ),
         )
 
 
@@ -276,6 +294,7 @@ class SqlAlchemyNormativeDocumentRepository:
                 mime_type=document.mime_type,
                 size_bytes=document.size_bytes,
                 sha256=document.sha256,
+                catalog_area=document.area.value,
                 index_status=document.index_status.value,
                 index_error=document.index_error,
                 indexed_at=document.indexed_at,
@@ -400,6 +419,7 @@ class SqlAlchemyNormativeDocumentRepository:
         model.mime_type = document.mime_type
         model.size_bytes = document.size_bytes
         model.sha256 = document.sha256
+        model.catalog_area = document.area.value
         model.index_status = document.index_status.value
         model.index_error = document.index_error
         model.indexed_at = document.indexed_at
@@ -439,4 +459,7 @@ class SqlAlchemyNormativeDocumentRepository:
             indexed_at=model.indexed_at,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            area=_catalog_area_from_model(
+                model.catalog_area,
+            ),
         )

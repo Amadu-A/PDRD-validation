@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/application/use_cases/normative_categories.py
 
-"""Use cases категорий управляемой нормативной базы."""
+"""Use cases категорий managed catalog."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -21,6 +21,7 @@ from pdrd_knowledge_service.application.use_cases.normative_sections import (
     NormativeSectionNotFoundError,
 )
 from pdrd_knowledge_service.domain.normative_catalog import (
+    CatalogArea,
     NormativeCategory,
 )
 
@@ -36,7 +37,7 @@ IdentifierFactory = Callable[
 
 
 class NormativeCategoryNotFoundError(LookupError):
-    """Запрошенная категория нормативной базы не найдена."""
+    """Запрошенная категория managed catalog не найдена."""
 
 
 class NormativeCategoryParentError(ValueError):
@@ -58,7 +59,7 @@ async def _require_section(
     unit_of_work: NormativeCatalogUnitOfWork,
     section_id: UUID,
 ) -> None:
-    """Проверяет существование нормативного раздела."""
+    """Проверяет существование раздела."""
     section = await unit_of_work.sections.get(
         section_id,
     )
@@ -92,8 +93,9 @@ async def _validate_parent(
     section_id: UUID,
     category_id: UUID,
     parent_id: UUID | None,
+    area: CatalogArea,
 ) -> None:
-    """Проверяет section принадлежность и отсутствие hierarchy cycle."""
+    """Проверяет section, area и отсутствие hierarchy cycle."""
     if parent_id is None:
         return
 
@@ -116,11 +118,20 @@ async def _validate_parent(
             "Родительская категория принадлежит другому разделу.",
         )
 
+    if parent.area is not area:
+        raise NormativeCategoryParentError(
+            "Родительская категория принадлежит другой области каталога.",
+        )
+
     categories = await unit_of_work.categories.list_by_section(
         section_id,
     )
 
-    categories_by_id = {category.category_id: category for category in categories}
+    categories_by_id = {
+        category.category_id: category
+        for category in categories
+        if category.area is area
+    }
 
     cursor_id: UUID | None = parent_id
     visited: set[UUID] = set()
@@ -146,7 +157,8 @@ async def _validate_parent(
 
         if cursor is None:
             raise NormativeCategoryParentError(
-                "Цепочка родительских категорий выходит за пределы текущего раздела.",
+                "Цепочка родительских категорий выходит "
+                "за пределы текущей области каталога.",
             )
 
         cursor_id = cursor.parent_id
@@ -154,7 +166,7 @@ async def _validate_parent(
 
 @dataclass(frozen=True, slots=True)
 class ListNormativeCategories:
-    """Возвращает категории одного нормативного раздела."""
+    """Возвращает категории одной области раздела."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -162,11 +174,12 @@ class ListNormativeCategories:
         self,
         *,
         section_id: UUID,
+        area: CatalogArea = CatalogArea.NORMATIVE,
     ) -> tuple[
         NormativeCategory,
         ...,
     ]:
-        """Возвращает категории раздела."""
+        """Возвращает категории section + catalog area."""
         async with self.unit_of_work_factory() as unit_of_work:
             await _require_section(
                 unit_of_work,
@@ -177,14 +190,12 @@ class ListNormativeCategories:
                 section_id,
             )
 
-        return tuple(
-            categories,
-        )
+        return tuple(category for category in categories if category.area is area)
 
 
 @dataclass(frozen=True, slots=True)
 class GetNormativeCategory:
-    """Возвращает одну категорию нормативной базы."""
+    """Возвращает одну категорию managed catalog."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -203,7 +214,7 @@ class GetNormativeCategory:
 
 @dataclass(frozen=True, slots=True)
 class CreateNormativeCategory:
-    """Создаёт категорию внутри нормативного раздела."""
+    """Создаёт категорию внутри section и catalog area."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -217,6 +228,7 @@ class CreateNormativeCategory:
         section_id: UUID,
         name: str,
         parent_id: UUID | None,
+        area: CatalogArea = CatalogArea.NORMATIVE,
     ) -> NormativeCategory:
         """Создаёт category и проверяет её parent."""
         created_at = self.clock()
@@ -233,6 +245,7 @@ class CreateNormativeCategory:
                 section_id=section_id,
                 category_id=category_id,
                 parent_id=parent_id,
+                area=area,
             )
 
             category = NormativeCategory(
@@ -242,6 +255,7 @@ class CreateNormativeCategory:
                 name=name.strip(),
                 created_at=created_at,
                 updated_at=created_at,
+                area=area,
             )
 
             await unit_of_work.categories.add(
@@ -289,6 +303,7 @@ class UpdateNormativeCategory:
                     section_id=category.section_id,
                     category_id=category.category_id,
                     parent_id=parent_id,
+                    area=category.area,
                 )
 
             if name is not None:
@@ -314,7 +329,7 @@ class UpdateNormativeCategory:
 
 @dataclass(frozen=True, slots=True)
 class DeleteNormativeCategory:
-    """Удаляет category без удаления нормативных документов."""
+    """Удаляет category без удаления документов."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
