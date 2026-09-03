@@ -10,7 +10,10 @@ from typing import (
 from pdrd_knowledge_service.domain.project_context import (
     VectorRecord,
 )
-from pdrd_knowledge_service.domain.search import VectorPoint
+from pdrd_knowledge_service.domain.search import (
+    VectorPoint,
+    VectorSearchFilter,
+)
 
 
 class VectorStoreError(RuntimeError):
@@ -27,7 +30,18 @@ class VectorStore(Protocol):
         vector: list[float],
         limit: int,
     ) -> list[VectorPoint]:
-        """Ищет ближайшие точки в одной коллекции."""
+        """Ищет ближайшие точки без payload scope."""
+        ...
+
+    async def search_filtered(
+        self,
+        *,
+        collection: str,
+        vector: list[float],
+        limit: int,
+        search_filter: VectorSearchFilter,
+    ) -> list[VectorPoint]:
+        """Ищет ближайшие points только внутри payload scope."""
         ...
 
     async def create_collection(

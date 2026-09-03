@@ -2,7 +2,14 @@
 
 """HTTP schemas поиска по базе знаний."""
 
-from pydantic import BaseModel, ConfigDict
+from typing import Self
+from uuid import UUID
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    model_validator,
+)
 
 
 class NormativeSearchRequest(BaseModel):
@@ -10,9 +17,28 @@ class NormativeSearchRequest(BaseModel):
 
     model_config = ConfigDict(
         frozen=True,
+        extra="forbid",
     )
 
     queries: list[str]
+
+    section_id: UUID | None = None
+
+    document_ids: list[UUID] | None = None
+
+    @model_validator(
+        mode="after",
+    )
+    def validate_scope(
+        self,
+    ) -> Self:
+        """Требует section_id и document_ids только совместно."""
+        if (self.section_id is None) != (self.document_ids is None):
+            raise ValueError(
+                "section_id и document_ids должны передаваться вместе.",
+            )
+
+        return self
 
 
 class ExperienceSearchRequest(BaseModel):
@@ -35,6 +61,12 @@ class NormativeSourceResponse(BaseModel):
     source_id: str
     point_id: str
     score: float
+
+    document_id: str | None
+    section_id: str | None
+    category_id: str | None
+
+    source_sha256: str | None
 
     source_file: str | None
     source_path: str | None

@@ -17,6 +17,13 @@ from pdrd_knowledge_service.application.ports.embedding import (
 from pdrd_knowledge_service.application.ports.vector_store import (
     VectorStoreError,
 )
+from pdrd_knowledge_service.application.use_cases.normative import (
+    NormativeSearchScopeConflictError,
+    NormativeSearchScopeError,
+)
+from pdrd_knowledge_service.application.use_cases.normative_sections import (
+    NormativeSectionNotFoundError,
+)
 from pdrd_knowledge_service.core.container import (
     ApplicationContainer,
 )
@@ -50,18 +57,47 @@ async def search_normative(
         Depends(get_container),
     ],
 ) -> NormativeSearchResponse:
-    """Ищет нормативные требования для набора тем."""
+    """Ищет нормативные требования внутри optional managed scope."""
     try:
         result = await container.search_normative.execute(
             request.queries,
+            section_id=request.section_id,
+            document_ids=request.document_ids,
         )
+
+    except NormativeSectionNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    except NormativeSearchScopeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    except NormativeSearchScopeConflictError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(
+                error,
+            ),
+        ) from error
+
     except (
         EmbeddingProviderError,
         VectorStoreError,
     ) as error:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
-            detail=str(error),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(
+                error,
+            ),
         ) from error
 
     return NormativeSearchResponse(
@@ -73,6 +109,10 @@ async def search_normative(
                 source_id=source.source_id,
                 point_id=source.point_id,
                 score=source.score,
+                document_id=source.document_id,
+                section_id=source.section_id,
+                category_id=source.category_id,
+                source_sha256=source.source_sha256,
                 source_file=source.source_file,
                 source_path=source.source_path,
                 page=source.page,
@@ -81,7 +121,7 @@ async def search_normative(
             )
             for source in result.sources
         ],
-        embedding_model=(result.embedding_model),
+        embedding_model=result.embedding_model,
     )
 
 
@@ -101,18 +141,24 @@ async def search_experience(
         results = await container.search_experience.execute(
             request.queries,
         )
+
     except ValueError as error:
         raise HTTPException(
-            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
-            detail=str(error),
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(
+                error,
+            ),
         ) from error
+
     except (
         EmbeddingProviderError,
         VectorStoreError,
     ) as error:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
-            detail=str(error),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(
+                error,
+            ),
         ) from error
 
     return ExperienceSearchResponse(
@@ -124,19 +170,19 @@ async def search_experience(
                         source_id=source.source_id,
                         point_id=source.point_id,
                         score=source.score,
-                        project_id=(source.project_id),
+                        project_id=source.project_id,
                         issue_id=source.issue_id,
                         issue_text=source.issue_text,
                         status=source.status,
-                        verified_fixed=(source.verified_fixed),
-                        before_page=(source.before_page),
+                        verified_fixed=source.verified_fixed,
+                        before_page=source.before_page,
                         after_page=source.after_page,
-                        before_context=(source.before_context),
-                        after_context=(source.after_context),
+                        before_context=source.before_context,
+                        after_context=source.after_context,
                     )
                     for source in result.sources
                 ],
-                embedding_model=(result.embedding_model),
+                embedding_model=result.embedding_model,
             )
             for result in results
         ]

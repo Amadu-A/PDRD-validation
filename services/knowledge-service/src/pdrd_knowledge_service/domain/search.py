@@ -4,6 +4,7 @@
 
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,12 +17,77 @@ class VectorPoint:
 
 
 @dataclass(frozen=True, slots=True)
+class VectorSearchCondition:
+    """Одно обязательное условие vector search."""
+
+    key: str
+
+    values: tuple[str, ...]
+
+    def __post_init__(
+        self,
+    ) -> None:
+        """Проверяет корректность generic filter condition."""
+        if not self.key.strip():
+            raise ValueError(
+                "Vector search filter key не может быть пустым.",
+            )
+
+        if not self.values:
+            raise ValueError(
+                "Vector search filter condition требует хотя бы одно value.",
+            )
+
+        if any(not value for value in self.values):
+            raise ValueError(
+                "Vector search filter value не может быть пустым.",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class VectorSearchFilter:
+    """Набор обязательных условий vector retrieval."""
+
+    must: tuple[
+        VectorSearchCondition,
+        ...,
+    ]
+
+    def __post_init__(
+        self,
+    ) -> None:
+        """Не допускает пустой scoped filter."""
+        if not self.must:
+            raise ValueError(
+                "Vector search filter требует хотя бы одно условие.",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class NormativeSearchScope:
+    """Immutable scope одного нормативного поиска."""
+
+    section_id: UUID
+
+    document_ids: tuple[
+        UUID,
+        ...,
+    ]
+
+
+@dataclass(frozen=True, slots=True)
 class NormativeSource:
     """Нормативный источник, найденный для проверки."""
 
     source_id: str
     point_id: str
     score: float
+
+    document_id: str | None
+    section_id: str | None
+    category_id: str | None
+
+    source_sha256: str | None
 
     source_file: str | None
     source_path: str | None

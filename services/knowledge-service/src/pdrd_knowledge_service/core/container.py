@@ -128,8 +128,8 @@ def build_container() -> ApplicationContainer:
 
     vector_store = QdrantVectorStore(
         base_url=settings.qdrant.base_url,
-        request_timeout_seconds=(settings.qdrant.request_timeout_seconds),
-        health_timeout_seconds=(settings.qdrant.health_timeout_seconds),
+        request_timeout_seconds=settings.qdrant.request_timeout_seconds,
+        health_timeout_seconds=settings.qdrant.health_timeout_seconds,
     )
 
     normative_sections = NormativeSectionUseCases(
@@ -210,9 +210,9 @@ def build_container() -> ApplicationContainer:
     embedding_provider = OllamaEmbeddingProvider(
         base_url=settings.embedding.base_url,
         model=settings.embedding.model,
-        request_timeout_seconds=(settings.embedding.request_timeout_seconds),
-        connect_timeout_seconds=(settings.embedding.connect_timeout_seconds),
-        health_timeout_seconds=(settings.embedding.health_timeout_seconds),
+        request_timeout_seconds=settings.embedding.request_timeout_seconds,
+        connect_timeout_seconds=settings.embedding.connect_timeout_seconds,
+        health_timeout_seconds=settings.embedding.health_timeout_seconds,
     )
 
     search_normative = SearchNormative(
@@ -222,6 +222,7 @@ def build_container() -> ApplicationContainer:
         embedding_model=settings.embedding.model,
         top_k=settings.search.normative_top_k,
         max_sources=settings.search.normative_max_sources,
+        unit_of_work_factory=normative_catalog_uow_factory,
     )
 
     search_experience = SearchExperience(

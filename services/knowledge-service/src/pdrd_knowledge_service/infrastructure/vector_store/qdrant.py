@@ -12,7 +12,10 @@ from pdrd_knowledge_service.application.ports.vector_store import (
 from pdrd_knowledge_service.domain.project_context import (
     VectorRecord,
 )
-from pdrd_knowledge_service.domain.search import VectorPoint
+from pdrd_knowledge_service.domain.search import (
+    VectorPoint,
+    VectorSearchFilter,
+)
 
 
 class QdrantVectorStore:
@@ -41,19 +44,61 @@ class QdrantVectorStore:
         vector: list[float],
         limit: int,
     ) -> list[VectorPoint]:
-        """Ищет ближайшие Qdrant points."""
+        """Ищет ближайшие Qdrant points без payload filter."""
+        return await self._search(
+            collection=collection,
+            vector=vector,
+            limit=limit,
+            search_filter=None,
+        )
+
+    async def search_filtered(
+        self,
+        *,
+        collection: str,
+        vector: list[float],
+        limit: int,
+        search_filter: VectorSearchFilter,
+    ) -> list[VectorPoint]:
+        """Ищет Qdrant points только внутри указанного payload scope."""
+        return await self._search(
+            collection=collection,
+            vector=vector,
+            limit=limit,
+            search_filter=search_filter,
+        )
+
+    async def _search(
+        self,
+        *,
+        collection: str,
+        vector: list[float],
+        limit: int,
+        search_filter: VectorSearchFilter | None,
+    ) -> list[VectorPoint]:
+        """Выполняет общий Qdrant Query Points request."""
+        payload: dict[
+            str,
+            Any,
+        ] = {
+            "query": vector,
+            "limit": limit,
+            "with_payload": True,
+            "with_vector": False,
+        }
+
+        if search_filter is not None:
+            payload["filter"] = self._build_search_filter(
+                search_filter,
+            )
+
         try:
             async with httpx.AsyncClient(
                 timeout=self._request_timeout_seconds,
             ) as client:
                 response = await client.post(
                     f"{self._base_url}/collections/{collection}/points/query",
-                    json={
-                        "query": vector,
-                        "limit": limit,
-                        "with_payload": True,
-                        "with_vector": False,
-                    },
+                    json=payload,
                 )
 
                 response.raise_for_status()
@@ -101,6 +146,45 @@ class QdrantVectorStore:
                 dict,
             )
         ]
+
+    @staticmethod
+    def _build_search_filter(
+        search_filter: VectorSearchFilter,
+    ) -> dict[str, Any]:
+        """Преобразует generic Domain filter в Qdrant payload filter."""
+        conditions: list[dict[str, Any]] = []
+
+        for condition in search_filter.must:
+            if (
+                len(
+                    condition.values,
+                )
+                == 1
+            ):
+                match: dict[
+                    str,
+                    Any,
+                ] = {
+                    "value": condition.values[0],
+                }
+
+            else:
+                match = {
+                    "any": list(
+                        condition.values,
+                    ),
+                }
+
+            conditions.append(
+                {
+                    "key": condition.key,
+                    "match": match,
+                }
+            )
+
+        return {
+            "must": conditions,
+        }
 
     async def create_collection(
         self,

@@ -121,6 +121,16 @@ class NormativeDocumentRepository(Protocol):
         """Возвращает документ с PostgreSQL row lock."""
         ...
 
+    async def list_by_ids(
+        self,
+        document_ids: tuple[
+            UUID,
+            ...,
+        ],
+    ) -> list[NormativeDocument]:
+        """Возвращает документы по набору UUID."""
+        ...
+
     async def list_by_section(
         self,
         section_id: UUID,

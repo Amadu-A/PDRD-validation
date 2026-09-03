@@ -325,6 +325,34 @@ class SqlAlchemyNormativeDocumentRepository:
             model,
         )
 
+    async def list_by_ids(
+        self,
+        document_ids: tuple[
+            UUID,
+            ...,
+        ],
+    ) -> list[NormativeDocument]:
+        """Возвращает документы по набору UUID одним SQL query."""
+        if not document_ids:
+            return []
+
+        result = await self._session.scalars(
+            select(
+                NormativeDocumentModel,
+            ).where(
+                NormativeDocumentModel.id.in_(
+                    document_ids,
+                )
+            )
+        )
+
+        return [
+            self._to_domain(
+                model,
+            )
+            for model in result.all()
+        ]
+
     async def list_by_section(
         self,
         section_id: UUID,
