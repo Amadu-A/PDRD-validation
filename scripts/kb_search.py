@@ -1,19 +1,16 @@
 # scripts/kb_search.py
 
-"""Ручная проверка поиска по нормативам и Базе Опыта.
+"""Ручная проверка semantic search legacy Базы Опыта.
 
-Без аргументов скрипт показывает подтверждённые замечания
-из локальной Базы Опыта и позволяет выбрать одно числом.
+Нормативный поиск этим скриптом больше не выполняется.
 
-Запуск:
-
-    python -m scripts.kb_search
+Managed normative retrieval должен проходить через Knowledge Service,
+поскольку только он учитывает section_id, document_ids и состояние READY.
 """
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from scripts.kb_common import (
     OllamaEmbeddingClient,
@@ -23,9 +20,10 @@ from scripts.kb_common import (
 )
 
 
-def load_experience_queries() -> list[dict]:
-    """Собрать подтверждённые замечания для меню."""
-
+def load_experience_queries() -> list[
+    dict
+]:
+    """Собирает подтверждённые замечания для меню."""
     cases_dir = (
         get_repo_root()
         / "data"
@@ -34,7 +32,9 @@ def load_experience_queries() -> list[dict]:
         / "cases"
     )
 
-    result: list[dict] = []
+    result: list[
+        dict
+    ] = []
 
     if not cases_dir.is_dir():
         return result
@@ -64,10 +64,10 @@ def load_experience_queries() -> list[dict]:
             result.append(
                 {
                     "project_id": payload.get(
-                        "project_id"
+                        "project_id",
                     ),
                     "issue_id": issue.get(
-                        "id"
+                        "id",
                     ),
                     "text": issue.get(
                         "text",
@@ -80,18 +80,17 @@ def load_experience_queries() -> list[dict]:
 
 
 def choose_query() -> str:
-    """Выбрать запрос без необходимости вводить кириллицу."""
-
+    """Выбирает запрос для поиска по Базе Опыта."""
     examples = load_experience_queries()
 
     if not examples:
         return input(
-            "Введите поисковый запрос: "
+            "Введите поисковый запрос: ",
         ).strip()
 
     print(
         "Выберите подтверждённое "
-        "экспертное замечание:"
+        "экспертное замечание:",
     )
 
     for index, item in enumerate(
@@ -107,105 +106,58 @@ def choose_query() -> str:
 
     while True:
         raw_value = input(
-            "\nНомер: "
+            "\nНомер: ",
         ).strip()
 
         try:
             number = int(
-                raw_value
+                raw_value,
             )
 
         except ValueError:
             print(
-                "Введите номер."
+                "Введите номер.",
             )
+
             continue
 
         if (
             number < 1
-            or number > len(
-                examples
+            or number
+            > len(
+                examples,
             )
         ):
             print(
-                "Такого номера нет."
+                "Такого номера нет.",
             )
+
             continue
 
         return examples[
             number - 1
-        ]["text"]
-
-
-def print_normative_results(
-    results: list[dict],
-) -> None:
-    """Показать результаты нормативной базы."""
-
-    print()
-    print(
-        "=== НОРМАТИВНАЯ БАЗА ==="
-    )
-
-    if not results:
-        print(
-            "Ничего не найдено."
-        )
-        return
-
-    for index, item in enumerate(
-        results,
-        start=1,
-    ):
-        payload = item.get(
-            "payload",
-            {},
-        )
-
-        print()
-        print(
-            f"{index}. score="
-            f"{item.get('score', 0):.4f}"
-        )
-
-        print(
-            f"   Файл: "
-            f"{payload.get('source_file')}"
-        )
-
-        print(
-            f"   Страница: "
-            f"{payload.get('page')}"
-        )
-
-        text = payload.get(
-            "text",
-            "",
-        )
-
-        print(
-            "   Текст: "
-            + text[:1000].replace(
-                "\n",
-                " ",
-            )
-        )
+        ][
+            "text"
+        ]
 
 
 def print_experience_results(
-    results: list[dict],
+    results: list[
+        dict
+    ],
 ) -> None:
-    """Показать похожие экспертные кейсы."""
-
+    """Показывает похожие экспертные кейсы."""
     print()
+
     print(
-        "=== БАЗА ОПЫТА ==="
+        "=== БАЗА ОПЫТА ===",
     )
 
     if not results:
         print(
-            "Ничего не найдено."
+            "Ничего не найдено.",
         )
+
         return
 
     for index, item in enumerate(
@@ -218,72 +170,73 @@ def print_experience_results(
         )
 
         print()
+
         print(
             f"{index}. score="
-            f"{item.get('score', 0):.4f}"
+            f"{item.get('score', 0):.4f}",
         )
 
         print(
-            f"   Проект: "
-            f"{payload.get('project_id')}"
+            "   Проект: "
+            f"{payload.get('project_id')}",
         )
 
         print(
-            f"   Issue: "
-            f"{payload.get('issue_id')}"
+            "   Issue: "
+            f"{payload.get('issue_id')}",
         )
 
         print(
-            f"   Замечание: "
-            f"{payload.get('issue_text')}"
+            "   Замечание: "
+            f"{payload.get('issue_text')}",
         )
 
         print(
-            f"   BEFORE: "
+            "   BEFORE: "
             f"{payload.get('before_page')}"
-            f" -> AFTER: "
-            f"{payload.get('after_page')}"
+            " -> AFTER: "
+            f"{payload.get('after_page')}",
         )
 
 
 def main() -> int:
-    """Выполнить ручной semantic search."""
-
+    """Выполняет ручной semantic search Базы Опыта."""
     settings = get_settings()
 
     query = choose_query()
 
     if not query:
         print(
-            "Пустой запрос."
+            "Пустой запрос.",
         )
+
         return 1
 
     print()
+
     print(
-        f"Запрос: {query}"
+        f"Запрос: {query}",
     )
 
-    embedding_client = (
-        OllamaEmbeddingClient(
-            settings.ollama_url,
-            settings.embedding_model,
-        )
+    print(
+        "Нормативный поиск здесь отключён. "
+        "Используйте основной managed analysis pipeline.",
+    )
+
+    embedding_client = OllamaEmbeddingClient(
+        settings.ollama_url,
+        settings.embedding_model,
     )
 
     qdrant = QdrantRestClient(
-        settings.qdrant_url
+        settings.qdrant_url,
     )
 
     vector = embedding_client.embed(
-        [query]
+        [
+            query,
+        ]
     )[0]
-
-    normative = qdrant.query(
-        settings.normative_collection,
-        vector,
-        limit=5,
-    )
 
     experience = qdrant.query(
         settings.experience_collection,
@@ -291,12 +244,8 @@ def main() -> int:
         limit=5,
     )
 
-    print_normative_results(
-        normative
-    )
-
     print_experience_results(
-        experience
+        experience,
     )
 
     return 0
