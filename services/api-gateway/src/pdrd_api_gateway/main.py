@@ -17,6 +17,9 @@ from pdrd_api_gateway.transport.http.routers.analyses import (
 from pdrd_api_gateway.transport.http.routers.health import (
     router as health_router,
 )
+from pdrd_api_gateway.transport.http.routers.normative_catalog import (
+    router as normative_catalog_router,
+)
 
 
 def create_app(
@@ -36,6 +39,7 @@ def create_app(
 
         try:
             yield
+
         finally:
             await application_container.close()
 
@@ -62,6 +66,10 @@ def create_app(
 
     application.include_router(
         analyses_router,
+    )
+
+    application.include_router(
+        normative_catalog_router,
     )
 
     return application

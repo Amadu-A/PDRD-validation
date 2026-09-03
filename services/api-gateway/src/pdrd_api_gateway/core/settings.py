@@ -194,6 +194,19 @@ class KnowledgeServiceSettings(BaseModel):
         le=120,
     )
 
+    max_upload_mb: int = Field(
+        default=200,
+        ge=1,
+        le=1000,
+    )
+
+    @property
+    def max_upload_bytes(
+        self,
+    ) -> int:
+        """Возвращает Gateway limit нормативного upload."""
+        return self.max_upload_mb * 1024 * 1024
+
 
 class ProjectContextCleanupSettings(BaseModel):
     """Настройки страховочного cleanup через Knowledge Service."""

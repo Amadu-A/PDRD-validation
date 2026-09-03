@@ -22,6 +22,9 @@ from pdrd_api_gateway.application.use_cases.get_analysis_job import (
 from pdrd_api_gateway.application.use_cases.get_analysis_result import (
     GetAnalysisResult,
 )
+from pdrd_api_gateway.application.use_cases.manage_normative_catalog import (
+    NormativeCatalogFacade,
+)
 from pdrd_api_gateway.application.use_cases.resolve_normative_snapshot import (
     ResolveNormativeSnapshot,
 )
@@ -44,6 +47,9 @@ from pdrd_api_gateway.infrastructure.database.unit_of_work import (
 )
 from pdrd_api_gateway.infrastructure.knowledge.normative_catalog import (
     HttpNormativeCatalogReader,
+)
+from pdrd_api_gateway.infrastructure.knowledge.normative_catalog_management import (
+    HttpNormativeCatalogManager,
 )
 from pdrd_api_gateway.infrastructure.messaging.broker import (
     RabbitMqReadinessProbe,
@@ -76,6 +82,8 @@ class ApplicationContainer:
     get_analysis_result: GetAnalysisResult | None = None
 
     submit_analysis: SubmitAnalysis | None = None
+
+    normative_catalog: NormativeCatalogFacade | None = None
 
     async def close(
         self,
@@ -139,6 +147,14 @@ def build_container() -> ApplicationContainer:
         settings=settings.knowledge_service,
     )
 
+    normative_catalog_manager = HttpNormativeCatalogManager(
+        settings=settings.knowledge_service,
+    )
+
+    normative_catalog = NormativeCatalogFacade(
+        manager=normative_catalog_manager,
+    )
+
     resolve_normative_snapshot = ResolveNormativeSnapshot(
         catalog_reader=normative_catalog_reader,
     )
@@ -165,4 +181,5 @@ def build_container() -> ApplicationContainer:
         get_analysis_job=get_analysis_job,
         get_analysis_result=get_analysis_result,
         submit_analysis=submit_analysis,
+        normative_catalog=normative_catalog,
     )
