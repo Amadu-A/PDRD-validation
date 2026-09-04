@@ -36,6 +36,10 @@ import {
   createUserPackageCatalog,
 } from "./features/normative/user_packages.js";
 
+import {
+  createTechnicalAssignmentFilePicker,
+} from "./features/technical_assignment/file.js";
+
 
 const analysisFormElement = requireElement(
   "[data-analysis-form]",
@@ -48,6 +52,15 @@ const submitButton = requireElement(
 const normativeRoot = requireElement(
   "[data-normative-sidebar]",
 );
+
+
+const technicalAssignmentFilePicker = (
+  createTechnicalAssignmentFilePicker(
+    normativeRoot,
+  )
+);
+
+technicalAssignmentFilePicker.bind();
 
 
 const promptEditor = createNormativePromptEditor(
@@ -150,7 +163,9 @@ function getNormativeSelection() {
   return {
     ...selection,
 
-    userPackageDocumentIds: packageDocumentIds,
+    userPackageDocumentIds: (
+      packageDocumentIds
+    ),
 
     ...prompt,
   };
@@ -164,6 +179,10 @@ const analysisForm = createAnalysisForm({
 
   cadInput: requireElement(
     "[data-cad-input]",
+  ),
+
+  technicalAssignmentInput: (
+    technicalAssignmentFilePicker.input
   ),
 
   pagesInput: requireElement(

@@ -24,8 +24,13 @@ class LocalFilesystemAnalysisArtifactStore:
     """Хранит пользовательские файлы по ключу document_id."""
 
     _MANIFEST_FILE = "request.json"
+
     _PDF_FILE = "pdf.bin"
+
     _CAD_FILE = "cad.bin"
+
+    _TECHNICAL_ASSIGNMENT_FILE = "technical_assignment.bin"
+
     _RESULT_FILE = "result.json"
 
     def __init__(
@@ -49,6 +54,30 @@ class LocalFilesystemAnalysisArtifactStore:
             submission,
             pdf_content,
             cad_content,
+        )
+
+    async def save_technical_assignment(
+        self,
+        *,
+        document_id: UUID,
+        content: bytes,
+    ) -> None:
+        """Атомарно сохраняет исходные bytes ТЗ."""
+        await asyncio.to_thread(
+            self._save_technical_assignment_sync,
+            document_id,
+            content,
+        )
+
+    async def load_technical_assignment(
+        self,
+        *,
+        document_id: UUID,
+    ) -> bytes | None:
+        """Возвращает сохранённое ТЗ."""
+        return await asyncio.to_thread(
+            self._load_technical_assignment_sync,
+            document_id,
         )
 
     async def load_request(
@@ -158,6 +187,60 @@ class LocalFilesystemAnalysisArtifactStore:
 
             raise AnalysisArtifactStorageError(
                 "Не удалось сохранить исходные файлы анализа.",
+            ) from error
+
+    def _save_technical_assignment_sync(
+        self,
+        document_id: UUID,
+        content: bytes,
+    ) -> None:
+        directory = self._document_directory(
+            document_id,
+        )
+
+        if not directory.is_dir():
+            raise AnalysisArtifactsNotFoundError(
+                f"Артефакты document_id={document_id} не найдены.",
+            )
+
+        if not content:
+            raise AnalysisArtifactStorageError(
+                "Нельзя сохранить пустое ТЗ.",
+            )
+
+        path = directory / self._TECHNICAL_ASSIGNMENT_FILE
+
+        try:
+            self._write_bytes_atomic(
+                path,
+                content,
+            )
+
+        except OSError as error:
+            raise AnalysisArtifactStorageError(
+                "Не удалось сохранить файл ТЗ.",
+            ) from error
+
+    def _load_technical_assignment_sync(
+        self,
+        document_id: UUID,
+    ) -> bytes | None:
+        path = (
+            self._document_directory(
+                document_id,
+            )
+            / self._TECHNICAL_ASSIGNMENT_FILE
+        )
+
+        if not path.is_file():
+            return None
+
+        try:
+            return path.read_bytes()
+
+        except OSError as error:
+            raise AnalysisArtifactStorageError(
+                "Не удалось прочитать файл ТЗ.",
             ) from error
 
     def _load_request_sync(
@@ -353,6 +436,23 @@ class LocalFilesystemAnalysisArtifactStore:
                 ),
             ),
             encoding="utf-8",
+        )
+
+        temporary_path.replace(
+            path,
+        )
+
+    @staticmethod
+    def _write_bytes_atomic(
+        path: Path,
+        content: bytes,
+    ) -> None:
+        temporary_path = path.with_suffix(
+            f"{path.suffix}.tmp",
+        )
+
+        temporary_path.write_bytes(
+            content,
         )
 
         temporary_path.replace(

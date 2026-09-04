@@ -17,7 +17,9 @@ from pdrd_api_gateway.domain.normative_snapshot import (
 )
 
 
-class AnalysisArtifactStorageError(RuntimeError):
+class AnalysisArtifactStorageError(
+    RuntimeError,
+):
     """Ошибка infrastructure-хранилища артефактов анализа."""
 
 
@@ -34,6 +36,7 @@ class AnalysisRequestArtifacts:
     submission: AnalysisSubmission
 
     pdf_content: bytes | None
+
     cad_content: bytes | None
 
     normative_snapshot: NormativeAnalysisSnapshot | None = None
@@ -50,6 +53,23 @@ class AnalysisArtifactStore(Protocol):
         cad_content: bytes | None,
     ) -> None:
         """Сохраняет manifest и исходные пользовательские файлы."""
+        ...
+
+    async def save_technical_assignment(
+        self,
+        *,
+        document_id: UUID,
+        content: bytes,
+    ) -> None:
+        """Сохраняет исходный файл ТЗ рядом с analysis artifacts."""
+        ...
+
+    async def load_technical_assignment(
+        self,
+        *,
+        document_id: UUID,
+    ) -> bytes | None:
+        """Возвращает исходные bytes ТЗ, если файл был загружен."""
         ...
 
     async def load_request(

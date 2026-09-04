@@ -9,9 +9,15 @@ import {
 } from "../../config.js";
 
 
+const TECHNICAL_ASSIGNMENT_FILE_PATTERN = (
+  /\.(?:pdf|doc|docx)$/i
+);
+
+
 export function createAnalysisForm({
   pdfInput,
   cadInput,
+  technicalAssignmentInput,
   pagesInput,
   pagesHint,
   useExplanatoryNoteInput,
@@ -145,7 +151,9 @@ export function createAnalysisForm({
       return true;
     }
 
-    const value = pagesInput.value.trim();
+    const value = (
+      pagesInput.value.trim()
+    );
 
     if (/^[1-9]\d*$/.test(value)) {
       return true;
@@ -225,6 +233,56 @@ export function createAnalysisForm({
   }
 
 
+  function validateTechnicalAssignment() {
+    const file = (
+      technicalAssignmentInput.files[0]
+    );
+
+    if (!file) {
+      return {
+        valid: true,
+
+        message: null,
+      };
+    }
+
+    if (
+      !TECHNICAL_ASSIGNMENT_FILE_PATTERN.test(
+        file.name,
+      )
+    ) {
+      return {
+        valid: false,
+
+        message: (
+          "ТЗ поддерживает только PDF, DOC или DOCX."
+        ),
+      };
+    }
+
+    const selection = (
+      getNormativeSelection()
+    );
+
+    if (!selection) {
+      return {
+        valid: false,
+
+        message: (
+          "Для использования ТЗ выберите "
+          + "нормативный раздел."
+        ),
+      };
+    }
+
+    return {
+      valid: true,
+
+      message: null,
+    };
+  }
+
+
   function validate() {
     const mode = getMode();
 
@@ -238,7 +296,9 @@ export function createAnalysisForm({
       return {
         valid: false,
 
-        message: "Загрузите PDF и/или DWG/DXF.",
+        message: (
+          "Загрузите PDF и/или DWG/DXF."
+        ),
       };
     }
 
@@ -262,6 +322,16 @@ export function createAnalysisForm({
 
         message: null,
       };
+    }
+
+    const technicalAssignmentValidation = (
+      validateTechnicalAssignment()
+    );
+
+    if (
+      !technicalAssignmentValidation.valid
+    ) {
+      return technicalAssignmentValidation;
     }
 
     return {
@@ -330,6 +400,10 @@ export function createAnalysisForm({
 
     const cad = cadInput.files[0];
 
+    const technicalAssignment = (
+      technicalAssignmentInput.files[0]
+    );
+
     if (pdf) {
       body.append(
         "pdf",
@@ -341,6 +415,13 @@ export function createAnalysisForm({
       body.append(
         "cad",
         cad,
+      );
+    }
+
+    if (technicalAssignment) {
+      body.append(
+        "technical_assignment",
+        technicalAssignment,
       );
     }
 

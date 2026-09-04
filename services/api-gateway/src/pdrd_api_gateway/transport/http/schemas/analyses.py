@@ -16,6 +16,30 @@ from pdrd_api_gateway.domain.analysis_job import (
 )
 
 
+class TechnicalAssignmentSnapshotResponse(
+    BaseModel,
+):
+    """Immutable metadata загруженного ТЗ."""
+
+    model_config = ConfigDict(
+        frozen=True,
+    )
+
+    technical_assignment_id: UUID
+
+    analysis_document_id: UUID
+
+    section_id: UUID
+
+    source_file: str
+
+    mime_type: str
+
+    size_bytes: int
+
+    sha256: str
+
+
 class AnalysisAcceptedResponse(BaseModel):
     """Ответ на успешно принятое асинхронное задание."""
 
@@ -38,6 +62,8 @@ class AnalysisAcceptedResponse(BaseModel):
     user_package_document_ids: list[UUID] = Field(
         default_factory=list,
     )
+
+    technical_assignment: TechnicalAssignmentSnapshotResponse | None = None
 
 
 class AnalysisStatusResponse(BaseModel):
@@ -66,6 +92,8 @@ class AnalysisStatusResponse(BaseModel):
     user_package_document_ids: list[UUID] = Field(
         default_factory=list,
     )
+
+    technical_assignment: TechnicalAssignmentSnapshotResponse | None = None
 
     created_at: datetime
 

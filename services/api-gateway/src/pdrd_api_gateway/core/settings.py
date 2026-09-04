@@ -153,6 +153,25 @@ class StorageSettings(BaseModel):
         return self.max_upload_mb * 1024 * 1024
 
 
+class TechnicalAssignmentSettings(
+    BaseModel,
+):
+    """Gateway limits uploaded технического задания."""
+
+    max_upload_mb: int = Field(
+        default=100,
+        ge=1,
+        le=500,
+    )
+
+    @property
+    def max_upload_bytes(
+        self,
+    ) -> int:
+        """Возвращает максимальный размер ТЗ."""
+        return self.max_upload_mb * 1024 * 1024
+
+
 class OrchestrationSettings(BaseModel):
     """Настройки опубликованных PDRD n8n workflows."""
 
@@ -272,16 +291,20 @@ class Settings(BaseSettings):
         default_factory=StorageSettings,
     )
 
+    technical_assignment: TechnicalAssignmentSettings = Field(
+        default_factory=(TechnicalAssignmentSettings),
+    )
+
     orchestration: OrchestrationSettings = Field(
         default_factory=OrchestrationSettings,
     )
 
     knowledge_service: KnowledgeServiceSettings = Field(
-        default_factory=KnowledgeServiceSettings,
+        default_factory=(KnowledgeServiceSettings),
     )
 
     project_context_cleanup: ProjectContextCleanupSettings = Field(
-        default_factory=ProjectContextCleanupSettings,
+        default_factory=(ProjectContextCleanupSettings),
     )
 
 

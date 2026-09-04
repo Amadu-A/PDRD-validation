@@ -3,11 +3,21 @@
 """Immutable snapshot нормативной конфигурации analysis job."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import (
+    dataclass,
+    replace,
+)
 from uuid import UUID
 
+from pdrd_api_gateway.domain.technical_assignment import (
+    InvalidTechnicalAssignmentSnapshotError,
+    TechnicalAssignmentSnapshot,
+)
 
-class InvalidNormativeAnalysisSnapshotError(ValueError):
+
+class InvalidNormativeAnalysisSnapshotError(
+    ValueError,
+):
     """Некорректный immutable snapshot нормативного анализа."""
 
 
@@ -44,7 +54,7 @@ def _deduplicate_ids(
 
 @dataclass(frozen=True, slots=True)
 class NormativeAnalysisSnapshot:
-    """Фиксирует normative scope, package scope и active prompt."""
+    """Фиксирует N/U scope, ТЗ и active prompt анализа."""
 
     section_id: UUID
 
@@ -59,6 +69,8 @@ class NormativeAnalysisSnapshot:
         UUID,
         ...,
     ] = ()
+
+    technical_assignment: TechnicalAssignmentSnapshot | None = None
 
     def __post_init__(
         self,
@@ -112,6 +124,16 @@ class NormativeAnalysisSnapshot:
                 "Normative system prompt содержит NUL-символ.",
             )
 
+        technical_assignment = self.technical_assignment
+
+        if (
+            technical_assignment is not None
+            and technical_assignment.section_id != self.section_id
+        ):
+            raise InvalidNormativeAnalysisSnapshotError(
+                "ТЗ должно принадлежать тому же разделу, что и normative snapshot.",
+            )
+
     @classmethod
     def create(
         cls,
@@ -126,6 +148,7 @@ class NormativeAnalysisSnapshot:
             UUID,
             ...,
         ] = (),
+        technical_assignment: (TechnicalAssignmentSnapshot | None) = None,
     ) -> "NormativeAnalysisSnapshot":
         """Создаёт snapshot с ordered deduplication IDs."""
         return cls(
@@ -137,6 +160,22 @@ class NormativeAnalysisSnapshot:
             user_package_document_ids=_deduplicate_ids(
                 user_package_document_ids,
             ),
+            technical_assignment=technical_assignment,
+        )
+
+    def with_technical_assignment(
+        self,
+        technical_assignment: TechnicalAssignmentSnapshot,
+    ) -> "NormativeAnalysisSnapshot":
+        """Добавляет ТЗ один раз в immutable snapshot."""
+        if self.technical_assignment is not None:
+            raise InvalidNormativeAnalysisSnapshotError(
+                "Normative snapshot уже содержит ТЗ.",
+            )
+
+        return replace(
+            self,
+            technical_assignment=technical_assignment,
         )
 
     def as_payload(
@@ -163,6 +202,11 @@ class NormativeAnalysisSnapshot:
                 for document_id in self.user_package_document_ids
             ],
             "system_prompt": self.system_prompt,
+            "technical_assignment": (
+                self.technical_assignment.as_payload()
+                if self.technical_assignment is not None
+                else None
+            ),
         }
 
     @classmethod
@@ -189,6 +233,10 @@ class NormativeAnalysisSnapshot:
 
         system_prompt = payload.get(
             "system_prompt",
+        )
+
+        technical_assignment_value = payload.get(
+            "technical_assignment",
         )
 
         if not isinstance(
@@ -246,6 +294,27 @@ class NormativeAnalysisSnapshot:
                 "Normative snapshot не содержит system_prompt.",
             )
 
+        technical_assignment = None
+
+        if technical_assignment_value is not None:
+            if not isinstance(
+                technical_assignment_value,
+                Mapping,
+            ):
+                raise InvalidNormativeAnalysisSnapshotError(
+                    "Normative snapshot содержит некорректное ТЗ.",
+                )
+
+            try:
+                technical_assignment = TechnicalAssignmentSnapshot.from_payload(
+                    technical_assignment_value,
+                )
+
+            except InvalidTechnicalAssignmentSnapshotError as error:
+                raise InvalidNormativeAnalysisSnapshotError(
+                    "Normative snapshot содержит некорректный snapshot ТЗ.",
+                ) from error
+
         try:
             section_id = UUID(
                 section_value,
@@ -274,5 +343,6 @@ class NormativeAnalysisSnapshot:
             section_id=section_id,
             document_ids=document_ids,
             system_prompt=system_prompt,
-            user_package_document_ids=user_package_document_ids,
+            user_package_document_ids=(user_package_document_ids),
+            technical_assignment=technical_assignment,
         )

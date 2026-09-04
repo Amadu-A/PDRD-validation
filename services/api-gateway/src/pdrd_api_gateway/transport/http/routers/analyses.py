@@ -52,6 +52,10 @@ from pdrd_api_gateway.domain.analysis_submission import (
 )
 from pdrd_api_gateway.domain.normative_snapshot import (
     InvalidNormativeAnalysisSnapshotError,
+    NormativeAnalysisSnapshot,
+)
+from pdrd_api_gateway.domain.technical_assignment import (
+    InvalidTechnicalAssignmentSnapshotError,
 )
 from pdrd_api_gateway.transport.http.dependencies import (
     get_container,
@@ -59,6 +63,7 @@ from pdrd_api_gateway.transport.http.dependencies import (
 from pdrd_api_gateway.transport.http.schemas.analyses import (
     AnalysisAcceptedResponse,
     AnalysisStatusResponse,
+    TechnicalAssignmentSnapshotResponse,
 )
 
 router = APIRouter(
@@ -133,7 +138,7 @@ async def read_upload(
         > max_upload_bytes
     ):
         raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            status_code=(status.HTTP_413_CONTENT_TOO_LARGE),
             detail=("Размер загруженного файла превышает допустимый предел."),
         )
 
@@ -165,7 +170,7 @@ def _parse_document_ids(
 
     except json.JSONDecodeError as error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
             detail=(f"{field_name} должен быть JSON array UUID."),
         ) from error
 
@@ -174,8 +179,8 @@ def _parse_document_ids(
         list,
     ):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"{field_name} должен быть JSON array.",
+            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
+            detail=(f"{field_name} должен быть JSON array."),
         )
 
     result: list[UUID] = []
@@ -186,7 +191,7 @@ def _parse_document_ids(
             str,
         ):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
                 detail=(f"Каждый элемент {field_name} должен быть строкой UUID."),
             )
 
@@ -199,7 +204,7 @@ def _parse_document_ids(
 
         except ValueError as error:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
                 detail=(f"Некорректный UUID в {field_name}: {value}."),
             ) from error
 
@@ -240,6 +245,26 @@ def parse_user_package_document_ids(
     )
 
 
+def build_technical_assignment_response(
+    snapshot: (NormativeAnalysisSnapshot | None),
+) -> TechnicalAssignmentSnapshotResponse | None:
+    """Преобразует domain snapshot ТЗ в HTTP schema."""
+    if snapshot is None or snapshot.technical_assignment is None:
+        return None
+
+    technical_assignment = snapshot.technical_assignment
+
+    return TechnicalAssignmentSnapshotResponse(
+        technical_assignment_id=(technical_assignment.technical_assignment_id),
+        analysis_document_id=(technical_assignment.analysis_document_id),
+        section_id=(technical_assignment.section_id),
+        source_file=(technical_assignment.source_file),
+        mime_type=(technical_assignment.mime_type),
+        size_bytes=(technical_assignment.size_bytes),
+        sha256=technical_assignment.sha256,
+    )
+
+
 @router.post(
     "",
     status_code=status.HTTP_202_ACCEPTED,
@@ -257,6 +282,10 @@ async def create_analysis(
         File(),
     ] = None,
     cad: Annotated[
+        UploadFile | None,
+        File(),
+    ] = None,
+    technical_assignment: Annotated[
         UploadFile | None,
         File(),
     ] = None,
@@ -310,6 +339,14 @@ async def create_analysis(
         max_upload_bytes=max_upload_bytes,
     )
 
+    (
+        technical_assignment_content,
+        technical_assignment_file_name,
+    ) = await read_upload(
+        upload=technical_assignment,
+        max_upload_bytes=(container.settings.technical_assignment.max_upload_bytes),
+    )
+
     parsed_normative_document_ids = parse_normative_document_ids(
         normative_document_ids,
     )
@@ -322,26 +359,40 @@ async def create_analysis(
         container,
     )
 
+    execute_kwargs: dict[
+        str,
+        Any,
+    ] = {
+        "pdf_content": pdf_content,
+        "pdf_file_name": pdf_file_name,
+        "cad_content": cad_content,
+        "cad_file_name": cad_file_name,
+        "pages": pages,
+        "use_explanatory_note": (use_explanatory_note),
+        "note_start_page": note_start_page,
+        "note_end_page": note_end_page,
+        "normative_section_id": (normative_section_id),
+        "normative_document_ids": (parsed_normative_document_ids),
+        "user_package_document_ids": (parsed_user_package_document_ids),
+        "normative_prompt_override_enabled": (normative_prompt_override_enabled),
+        "normative_prompt_override": (normative_prompt_override),
+    }
+
+    if technical_assignment_content is not None:
+        execute_kwargs["technical_assignment_content"] = technical_assignment_content
+
+        execute_kwargs["technical_assignment_file_name"] = (
+            technical_assignment_file_name
+        )
+
     try:
         job = await use_case.execute(
-            pdf_content=pdf_content,
-            pdf_file_name=pdf_file_name,
-            cad_content=cad_content,
-            cad_file_name=cad_file_name,
-            pages=pages,
-            use_explanatory_note=use_explanatory_note,
-            note_start_page=note_start_page,
-            note_end_page=note_end_page,
-            normative_section_id=normative_section_id,
-            normative_document_ids=(parsed_normative_document_ids),
-            user_package_document_ids=(parsed_user_package_document_ids),
-            normative_prompt_override_enabled=(normative_prompt_override_enabled),
-            normative_prompt_override=(normative_prompt_override),
+            **execute_kwargs,
         )
 
     except EmptyAnalysisFileError as error:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=(status.HTTP_400_BAD_REQUEST),
             detail=str(
                 error,
             ),
@@ -351,9 +402,10 @@ async def create_analysis(
         InvalidAnalysisSubmissionError,
         InvalidNormativeSelectionError,
         InvalidNormativeAnalysisSnapshotError,
+        InvalidTechnicalAssignmentSnapshotError,
     ) as error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
             detail=str(
                 error,
             ),
@@ -361,7 +413,7 @@ async def create_analysis(
 
     except NormativeSelectionConflictError as error:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=(status.HTTP_409_CONFLICT),
             detail=str(
                 error,
             ),
@@ -374,7 +426,7 @@ async def create_analysis(
         UserPackageReaderNotConfiguredError,
     ) as error:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
             detail=str(
                 error,
             ),
@@ -391,7 +443,7 @@ async def create_analysis(
         job_id=job.id,
         document_id=job.document_id,
         status=job.status,
-        status_url=f"/api/v1/analyses/{job.id}",
+        status_url=(f"/api/v1/analyses/{job.id}"),
         normative_section_id=(snapshot.section_id if snapshot is not None else None),
         normative_document_ids=(
             list(
@@ -406,6 +458,11 @@ async def create_analysis(
             )
             if snapshot is not None
             else []
+        ),
+        technical_assignment=(
+            build_technical_assignment_response(
+                snapshot,
+            )
         ),
     )
 
@@ -441,7 +498,7 @@ async def get_analysis_result(
 
     except AnalysisResultJobNotFoundError as error:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=(status.HTTP_404_NOT_FOUND),
             detail=str(
                 error,
             ),
@@ -449,7 +506,7 @@ async def get_analysis_result(
 
     except AnalysisResultNotReadyError as error:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=(status.HTTP_409_CONFLICT),
             detail={
                 "message": str(
                     error,
@@ -460,7 +517,7 @@ async def get_analysis_result(
 
     except AnalysisResultUnavailableError as error:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=(status.HTTP_500_INTERNAL_SERVER_ERROR),
             detail=str(
                 error,
             ),
@@ -491,7 +548,7 @@ async def get_analysis(
 
     if job is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=(status.HTTP_404_NOT_FOUND),
             detail="Analysis job not found.",
         )
 
@@ -518,6 +575,11 @@ async def get_analysis(
             )
             if snapshot is not None
             else []
+        ),
+        technical_assignment=(
+            build_technical_assignment_response(
+                snapshot,
+            )
         ),
         created_at=job.created_at,
         updated_at=job.updated_at,
