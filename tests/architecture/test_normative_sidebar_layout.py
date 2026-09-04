@@ -26,6 +26,8 @@ USER_PACKAGES_JS = (
 
 GLOBAL_CSS = FRONTEND_SOURCE / "css" / "global.css"
 
+NORMATIVE_CSS = FRONTEND_SOURCE / "css" / "blocks" / "normative-sidebar.css"
+
 NGINX_CONFIG = FRONTEND_ROOT / "nginx.conf"
 
 
@@ -58,8 +60,8 @@ def test_sidebar_blocks_have_requested_order() -> None:
     )
 
 
-def test_normative_selection_is_hidden_but_preserved() -> None:
-    """Normative checkbox скрыты через существующий state class."""
+def test_normative_selection_is_hidden_but_catalog_remains_visible() -> None:
+    """Скрываются checkbox/toolbar, но не documents block и не tree."""
     html = INDEX_HTML.read_text(
         encoding="utf-8",
     )
@@ -72,6 +74,10 @@ def test_normative_selection_is_hidden_but_preserved() -> None:
         encoding="utf-8",
     )
 
+    sidebar_css = NORMATIVE_CSS.read_text(
+        encoding="utf-8",
+    )
+
     assert "data-normative-admin-selection" in html
 
     assert "normative-sidebar__toolbar is-hidden" in html
@@ -81,6 +87,56 @@ def test_normative_selection_is_hidden_but_preserved() -> None:
     assert ".is-hidden" in global_css
 
     assert 'class="hidden"' not in html
+
+    documents_marker = html.find(
+        "data-normative-documents-block",
+    )
+
+    documents_start = html.rfind(
+        "<section",
+        0,
+        documents_marker,
+    )
+
+    documents_end = html.find(
+        ">",
+        documents_marker,
+    )
+
+    documents_opening = html[documents_start:documents_end]
+
+    assert documents_marker >= 0
+
+    assert "is-hidden" not in documents_opening
+
+    tree_marker = html.find(
+        "data-normative-tree",
+    )
+
+    tree_start = html.rfind(
+        "<div",
+        0,
+        tree_marker,
+    )
+
+    tree_end = html.find(
+        ">",
+        tree_marker,
+    )
+
+    tree_opening = html[tree_start:tree_end]
+
+    assert tree_marker >= 0
+
+    assert "is-hidden" not in tree_opening
+
+    assert "overflow-x: hidden;" in sidebar_css
+
+    assert "overflow-y: auto;" in sidebar_css
+
+    assert "flex: 0 0 auto;" in sidebar_css
+
+    assert "overflow: visible;" in sidebar_css
 
 
 def test_new_ready_normatives_are_selected_automatically() -> None:
@@ -103,7 +159,9 @@ def test_new_ready_normatives_are_selected_automatically() -> None:
         missing,
     )
 
-    assignment_position = catalog.find("state.documents = documents")
+    assignment_position = catalog.find(
+        "state.documents = documents",
+    )
 
     selection_position = catalog.find(
         "selectNewReadyDocumentsByDefault()",
@@ -141,7 +199,9 @@ def test_tz_disabled_and_user_packages_are_live() -> None:
 
     assert "data-user-packages-placeholder" not in html
 
-    specification_start = html.find("data-specification-placeholder")
+    specification_start = html.find(
+        "data-specification-placeholder",
+    )
 
     specification_end = html.find(
         "</section>",

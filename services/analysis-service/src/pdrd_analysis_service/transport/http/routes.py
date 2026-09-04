@@ -25,6 +25,7 @@ from pdrd_analysis_service.domain.analysis import (
     FindingDraft,
     NormativeSource,
     PageFacts,
+    UserPackageSource,
 )
 from pdrd_analysis_service.transport.http.dependencies import (
     get_container,
@@ -45,6 +46,7 @@ from pdrd_analysis_service.transport.http.schemas import (
     ReadyHealthResponse,
     UnderstandPageRequest,
     UnderstandPageResponse,
+    UserPackageSourcePayload,
 )
 
 router = APIRouter()
@@ -77,12 +79,7 @@ def _decode_image(
             detail="Передано пустое изображение.",
         )
 
-    if (
-        len(
-            content,
-        )
-        > max_bytes
-    ):
+    if len(content) > max_bytes:
         raise HTTPException(
             status_code=(status.HTTP_413_CONTENT_TOO_LARGE),
             detail=("Изображение превышает допустимый размер."),
@@ -119,6 +116,26 @@ def _normative_source_payload(
 ) -> NormativeSourcePayload:
     """Преобразует managed normative source в HTTP payload."""
     return NormativeSourcePayload(
+        source_id=source.source_id,
+        point_id=source.point_id,
+        score=source.score,
+        document_id=source.document_id,
+        section_id=source.section_id,
+        category_id=source.category_id,
+        source_sha256=source.source_sha256,
+        source_file=source.source_file,
+        source_path=source.source_path,
+        page=source.page,
+        chunk_index=source.chunk_index,
+        text=source.text,
+    )
+
+
+def _user_package_source_payload(
+    source: UserPackageSource,
+) -> UserPackageSourcePayload:
+    """Преобразует user-package source в HTTP payload."""
+    return UserPackageSourcePayload(
         source_id=source.source_id,
         point_id=source.point_id,
         score=source.score,
@@ -179,7 +196,16 @@ def _finding_draft_payload(
             )
             for source in finding.basis_sources
         ],
-        experience_query=(finding.experience_query),
+        experience_query=finding.experience_query,
+        user_package_source_ids=list(
+            finding.user_package_source_ids,
+        ),
+        user_package_basis_sources=[
+            _user_package_source_payload(
+                source,
+            )
+            for source in finding.user_package_basis_sources
+        ],
     )
 
 
@@ -211,6 +237,12 @@ def _final_finding_payload(
             )
             for source in finding.experience_sources
         ],
+        user_package_basis_sources=[
+            _user_package_source_payload(
+                source,
+            )
+            for source in finding.user_package_basis_sources
+        ],
     )
 
 
@@ -229,8 +261,8 @@ async def health_live(
     """Возвращает liveness."""
     return LiveHealthResponse(
         status="ok",
-        service=(container.settings.service_name),
-        version=(container.settings.service_version),
+        service=container.settings.service_name,
+        version=container.settings.service_version,
     )
 
 
@@ -250,7 +282,7 @@ async def health_ready(
     report = await container.check_readiness.execute()
 
     dependencies = {
-        "vision_model": (report.vision_model),
+        "vision_model": report.vision_model,
     }
 
     if not report.ready:
@@ -264,8 +296,8 @@ async def health_ready(
 
     return ReadyHealthResponse(
         status="ready",
-        service=(container.settings.service_name),
-        version=(container.settings.service_version),
+        service=container.settings.service_name,
+        version=container.settings.service_version,
         dependencies=dependencies,
     )
 
@@ -293,7 +325,7 @@ async def understand_page(
         facts, metrics = await container.understand_page.execute(
             page_number=request.page_number,
             heuristic_page_type=(request.heuristic_page_type),
-            extracted_text=(request.extracted_text),
+            extracted_text=request.extracted_text,
             image_bytes=image,
         )
 
@@ -328,8 +360,8 @@ async def normative_queries(
 ) -> NormativeQueriesResponse:
     """Строит retrieval queries Knowledge Service."""
     queries = container.build_normative_queries.execute(
-        page_facts=(request.page_facts.to_domain()),
-        extracted_text=(request.extracted_text),
+        page_facts=request.page_facts.to_domain(),
+        extracted_text=request.extracted_text,
         project_context_texts=tuple(
             request.project_context_texts,
         ),
@@ -355,7 +387,7 @@ async def check_norms(
         ),
     ],
 ) -> CheckNormsResponse:
-    """Проверяет лист по norms с separate user-package context."""
+    """Проверяет лист по N-sources и отдельным U-sources."""
     image = _decode_image(
         encoded=request.image_base64,
         max_bytes=(container.settings.pipeline.max_image_bytes),
@@ -367,9 +399,9 @@ async def check_norms(
             findings,
             metrics,
         ) = await container.check_page_against_norms.execute(
-            page_number=(request.page_number),
-            extracted_text=(request.extracted_text),
-            page_facts=(request.page_facts.to_domain()),
+            page_number=request.page_number,
+            extracted_text=request.extracted_text,
+            page_facts=request.page_facts.to_domain(),
             normative_sources=tuple(
                 source.to_domain() for source in request.normative_sources
             ),
@@ -413,7 +445,7 @@ async def finalize_findings(
         ),
     ],
 ) -> FinalizeResponse:
-    """Финализирует нормативные findings."""
+    """Финализирует findings, сохраняя N/U evidence отдельно."""
     (
         summary,
         findings,
@@ -422,10 +454,7 @@ async def finalize_findings(
         findings=tuple(finding.to_domain() for finding in request.findings),
         experience_by_finding={
             finding_id: tuple(source.to_domain() for source in sources)
-            for (
-                finding_id,
-                sources,
-            ) in (request.experience_by_finding.items())
+            for finding_id, sources in (request.experience_by_finding.items())
         },
     )
 

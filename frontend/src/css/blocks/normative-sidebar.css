@@ -19,7 +19,8 @@
 
   padding: var(--space-7);
 
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 
   background: var(--color-surface);
 
@@ -178,11 +179,11 @@
 
 .normative-sidebar__documents,
 .normative-sidebar__user-packages {
-  flex: 1 1 0;
+  flex: 0 0 auto;
 
-  min-height: 180px;
+  min-height: 0;
 
-  overflow: hidden;
+  overflow: visible;
 }
 
 .normative-sidebar__prompt {
@@ -367,11 +368,11 @@
 }
 
 .normative-sidebar__tree {
-  flex: 1;
+  flex: 0 0 auto;
 
-  min-height: 100px;
+  min-height: 0;
 
-  overflow: auto;
+  overflow: visible;
 
   padding-right: var(--space-1);
 
@@ -380,7 +381,7 @@
 }
 
 .normative-sidebar__packages-tree {
-  min-height: 90px;
+  min-height: 0;
 }
 
 .normative-sidebar__root-header,
@@ -621,9 +622,5 @@
   .normative-sidebar__documents,
   .normative-sidebar__user-packages {
     min-height: 0;
-  }
-
-  .normative-sidebar__tree {
-    max-height: 420px;
   }
 }

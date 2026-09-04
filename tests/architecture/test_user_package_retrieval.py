@@ -78,8 +78,8 @@ def test_qdrant_scope_uses_exact_managed_document_ids() -> None:
     assert "list_by_ids" in normative
 
 
-def test_analysis_keeps_user_sources_out_of_normative_basis() -> None:
-    """U-source передаётся отдельно и не участвует в basis_sources."""
+def test_analysis_keeps_user_sources_separate_from_normative_basis() -> None:
+    """N- и U-sources имеют разные maps и разные evidence fields."""
     domain = (ANALYSIS_ROOT / "domain" / "analysis.py").read_text(
         encoding="utf-8",
     )
@@ -98,23 +98,47 @@ def test_analysis_keeps_user_sources_out_of_normative_basis() -> None:
 
     assert "class UserPackageSource" in domain
 
+    assert "user_package_source_ids" in domain
+
+    assert "user_package_basis_sources" in domain
+
     assert "user_package_sources" in schemas
 
+    assert "user_package_basis_sources" in schemas
+
     assert "USER PACKAGE SOURCES" in prompt
+
+    assert "normative_source_ids" in prompt
+
+    assert "user_package_source_ids" in prompt
 
     assert "source_by_id = {" in use_case
 
     assert "for source in normative_sources" in use_case
 
-    source_map_start = use_case.find(
-        "source_by_id = {",
+    assert "user_package_by_id = {" in use_case
+
+    assert "for source in user_package_sources" in use_case
+
+    basis_start = use_case.find(
+        "basis=build_basis(",
     )
 
-    findings_start = use_case.find(
-        "findings:",
-        source_map_start,
+    basis_sources_start = use_case.find(
+        "basis_sources=",
+        basis_start,
     )
 
-    source_map_block = use_case[source_map_start:findings_start]
+    assert basis_start >= 0
 
-    assert "for source in user_package_sources" not in source_map_block
+    assert basis_sources_start > basis_start
+
+    basis_block = use_case[basis_start:basis_sources_start]
+
+    assert "selected_normative_sources" in basis_block
+
+    assert "selected_user_package_sources" not in basis_block
+
+    assert "user_package_basis_sources=(" in use_case
+
+    assert "selected_user_package_sources" in use_case

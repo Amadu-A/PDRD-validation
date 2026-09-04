@@ -1,6 +1,6 @@
 # services/analysis-service/src/pdrd_analysis_service/application/use_cases/finalization.py
 
-"""Use case финализации нормативных findings."""
+"""Use case финализации findings."""
 
 from dataclasses import dataclass
 from typing import Any
@@ -27,7 +27,7 @@ from pdrd_analysis_service.domain.analysis import (
 
 @dataclass(frozen=True, slots=True)
 class FinalizeFindings:
-    """Финализирует нормативные findings небольшими batches."""
+    """Финализирует findings небольшими batches."""
 
     vision_model: StructuredVisionModel
 
@@ -66,8 +66,8 @@ class FinalizeFindings:
                 (),
                 {
                     "attempt": 0,
-                    "done_reason": ("no_findings"),
-                    "batch_size": (self.batch_size),
+                    "done_reason": "no_findings",
+                    "batch_size": self.batch_size,
                     "fallback_count": 0,
                     "batches": [],
                 },
@@ -77,12 +77,9 @@ class FinalizeFindings:
             finding_id: tuple(
                 source
                 for source in sources
-                if (source.score >= self.experience_min_score)
+                if source.score >= self.experience_min_score
             )
-            for (
-                finding_id,
-                sources,
-            ) in experience_by_finding.items()
+            for finding_id, sources in experience_by_finding.items()
         }
 
         final_items: list[FinalFinding] = []
@@ -104,20 +101,16 @@ class FinalizeFindings:
 
             try:
                 generation = await self.vision_model.generate_json(
-                    prompt=(
-                        build_finalization_prompt(
-                            findings=batch,
-                            experience_by_finding=(eligible_experience),
-                            experience_context_limit=(self.experience_context_limit),
-                        )
+                    prompt=build_finalization_prompt(
+                        findings=batch,
+                        experience_by_finding=(eligible_experience),
+                        experience_context_limit=(self.experience_context_limit),
                     ),
-                    schema=(
-                        build_finalization_schema(
-                            finding_ids,
-                        )
+                    schema=build_finalization_schema(
+                        finding_ids,
                     ),
-                    num_predict=(self.num_predict),
-                    seed=(300 + start),
+                    num_predict=self.num_predict,
+                    seed=300 + start,
                     stage=(
                         "finalization:"
                         + ",".join(
@@ -134,11 +127,9 @@ class FinalizeFindings:
                             "",
                         )
                     ): item
-                    for item in (
-                        generation.payload.get(
-                            "findings",
-                            [],
-                        )
+                    for item in generation.payload.get(
+                        "findings",
+                        [],
                     )
                     if isinstance(
                         item,
@@ -210,7 +201,7 @@ class FinalizeFindings:
                 )
 
         return (
-            ("Замечания сформированы по результатам нормативной проверки."),
+            "Замечания сформированы по результатам проверки требований.",
             tuple(
                 final_items,
             ),
@@ -219,10 +210,10 @@ class FinalizeFindings:
                 "done_reason": (
                     "completed_with_fallback" if fallback_count else "stop"
                 ),
-                "batch_size": (self.batch_size),
-                "fallback_count": (fallback_count),
+                "batch_size": self.batch_size,
+                "fallback_count": fallback_count,
                 "experience_min_score": (self.experience_min_score),
-                "batches": (batch_metrics),
+                "batches": batch_metrics,
             },
         )
 
@@ -237,23 +228,24 @@ class FinalizeFindings:
             recommendation = (
                 "Проверить указанное несоответствие "
                 "и скорректировать проектное решение "
-                "по приведённому нормативному основанию."
+                "по приведённому основанию."
             )
 
         return FinalFinding(
-            finding_id=(finding.finding_id),
+            finding_id=finding.finding_id,
             page=finding.page,
-            page_type=(finding.page_type),
-            category=(finding.category),
-            severity=(finding.severity),
-            status=(finding.status),
-            comment=(finding.comment),
-            evidence=(finding.evidence),
-            recommendation=(recommendation),
-            confidence=(finding.confidence),
-            basis=(finding.basis),
+            page_type=finding.page_type,
+            category=finding.category,
+            severity=finding.severity,
+            status=finding.status,
+            comment=finding.comment,
+            evidence=finding.evidence,
+            recommendation=recommendation,
+            confidence=finding.confidence,
+            basis=finding.basis,
             basis_sources=(finding.basis_sources),
             experience_sources=(),
+            user_package_basis_sources=(finding.user_package_basis_sources),
         )
 
     @staticmethod
@@ -303,17 +295,18 @@ class FinalizeFindings:
             recommendation = finding.recommendation_draft
 
         return FinalFinding(
-            finding_id=(finding.finding_id),
+            finding_id=finding.finding_id,
             page=finding.page,
-            page_type=(finding.page_type),
-            category=(finding.category),
-            severity=(finding.severity),
-            status=(finding.status),
+            page_type=finding.page_type,
+            category=finding.category,
+            severity=finding.severity,
+            status=finding.status,
             comment=comment,
-            evidence=(finding.evidence),
-            recommendation=(recommendation),
-            confidence=(finding.confidence),
-            basis=(finding.basis),
+            evidence=finding.evidence,
+            recommendation=recommendation,
+            confidence=finding.confidence,
+            basis=finding.basis,
             basis_sources=(finding.basis_sources),
-            experience_sources=(selected_experience),
+            experience_sources=selected_experience,
+            user_package_basis_sources=(finding.user_package_basis_sources),
         )

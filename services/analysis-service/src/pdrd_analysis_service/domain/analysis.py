@@ -59,13 +59,13 @@ class GenerationMetrics:
         return {
             "attempt": self.attempt,
             "done_reason": self.done_reason,
-            "requested_num_predict": (self.requested_num_predict),
-            "total_duration_ms": (self.total_duration_ms),
-            "load_duration_ms": (self.load_duration_ms),
-            "prompt_eval_count": (self.prompt_eval_count),
+            "requested_num_predict": self.requested_num_predict,
+            "total_duration_ms": self.total_duration_ms,
+            "load_duration_ms": self.load_duration_ms,
+            "prompt_eval_count": self.prompt_eval_count,
             "eval_count": self.eval_count,
-            "content_length": (self.content_length),
-            "thinking_length": (self.thinking_length),
+            "content_length": self.content_length,
+            "thinking_length": self.thinking_length,
         }
 
 
@@ -184,7 +184,7 @@ class ExperienceSource:
 
 @dataclass(frozen=True, slots=True)
 class FindingDraft:
-    """Нарушение после нормативной проверки, до финализации."""
+    """Нарушение после проверки требований, до финализации."""
 
     finding_id: str
 
@@ -214,6 +214,16 @@ class FindingDraft:
     ]
 
     experience_query: str
+
+    user_package_source_ids: tuple[
+        str,
+        ...,
+    ] = ()
+
+    user_package_basis_sources: tuple[
+        UserPackageSource,
+        ...,
+    ] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +256,11 @@ class FinalFinding:
         ExperienceSource,
         ...,
     ]
+
+    user_package_basis_sources: tuple[
+        UserPackageSource,
+        ...,
+    ] = ()
 
 
 @dataclass(frozen=True, slots=True)

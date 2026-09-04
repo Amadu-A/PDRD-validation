@@ -90,12 +90,41 @@ def build_page_facts_schema() -> dict[str, Any]:
     }
 
 
+def _source_ids_schema(
+    source_ids: tuple[
+        str,
+        ...,
+    ],
+) -> dict[str, Any]:
+    """Строит array schema только для реально переданных source IDs."""
+    if not source_ids:
+        return {
+            "type": "array",
+            "maxItems": 0,
+            "items": {
+                "type": "string",
+            },
+        }
+
+    return {
+        "type": "array",
+        "maxItems": 3,
+        "items": {
+            "type": "string",
+            "enum": list(
+                source_ids,
+            ),
+        },
+    }
+
+
 def build_normative_check_schema(
     *,
     source_ids: tuple[str, ...],
     max_issues: int,
+    user_package_source_ids: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """Возвращает schema нормативной проверки."""
+    """Возвращает schema проверки нормативных и пользовательских требований."""
     return {
         "type": "object",
         "additionalProperties": False,
@@ -148,17 +177,12 @@ def build_normative_check_schema(
                             "minimum": 0,
                             "maximum": 1,
                         },
-                        "normative_source_ids": {
-                            "type": "array",
-                            "minItems": 1,
-                            "maxItems": 3,
-                            "items": {
-                                "type": "string",
-                                "enum": list(
-                                    source_ids,
-                                ),
-                            },
-                        },
+                        "normative_source_ids": _source_ids_schema(
+                            source_ids,
+                        ),
+                        "user_package_source_ids": _source_ids_schema(
+                            user_package_source_ids,
+                        ),
                     },
                     "required": [
                         "category",
@@ -169,6 +193,7 @@ def build_normative_check_schema(
                         "recommendation_draft",
                         "confidence",
                         "normative_source_ids",
+                        "user_package_source_ids",
                     ],
                 },
             },

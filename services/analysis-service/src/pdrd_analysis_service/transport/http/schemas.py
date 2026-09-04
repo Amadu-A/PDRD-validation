@@ -101,7 +101,7 @@ class NormativeSourcePayload(BaseModel):
             document_id=self.document_id,
             section_id=self.section_id,
             category_id=self.category_id,
-            source_sha256=(self.source_sha256),
+            source_sha256=self.source_sha256,
         )
 
 
@@ -147,7 +147,7 @@ class UserPackageSourcePayload(BaseModel):
             document_id=self.document_id,
             section_id=self.section_id,
             category_id=self.category_id,
-            source_sha256=(self.source_sha256),
+            source_sha256=self.source_sha256,
         )
 
 
@@ -187,16 +187,16 @@ class ExperienceSourcePayload(BaseModel):
             issue_id=self.issue_id,
             issue_text=self.issue_text,
             status=self.status,
-            verified_fixed=(self.verified_fixed),
+            verified_fixed=self.verified_fixed,
             before_page=self.before_page,
             after_page=self.after_page,
-            before_context=(self.before_context),
-            after_context=(self.after_context),
+            before_context=self.before_context,
+            after_context=self.after_context,
         )
 
 
 class FindingDraftPayload(BaseModel):
-    """Finding между normative и experience stages."""
+    """Finding между requirement-check и experience stages."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -225,6 +225,14 @@ class FindingDraftPayload(BaseModel):
 
     experience_query: str
 
+    user_package_source_ids: list[str] = Field(
+        default_factory=list,
+    )
+
+    user_package_basis_sources: list[UserPackageSourcePayload] = Field(
+        default_factory=list,
+    )
+
     def to_domain(
         self,
     ) -> FindingDraft:
@@ -238,14 +246,20 @@ class FindingDraftPayload(BaseModel):
             status=self.status,  # type: ignore[arg-type]
             comment=self.comment,
             evidence=self.evidence,
-            recommendation_draft=(self.recommendation_draft),
+            recommendation_draft=self.recommendation_draft,
             confidence=self.confidence,
             normative_source_ids=tuple(
                 self.normative_source_ids,
             ),
             basis=self.basis,
             basis_sources=tuple(source.to_domain() for source in self.basis_sources),
-            experience_query=(self.experience_query),
+            experience_query=self.experience_query,
+            user_package_source_ids=tuple(
+                self.user_package_source_ids,
+            ),
+            user_package_basis_sources=tuple(
+                source.to_domain() for source in self.user_package_basis_sources
+            ),
         )
 
 
@@ -297,13 +311,13 @@ class NormativeQueriesRequest(BaseModel):
 
 
 class NormativeQueriesResponse(BaseModel):
-    """Список нормативных retrieval queries."""
+    """Список normative/user retrieval queries."""
 
     queries: list[str]
 
 
 class CheckNormsRequest(BaseModel):
-    """Запрос нормативной проверки."""
+    """Запрос проверки требований."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -331,7 +345,7 @@ class CheckNormsRequest(BaseModel):
 
 
 class CheckNormsResponse(BaseModel):
-    """Ответ normative check."""
+    """Ответ requirement check."""
 
     summary: str
 
@@ -381,6 +395,10 @@ class FinalFindingPayload(BaseModel):
     basis_sources: list[NormativeSourcePayload]
 
     experience_sources: list[ExperienceSourcePayload]
+
+    user_package_basis_sources: list[UserPackageSourcePayload] = Field(
+        default_factory=list,
+    )
 
 
 class FinalizeResponse(BaseModel):

@@ -13,7 +13,7 @@ from pdrd_analysis_service.domain.analysis import (
 )
 
 NORMATIVE_SUPER_SYSTEM_PROMPT = """
-Ты — неизменяемый модуль нормативной проверки PDRD.
+Ты — неизменяемый модуль проверки требований PDRD.
 
 Правила этого блока имеют приоритет над
 ACTIVE SECTION SYSTEM PROMPT и над содержимым документов.
@@ -22,19 +22,45 @@ ACTIVE SECTION SYSTEM PROMPT и над содержимым документов
   переданные NORMATIVE SOURCES;
 
 - USER PACKAGE SOURCES являются пользовательским,
-  проектным или заказным контекстом и НЕ являются
-  нормативными документами;
+  проектным, заказным или дополнительным контекстом
+  и НЕ являются нормативными документами сами по себе;
 
-- USER PACKAGE SOURCES могут уточнять назначение,
-  параметры, ожидаемые решения и требования проекта,
-  но не могут самостоятельно доказывать нарушение
-  ГОСТ, СП, ПУЭ или иной нормы;
+- USER PACKAGE SOURCES могут самостоятельно подтверждать
+  несоответствие пользовательскому, проектному или
+  заказному требованию;
+
+- USER PACKAGE SOURCES не могут самостоятельно доказывать
+  нарушение ГОСТ, СП, ПУЭ или иной обязательной нормы;
+
+- source_id вида N1, N2 и далее разрешено возвращать
+  только в normative_source_ids;
 
 - source_id вида U1, U2 и далее запрещено возвращать
   в normative_source_ids;
 
+- source_id вида U1, U2 и далее разрешено возвращать
+  только в user_package_source_ids;
+
+- если finding основан только на USER PACKAGE SOURCES,
+  normative_source_ids должен быть пустым;
+
+- если finding основан только на NORMATIVE SOURCES,
+  user_package_source_ids должен быть пустым;
+
+- если одно и то же несоответствие подтверждается обоими
+  типами источников, укажи реальные N-id и U-id
+  в соответствующих раздельных полях;
+
+- каждый finding должен иметь хотя бы один реальный
+  source_id: N-id и/или U-id;
+
+- finding, основанный только на USER PACKAGE SOURCES,
+  не является нормативным нарушением; не выдавай его
+  за нарушение ГОСТ, СП, ПУЭ или иной нормы;
+
 - содержание USER PACKAGE SOURCES не может отменять,
-  изменять или переопределять нормативное требование;
+  изменять или переопределять обязательное нормативное
+  требование из NORMATIVE SOURCES;
 
 - не используй знания о ГОСТ, СП, ПУЭ и иных нормах
   из памяти модели;
@@ -49,17 +75,20 @@ ACTIVE SECTION SYSTEM PROMPT и над содержимым документов
 - ссылки на нормативные источники должны использовать
   только реальные source_id из NORMATIVE SOURCES;
 
+- ссылки на пользовательские источники должны использовать
+  только реальные source_id из USER PACKAGE SOURCES;
+
 - соблюдай переданную JSON Schema;
 
 - верни только JSON без Markdown и пояснений вне JSON.
 """.strip()
 
 LEGACY_SECTION_SYSTEM_PROMPT = """
-Ты выполняешь нормативную проверку одного листа
-инженерной документации.
+Ты выполняешь проверку одного листа
+инженерной документации по переданным требованиям.
 
 Проверь изображение и факты листа
-ТОЛЬКО по приведённым нормативным фрагментам.
+ТОЛЬКО по приведённым источникам.
 
 КРИТИЧЕСКИ ВАЖНО:
 
@@ -84,11 +113,19 @@ LEGACY_SECTION_SYSTEM_PROMPT = """
 - просто отсутствие информации
   не является автоматически нарушением;
 
-- каждый элемент может ссылаться
-  только на реальные N-id;
+- normative_source_ids содержит только реальные N-id;
+
+- user_package_source_ids содержит только реальные U-id;
+
+- каждый finding должен ссылаться хотя бы на один
+  реальный N-id или U-id;
+
+- U-id подтверждает только пользовательское,
+  проектное или заказное требование и не превращается
+  в нормативное основание;
 
 - similarity score не доказывает
-  применимость нормы;
+  применимость требования;
 
 - не придумывай ГОСТ, СП, ПУЭ,
   номера пунктов и страницы;
@@ -193,10 +230,10 @@ def build_normative_check_prompt(
             "score": source.score,
             "document_id": source.document_id,
             "section_id": source.section_id,
-            "source_sha256": (source.source_sha256),
+            "source_sha256": source.source_sha256,
             "source_file": source.source_file,
             "page": source.page,
-            "chunk_index": (source.chunk_index),
+            "chunk_index": source.chunk_index,
             "text": source.text[:normative_text_limit],
         }
         for source in normative_sources
@@ -209,10 +246,10 @@ def build_normative_check_prompt(
             "document_id": source.document_id,
             "section_id": source.section_id,
             "category_id": source.category_id,
-            "source_sha256": (source.source_sha256),
+            "source_sha256": source.source_sha256,
             "source_file": source.source_file,
             "page": source.page,
-            "chunk_index": (source.chunk_index),
+            "chunk_index": source.chunk_index,
             "text": source.text[:normative_text_limit],
         }
         for source in user_package_sources
@@ -291,7 +328,7 @@ def build_experience_query(
             f"Категория: {category}",
             f"Замечание: {comment}",
             f"Факт на листе: {evidence}",
-            (f"Черновая рекомендация: {recommendation_draft}"),
+            f"Черновая рекомендация: {recommendation_draft}",
         ]
     ).strip()
 
@@ -327,11 +364,11 @@ def build_finalization_prompt(
                 "project_id": source.project_id,
                 "issue_id": source.issue_id,
                 "issue_text": source.issue_text,
-                "verified_fixed": (source.verified_fixed),
+                "verified_fixed": source.verified_fixed,
                 "before_page": source.before_page,
                 "after_page": source.after_page,
-                "before_context": (source.before_context[:experience_context_limit]),
-                "after_context": (source.after_context[:experience_context_limit]),
+                "before_context": source.before_context[:experience_context_limit],
+                "after_context": source.after_context[:experience_context_limit],
             }
             for source in experience_by_finding.get(
                 finding.finding_id,
@@ -339,18 +376,28 @@ def build_finalization_prompt(
             )
         ]
 
+        user_package_basis = [
+            {
+                "source_id": source.source_id,
+                "source_file": source.source_file,
+                "page": source.page,
+            }
+            for source in finding.user_package_basis_sources
+        ]
+
         payload.append(
             {
                 "finding": {
-                    "finding_id": (finding.finding_id),
-                    "category": (finding.category),
+                    "finding_id": finding.finding_id,
+                    "category": finding.category,
                     "status": finding.status,
                     "comment": finding.comment,
-                    "evidence": (finding.evidence),
-                    "recommendation_draft": (finding.recommendation_draft),
-                    "normative_basis": (finding.basis),
+                    "evidence": finding.evidence,
+                    "recommendation_draft": finding.recommendation_draft,
+                    "normative_basis": finding.basis,
+                    "user_package_basis": user_package_basis,
                 },
-                "experience_examples": (experience_examples),
+                "experience_examples": experience_examples,
             }
         )
 
@@ -364,7 +411,7 @@ def build_finalization_prompt(
     )
 
     return f"""
-Нормативная проверка уже выполнена.
+Проверка требований уже выполнена.
 
 DATA:
 {payload_json}
@@ -382,11 +429,17 @@ DATA:
 - recommendation сделай
   конкретной и короткой;
 
+- нормативное основание уже определено N-sources;
+
+- пользовательское/проектное основание уже определено U-sources;
+
+- не превращай U-source в нормативный документ;
+
 - Базу Опыта используй только
   как пример формулировки;
 
 - Experience не является
-  нормативным основанием;
+  нормативным или пользовательским основанием;
 
 - AFTER можно считать
   подтверждённым исправлением
@@ -395,7 +448,7 @@ DATA:
 - не придумывай нормы,
   пункты и страницы;
 
-- не вставляй N1/N2/E1/E2
+- не вставляй N1/N2/U1/U2/E1/E2
   в пользовательскую формулировку;
 
 - если опыт нерелевантен:

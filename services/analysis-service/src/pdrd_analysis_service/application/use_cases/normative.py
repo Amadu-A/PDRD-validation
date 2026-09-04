@@ -1,6 +1,6 @@
 # services/analysis-service/src/pdrd_analysis_service/application/use_cases/normative.py
 
-"""Use cases normative retrieval preparation и compliance check."""
+"""Use cases retrieval preparation и проверки требований."""
 
 from dataclasses import dataclass
 
@@ -57,11 +57,17 @@ class BuildNormativeQueries:
             query.strip() for query in page_facts.normative_queries if query.strip()
         ]
 
-        objects = "; ".join(page_facts.objects[:10])
+        objects = "; ".join(
+            page_facts.objects[:10],
+        )
 
-        connections = "; ".join(page_facts.connections[:8])
+        connections = "; ".join(
+            page_facts.connections[:8],
+        )
 
-        labels = "; ".join(page_facts.labels[:10])
+        labels = "; ".join(
+            page_facts.labels[:10],
+        )
 
         pz_hint = " ".join(text[:300] for text in project_context_texts[:3])
 
@@ -102,12 +108,14 @@ class BuildNormativeQueries:
                 normalized,
             )
 
-        return tuple(result[: self.max_queries])
+        return tuple(
+            result[: self.max_queries],
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class CheckPageAgainstNorms:
-    """Проверяет лист по нормам с optional user document context."""
+    """Проверяет лист по нормативным и пользовательским требованиям."""
 
     vision_model: StructuredVisionModel
 
@@ -139,14 +147,18 @@ class CheckPageAgainstNorms:
         ],
         GenerationMetrics,
     ]:
-        """Выполняет нормативную VLM-проверку."""
-        source_ids = tuple(
+        """Выполняет VLM-проверку по раздельным N- и U-sources."""
+        normative_source_ids = tuple(
             source.source_id for source in normative_sources if source.source_id
         )
 
-        if not source_ids:
+        user_package_source_ids = tuple(
+            source.source_id for source in user_package_sources if source.source_id
+        )
+
+        if not normative_source_ids and not user_package_source_ids:
             return (
-                "Нормативные источники для листа не найдены.",
+                "Источники требований для листа не найдены.",
                 (),
                 zero_metrics(
                     "no_normative_sources",
@@ -159,12 +171,13 @@ class CheckPageAgainstNorms:
                 extracted_text=extracted_text,
                 page_facts=page_facts,
                 normative_sources=normative_sources,
-                user_package_sources=(user_package_sources),
-                normative_text_limit=(self.normative_text_limit),
-                normative_system_prompt=(normative_system_prompt),
+                user_package_sources=user_package_sources,
+                normative_text_limit=self.normative_text_limit,
+                normative_system_prompt=normative_system_prompt,
             ),
             schema=build_normative_check_schema(
-                source_ids=source_ids,
+                source_ids=normative_source_ids,
+                user_package_source_ids=(user_package_source_ids),
                 max_issues=self.max_issues,
             ),
             num_predict=self.num_predict,
@@ -175,6 +188,10 @@ class CheckPageAgainstNorms:
 
         source_by_id = {source.source_id: source for source in normative_sources}
 
+        user_package_by_id = {
+            source.source_id: source for source in user_package_sources
+        }
+
         findings: list[FindingDraft] = []
 
         for violation in filter_violations(
@@ -183,20 +200,33 @@ class CheckPageAgainstNorms:
                 [],
             )
         ):
-            requested_ids = string_tuple(
+            requested_normative_ids = string_tuple(
                 violation.get(
                     "normative_source_ids",
                 ),
                 limit=3,
             )
 
-            selected_sources = tuple(
+            requested_user_package_ids = string_tuple(
+                violation.get(
+                    "user_package_source_ids",
+                ),
+                limit=3,
+            )
+
+            selected_normative_sources = tuple(
                 source_by_id[source_id]
-                for source_id in requested_ids
+                for source_id in requested_normative_ids
                 if source_id in source_by_id
             )
 
-            if not selected_sources:
+            selected_user_package_sources = tuple(
+                user_package_by_id[source_id]
+                for source_id in requested_user_package_ids
+                if source_id in user_package_by_id
+            )
+
+            if not selected_normative_sources and not selected_user_package_sources:
                 continue
 
             comment = str(
@@ -228,12 +258,19 @@ class CheckPageAgainstNorms:
                 )
             )
 
+            if (
+                not selected_normative_sources
+                and selected_user_package_sources
+                and finding_category == "normative_control"
+            ):
+                finding_category = "customer_requirements"
+
             findings.append(
                 FindingDraft(
                     finding_id=finding_id,
                     page=page_number,
-                    page_type=(page_facts.page_type),
-                    category=(finding_category),
+                    page_type=page_facts.page_type,
+                    category=finding_category,
                     severity=severity(
                         violation.get(
                             "severity",
@@ -253,20 +290,22 @@ class CheckPageAgainstNorms:
                         )
                     ),
                     normative_source_ids=tuple(
-                        source.source_id for source in selected_sources
+                        source.source_id for source in selected_normative_sources
                     ),
                     basis=build_basis(
-                        selected_sources,
+                        selected_normative_sources,
                     ),
-                    basis_sources=(selected_sources),
-                    experience_query=(
-                        build_experience_query(
-                            category=(finding_category),
-                            comment=comment,
-                            evidence=evidence,
-                            recommendation_draft=(recommendation_draft),
-                        )
+                    basis_sources=(selected_normative_sources),
+                    experience_query=build_experience_query(
+                        category=finding_category,
+                        comment=comment,
+                        evidence=evidence,
+                        recommendation_draft=(recommendation_draft),
                     ),
+                    user_package_source_ids=tuple(
+                        source.source_id for source in selected_user_package_sources
+                    ),
+                    user_package_basis_sources=(selected_user_package_sources),
                 )
             )
 

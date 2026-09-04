@@ -4,8 +4,8 @@
  * Строит безопасное DOM-представление результата анализа.
  *
  * Пользовательские и модельные строки вставляются только через textContent.
- * Нормативные citations открывают managed PDF или Word PDF-preview
- * на физической странице, указанной Knowledge Service.
+ * Нормативные и пользовательские citations открывают managed PDF
+ * или Word PDF-preview на физической странице из Knowledge Service.
  */
 
 import {
@@ -192,25 +192,20 @@ function normalizePage(
 
 function sourceFileName(
   source,
+  fallback,
 ) {
   return (
     source.source_file
     || source.file_name
     || source.source
-    || "Нормативный источник"
+    || fallback
   );
 }
 
 
-function normativeSources(
-  finding,
+function uniqueSources(
+  sources,
 ) {
-  const sources = (
-    finding.normative_sources
-    || finding.basis_sources
-    || []
-  );
-
   if (!Array.isArray(
     sources,
   )) {
@@ -253,8 +248,56 @@ function normativeSources(
 }
 
 
-function normativeCitationUrl(
+function preferredSourceArray(
+  primary,
+  fallback,
+) {
+  if (
+    Array.isArray(
+      primary,
+    )
+    && primary.length
+  ) {
+    return primary;
+  }
+
+  if (Array.isArray(
+    fallback,
+  )) {
+    return fallback;
+  }
+
+  return [];
+}
+
+
+function normativeSources(
+  finding,
+) {
+  return uniqueSources(
+    preferredSourceArray(
+      finding.normative_sources,
+      finding.basis_sources,
+    ),
+  );
+}
+
+
+function userPackageSources(
+  finding,
+) {
+  return uniqueSources(
+    preferredSourceArray(
+      finding.user_package_basis_sources,
+      finding.user_package_sources,
+    ),
+  );
+}
+
+
+function managedCitationUrl(
   source,
+  pathPrefix,
 ) {
   const documentId = (
     typeof source.document_id === "string"
@@ -275,18 +318,25 @@ function normativeCitationUrl(
   }
 
   return (
-    "/api/v1/normative/documents/"
+    pathPrefix
     + `${encodeURIComponent(documentId)}`
     + `/content#page=${page}`
   );
 }
 
 
-function createNormativeCitation(
+function createManagedCitation(
   source,
+  {
+    fallbackName,
+    pathPrefix,
+    datasetName,
+    titlePrefix,
+  },
 ) {
   const fileName = sourceFileName(
     source,
+    fallbackName,
   );
 
   const page = normalizePage(
@@ -300,8 +350,9 @@ function createNormativeCitation(
       : `${fileName}, стр. ${page}`
   );
 
-  const url = normativeCitationUrl(
+  const url = managedCitationUrl(
     source,
+    pathPrefix,
   );
 
   if (!url) {
@@ -326,7 +377,13 @@ function createNormativeCitation(
     "noopener noreferrer"
   );
 
-  link.dataset.normativeCitation = "";
+  if (datasetName === "normativeCitation") {
+    link.dataset.normativeCitation = "";
+  }
+
+  if (datasetName === "userPackageCitation") {
+    link.dataset.userPackageCitation = "";
+  }
 
   link.dataset.documentId = (
     source.document_id
@@ -337,22 +394,52 @@ function createNormativeCitation(
   );
 
   link.title = (
-    "Открыть нормативный документ "
-    + `на странице ${page}`
+    `${titlePrefix} на странице ${page}`
   );
 
   return link;
 }
 
 
-function appendNormativeSources(
-  finding,
-  parent,
+function createNormativeCitation(
+  source,
 ) {
-  const sources = normativeSources(
-    finding,
+  return createManagedCitation(
+    source,
+    {
+      fallbackName: "Нормативный источник",
+      pathPrefix: "/api/v1/normative/documents/",
+      datasetName: "normativeCitation",
+      titlePrefix: "Открыть нормативный документ",
+    },
   );
+}
 
+
+function createUserPackageCitation(
+  source,
+) {
+  return createManagedCitation(
+    source,
+    {
+      fallbackName: "Пользовательский документ",
+      pathPrefix: (
+        "/api/v1/normative/"
+        + "user-packages/documents/"
+      ),
+      datasetName: "userPackageCitation",
+      titlePrefix: "Открыть пользовательский документ",
+    },
+  );
+}
+
+
+function appendSourceList(
+  parent,
+  label,
+  sources,
+  createCitation,
+) {
   if (!sources.length) {
     return;
   }
@@ -366,7 +453,7 @@ function appendNormativeSources(
     createElement(
       "strong",
       "analysis-result__field-label",
-      "Нормативные источники",
+      label,
     ),
   );
 
@@ -383,7 +470,7 @@ function appendNormativeSources(
       );
 
       item.append(
-        createNormativeCitation(
+        createCitation(
           source,
         ),
       );
@@ -400,6 +487,36 @@ function appendNormativeSources(
 
   parent.append(
     section,
+  );
+}
+
+
+function appendNormativeSources(
+  finding,
+  parent,
+) {
+  appendSourceList(
+    parent,
+    "Нормативные источники",
+    normativeSources(
+      finding,
+    ),
+    createNormativeCitation,
+  );
+}
+
+
+function appendUserPackageSources(
+  finding,
+  parent,
+) {
+  appendSourceList(
+    parent,
+    "Пользовательские требования / документы",
+    userPackageSources(
+      finding,
+    ),
+    createUserPackageCitation,
   );
 }
 
@@ -587,6 +704,11 @@ function appendFinding(
   );
 
   appendNormativeSources(
+    finding,
+    article,
+  );
+
+  appendUserPackageSources(
     finding,
     article,
   );
