@@ -107,6 +107,24 @@ class BrokerSettings(BaseModel):
     )
 
 
+class TechnicalAssignmentQueueSettings(
+    BaseModel,
+):
+    """Отдельная очередь multimodal индексации ТЗ."""
+
+    queue_name: str = "pdrd.knowledge.technical-assignment"
+
+    exchange_name: str = "pdrd.knowledge.technical-assignment"
+
+    routing_key: str = "technical_assignment.index"
+
+    prefetch_count: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+    )
+
+
 class OutboxSettings(BaseModel):
     """Настройки Knowledge transactional outbox."""
 
@@ -172,6 +190,49 @@ class NormativeIndexingSettings(BaseModel):
     )
 
 
+class TechnicalAssignmentSettings(
+    BaseModel,
+):
+    """Параметры ingestion и retrieval технического задания."""
+
+    max_upload_mb: int = Field(
+        default=100,
+        ge=1,
+        le=500,
+    )
+
+    max_pages: int = Field(
+        default=300,
+        ge=1,
+        le=2000,
+    )
+
+    render_dpi: int = Field(
+        default=150,
+        ge=72,
+        le=300,
+    )
+
+    retrieval_top_k: int = Field(
+        default=6,
+        ge=1,
+        le=50,
+    )
+
+    max_sources: int = Field(
+        default=12,
+        ge=1,
+        le=100,
+    )
+
+    @property
+    def max_upload_bytes(
+        self,
+    ) -> int:
+        """Возвращает upload limit ТЗ в bytes."""
+        return self.max_upload_mb * 1024 * 1024
+
+
 class OfficeConversionSettings(BaseModel):
     """Настройки нормализации Word через LibreOffice."""
 
@@ -185,7 +246,7 @@ class OfficeConversionSettings(BaseModel):
 
 
 class EmbeddingSettings(BaseModel):
-    """Настройки embedding provider."""
+    """Настройки text embedding provider."""
 
     base_url: str = "http://ollama:11434"
 
@@ -210,6 +271,70 @@ class EmbeddingSettings(BaseModel):
     )
 
 
+class MultimodalEmbeddingSettings(
+    BaseModel,
+):
+    """Настройки Qwen3-VL-Embedding provider и safety envelope."""
+
+    base_url: str = "http://pdrd-multimodal-embedding-service:8601"
+
+    model: str = "Qwen/Qwen3-VL-Embedding-8B"
+
+    output_dimension: int = Field(
+        default=4096,
+        ge=64,
+        le=4096,
+    )
+
+    model_context_tokens: int = Field(
+        default=32768,
+        ge=8192,
+        le=32768,
+    )
+
+    max_input_tokens: int = Field(
+        default=8192,
+        ge=512,
+        le=32768,
+    )
+
+    max_image_pixels: int = Field(
+        default=1_843_200,
+        ge=4096,
+        le=16_777_216,
+    )
+
+    max_batch_size: int = Field(
+        default=1,
+        ge=1,
+        le=8,
+    )
+
+    max_concurrency: int = Field(
+        default=1,
+        ge=1,
+        le=8,
+    )
+
+    request_timeout_seconds: float = Field(
+        default=1800.0,
+        gt=0,
+        le=7200,
+    )
+
+    connect_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        le=300,
+    )
+
+    health_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=120,
+    )
+
+
 class QdrantSettings(BaseModel):
     """Настройки Qdrant."""
 
@@ -218,6 +343,8 @@ class QdrantSettings(BaseModel):
     normative_collection: str = "dva_normative_v2"
 
     experience_collection: str = "dva_experience_v2"
+
+    multimodal_collection: str = "dva_multimodal_v1"
 
     request_timeout_seconds: float = Field(
         default=90.0,
@@ -328,6 +455,10 @@ class Settings(BaseSettings):
         default_factory=BrokerSettings,
     )
 
+    technical_assignment_queue: TechnicalAssignmentQueueSettings = Field(
+        default_factory=(TechnicalAssignmentQueueSettings),
+    )
+
     outbox: OutboxSettings = Field(
         default_factory=OutboxSettings,
     )
@@ -340,12 +471,20 @@ class Settings(BaseSettings):
         default_factory=NormativeIndexingSettings,
     )
 
+    technical_assignment: TechnicalAssignmentSettings = Field(
+        default_factory=(TechnicalAssignmentSettings),
+    )
+
     office_conversion: OfficeConversionSettings = Field(
         default_factory=OfficeConversionSettings,
     )
 
     embedding: EmbeddingSettings = Field(
         default_factory=EmbeddingSettings,
+    )
+
+    multimodal_embedding: MultimodalEmbeddingSettings = Field(
+        default_factory=(MultimodalEmbeddingSettings),
     )
 
     qdrant: QdrantSettings = Field(
