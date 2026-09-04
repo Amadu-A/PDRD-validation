@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/transport/http/schemas/normative_documents.py
 
-"""HTTP schemas нормативных документов каталога."""
+"""HTTP schemas managed документов каталога."""
 
 from datetime import datetime
 from uuid import UUID
@@ -11,13 +11,14 @@ from pydantic import (
 )
 
 from pdrd_knowledge_service.domain.normative_catalog import (
+    CatalogArea,
     IndexingStatus,
     NormativeDocument,
 )
 
 
 class MoveNormativeDocumentRequest(BaseModel):
-    """Запрос перемещения document в category или корень раздела."""
+    """Запрос перемещения document в category или root."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -27,7 +28,7 @@ class MoveNormativeDocumentRequest(BaseModel):
 
 
 class NormativeDocumentResponse(BaseModel):
-    """Безопасная metadata нормативного документа для API."""
+    """Безопасная metadata managed документа для API."""
 
     model_config = ConfigDict(
         frozen=True,
@@ -44,6 +45,8 @@ class NormativeDocumentResponse(BaseModel):
     mime_type: str
 
     size_bytes: int
+
+    area: CatalogArea
 
     index_status: IndexingStatus
 
@@ -70,6 +73,7 @@ class NormativeDocumentResponse(BaseModel):
             original_name=document.original_name,
             mime_type=document.mime_type,
             size_bytes=document.size_bytes,
+            area=document.area,
             index_status=document.index_status,
             index_error=document.index_error,
             indexed_at=document.indexed_at,

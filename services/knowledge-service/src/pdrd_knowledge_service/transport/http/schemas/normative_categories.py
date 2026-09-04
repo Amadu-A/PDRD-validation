@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/transport/http/schemas/normative_categories.py
 
-"""HTTP schemas категорий нормативной базы."""
+"""HTTP schemas категорий managed catalog."""
 
 from datetime import datetime
 from typing import Self
@@ -14,12 +14,13 @@ from pydantic import (
 )
 
 from pdrd_knowledge_service.domain.normative_catalog import (
+    CatalogArea,
     NormativeCategory,
 )
 
 
 class CreateNormativeCategoryRequest(BaseModel):
-    """Запрос создания категории нормативов."""
+    """Запрос создания категории managed catalog."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -32,9 +33,11 @@ class CreateNormativeCategoryRequest(BaseModel):
 
     parent_id: UUID | None = None
 
+    area: CatalogArea = CatalogArea.NORMATIVE
+
 
 class UpdateNormativeCategoryRequest(BaseModel):
-    """Частичное изменение категории нормативов."""
+    """Частичное изменение категории managed catalog."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -78,7 +81,7 @@ class UpdateNormativeCategoryRequest(BaseModel):
 
 
 class NormativeCategoryResponse(BaseModel):
-    """Категория управляемой нормативной базы."""
+    """Категория managed catalog."""
 
     model_config = ConfigDict(
         frozen=True,
@@ -91,6 +94,8 @@ class NormativeCategoryResponse(BaseModel):
     parent_id: UUID | None
 
     name: str
+
+    area: CatalogArea
 
     created_at: datetime
 
@@ -107,6 +112,7 @@ class NormativeCategoryResponse(BaseModel):
             section_id=category.section_id,
             parent_id=category.parent_id,
             name=category.name,
+            area=category.area,
             created_at=category.created_at,
             updated_at=category.updated_at,
         )

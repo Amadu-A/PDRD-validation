@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/transport/http/routers/normative_documents.py
 
-"""Internal HTTP API нормативных документов."""
+"""Internal HTTP API managed документов."""
 
 from typing import Annotated
 from uuid import UUID
@@ -39,6 +39,9 @@ from pdrd_knowledge_service.application.use_cases.normative_sections import (
 )
 from pdrd_knowledge_service.core.container import (
     ApplicationContainer,
+)
+from pdrd_knowledge_service.domain.normative_catalog import (
+    CatalogArea,
 )
 from pdrd_knowledge_service.transport.http.dependencies import (
     get_container,
@@ -168,7 +171,7 @@ async def _read_upload_content(
             > max_upload_bytes
         ):
             raise NormativeDocumentUploadError(
-                "Размер нормативного документа превышает допустимый лимит.",
+                "Размер managed документа превышает допустимый лимит.",
             )
 
         content.extend(
@@ -187,8 +190,9 @@ async def _read_upload_content(
 async def list_normative_documents(
     section_id: UUID,
     container: ContainerDependency,
+    area: CatalogArea = CatalogArea.NORMATIVE,
 ) -> list[NormativeDocumentResponse]:
-    """Возвращает документы и состояния индексации."""
+    """Возвращает документы выбранной области и состояния индексации."""
     use_cases = _require_use_cases(
         container,
     )
@@ -196,6 +200,7 @@ async def list_normative_documents(
     try:
         documents = await use_cases.list_documents.execute(
             section_id=section_id,
+            area=area,
         )
 
     except NormativeSectionNotFoundError as error:
@@ -227,8 +232,12 @@ async def upload_normative_document(
         UUID | None,
         Form(),
     ] = None,
+    area: Annotated[
+        CatalogArea,
+        Form(),
+    ] = CatalogArea.NORMATIVE,
 ) -> NormativeDocumentResponse:
-    """Загружает managed PDF/DOC/DOCX в нормативный каталог."""
+    """Загружает managed PDF/DOC/DOCX в выбранную область каталога."""
     use_cases = _require_use_cases(
         container,
     )
@@ -244,6 +253,7 @@ async def upload_normative_document(
             category_id=category_id,
             original_name=file.filename or "",
             content=content,
+            area=area,
         )
 
     except NormativeSectionNotFoundError as error:
@@ -280,7 +290,7 @@ async def get_normative_document(
     document_id: UUID,
     container: ContainerDependency,
 ) -> NormativeDocumentResponse:
-    """Возвращает metadata нормативного документа."""
+    """Возвращает metadata managed документа."""
     use_cases = _require_use_cases(
         container,
     )
@@ -390,7 +400,7 @@ async def queue_normative_document(
     document_id: UUID,
     container: ContainerDependency,
 ) -> NormativeDocumentResponse:
-    """Ставит document в durable очередь нормативной индексации."""
+    """Ставит document в durable очередь managed индексации."""
     use_case = _require_queue_use_case(
         container,
     )
@@ -422,7 +432,7 @@ async def get_normative_document_content(
     document_id: UUID,
     container: ContainerDependency,
 ) -> Response:
-    """Возвращает browser-viewable PDF документа."""
+    """Возвращает browser-viewable PDF managed документа."""
     use_cases = _require_use_cases(
         container,
     )

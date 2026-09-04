@@ -25,6 +25,9 @@ from pdrd_api_gateway.application.use_cases.get_analysis_result import (
 from pdrd_api_gateway.application.use_cases.manage_normative_catalog import (
     NormativeCatalogFacade,
 )
+from pdrd_api_gateway.application.use_cases.manage_user_packages import (
+    UserPackageCatalogFacade,
+)
 from pdrd_api_gateway.application.use_cases.resolve_normative_snapshot import (
     ResolveNormativeSnapshot,
 )
@@ -50,6 +53,9 @@ from pdrd_api_gateway.infrastructure.knowledge.normative_catalog import (
 )
 from pdrd_api_gateway.infrastructure.knowledge.normative_catalog_management import (
     HttpNormativeCatalogManager,
+)
+from pdrd_api_gateway.infrastructure.knowledge.user_package_catalog import (
+    HttpUserPackageCatalogManager,
 )
 from pdrd_api_gateway.infrastructure.messaging.broker import (
     RabbitMqReadinessProbe,
@@ -84,6 +90,8 @@ class ApplicationContainer:
     submit_analysis: SubmitAnalysis | None = None
 
     normative_catalog: NormativeCatalogFacade | None = None
+
+    user_package_catalog: UserPackageCatalogFacade | None = None
 
     async def close(
         self,
@@ -155,6 +163,14 @@ def build_container() -> ApplicationContainer:
         manager=normative_catalog_manager,
     )
 
+    user_package_catalog_manager = HttpUserPackageCatalogManager(
+        settings=settings.knowledge_service,
+    )
+
+    user_package_catalog = UserPackageCatalogFacade(
+        manager=user_package_catalog_manager,
+    )
+
     resolve_normative_snapshot = ResolveNormativeSnapshot(
         catalog_reader=normative_catalog_reader,
     )
@@ -182,4 +198,5 @@ def build_container() -> ApplicationContainer:
         get_analysis_result=get_analysis_result,
         submit_analysis=submit_analysis,
         normative_catalog=normative_catalog,
+        user_package_catalog=user_package_catalog,
     )

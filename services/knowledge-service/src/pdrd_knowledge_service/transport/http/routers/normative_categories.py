@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/transport/http/routers/normative_categories.py
 
-"""Internal HTTP API категорий нормативной базы."""
+"""Internal HTTP API категорий managed catalog."""
 
 from typing import Annotated
 from uuid import UUID
@@ -25,6 +25,7 @@ from pdrd_knowledge_service.core.container import (
     ApplicationContainer,
 )
 from pdrd_knowledge_service.domain.normative_catalog import (
+    CatalogArea,
     NormativeCatalogError,
 )
 from pdrd_knowledge_service.transport.http.dependencies import (
@@ -96,8 +97,9 @@ def _translate_error(
 async def list_normative_categories(
     section_id: UUID,
     container: ContainerDependency,
+    area: CatalogArea = CatalogArea.NORMATIVE,
 ) -> list[NormativeCategoryResponse]:
-    """Возвращает категории нормативного раздела."""
+    """Возвращает категории указанной области раздела."""
     use_cases = _require_use_cases(
         container,
     )
@@ -105,6 +107,7 @@ async def list_normative_categories(
     try:
         categories = await use_cases.list_categories.execute(
             section_id=section_id,
+            area=area,
         )
 
     except NormativeSectionNotFoundError as error:
@@ -130,7 +133,7 @@ async def create_normative_category(
     request: CreateNormativeCategoryRequest,
     container: ContainerDependency,
 ) -> NormativeCategoryResponse:
-    """Создаёт категорию внутри нормативного раздела."""
+    """Создаёт категорию внутри выбранной области раздела."""
     use_cases = _require_use_cases(
         container,
     )
@@ -140,6 +143,7 @@ async def create_normative_category(
             section_id=section_id,
             name=request.name,
             parent_id=request.parent_id,
+            area=request.area,
         )
 
     except (
