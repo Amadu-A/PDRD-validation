@@ -32,6 +32,10 @@ import {
   createNormativePromptEditor,
 } from "./features/normative/prompt.js";
 
+import {
+  createUserPackageCatalog,
+} from "./features/normative/user_packages.js";
+
 
 const analysisFormElement = requireElement(
   "[data-analysis-form]",
@@ -51,14 +55,29 @@ const promptEditor = createNormativePromptEditor(
 );
 
 
+const userPackageCatalog = createUserPackageCatalog(
+  normativeRoot,
+);
+
+userPackageCatalog.start();
+
+
 const normativeCatalog = createNormativeCatalog(
   normativeRoot,
   {
     onSectionChange: async (
       sectionId,
     ) => {
-      await promptEditor.setSection(
-        sectionId,
+      await Promise.all(
+        [
+          promptEditor.setSection(
+            sectionId,
+          ),
+
+          userPackageCatalog.setSection(
+            sectionId,
+          ),
+        ],
       );
     },
   },
@@ -110,12 +129,29 @@ function getNormativeSelection() {
     return null;
   }
 
+  const packageSelection = (
+    userPackageCatalog.getSelection()
+  );
+
+  const packageDocumentIds = (
+    packageSelection
+    && (
+      packageSelection.sectionId
+      === selection.sectionId
+    )
+      ? packageSelection.documentIds
+      : []
+  );
+
   const prompt = promptEditor.getOverride(
     selection.sectionId,
   );
 
   return {
     ...selection,
+
+    userPackageDocumentIds: packageDocumentIds,
+
     ...prompt,
   };
 }

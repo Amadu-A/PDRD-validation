@@ -20,6 +20,7 @@ from pdrd_knowledge_service.application.use_cases.normative_sections import (
     NormativeSectionNotFoundError,
 )
 from pdrd_knowledge_service.domain.normative_catalog import (
+    CatalogArea,
     IndexingStatus,
 )
 from pdrd_knowledge_service.domain.search import (
@@ -67,11 +68,17 @@ class SearchNormative:
         *,
         section_id: UUID | None = None,
         document_ids: list[UUID] | None = None,
+        expected_area: CatalogArea = CatalogArea.NORMATIVE,
+        source_prefix: str = "N",
+        query_instruction: str = NORMATIVE_QUERY_INSTRUCTION,
+        allow_unscoped: bool = True,
     ) -> NormativeSearchResult:
-        """Выполняет embedding и scoped vector search нормативов."""
+        """Выполняет embedding и managed scoped vector search."""
         scope = await self._resolve_scope(
             section_id=section_id,
             document_ids=document_ids,
+            expected_area=expected_area,
+            allow_unscoped=allow_unscoped,
         )
 
         normalized_queries = self._normalize_queries(
@@ -85,6 +92,13 @@ class SearchNormative:
                 embedding_model=self.embedding_model,
             )
 
+        if not allow_unscoped and scope is None:
+            return NormativeSearchResult(
+                queries=normalized_queries,
+                sources=(),
+                embedding_model=self.embedding_model,
+            )
+
         if scope is not None and not scope.document_ids:
             return NormativeSearchResult(
                 queries=normalized_queries,
@@ -94,10 +108,36 @@ class SearchNormative:
 
         vectors = await self.embedding_provider.embed(
             normalized_queries,
-            instruction=NORMATIVE_QUERY_INSTRUCTION,
+            instruction=query_instruction,
         )
 
-        if scope is None:
+        search_filter = None
+
+        if scope is not None:
+            search_filter = self._build_scope_filter(
+                scope,
+            )
+
+        elif (
+            expected_area is CatalogArea.NORMATIVE
+            and self.unit_of_work_factory is not None
+        ):
+            ready_document_ids = await self._list_ready_document_ids(
+                area=CatalogArea.NORMATIVE,
+            )
+
+            if not ready_document_ids:
+                return NormativeSearchResult(
+                    queries=normalized_queries,
+                    sources=(),
+                    embedding_model=self.embedding_model,
+                )
+
+            search_filter = self._build_document_filter(
+                ready_document_ids,
+            )
+
+        if search_filter is None:
             groups = await asyncio.gather(
                 *(
                     self.vector_store.search(
@@ -110,10 +150,6 @@ class SearchNormative:
             )
 
         else:
-            search_filter = self._build_scope_filter(
-                scope,
-            )
-
             groups = await asyncio.gather(
                 *(
                     self.vector_store.search_filtered(
@@ -134,6 +170,7 @@ class SearchNormative:
             self._build_source(
                 point,
                 index=index,
+                source_prefix=source_prefix,
             )
             for index, point in enumerate(
                 merged,
@@ -152,9 +189,14 @@ class SearchNormative:
         *,
         section_id: UUID | None,
         document_ids: list[UUID] | None,
+        expected_area: CatalogArea,
+        allow_unscoped: bool,
     ) -> NormativeSearchScope | None:
         """Валидирует selection snapshot против managed PostgreSQL catalog."""
         if section_id is None and document_ids is None:
+            if allow_unscoped:
+                return None
+
             return None
 
         if section_id is None or document_ids is None:
@@ -201,8 +243,13 @@ class SearchNormative:
                 for document_id in missing_ids
             )
 
+            if expected_area is CatalogArea.NORMATIVE:
+                raise NormativeSearchScopeError(
+                    f"Выбранные нормативные документы не найдены: {missing_text}.",
+                )
+
             raise NormativeSearchScopeError(
-                f"Выбранные нормативные документы не найдены: {missing_text}.",
+                f"Выбранные пользовательские документы не найдены: {missing_text}.",
             )
 
         foreign_ids = [
@@ -219,8 +266,33 @@ class SearchNormative:
                 for document_id in foreign_ids
             )
 
+            if expected_area is CatalogArea.NORMATIVE:
+                raise NormativeSearchScopeError(
+                    "Документы принадлежат другому нормативному разделу: "
+                    f"{foreign_text}.",
+                )
+
             raise NormativeSearchScopeError(
-                f"Документы принадлежат другому нормативному разделу: {foreign_text}.",
+                "Пользовательские документы принадлежат другому разделу: "
+                f"{foreign_text}.",
+            )
+
+        wrong_area_ids = [
+            document.document_id
+            for document in documents
+            if document.area is not expected_area
+        ]
+
+        if wrong_area_ids:
+            wrong_area_text = ", ".join(
+                str(
+                    document_id,
+                )
+                for document_id in wrong_area_ids
+            )
+
+            raise NormativeSearchScopeError(
+                f"Документы принадлежат другой области каталога: {wrong_area_text}.",
             )
 
         unavailable_ids = [
@@ -237,13 +309,57 @@ class SearchNormative:
                 for document_id in unavailable_ids
             )
 
+            if expected_area is CatalogArea.NORMATIVE:
+                raise NormativeSearchScopeConflictError(
+                    "Документы ещё не готовы к нормативному поиску: "
+                    f"{unavailable_text}.",
+                )
+
             raise NormativeSearchScopeConflictError(
-                f"Документы ещё не готовы к нормативному поиску: {unavailable_text}.",
+                "Пользовательские документы ещё не готовы к поиску: "
+                f"{unavailable_text}.",
             )
 
         return NormativeSearchScope(
             section_id=section_id,
             document_ids=normalized_document_ids,
+        )
+
+    async def _list_ready_document_ids(
+        self,
+        *,
+        area: CatalogArea,
+    ) -> tuple[
+        UUID,
+        ...,
+    ]:
+        """Возвращает READY document IDs заданной catalog area."""
+        if self.unit_of_work_factory is None:
+            return ()
+
+        async with self.unit_of_work_factory() as unit_of_work:
+            sections = await unit_of_work.sections.list_all()
+
+            result: list[UUID] = []
+
+            for section in sections:
+                documents = await unit_of_work.documents.list_by_section(
+                    section.section_id,
+                )
+
+                result.extend(
+                    document.document_id
+                    for document in documents
+                    if (
+                        document.area is area
+                        and document.index_status is IndexingStatus.READY
+                    )
+                )
+
+        return tuple(
+            dict.fromkeys(
+                result,
+            )
         )
 
     @staticmethod
@@ -278,7 +394,7 @@ class SearchNormative:
     def _build_scope_filter(
         scope: NormativeSearchScope,
     ) -> VectorSearchFilter:
-        """Строит generic vector filter для managed payload."""
+        """Строит vector filter section + exact document IDs."""
         return VectorSearchFilter(
             must=(
                 VectorSearchCondition(
@@ -302,11 +418,34 @@ class SearchNormative:
         )
 
     @staticmethod
+    def _build_document_filter(
+        document_ids: tuple[
+            UUID,
+            ...,
+        ],
+    ) -> VectorSearchFilter:
+        """Строит catalog-wide filter по exact managed document IDs."""
+        return VectorSearchFilter(
+            must=(
+                VectorSearchCondition(
+                    key="document_id",
+                    values=tuple(
+                        str(
+                            document_id,
+                        )
+                        for document_id in document_ids
+                    ),
+                ),
+            )
+        )
+
+    @staticmethod
     def _normalize_queries(
         queries: list[str],
     ) -> tuple[str, ...]:
         """Нормализует и дедуплицирует retrieval queries."""
         result: list[str] = []
+
         seen: set[str] = set()
 
         for query in queries:
@@ -335,7 +474,10 @@ class SearchNormative:
         ],
     ) -> list[VectorPoint]:
         """Дедуплицирует Qdrant points и оставляет лучший score."""
-        by_id: dict[str, VectorPoint] = {}
+        by_id: dict[
+            str,
+            VectorPoint,
+        ] = {}
 
         for points in groups:
             for point in points:
@@ -360,12 +502,13 @@ class SearchNormative:
         point: VectorPoint,
         *,
         index: int,
+        source_prefix: str,
     ) -> NormativeSource:
-        """Преобразует vector payload в нормативный источник."""
+        """Преобразует vector payload в managed source."""
         payload = point.payload
 
         return NormativeSource(
-            source_id=f"N{index}",
+            source_id=f"{source_prefix}{index}",
             point_id=point.point_id,
             score=round(
                 point.score,
@@ -439,7 +582,10 @@ class SearchNormative:
         """Нормализует page/chunk payload value."""
         if isinstance(
             value,
-            (int, str),
+            (
+                int,
+                str,
+            ),
         ):
             return value
 

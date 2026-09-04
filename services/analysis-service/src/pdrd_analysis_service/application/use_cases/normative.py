@@ -29,6 +29,7 @@ from pdrd_analysis_service.domain.analysis import (
     GenerationMetrics,
     NormativeSource,
     PageFacts,
+    UserPackageSource,
 )
 
 
@@ -106,7 +107,7 @@ class BuildNormativeQueries:
 
 @dataclass(frozen=True, slots=True)
 class CheckPageAgainstNorms:
-    """Проверяет лист только по переданным нормам."""
+    """Проверяет лист по нормам с optional user document context."""
 
     vision_model: StructuredVisionModel
 
@@ -126,6 +127,10 @@ class CheckPageAgainstNorms:
         ],
         image_bytes: bytes,
         normative_system_prompt: str | None = None,
+        user_package_sources: tuple[
+            UserPackageSource,
+            ...,
+        ] = (),
     ) -> tuple[
         str,
         tuple[
@@ -154,8 +159,9 @@ class CheckPageAgainstNorms:
                 extracted_text=extracted_text,
                 page_facts=page_facts,
                 normative_sources=normative_sources,
-                normative_text_limit=self.normative_text_limit,
-                normative_system_prompt=normative_system_prompt,
+                user_package_sources=(user_package_sources),
+                normative_text_limit=(self.normative_text_limit),
+                normative_system_prompt=(normative_system_prompt),
             ),
             schema=build_normative_check_schema(
                 source_ids=source_ids,
@@ -163,7 +169,7 @@ class CheckPageAgainstNorms:
             ),
             num_predict=self.num_predict,
             seed=200,
-            stage=f"normative_check:{page_number}",
+            stage=(f"normative_check:{page_number}"),
             image_bytes=image_bytes,
         )
 
@@ -226,8 +232,8 @@ class CheckPageAgainstNorms:
                 FindingDraft(
                     finding_id=finding_id,
                     page=page_number,
-                    page_type=page_facts.page_type,
-                    category=finding_category,
+                    page_type=(page_facts.page_type),
+                    category=(finding_category),
                     severity=severity(
                         violation.get(
                             "severity",
@@ -240,7 +246,7 @@ class CheckPageAgainstNorms:
                     ),
                     comment=comment,
                     evidence=evidence,
-                    recommendation_draft=recommendation_draft,
+                    recommendation_draft=(recommendation_draft),
                     confidence=confidence(
                         violation.get(
                             "confidence",
@@ -252,12 +258,14 @@ class CheckPageAgainstNorms:
                     basis=build_basis(
                         selected_sources,
                     ),
-                    basis_sources=selected_sources,
-                    experience_query=build_experience_query(
-                        category=finding_category,
-                        comment=comment,
-                        evidence=evidence,
-                        recommendation_draft=recommendation_draft,
+                    basis_sources=(selected_sources),
+                    experience_query=(
+                        build_experience_query(
+                            category=(finding_category),
+                            comment=comment,
+                            evidence=evidence,
+                            recommendation_draft=(recommendation_draft),
+                        )
                     ),
                 )
             )

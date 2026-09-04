@@ -65,7 +65,7 @@ class VectorSearchFilter:
 
 @dataclass(frozen=True, slots=True)
 class NormativeSearchScope:
-    """Immutable scope одного нормативного поиска."""
+    """Immutable scope одного managed поиска."""
 
     section_id: UUID
 
@@ -78,6 +78,29 @@ class NormativeSearchScope:
 @dataclass(frozen=True, slots=True)
 class NormativeSource:
     """Нормативный источник, найденный для проверки."""
+
+    source_id: str
+    point_id: str
+    score: float
+
+    document_id: str | None
+    section_id: str | None
+    category_id: str | None
+
+    source_sha256: str | None
+
+    source_file: str | None
+    source_path: str | None
+
+    page: int | str | None
+    chunk_index: int | str | None
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class UserPackageSource:
+    """Фрагмент выбранного пользовательского документа."""
 
     source_id: str
     point_id: str
@@ -126,6 +149,15 @@ class NormativeSearchResult:
 
     queries: tuple[str, ...]
     sources: tuple[NormativeSource, ...]
+    embedding_model: str
+
+
+@dataclass(frozen=True, slots=True)
+class UserPackageSearchResult:
+    """Результат поиска по выбранным пользовательским документам."""
+
+    queries: tuple[str, ...]
+    sources: tuple[UserPackageSource, ...]
     embedding_model: str
 
 

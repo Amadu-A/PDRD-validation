@@ -296,6 +296,14 @@ export function createAnalysisForm({
     );
 
     body.append(
+      "user_package_document_ids",
+      JSON.stringify(
+        selection.userPackageDocumentIds
+        ?? [],
+      ),
+    );
+
+    body.append(
       "normative_prompt_override_enabled",
       (
         selection.promptOverrideEnabled

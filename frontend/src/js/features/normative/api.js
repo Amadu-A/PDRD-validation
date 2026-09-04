@@ -1,7 +1,7 @@
 // frontend/src/js/features/normative/api.js
 
 /**
- * Public API Gateway client managed normative catalog.
+ * Public API Gateway client managed catalog.
  */
 
 import {
@@ -274,6 +274,178 @@ export function documentContentUrl(
 ) {
   return (
     `${NORMATIVE_ENDPOINT}/documents/`
+    + `${encodeURIComponent(documentId)}/content`
+  );
+}
+
+
+export function listUserPackageCategories(
+  sectionId,
+) {
+  return requestJson(
+    (
+      `/sections/${encodeURIComponent(sectionId)}`
+      + "/user-packages/categories"
+    ),
+  );
+}
+
+
+export function createUserPackageCategory(
+  sectionId,
+  {
+    name,
+    parentId = null,
+  },
+) {
+  return requestJson(
+    (
+      `/sections/${encodeURIComponent(sectionId)}`
+      + "/user-packages/categories"
+    ),
+    jsonRequest(
+      "POST",
+      {
+        name,
+        parent_id: parentId,
+      },
+    ),
+  );
+}
+
+
+export function updateUserPackageCategory(
+  categoryId,
+  changes,
+) {
+  return requestJson(
+    (
+      "/user-packages/categories/"
+      + `${encodeURIComponent(categoryId)}`
+    ),
+    jsonRequest(
+      "PATCH",
+      changes,
+    ),
+  );
+}
+
+
+export function deleteUserPackageCategory(
+  categoryId,
+) {
+  return requestJson(
+    (
+      "/user-packages/categories/"
+      + `${encodeURIComponent(categoryId)}`
+    ),
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+
+export function listUserPackageDocuments(
+  sectionId,
+) {
+  return requestJson(
+    (
+      `/sections/${encodeURIComponent(sectionId)}`
+      + "/user-packages/documents"
+    ),
+  );
+}
+
+
+export async function uploadUserPackageDocument(
+  sectionId,
+  {
+    file,
+    categoryId = null,
+  },
+) {
+  const body = new FormData();
+
+  body.append(
+    "file",
+    file,
+  );
+
+  if (categoryId) {
+    body.append(
+      "category_id",
+      categoryId,
+    );
+  }
+
+  return requestJson(
+    (
+      `/sections/${encodeURIComponent(sectionId)}`
+      + "/user-packages/documents"
+    ),
+    {
+      method: "POST",
+      body,
+    },
+  );
+}
+
+
+export function queueUserPackageDocument(
+  documentId,
+) {
+  return requestJson(
+    (
+      "/user-packages/documents/"
+      + `${encodeURIComponent(documentId)}/index`
+    ),
+    {
+      method: "POST",
+    },
+  );
+}
+
+
+export function moveUserPackageDocument(
+  documentId,
+  categoryId,
+) {
+  return requestJson(
+    (
+      "/user-packages/documents/"
+      + `${encodeURIComponent(documentId)}`
+    ),
+    jsonRequest(
+      "PATCH",
+      {
+        category_id: categoryId,
+      },
+    ),
+  );
+}
+
+
+export function deleteUserPackageDocument(
+  documentId,
+) {
+  return requestJson(
+    (
+      "/user-packages/documents/"
+      + `${encodeURIComponent(documentId)}`
+    ),
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+
+export function userPackageDocumentContentUrl(
+  documentId,
+) {
+  return (
+    `${NORMATIVE_ENDPOINT}/user-packages/documents/`
     + `${encodeURIComponent(documentId)}/content`
   );
 }

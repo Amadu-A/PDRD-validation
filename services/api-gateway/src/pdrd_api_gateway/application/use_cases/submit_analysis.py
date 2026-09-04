@@ -27,7 +27,7 @@ class EmptyAnalysisFileError(ValueError):
 
 
 class NormativeSnapshotResolverNotConfiguredError(RuntimeError):
-    """Managed normative selection передан без configured resolver."""
+    """Managed selection передан без configured resolver."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +57,11 @@ class SubmitAnalysis:
             ...,
         ]
         | None = None,
+        user_package_document_ids: tuple[
+            UUID,
+            ...,
+        ]
+        | None = None,
         normative_prompt_override_enabled: bool = False,
         normative_prompt_override: str = "",
     ) -> AnalysisJob:
@@ -73,13 +78,14 @@ class SubmitAnalysis:
 
         normative_snapshot = None
 
-        normative_selection_requested = (
+        managed_selection_requested = (
             normative_section_id is not None
             or normative_document_ids is not None
+            or user_package_document_ids is not None
             or normative_prompt_override_enabled
         )
 
-        if normative_selection_requested:
+        if managed_selection_requested:
             resolver = self.resolve_normative_snapshot
 
             if resolver is None:
@@ -90,6 +96,7 @@ class SubmitAnalysis:
             normative_snapshot = await resolver.execute(
                 section_id=normative_section_id,
                 document_ids=normative_document_ids,
+                user_package_document_ids=user_package_document_ids,
                 prompt_override_enabled=(normative_prompt_override_enabled),
                 prompt_override=normative_prompt_override,
             )

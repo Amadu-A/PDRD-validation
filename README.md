@@ -1,11 +1,10 @@
 <!-- README.md -->
+
 # PDRD Validation — Drawing Validation AI
 
-PDRD Validation — локальный сервис проверки проектной и рабочей документации по нормативной базе, контексту проекта и Базе Опыта.
+PDRD Validation — локальный сервис проверки проектной и рабочей документации по нормативной базе, пользовательским пакетам документов, контексту проекта и Базе Опыта.
 
-Пользователь загружает PDF, DXF/DWG или PDF вместе с CAD-файлом. Сервис извлекает текст и геометрию, формирует машинный контекст листа, выполняет локальный VLM-анализ, подбирает нормативные фрагменты из Qdrant и возвращает структурированные замечания с источниками.
-
-Нормативная база управляется через приложение: разделы, вложенные папки, PDF/DOC/DOCX, system prompt раздела, автоматическая индексация и удаление. Git-репозиторий больше не является хранилищем нормативных файлов.
+Пользователь загружает PDF, DXF/DWG или PDF вместе с соответствующим CAD-файлом. Система извлекает текст и геометрию, формирует машинный контекст листа, подбирает релевантные фрагменты, выполняет локальный VLM-анализ и возвращает структурированные замечания с кликабельными нормативными источниками.
 
 Тяжёлые AI-задачи выполняются через RabbitMQ/Celery с `concurrency=1`, чтобы несколько пользовательских запросов не запускали параллельно несколько тяжёлых GPU-задач и не конкурировали за VRAM.
 
@@ -17,33 +16,43 @@ PDRD Validation — локальный сервис проверки проек�
 - контекст Пояснительной записки;
 - временный semantic Project Context;
 - managed нормативные разделы и вложенные папки;
-- загрузка PDF, DOC и DOCX;
+- пользовательские пакеты документов внутри выбранного раздела;
+- PDF/DOC/DOCX upload;
 - Word -> PDF preview через LibreOffice;
-- durable нормативная индексация;
-- scoped normative RAG по immutable snapshot задания;
+- durable индексация через Transactional Outbox;
+- scoped normative RAG по immutable snapshot;
+- scoped retrieval выбранных пользовательских документов;
 - отдельный system prompt нормативного раздела;
 - transient working prompt;
 - кликабельные нормативные источники;
 - База Опыта;
 - локальная VLM и embeddings через Ollama;
-- Transactional Outbox для анализа и нормативной индексации;
 - n8n orchestration;
 - frontend только через API Gateway;
 - cleanup временного Project Context;
 - unit, integration и architecture tests.
 
-## Пользовательские пакеты документов
+## Главный принцип разделения источников
 
-В Knowledge Service введены две области документов внутри одного раздела:
+В одном managed catalog существуют две области:
 
 - `normative` — нормативная база;
-- `user_package` — пользовательские пакеты.
+- `user_package` — пользовательские документы проекта/заказчика.
 
-Существующие документы после migration относятся к `normative`.
+Обе области используют:
 
-На текущем этапе `user_package` поддержан на уровне domain/persistence-модели. Отдельный HTTP API, frontend CRUD и включение выбранных package-документов в analysis snapshot подключаются следующим этапом.
+- PostgreSQL metadata;
+- один filesystem volume;
+- один indexing pipeline;
+- одну Qdrant collection `dva_normative_v2`.
 
-## Технологии
+Но при анализе они имеют **разные роли**.
+
+Нормативы формируют `N1`, `N2`, ... и только они могут попасть в `normative_source_ids`, `basis_sources` и кликабельные нормативные ссылки.
+
+Пользовательские документы формируют `U1`, `U2`, ... и используются только как дополнительный фактический контекст. Они не могут самостоятельно доказывать нарушение ГОСТ, СП, ПУЭ или другого нормативного документа.
+
+# Технологии
 
 | Слой | Технологии |
 |---|---|
@@ -65,10 +74,10 @@ PDRD Validation — локальный сервис проверки проек�
 
 Bounded contexts:
 
-- **API Gateway** — публичный API, job state, immutable normative snapshot, Outbox, Celery и analysis artifacts.
+- **API Gateway** — публичный API, job state, immutable analysis snapshot, Outbox, Celery и analysis artifacts.
 - **Document Service** — PDF/CAD extraction, render, DWG -> DXF.
-- **Knowledge Service** — managed catalog, Qdrant, embeddings, Normative RAG, Experience RAG, Project Context.
-- **Analysis Service** — VLM page understanding, normative check и finalization.
+- **Knowledge Service** — managed catalog, PostgreSQL metadata, Qdrant, embeddings, Normative RAG, User Package RAG, Experience RAG и Project Context.
+- **Analysis Service** — VLM page understanding, нормативная проверка и finalization.
 - **n8n** — orchestration внутренних вызовов.
 - **Frontend** — Browser -> API Gateway; прямого доступа к n8n и внутренним сервисам нет.
 
@@ -105,61 +114,61 @@ Infrastructure ──implements──> Application ports
 
 ```mermaid
 flowchart TD
-    U[Пользователь] --> FE[Frontend :8080]
-    FE --> GW[API Gateway :8200]
+    U["Пользователь"] --> FE["Frontend :8080"]
+    FE --> GW["API Gateway :8200"]
 
-    GW --> FS[Analysis Artifact Store]
-    GW --> KS[Knowledge Service]
-    KS --> RESOLVE[Resolve normative selection]
+    GW --> FS["Analysis Artifact Store"]
+    GW --> KS["Knowledge Service"]
+    KS --> RESOLVE["Resolve analysis selection"]
     RESOLVE --> GW
 
-    GW --> PG[(PostgreSQL)]
-    PG --> O[API Gateway Outbox]
-    O --> RMQ[RabbitMQ pdrd.analysis]
-    RMQ --> W[Celery worker concurrency=1]
-    W --> N8N[n8n V2]
+    GW --> PG[("PostgreSQL")]
+    PG --> O["API Gateway Outbox"]
+    O --> RMQ["RabbitMQ pdrd.analysis"]
+    RMQ --> W["Celery worker concurrency=1"]
+    W --> N8N["n8n V2"]
 
-    N8N --> DS[Document Service]
-    N8N --> KS2[Knowledge Service]
-    N8N --> AS[Analysis Service]
+    N8N --> DS["Document Service"]
+    N8N --> KS2["Knowledge Service"]
+    N8N --> AS["Analysis Service"]
 
-    KS2 --> QD[(Qdrant)]
-    KS2 --> EMB[Ollama Embeddings]
-    AS --> VLM[Ollama VLM]
+    KS2 --> QD[("Qdrant")]
+    KS2 --> EMB["Ollama Embeddings"]
+    AS --> VLM["Ollama VLM"]
 
     N8N --> W
     W --> PG
     W --> FS
 
-    FE --> POLL[Status / result polling]
+    FE --> POLL["Status / result polling"]
     POLL --> GW
 ```
 
-## 2. Managed нормативная база
+## 2. Managed catalog и индексация
 
 ```mermaid
 flowchart TD
-    U[Пользователь] --> FE[Frontend]
-    FE --> GW[API Gateway /api/v1/normative]
-    GW --> KS[Knowledge Service internal API]
+    U["Пользователь"] --> FE["Frontend"]
+    FE --> GW["API Gateway /api/v1/normative"]
+    GW --> KS["Knowledge Service internal API"]
 
-    KS --> PG[(knowledge schema)]
-    KS --> STORE[(normative_documents volume)]
+    KS --> PG[("knowledge schema")]
+    KS --> STORE[("normative_documents volume")]
 
-    PG --> OUTBOX[Knowledge Outbox]
-    OUTBOX --> RMQ[RabbitMQ pdrd.knowledge.indexing]
-    RMQ --> IDX[knowledge-indexer concurrency=1]
+    PG --> OUTBOX["Knowledge Outbox"]
+    OUTBOX --> RMQ["RabbitMQ pdrd.knowledge.indexing"]
+    RMQ --> IDX["knowledge-indexer concurrency=1"]
 
     IDX --> STORE
-    IDX --> TYPE{Формат}
-    TYPE -->|PDF| PDF[PDF]
-    TYPE -->|DOC / DOCX| LO[LibreOffice -> PDF preview]
+    IDX --> TYPE{"Формат"}
+    TYPE -->|PDF| PDF["PDF"]
+    TYPE -->|DOC / DOCX| LO["LibreOffice -> PDF preview"]
     LO --> PDF
 
-    PDF --> TEXT[Page extraction]
-    TEXT --> CHUNK[Chunking]
-    CHUNK --> EMB[Ollama embeddings]
-    EMB --> NORM[(dva_normative_v2)]
+    PDF --> TEXT["Page extraction"]
+    TEXT --> CHUNK["Chunking"]
+    CHUNK --> EMB["Ollama embeddings"]
+    EMB --> MANAGED[("dva_normative_v2")]
 
     IDX --> PG
 ```
@@ -168,27 +177,33 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    DOC[Document extraction] --> FACTS[Page understanding]
-    FACTS --> PZQ[Project Context query]
+    DOC["Document extraction"] --> FACTS["Page understanding"]
 
-    PZQ --> PZ{ПЗ включена?}
-    PZ -->|да| PZS[Search temporary Project Context]
-    PZ -->|нет| EMPTY[Без Project Context]
-
-    PZS --> AUG[Augmented project context]
+    FACTS --> PZQ["Project Context query"]
+    PZQ --> PZ{"ПЗ включена?"}
+    PZ -->|да| PZS["Search temporary Project Context"]
+    PZ -->|нет| EMPTY["Без Project Context"]
+    PZS --> AUG["Augmented project context"]
     EMPTY --> AUG
 
-    FACTS --> NQ[Normative queries]
-    AUG --> NQ
-    NQ --> NS[Scoped normative search]
-    NS --> CHECK[VLM normative check]
+    FACTS --> Q["Retrieval queries"]
+    AUG --> Q
 
-    CHECK --> EQ[Experience queries]
-    EQ --> ES[Experience search]
+    Q --> NS["Search Normative"]
+    Q --> US["Search User Packages"]
 
-    CHECK --> FINAL[Finalization]
+    NS --> NCTX["N1, N2, N3"]
+    US --> UCTX["U1, U2, U3"]
+
+    NCTX --> CHECK["VLM normative check"]
+    UCTX --> CHECK
+
+    CHECK --> EQ["Experience queries"]
+    EQ --> ES["Experience search"]
+
+    CHECK --> FINAL["Finalization"]
     ES --> FINAL
-    FINAL --> RESULT[Findings + sources]
+    FINAL --> RESULT["Findings + normative citations"]
 ```
 
 ## 4. PostgreSQL — таблицы и связи
@@ -280,8 +295,23 @@ erDiagram
 `analysis_jobs`
 
 - lifecycle задания;
-- `normative_snapshot` — immutable JSONB нормативных настроек на момент создания задания;
-- изменение раздела, списка документов или prompt после запуска не изменяет snapshot существующего job.
+- `normative_snapshot` — immutable JSONB настроек на момент создания job;
+- изменение UI, раздела, prompt или checkbox после запуска не изменяет уже созданный job.
+
+Актуальный snapshot:
+
+```json
+{
+  "section_id": "<uuid>",
+  "document_ids": [
+    "<normative-uuid>"
+  ],
+  "user_package_document_ids": [
+    "<user-package-uuid>"
+  ],
+  "system_prompt": "<exact resolved prompt>"
+}
+```
 
 `outbox_messages`
 
@@ -304,14 +334,14 @@ erDiagram
 `knowledge.normative_documents`
 
 - metadata PDF/DOC/DOCX;
-- bytes хранятся в filesystem volume, а не в PostgreSQL;
+- bytes хранятся в filesystem volume, а не PostgreSQL;
 - `storage_key` указывает на physical file;
 - `index_status`: `uploaded`, `queued`, `indexing`, `ready`, `failed`, `deleting`;
-- `catalog_area` отделяет нормативную базу от пользовательских пакетов.
+- `catalog_area` является source of truth для разделения нормативов и пользовательских пакетов.
 
 `knowledge.normative_outbox_messages`
 
-- durable события нормативной индексации;
+- durable события managed индексации;
 - связаны с `normative_documents`.
 
 Knowledge Service использует отдельную Alembic version table:
@@ -324,19 +354,19 @@ alembic_version_knowledge
 
 ```mermaid
 flowchart LR
-    KS[Knowledge Service] --> N[(dva_normative_v2)]
-    KS --> E[(dva_experience_v2)]
-    KS --> P[(pdrd_project_context_<context_id>)]
+    KS["Knowledge Service"] --> M[("dva_normative_v2")]
+    KS --> E[("dva_experience_v2")]
+    KS --> P[("pdrd_project_context_CONTEXT_ID")]
 
-    N --> NP[Постоянная нормативная collection]
-    E --> EP[Постоянная База Опыта]
-    P --> PP[Временная ПЗ]
-    PP --> CLEAN[Cleanup после анализа]
+    M --> MN["Managed normative + user-package chunks"]
+    E --> EP["Постоянная База Опыта"]
+    P --> PP["Временная ПЗ"]
+    PP --> CLEAN["Cleanup после анализа"]
 ```
 
 ### `dva_normative_v2`
 
-Постоянная managed normative collection.
+Одна постоянная managed collection используется и для `normative`, и для `user_package`.
 
 Для PDF point соответствует chunk физической страницы. Для DOC/DOCX сначала создаётся PDF-preview, поэтому `page` относится к browser-viewable PDF.
 
@@ -351,11 +381,22 @@ Payload:
   "source_file": "<original filename>",
   "page": 17,
   "chunk_index": 2,
-  "text": "<normative fragment>"
+  "text": "<fragment>"
 }
 ```
 
-Managed search ограничивается `section_id` и точным набором `document_id`, сохранённым в immutable job snapshot.
+`catalog_area` намеренно не дублируется в Qdrant payload. Source of truth для `normative` / `user_package` — PostgreSQL.
+
+Перед vector search Knowledge Service:
+
+1. получает выбранные IDs;
+2. проверяет их в PostgreSQL;
+3. проверяет `section_id`;
+4. проверяет `catalog_area`;
+5. проверяет `index_status=ready`;
+6. только после этого строит Qdrant filter по exact `document_id`.
+
+Это не позволяет подставить UUID пользовательского документа в нормативный retrieval и наоборот.
 
 ### `dva_experience_v2`
 
@@ -379,9 +420,9 @@ Managed search ограничивается `section_id` и точным наб�
 }
 ```
 
-`scripts/kb_sync.py` работает только с этой legacy Базой Опыта. Нормативную базу скрипт не создаёт, не обновляет и не удаляет.
+`scripts/kb_sync.py` работает только с legacy Базой Опыта. Managed normative/user-package catalog он не создаёт, не обновляет и не удаляет.
 
-### `pdrd_project_context_<context_id>`
+### `pdrd_project_context_CONTEXT_ID`
 
 Временная collection Пояснительной записки конкретного analysis context.
 
@@ -399,25 +440,43 @@ Collection удаляется cleanup-механизмом после анали
 
 ## 6. Физическое хранение
 
+В Mermaid пути заключены в кавычки. Без кавычек конструкция вида `NODE[/var/lib/... ]` воспринимается Mermaid как специальная shape syntax и GitHub выдаёт `Lexical error`.
+
 ```mermaid
 flowchart TD
-    PG[(PostgreSQL)] --> PGV[postgres_data]
-    QD[(Qdrant)] --> QDV[qdrant_data]
-    GW[API Gateway / worker] --> AV[analysis_artifacts]
-    KS[Knowledge Service / indexer] --> NV[normative_documents]
+    PG[("PostgreSQL")] --> PGV["postgres_data"]
+    QD[("Qdrant")] --> QDV["qdrant_data"]
+    GW["API Gateway / worker"] --> AV["analysis_artifacts"]
+    KS["Knowledge Service / indexer"] --> NV["normative_documents"]
 
-    PGV --> PGP[/var/lib/postgresql/data]
-    QDV --> QDP[/qdrant/storage]
-    AV --> AP[/data/analyses]
-    NV --> NP[/data/normative]
+    PGV --> PGP["/var/lib/postgresql/data"]
+    QDV --> QDP["/qdrant/storage"]
+    AV --> AP["/data/analyses"]
+    NV --> NP["/data/normative"]
 ```
 
-| Данные | Docker volume | Путь |
+| Данные | Docker volume | Путь в container |
 |---|---|---|
 | PostgreSQL | `postgres_data` | `/var/lib/postgresql/data` |
 | Qdrant | `qdrant_data` | `/qdrant/storage` |
 | Analysis artifacts | `analysis_artifacts` | `/data/analyses` |
-| Managed normative files | `normative_documents` | `/data/normative` |
+| Managed normative + package files | `normative_documents` | `/data/normative` |
+
+Фактическое Docker volume name зависит от Compose project name. Проверять нужно через Docker, а не предполагать имя:
+
+```bash
+docker compose ps -q knowledge-service \
+  | xargs docker inspect \
+  --format '{{range .Mounts}}{{println .Name "->" .Destination}}{{end}}'
+```
+
+На ранее проверенном deployment Compose создал volume вида:
+
+```text
+pdrd-validation-ai_normative_documents
+```
+
+но на другом хосте/Compose project prefix может отличаться.
 
 ### Реальное расположение managed документов
 
@@ -448,7 +507,13 @@ Word PDF-preview:
 
 `storage_key` хранится в `knowledge.normative_documents`.
 
-Каталог `data/knowledge/normative/source/` удалён и больше не является source of truth. Новые нормативные документы загружаются через managed frontend/API.
+Каталог:
+
+```text
+data/knowledge/normative/source/
+```
+
+удалён и больше не является source of truth.
 
 Repository source Базы Опыта остаётся здесь:
 
@@ -456,49 +521,137 @@ Repository source Базы Опыта остаётся здесь:
 data/knowledge/experience/cases/
 ```
 
-## 7. Пояснительная записка
+## 7. Как работает поиск
+
+Для каждого анализируемого листа Analysis Service сначала формирует нейтральные retrieval queries по фактам листа. Если включена ПЗ, relevant Project Context помогает сформировать запрос, но не является нормативным доказательством.
+
+Дальше одна и та же query идёт в два независимых retrieval:
 
 ```mermaid
 flowchart TD
-    RANGE[Диапазон страниц ПЗ] --> TEXT[Text extraction]
-    TEXT --> VALID[Classification]
-    VALID -->|не ПЗ| REJECT[Reject]
-    VALID -->|ПЗ| CHUNK[Chunking]
-    CHUNK --> EMB[Embeddings]
-    EMB --> TEMP[(Temporary Project Context)]
-    PAGE[Анализируемый лист] --> QUERY[Context query]
-    QUERY --> TEMP
-    TEMP --> SOURCES[Relevant fragments]
-    SOURCES --> CHECK[Normative check]
-    CHECK --> CLEAN[Cleanup]
-    CLEAN --> DELETE[Delete temporary collection]
+    Q["Retrieval query"] --> NDB["PostgreSQL validation: normative IDs"]
+    Q --> UDB["PostgreSQL validation: user-package IDs"]
+
+    NDB --> NF["Qdrant exact document_id filter"]
+    UDB --> UF["Qdrant exact document_id filter"]
+
+    NF --> N["N1, N2, N3"]
+    UF --> U["U1, U2, U3"]
+
+    N --> V["VLM check"]
+    U --> V
+
+    V --> BASIS["basis_sources только из N-sources"]
 ```
 
-## 8. GPU-safe очередь
+### Нормативный поиск
+
+Snapshot содержит `document_ids`.
+
+Knowledge Service проверяет, что каждый UUID:
+
+- существует;
+- находится в выбранном section;
+- имеет `catalog_area=normative`;
+- имеет `index_status=ready`.
+
+После этого Qdrant ищет только внутри этих exact `document_id`.
+
+### Пользовательский поиск
+
+Snapshot отдельно содержит `user_package_document_ids`.
+
+Knowledge Service проверяет, что каждый UUID:
+
+- существует;
+- находится в том же section;
+- имеет `catalog_area=user_package`;
+- имеет `index_status=ready`.
+
+После этого Qdrant ищет только внутри выбранных package IDs.
+
+### Что видит модель
+
+В VLM prompt источники передаются двумя разными блоками:
+
+```text
+USER PACKAGE SOURCES:
+U1 ...
+U2 ...
+
+NORMATIVE SOURCES:
+N1 ...
+N2 ...
+```
+
+Super-system prompt запрещает:
+
+- считать `U*` нормативными документами;
+- возвращать `U*` в `normative_source_ids`;
+- использовать пользовательский документ вместо нормативного основания;
+- придумывать нормативные документы или пункты из памяти модели.
+
+JSON Schema для нормативной проверки получает допустимые source IDs только из реальных `N*`, найденных текущим normative retrieval.
+
+Итоговые `basis_sources` строятся только из `normative_sources`.
+
+### От чего это защищает
+
+Архитектура защищает от следующих классов ошибок:
+
+1. **Смешивание нормативов и требований заказчика.** Фраза из пользовательского PDF не превращается в ГОСТ/СП/ПУЭ.
+2. **Подмена UUID.** UUID `user_package` нельзя использовать через normative scope, а normative UUID — через package scope.
+3. **Изменение выбора после старта.** Worker использует immutable snapshot job.
+4. **Поиск по случайным документам раздела.** Qdrant получает exact list `document_id`, а не просто имя папки или глобальную collection.
+5. **Неиндексированные документы.** Документ допускается в analysis snapshot/search только в `READY`.
+6. **Попадание package chunks в unscoped production normative search.** Production Knowledge Service сначала получает READY normative IDs из PostgreSQL и фильтрует Qdrant по ним.
+7. **Prompt injection из файлов.** PAGE TEXT, Project Context, USER PACKAGE SOURCES и NORMATIVE SOURCES объявлены данными, а не инструкциями.
+8. **Галлюцинация нормативной ссылки.** Модель может сослаться только на реальные `N*`, переданные в JSON Schema.
+9. **Смешивание Базы Опыта с нормой.** Experience используется для формулировок/finalization, но не становится нормативным basis.
+
+## 8. Пояснительная записка
 
 ```mermaid
 flowchart TD
-    USERS[User requests] --> GW[API Gateway]
-    GW --> OUT[Transactional Outbox]
-    OUT --> RMQ[RabbitMQ]
-    RMQ --> J1[Job 1]
-    RMQ --> J2[Job 2]
-    RMQ --> JN[Job N]
+    RANGE["Диапазон страниц ПЗ"] --> TEXT["Text extraction"]
+    TEXT --> VALID["Classification"]
+    VALID -->|не ПЗ| REJECT["Reject"]
+    VALID -->|ПЗ| CHUNK["Chunking"]
+    CHUNK --> EMB["Embeddings"]
+    EMB --> TEMP[("Temporary Project Context")]
+    PAGE["Анализируемый лист"] --> QUERY["Context query"]
+    QUERY --> TEMP
+    TEMP --> SOURCES["Relevant fragments"]
+    SOURCES --> CHECK["Normative check"]
+    CHECK --> CLEAN["Cleanup"]
+    CLEAN --> DELETE["Delete temporary collection"]
+```
 
-    J1 --> W[Celery concurrency=1]
+## 9. GPU-safe очередь
+
+```mermaid
+flowchart TD
+    USERS["User requests"] --> GW["API Gateway"]
+    GW --> OUT["Transactional Outbox"]
+    OUT --> RMQ["RabbitMQ"]
+    RMQ --> J1["Job 1"]
+    RMQ --> J2["Job 2"]
+    RMQ --> JN["Job N"]
+
+    J1 --> W["Celery concurrency=1"]
     J2 -. ждёт .-> RMQ
     JN -. ждёт .-> RMQ
 
-    W --> N8N[n8n]
-    N8N --> OL[Ollama]
-    OL --> GPU[NVIDIA GPU]
-    GPU --> NEXT[Следующий job]
+    W --> N8N["n8n"]
+    N8N --> OL["Ollama"]
+    OL --> GPU["NVIDIA GPU"]
+    GPU --> NEXT["Следующий job"]
     NEXT --> RMQ
 ```
 
 Backpressure находится в RabbitMQ: количество HTTP-запросов не равно числу одновременно выполняющихся GPU inference.
 
-# Managed нормативная база
+# Managed catalog
 
 ## Lifecycle документа
 
@@ -541,38 +694,141 @@ transient working override / dynamic context
 
 Transient working prompt может применяться к конкретному анализу без сохранения как новый system prompt.
 
-## Immutable snapshot
+# Пользовательские пакеты документов
 
-При создании job API Gateway сохраняет resolved нормативную конфигурацию:
+Пакеты относятся к текущему нормативному разделу, но имеют `catalog_area=user_package`.
+
+Frontend позволяет:
+
+- создать пакет;
+- создать вложенную папку;
+- загрузить PDF/DOC/DOCX;
+- автоматически поставить документ в indexing queue;
+- открыть PDF или Word PDF-preview;
+- перемещать документы drag&drop;
+- удалять документы/папки;
+- выбрать отдельные READY документы checkbox;
+- выбрать все READY package docs компактной кнопкой;
+- очистить package selection.
+
+Нормативные checkbox сейчас скрыты через `.is-hidden`, а READY нормативы автоматически входят в selection. Это оставляет возможность позже открыть ручное нормативное администрирование без переделки модели состояния.
+
+# Public API
+
+## Analysis
+
+```text
+POST /api/v1/analyses
+GET  /api/v1/analyses/{job_id}
+GET  /api/v1/analyses/{job_id}/result
+```
+
+Multipart analysis fields:
+
+```text
+pdf
+cad
+pages
+use_explanatory_note
+note_start_page
+note_end_page
+normative_section_id
+normative_document_ids
+user_package_document_ids
+normative_prompt_override_enabled
+normative_prompt_override
+```
+
+`normative_document_ids` и `user_package_document_ids` передаются как JSON arrays UUID.
+
+## Managed normative catalog
+
+```text
+GET    /api/v1/normative/sections
+POST   /api/v1/normative/sections
+GET    /api/v1/normative/sections/{section_id}
+PATCH  /api/v1/normative/sections/{section_id}
+DELETE /api/v1/normative/sections/{section_id}
+
+GET    /api/v1/normative/sections/{section_id}/categories
+POST   /api/v1/normative/sections/{section_id}/categories
+GET    /api/v1/normative/categories/{category_id}
+PATCH  /api/v1/normative/categories/{category_id}
+DELETE /api/v1/normative/categories/{category_id}
+
+GET    /api/v1/normative/sections/{section_id}/documents
+POST   /api/v1/normative/sections/{section_id}/documents
+GET    /api/v1/normative/documents/{document_id}
+PATCH  /api/v1/normative/documents/{document_id}
+DELETE /api/v1/normative/documents/{document_id}
+
+POST   /api/v1/normative/documents/{document_id}/index
+GET    /api/v1/normative/documents/{document_id}/content
+```
+
+## User packages
+
+```text
+GET    /api/v1/normative/sections/{section_id}/user-packages/categories
+POST   /api/v1/normative/sections/{section_id}/user-packages/categories
+
+GET    /api/v1/normative/user-packages/categories/{category_id}
+PATCH  /api/v1/normative/user-packages/categories/{category_id}
+DELETE /api/v1/normative/user-packages/categories/{category_id}
+
+GET    /api/v1/normative/sections/{section_id}/user-packages/documents
+POST   /api/v1/normative/sections/{section_id}/user-packages/documents
+
+GET    /api/v1/normative/user-packages/documents/{document_id}
+PATCH  /api/v1/normative/user-packages/documents/{document_id}
+DELETE /api/v1/normative/user-packages/documents/{document_id}
+
+POST   /api/v1/normative/user-packages/documents/{document_id}/index
+GET    /api/v1/normative/user-packages/documents/{document_id}/content
+```
+
+Browser использует только API Gateway. Internal Knowledge API не является frontend contract.
+
+# n8n workflows
+
+Repository:
+
+```text
+n8n/workflows/
+├── analysis-v2-pdf.json
+├── analysis-v2-cad.json
+└── analysis-v2-pdf-cad.json
+```
+
+Во всех трёх workflow retrieval path:
+
+```text
+Build Normative Queries
+  -> Search Normative
+  -> Search User Packages
+  -> Check Norms
+```
+
+`Search User Packages` получает:
 
 ```json
 {
-  "section_id": "<uuid>",
-  "document_ids": [
-    "<uuid>"
-  ],
-  "system_prompt": "<exact resolved prompt>"
+  "queries": ["..."],
+  "section_id": "<snapshot section>",
+  "document_ids": ["<selected user package ids>"]
 }
 ```
 
-Worker и n8n работают с snapshot, а не перечитывают изменившиеся настройки UI.
+`Check Norms` получает отдельно:
 
-# Legacy utilities
-
-Нормативный runtime:
-
-```text
-Browser
-  -> API Gateway
-  -> Knowledge Service
-  -> PostgreSQL + managed storage
-  -> Knowledge Outbox
-  -> RabbitMQ
-  -> knowledge-indexer
-  -> Qdrant
+```json
+{
+  "normative_sources": [],
+  "user_package_sources": []
+}
 ```
 
-`scripts/kb_sync.py` сохранён только для текущего legacy workflow Базы Опыта. Его запуск не изменяет managed normative collection.
+n8n workflow обновляются и публикуются **вручную через UI**. CLI import/update для workflow в этом проекте не используется.
 
 # Структура проекта
 
@@ -603,7 +859,8 @@ PDRD-validation/
 │               └── normative/
 │                   ├── api.js
 │                   ├── catalog.js
-│                   └── prompt.js
+│                   ├── prompt.js
+│                   └── user_packages.js
 │
 ├── services/
 │   ├── api-gateway/
@@ -747,7 +1004,7 @@ docker compose down
 docker compose down -v
 ```
 
-удаляет PostgreSQL, Qdrant, analysis artifacts и managed normative files. Для обычного deploy/restart её использовать нельзя.
+удаляет persistent PostgreSQL/Qdrant/application volumes и managed documents. Для обычного deploy/restart её использовать нельзя.
 
 # Тестирование
 
@@ -775,10 +1032,8 @@ docker compose --profile test run --rm quality-tests
 Service integration:
 
 ```bash
-docker compose --profile test build api-gateway-tests
+docker compose --profile test build api-gateway-tests knowledge-service-tests
 docker compose --profile test run --rm api-gateway-tests
-
-docker compose --profile test build knowledge-service-tests
 docker compose --profile test run --rm knowledge-service-tests
 ```
 
@@ -788,42 +1043,50 @@ Runtime:
 bash scripts/check-stack.sh
 ```
 
-# Публичный API
+# Backup и диагностика
 
-Analysis:
+Не использовать `docker compose down -v` как обычный способ обновления.
 
-```text
-POST /api/v1/analyses
-GET  /api/v1/analyses/{job_id}
-GET  /api/v1/analyses/{job_id}/result
+Посмотреть volumes:
+
+```bash
+docker volume ls | grep -E 'postgres|qdrant|analysis|normative'
 ```
 
-Managed normative catalog:
+Посмотреть mounts Knowledge Service:
 
-```text
-GET    /api/v1/normative/sections
-POST   /api/v1/normative/sections
-GET    /api/v1/normative/sections/{section_id}
-PATCH  /api/v1/normative/sections/{section_id}
-DELETE /api/v1/normative/sections/{section_id}
-
-GET    /api/v1/normative/sections/{section_id}/categories
-POST   /api/v1/normative/sections/{section_id}/categories
-GET    /api/v1/normative/categories/{category_id}
-PATCH  /api/v1/normative/categories/{category_id}
-DELETE /api/v1/normative/categories/{category_id}
-
-GET    /api/v1/normative/sections/{section_id}/documents
-POST   /api/v1/normative/sections/{section_id}/documents
-GET    /api/v1/normative/documents/{document_id}
-PATCH  /api/v1/normative/documents/{document_id}
-DELETE /api/v1/normative/documents/{document_id}
-
-POST   /api/v1/normative/documents/{document_id}/index
-GET    /api/v1/normative/documents/{document_id}/content
+```bash
+docker compose exec -T knowledge-service \
+  sh -lc 'find /data/normative -maxdepth 3 -type f -printf "%P\n" | sort | head -n 50'
 ```
 
-Browser использует только API Gateway. Internal Knowledge API не является frontend contract.
+Количество managed SQL документов:
+
+```bash
+docker compose exec -T postgres sh -lc '
+psql \
+  -U "$POSTGRES_USER" \
+  -d "$POSTGRES_DB" \
+  -P pager=off \
+  -c "
+SELECT catalog_area, index_status, count(*)
+FROM knowledge.normative_documents
+GROUP BY catalog_area, index_status
+ORDER BY catalog_area, index_status;
+"
+'
+```
+
+Qdrant point count:
+
+```bash
+curl -fsS \
+  -X POST \
+  http://127.0.0.1:6333/collections/dva_normative_v2/points/count \
+  -H 'Content-Type: application/json' \
+  -d '{"exact":true}' \
+  | python3 -m json.tool
+```
 
 # Текущий статус
 
@@ -840,23 +1103,19 @@ Browser использует только API Gateway. Internal Knowledge API н
 - managed нормативные разделы;
 - nested folders;
 - PDF/DOC/DOCX normative upload;
+- пользовательские package/folder CRUD;
+- PDF/DOC/DOCX user-package upload;
 - LibreOffice Word -> PDF normalization;
-- durable normative indexing;
+- durable managed indexing;
+- `catalog_area=normative|user_package`;
 - scoped normative retrieval;
-- immutable normative snapshot;
+- scoped user-package retrieval;
+- immutable snapshot с двумя независимыми списками IDs;
 - system prompt раздела;
 - transient prompt override;
+- защита `N*` vs `U*`;
 - clickable normative citations;
 - managed deletion из Qdrant + filesystem + PostgreSQL;
-- frontend нормативного каталога;
-- foundation `catalog_area=normative|user_package`.
+- frontend нормативного каталога и пользовательских пакетов.
 
-Следующий этап:
-
-- internal/public API для `user_package`;
-- folders/packages внутри текущего раздела;
-- PDF/DOC/DOCX upload в пользовательские пакеты;
-- видимые checkbox;
-- SVG select-all / clear-all;
-- immutable selection пользовательских документов;
-- защита от смешивания `normative` и `user_package`.
+Следующая отдельная функциональная область — ТЗ. Сейчас блок ТЗ в frontend намеренно disabled и не участвует в analysis pipeline.

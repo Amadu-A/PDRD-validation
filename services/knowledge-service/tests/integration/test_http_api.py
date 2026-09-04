@@ -12,12 +12,21 @@ from pdrd_knowledge_service.application.use_cases.health import (
 from pdrd_knowledge_service.application.use_cases.normative import (
     SearchNormative,
 )
+from pdrd_knowledge_service.application.use_cases.user_packages import (
+    SearchUserPackages,
+)
 from pdrd_knowledge_service.core.container import (
     ApplicationContainer,
 )
-from pdrd_knowledge_service.core.settings import Settings
-from pdrd_knowledge_service.domain.search import VectorPoint
-from pdrd_knowledge_service.main import create_app
+from pdrd_knowledge_service.core.settings import (
+    Settings,
+)
+from pdrd_knowledge_service.domain.search import (
+    VectorPoint,
+)
+from pdrd_knowledge_service.main import (
+    create_app,
+)
 
 
 class FakeDatabaseReadinessProbe:
@@ -35,7 +44,10 @@ class FakeEmbeddingProvider:
 
     async def embed(
         self,
-        texts: tuple[str, ...],
+        texts: tuple[
+            str,
+            ...,
+        ],
         *,
         instruction: str,
     ) -> list[list[float]]:
@@ -44,11 +56,16 @@ class FakeEmbeddingProvider:
 
         return [
             [
-                float(index),
+                float(
+                    index,
+                ),
             ]
             for index in range(
                 1,
-                len(texts) + 1,
+                len(
+                    texts,
+                )
+                + 1,
             )
         ]
 
@@ -135,16 +152,23 @@ def build_client() -> TestClient:
 
     vector_store = FakeVectorStore()
 
+    search_normative = SearchNormative(
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+        collection="normative-test",
+        embedding_model="embedding-test",
+        top_k=4,
+        max_sources=12,
+    )
+
+    search_user_packages = SearchUserPackages(
+        managed_search=search_normative,
+    )
+
     container = ApplicationContainer(
         settings=settings,
-        search_normative=SearchNormative(
-            embedding_provider=embedding_provider,
-            vector_store=vector_store,
-            collection="normative-test",
-            embedding_model="embedding-test",
-            top_k=4,
-            max_sources=12,
-        ),
+        search_normative=search_normative,
+        search_user_packages=search_user_packages,
         search_experience=SearchExperience(
             embedding_provider=embedding_provider,
             vector_store=vector_store,
@@ -232,6 +256,31 @@ def test_normative_search_endpoint() -> None:
     assert source["source_file"] == "СП-test.pdf"
 
     assert source["page"] == 12
+
+
+def test_user_package_search_without_scope_returns_empty_sources() -> None:
+    """Проверяет HTTP contract package retrieval без selected packages."""
+    with build_client() as client:
+        response = client.post(
+            "/internal/v1/search/user-packages",
+            json={
+                "queries": [
+                    "требования заказчика",
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["queries"] == [
+        "требования заказчика",
+    ]
+
+    assert payload["sources"] == []
+
+    assert payload["embedding_model"] == "embedding-test"
 
 
 def test_experience_search_endpoint() -> None:

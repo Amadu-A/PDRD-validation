@@ -67,13 +67,13 @@ def _decode_image(
         ValueError,
     ) as error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="image_base64 содержит некорректный Base64.",
+            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
+            detail=("image_base64 содержит некорректный Base64."),
         ) from error
 
     if not content:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
             detail="Передано пустое изображение.",
         )
 
@@ -84,8 +84,8 @@ def _decode_image(
         > max_bytes
     ):
         raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail="Изображение превышает допустимый размер.",
+            status_code=(status.HTTP_413_CONTENT_TOO_LARGE),
+            detail=("Изображение превышает допустимый размер."),
         )
 
     return content
@@ -167,7 +167,7 @@ def _finding_draft_payload(
         status=finding.status,
         comment=finding.comment,
         evidence=finding.evidence,
-        recommendation_draft=finding.recommendation_draft,
+        recommendation_draft=(finding.recommendation_draft),
         confidence=finding.confidence,
         normative_source_ids=list(
             finding.normative_source_ids,
@@ -179,7 +179,7 @@ def _finding_draft_payload(
             )
             for source in finding.basis_sources
         ],
-        experience_query=finding.experience_query,
+        experience_query=(finding.experience_query),
     )
 
 
@@ -229,8 +229,8 @@ async def health_live(
     """Возвращает liveness."""
     return LiveHealthResponse(
         status="ok",
-        service=container.settings.service_name,
-        version=container.settings.service_version,
+        service=(container.settings.service_name),
+        version=(container.settings.service_version),
     )
 
 
@@ -250,12 +250,12 @@ async def health_ready(
     report = await container.check_readiness.execute()
 
     dependencies = {
-        "vision_model": report.vision_model,
+        "vision_model": (report.vision_model),
     }
 
     if not report.ready:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
             detail={
                 "status": "not_ready",
                 "dependencies": dependencies,
@@ -264,8 +264,8 @@ async def health_ready(
 
     return ReadyHealthResponse(
         status="ready",
-        service=container.settings.service_name,
-        version=container.settings.service_version,
+        service=(container.settings.service_name),
+        version=(container.settings.service_version),
         dependencies=dependencies,
     )
 
@@ -286,20 +286,20 @@ async def understand_page(
     """Получает объективные факты листа."""
     image = _decode_image(
         encoded=request.image_base64,
-        max_bytes=container.settings.pipeline.max_image_bytes,
+        max_bytes=(container.settings.pipeline.max_image_bytes),
     )
 
     try:
         facts, metrics = await container.understand_page.execute(
             page_number=request.page_number,
-            heuristic_page_type=request.heuristic_page_type,
-            extracted_text=request.extracted_text,
+            heuristic_page_type=(request.heuristic_page_type),
+            extracted_text=(request.extracted_text),
             image_bytes=image,
         )
 
     except VisionModelError as error:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
             detail=str(
                 error,
             ),
@@ -328,8 +328,8 @@ async def normative_queries(
 ) -> NormativeQueriesResponse:
     """Строит retrieval queries Knowledge Service."""
     queries = container.build_normative_queries.execute(
-        page_facts=request.page_facts.to_domain(),
-        extracted_text=request.extracted_text,
+        page_facts=(request.page_facts.to_domain()),
+        extracted_text=(request.extracted_text),
         project_context_texts=tuple(
             request.project_context_texts,
         ),
@@ -355,10 +355,10 @@ async def check_norms(
         ),
     ],
 ) -> CheckNormsResponse:
-    """Проверяет лист по retrieved normative sources."""
+    """Проверяет лист по norms с separate user-package context."""
     image = _decode_image(
         encoded=request.image_base64,
-        max_bytes=container.settings.pipeline.max_image_bytes,
+        max_bytes=(container.settings.pipeline.max_image_bytes),
     )
 
     try:
@@ -367,19 +367,22 @@ async def check_norms(
             findings,
             metrics,
         ) = await container.check_page_against_norms.execute(
-            page_number=request.page_number,
-            extracted_text=request.extracted_text,
-            page_facts=request.page_facts.to_domain(),
+            page_number=(request.page_number),
+            extracted_text=(request.extracted_text),
+            page_facts=(request.page_facts.to_domain()),
             normative_sources=tuple(
                 source.to_domain() for source in request.normative_sources
             ),
+            user_package_sources=tuple(
+                source.to_domain() for source in request.user_package_sources
+            ),
             image_bytes=image,
-            normative_system_prompt=request.normative_system_prompt,
+            normative_system_prompt=(request.normative_system_prompt),
         )
 
     except VisionModelError as error:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
             detail=str(
                 error,
             ),
@@ -419,7 +422,10 @@ async def finalize_findings(
         findings=tuple(finding.to_domain() for finding in request.findings),
         experience_by_finding={
             finding_id: tuple(source.to_domain() for source in sources)
-            for finding_id, sources in request.experience_by_finding.items()
+            for (
+                finding_id,
+                sources,
+            ) in (request.experience_by_finding.items())
         },
     )
 

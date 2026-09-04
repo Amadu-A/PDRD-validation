@@ -59,13 +59,13 @@ class GenerationMetrics:
         return {
             "attempt": self.attempt,
             "done_reason": self.done_reason,
-            "requested_num_predict": self.requested_num_predict,
-            "total_duration_ms": self.total_duration_ms,
-            "load_duration_ms": self.load_duration_ms,
-            "prompt_eval_count": self.prompt_eval_count,
+            "requested_num_predict": (self.requested_num_predict),
+            "total_duration_ms": (self.total_duration_ms),
+            "load_duration_ms": (self.load_duration_ms),
+            "prompt_eval_count": (self.prompt_eval_count),
             "eval_count": self.eval_count,
-            "content_length": self.content_length,
-            "thinking_length": self.thinking_length,
+            "content_length": (self.content_length),
+            "thinking_length": (self.thinking_length),
         }
 
 
@@ -113,6 +113,31 @@ class PageFacts:
 @dataclass(frozen=True, slots=True)
 class NormativeSource:
     """Нормативный фрагмент, полученный из Knowledge Service."""
+
+    source_id: str
+    point_id: str
+    score: float
+
+    source_file: str | None
+    source_path: str | None
+
+    page: int | str | None
+    chunk_index: int | str | None
+
+    text: str
+
+    document_id: str | None = None
+
+    section_id: str | None = None
+
+    category_id: str | None = None
+
+    source_sha256: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UserPackageSource:
+    """Фрагмент пользовательского документа для contextual analysis."""
 
     source_id: str
     point_id: str

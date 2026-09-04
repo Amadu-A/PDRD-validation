@@ -12,7 +12,10 @@
       "name": "POST /analysis/v2/pdf-cad",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [-1900, 0],
+      "position": [
+        -1900,
+        0
+      ],
       "webhookId": "20000000-0000-4000-8000-000000000002"
     },
     {
@@ -59,7 +62,10 @@
       "name": "Document Extract PDF CAD",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-1680, 0]
+      "position": [
+        -1680,
+        0
+      ]
     },
     {
       "parameters": {
@@ -77,7 +83,10 @@
       "name": "Validate Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-1460, 0]
+      "position": [
+        -1460,
+        0
+      ]
     },
     {
       "parameters": {
@@ -95,7 +104,10 @@
       "name": "Create Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-1240, 0]
+      "position": [
+        -1240,
+        0
+      ]
     },
     {
       "parameters": {
@@ -105,7 +117,10 @@
       "name": "Prepare Combined Context",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-1020, 0]
+      "position": [
+        -1020,
+        0
+      ]
     },
     {
       "parameters": {
@@ -123,7 +138,10 @@
       "name": "Understand Combined Page",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-800, 0]
+      "position": [
+        -800,
+        0
+      ]
     },
     {
       "parameters": {
@@ -141,7 +159,10 @@
       "name": "Build Project Context Query",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-580, 0]
+      "position": [
+        -580,
+        0
+      ]
     },
     {
       "parameters": {
@@ -159,7 +180,10 @@
       "name": "Search Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-360, 0]
+      "position": [
+        -360,
+        0
+      ]
     },
     {
       "parameters": {
@@ -177,7 +201,10 @@
       "name": "Augment Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-140, 0]
+      "position": [
+        -140,
+        0
+      ]
     },
     {
       "parameters": {
@@ -195,7 +222,10 @@
       "name": "Build Normative Queries",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [80, 0]
+      "position": [
+        80,
+        0
+      ]
     },
     {
       "parameters": {
@@ -213,7 +243,31 @@
       "name": "Search Normative",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [300, 0]
+      "position": [
+        300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/search/user-packages",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ queries: $('Build Normative Queries').item.json.queries ?? [], ...($('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id ? { section_id: $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id, document_ids: JSON.parse($('POST /analysis/v2/pdf-cad').first().json.body?.user_package_document_ids ?? '[]') } : {}) }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000022",
+      "name": "Search User Packages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        0
+      ]
     },
     {
       "parameters": {
@@ -222,7 +276,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_number: $('Prepare Combined Context').item.json.page.page_number, extracted_text: $('Augment Project Context').item.json.analysis_text, page_facts: $('Understand Combined Page').item.json.facts, normative_sources: $json.sources ?? [], image_base64: $('Prepare Combined Context').item.json.page.image_base64, normative_system_prompt: $('POST /analysis/v2/pdf-cad').first().json.body?.normative_system_prompt ?? null }) }}",
+        "body": "={{ JSON.stringify({ page_number: $('Prepare Combined Context').item.json.page.page_number, extracted_text: $('Augment Project Context').item.json.analysis_text, page_facts: $('Understand Combined Page').item.json.facts, normative_sources: $('Search Normative').item.json.sources ?? [], user_package_sources: $json.sources ?? [], image_base64: $('Prepare Combined Context').item.json.page.image_base64, normative_system_prompt: $('POST /analysis/v2/pdf-cad').first().json.body?.normative_system_prompt ?? null }) }}",
         "options": {
           "timeout": 1800000
         }
@@ -231,7 +285,10 @@
       "name": "Check Norms",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [520, 0]
+      "position": [
+        740,
+        0
+      ]
     },
     {
       "parameters": {
@@ -242,7 +299,10 @@
       "name": "Prepare Experience Queries",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [740, 0]
+      "position": [
+        960,
+        0
+      ]
     },
     {
       "parameters": {
@@ -260,7 +320,10 @@
       "name": "Search Experience",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [960, 0]
+      "position": [
+        1180,
+        0
+      ]
     },
     {
       "parameters": {
@@ -271,7 +334,10 @@
       "name": "Build Experience Map",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1180, 0]
+      "position": [
+        1400,
+        0
+      ]
     },
     {
       "parameters": {
@@ -289,18 +355,24 @@
       "name": "Finalize Findings",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1400, 0]
+      "position": [
+        1620,
+        0
+      ]
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const prepared = $('Prepare Combined Context').item.json;\nconst understanding = $('Understand Combined Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst normative = $('Search Normative').item.json;\nconst check = $('Check Norms').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\nconst findings = (finalization.findings ?? []).map((finding) => ({ ...finding, project_context_sources: augmentation.sources ?? [] }));\n\nreturn { json: {\n  status: 'completed',\n  source_mode: 'pdf_cad',\n  file_name: prepared.source.pdf_file_name,\n  pdf_file_name: prepared.source.pdf_file_name,\n  cad_file_name: prepared.source.cad_file_name,\n  total_pages: prepared.source.total_pdf_pages,\n  selected_pages: [prepared.source.selected_page],\n  analyzed_pages: 1,\n  findings_count: findings.length,\n  summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранному PDF + CAD листу не найдены.',\n  findings,\n  render: prepared.render,\n  cad: prepared.cad,\n  explanatory_note_context: prepared.project_context,\n  page: {\n    page_number: prepared.page.page_number,\n    heuristic_page_type: prepared.page.page_type,\n    width_points: prepared.page.width_points,\n    height_points: prepared.page.height_points,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: normative.sources ?? [],\n    normative_check: { summary: check.summary ?? '', findings: check.findings ?? [], metrics: check.metrics ?? {} },\n    project_context_sources: augmentation.sources ?? [],\n  },\n  pipeline: ['combined_document_extract','explanatory_note_validation','temporary_project_context_index','page_understanding','project_context_retrieval','normative_queries','normative_search','normative_check','experience_search','finalization','project_context_cleanup'],\n  limitations: ['Контекст ПЗ является контекстом проекта, а не нормативным доказательством.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n} };"
+        "jsCode": "const prepared = $('Prepare Combined Context').item.json;\nconst understanding = $('Understand Combined Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst normative = $('Search Normative').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\nconst findings = (finalization.findings ?? []).map((finding) => ({ ...finding, project_context_sources: augmentation.sources ?? [] }));\n\nreturn { json: {\n  status: 'completed',\n  source_mode: 'pdf_cad',\n  file_name: prepared.source.pdf_file_name,\n  pdf_file_name: prepared.source.pdf_file_name,\n  cad_file_name: prepared.source.cad_file_name,\n  total_pages: prepared.source.total_pdf_pages,\n  selected_pages: [prepared.source.selected_page],\n  analyzed_pages: 1,\n  findings_count: findings.length,\n  summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранному PDF + CAD листу не найдены.',\n  findings,\n  render: prepared.render,\n  cad: prepared.cad,\n  explanatory_note_context: prepared.project_context,\n  page: {\n    page_number: prepared.page.page_number,\n    heuristic_page_type: prepared.page.page_type,\n    width_points: prepared.page.width_points,\n    height_points: prepared.page.height_points,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: normative.sources ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    normative_check: { summary: check.summary ?? '', findings: check.findings ?? [], metrics: check.metrics ?? {} },\n    project_context_sources: augmentation.sources ?? [],\n  },\n  pipeline: ['combined_document_extract','explanatory_note_validation','temporary_project_context_index','page_understanding','project_context_retrieval','normative_queries','normative_search','user_package_search','normative_check','experience_search','finalization','project_context_cleanup'],\n  limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n} };"
       },
       "id": "20000000-0000-4000-8000-000000000018",
       "name": "Build PDF CAD Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1620, 0]
+      "position": [
+        1840,
+        0
+      ]
     },
     {
       "parameters": {
@@ -314,7 +386,10 @@
       "name": "Cleanup Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1840, 0],
+      "position": [
+        2060,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
@@ -325,64 +400,222 @@
       "name": "Return PDF CAD Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2060, 0]
+      "position": [
+        2280,
+        0
+      ]
     }
   ],
   "pinData": {},
   "connections": {
     "POST /analysis/v2/pdf-cad": {
-      "main": [[{"node":"Document Extract PDF CAD","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Document Extract PDF CAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Document Extract PDF CAD": {
-      "main": [[{"node":"Validate Project Context","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Validate Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Validate Project Context": {
-      "main": [[{"node":"Create Project Context","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Create Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Create Project Context": {
-      "main": [[{"node":"Prepare Combined Context","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Prepare Combined Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Prepare Combined Context": {
-      "main": [[{"node":"Understand Combined Page","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Understand Combined Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Understand Combined Page": {
-      "main": [[{"node":"Build Project Context Query","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Build Project Context Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Project Context Query": {
-      "main": [[{"node":"Search Project Context","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Search Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Search Project Context": {
-      "main": [[{"node":"Augment Project Context","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Augment Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Augment Project Context": {
-      "main": [[{"node":"Build Normative Queries","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Build Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Normative Queries": {
-      "main": [[{"node":"Search Normative","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Search Normative",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Search Normative": {
-      "main": [[{"node":"Check Norms","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Search User Packages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search User Packages": {
+      "main": [
+        [
+          {
+            "node": "Check Norms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Check Norms": {
-      "main": [[{"node":"Prepare Experience Queries","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Prepare Experience Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Prepare Experience Queries": {
-      "main": [[{"node":"Search Experience","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Search Experience",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Search Experience": {
-      "main": [[{"node":"Build Experience Map","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Build Experience Map",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Experience Map": {
-      "main": [[{"node":"Finalize Findings","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Finalize Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Finalize Findings": {
-      "main": [[{"node":"Build PDF CAD Result","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Build PDF CAD Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build PDF CAD Result": {
-      "main": [[{"node":"Cleanup Project Context","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Cleanup Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Cleanup Project Context": {
-      "main": [[{"node":"Return PDF CAD Result","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Return PDF CAD Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,

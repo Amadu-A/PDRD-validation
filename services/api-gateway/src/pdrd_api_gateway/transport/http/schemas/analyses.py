@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
 )
 
 from pdrd_api_gateway.domain.analysis_job import (
@@ -23,14 +24,20 @@ class AnalysisAcceptedResponse(BaseModel):
     )
 
     job_id: UUID
+
     document_id: UUID
 
     status: AnalysisJobStatus
+
     status_url: str
 
     normative_section_id: UUID | None
 
     normative_document_ids: list[UUID]
+
+    user_package_document_ids: list[UUID] = Field(
+        default_factory=list,
+    )
 
 
 class AnalysisStatusResponse(BaseModel):
@@ -41,6 +48,7 @@ class AnalysisStatusResponse(BaseModel):
     )
 
     job_id: UUID
+
     document_id: UUID | None
 
     status: AnalysisJobStatus
@@ -48,11 +56,17 @@ class AnalysisStatusResponse(BaseModel):
     attempt_count: int
 
     error_code: str | None
+
     error_message: str | None
 
     normative_section_id: UUID | None
 
     normative_document_ids: list[UUID]
 
+    user_package_document_ids: list[UUID] = Field(
+        default_factory=list,
+    )
+
     created_at: datetime
+
     updated_at: datetime

@@ -151,7 +151,7 @@ class N8nAnalysisOrchestrator:
         if submission.use_explanatory_note:
             if submission.note_start_page is None or submission.note_end_page is None:
                 raise AnalysisOrchestrationError(
-                    ("Для включённого контекста ПЗ отсутствует диапазон страниц."),
+                    "Для включённого контекста ПЗ отсутствует диапазон страниц.",
                 )
 
             data["note_start_page"] = str(
@@ -175,6 +175,20 @@ class N8nAnalysisOrchestrator:
                         document_id,
                     )
                     for document_id in snapshot.document_ids
+                ],
+                ensure_ascii=False,
+                separators=(
+                    ",",
+                    ":",
+                ),
+            )
+
+            data["user_package_document_ids"] = json.dumps(
+                [
+                    str(
+                        document_id,
+                    )
+                    for document_id in snapshot.user_package_document_ids
                 ],
                 ensure_ascii=False,
                 separators=(

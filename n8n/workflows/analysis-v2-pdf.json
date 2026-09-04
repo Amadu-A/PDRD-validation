@@ -12,7 +12,10 @@
       "name": "POST /analysis/v2/pdf",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [-2000, 0],
+      "position": [
+        -2000,
+        0
+      ],
       "webhookId": "10000000-0000-4000-8000-000000000002"
     },
     {
@@ -54,7 +57,10 @@
       "name": "Document Extract PDF",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-1780, 0]
+      "position": [
+        -1780,
+        0
+      ]
     },
     {
       "parameters": {
@@ -72,7 +78,10 @@
       "name": "Validate Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-1560, 0]
+      "position": [
+        -1560,
+        0
+      ]
     },
     {
       "parameters": {
@@ -90,7 +99,10 @@
       "name": "Create Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-1340, 0]
+      "position": [
+        -1340,
+        0
+      ]
     },
     {
       "parameters": {
@@ -100,7 +112,10 @@
       "name": "Expand PDF Pages",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-1120, 0]
+      "position": [
+        -1120,
+        0
+      ]
     },
     {
       "parameters": {
@@ -118,7 +133,10 @@
       "name": "Understand Page",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-900, 0]
+      "position": [
+        -900,
+        0
+      ]
     },
     {
       "parameters": {
@@ -136,7 +154,10 @@
       "name": "Build Project Context Query",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-680, 0]
+      "position": [
+        -680,
+        0
+      ]
     },
     {
       "parameters": {
@@ -154,7 +175,10 @@
       "name": "Search Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-460, 0]
+      "position": [
+        -460,
+        0
+      ]
     },
     {
       "parameters": {
@@ -172,7 +196,10 @@
       "name": "Augment Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-240, 0]
+      "position": [
+        -240,
+        0
+      ]
     },
     {
       "parameters": {
@@ -190,7 +217,10 @@
       "name": "Build Normative Queries",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-20, 0]
+      "position": [
+        -20,
+        0
+      ]
     },
     {
       "parameters": {
@@ -208,7 +238,31 @@
       "name": "Search Normative",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [200, 0]
+      "position": [
+        200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/search/user-packages",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ queries: $('Build Normative Queries').item.json.queries ?? [], ...($('POST /analysis/v2/pdf').first().json.body?.normative_section_id ? { section_id: $('POST /analysis/v2/pdf').first().json.body.normative_section_id, document_ids: JSON.parse($('POST /analysis/v2/pdf').first().json.body?.user_package_document_ids ?? '[]') } : {}) }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "10000000-0000-4000-8000-000000000023",
+      "name": "Search User Packages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        420,
+        0
+      ]
     },
     {
       "parameters": {
@@ -217,7 +271,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_number: $('Expand PDF Pages').item.json.page.page_number, extracted_text: $('Augment Project Context').item.json.analysis_text, page_facts: $('Understand Page').item.json.facts, normative_sources: $json.sources ?? [], image_base64: $('Expand PDF Pages').item.json.page.image_base64, normative_system_prompt: $('POST /analysis/v2/pdf').first().json.body?.normative_system_prompt ?? null }) }}",
+        "body": "={{ JSON.stringify({ page_number: $('Expand PDF Pages').item.json.page.page_number, extracted_text: $('Augment Project Context').item.json.analysis_text, page_facts: $('Understand Page').item.json.facts, normative_sources: $('Search Normative').item.json.sources ?? [], user_package_sources: $json.sources ?? [], image_base64: $('Expand PDF Pages').item.json.page.image_base64, normative_system_prompt: $('POST /analysis/v2/pdf').first().json.body?.normative_system_prompt ?? null }) }}",
         "options": {
           "timeout": 1800000
         }
@@ -226,7 +280,10 @@
       "name": "Check Norms",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [420, 0]
+      "position": [
+        640,
+        0
+      ]
     },
     {
       "parameters": {
@@ -237,7 +294,10 @@
       "name": "Prepare Experience Queries",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [640, 0]
+      "position": [
+        860,
+        0
+      ]
     },
     {
       "parameters": {
@@ -255,7 +315,10 @@
       "name": "Search Experience",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [860, 0]
+      "position": [
+        1080,
+        0
+      ]
     },
     {
       "parameters": {
@@ -266,7 +329,10 @@
       "name": "Build Experience Map",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1080, 0]
+      "position": [
+        1300,
+        0
+      ]
     },
     {
       "parameters": {
@@ -284,28 +350,37 @@
       "name": "Finalize Findings",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1300, 0]
+      "position": [
+        1520,
+        0
+      ]
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const expanded = $('Expand PDF Pages').item.json;\nconst understanding = $('Understand Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst normative = $('Search Normative').item.json;\nconst check = $('Check Norms').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\n\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nreturn {\n  json: {\n    document: expanded.document,\n    project_context: expanded.project_context,\n    page_number: expanded.page.page_number,\n    heuristic_page_type: expanded.page.page_type,\n    width_points: expanded.page.width_points,\n    height_points: expanded.page.height_points,\n    extracted_text: expanded.page.text,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: normative.sources ?? [],\n    normative_check: { summary: check.summary ?? '', findings: check.findings ?? [], metrics: check.metrics ?? {} },\n    findings,\n  },\n};"
+        "jsCode": "const expanded = $('Expand PDF Pages').item.json;\nconst understanding = $('Understand Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst normative = $('Search Normative').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\n\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nreturn {\n  json: {\n    document: expanded.document,\n    project_context: expanded.project_context,\n    page_number: expanded.page.page_number,\n    heuristic_page_type: expanded.page.page_type,\n    width_points: expanded.page.width_points,\n    height_points: expanded.page.height_points,\n    extracted_text: expanded.page.text,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: normative.sources ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    normative_check: { summary: check.summary ?? '', findings: check.findings ?? [], metrics: check.metrics ?? {} },\n    findings,\n  },\n};"
       },
       "id": "10000000-0000-4000-8000-000000000018",
       "name": "Build Page Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1520, 0]
+      "position": [
+        1740,
+        0
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const pageItems = $input.all().map((item) => item.json);\npageItems.sort((left, right) => left.page_number - right.page_number);\nconst document = pageItems[0]?.document ?? { file_name: 'document.pdf', total_pages: 0, selected_pages: [] };\nconst context = pageItems[0]?.project_context ?? { enabled: false };\nconst pages = pageItems.map(({ document: _document, project_context: _context, ...page }) => page);\nconst findings = pages.flatMap((page) => Array.isArray(page.findings) ? page.findings : []);\n\nreturn [{\n  json: {\n    status: 'completed',\n    source_mode: 'pdf_only',\n    file_name: document.file_name,\n    pdf_file_name: document.file_name,\n    total_pages: document.total_pages,\n    selected_pages: document.selected_pages,\n    analyzed_pages: pages.length,\n    findings_count: findings.length,\n    summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранным листам не найдены.',\n    findings,\n    pages,\n    explanatory_note_context: context,\n    pipeline: ['document_extract','explanatory_note_validation','temporary_project_context_index','page_understanding','project_context_retrieval','normative_queries','normative_search','normative_check','experience_search','finalization','project_context_cleanup'],\n    limitations: ['Контекст ПЗ является контекстом проекта, а не нормативным доказательством.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n  },\n}];"
+        "jsCode": "const pageItems = $input.all().map((item) => item.json);\npageItems.sort((left, right) => left.page_number - right.page_number);\nconst document = pageItems[0]?.document ?? { file_name: 'document.pdf', total_pages: 0, selected_pages: [] };\nconst context = pageItems[0]?.project_context ?? { enabled: false };\nconst pages = pageItems.map(({ document: _document, project_context: _context, ...page }) => page);\nconst findings = pages.flatMap((page) => Array.isArray(page.findings) ? page.findings : []);\n\nreturn [{\n  json: {\n    status: 'completed',\n    source_mode: 'pdf_only',\n    file_name: document.file_name,\n    pdf_file_name: document.file_name,\n    total_pages: document.total_pages,\n    selected_pages: document.selected_pages,\n    analyzed_pages: pages.length,\n    findings_count: findings.length,\n    summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранным листам не найдены.',\n    findings,\n    pages,\n    explanatory_note_context: context,\n    pipeline: ['document_extract','explanatory_note_validation','temporary_project_context_index','page_understanding','project_context_retrieval','normative_queries','normative_search','user_package_search','normative_check','experience_search','finalization','project_context_cleanup'],\n    limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n  },\n}];"
       },
       "id": "10000000-0000-4000-8000-000000000019",
       "name": "Aggregate PDF Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1740, 0]
+      "position": [
+        1960,
+        0
+      ]
     },
     {
       "parameters": {
@@ -319,7 +394,10 @@
       "name": "Cleanup Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1960, 0],
+      "position": [
+        2180,
+        0
+      ],
       "onError": "continueRegularOutput"
     },
     {
@@ -330,67 +408,233 @@
       "name": "Return PDF Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2180, 0]
+      "position": [
+        2400,
+        0
+      ]
     }
   ],
   "pinData": {},
   "connections": {
     "POST /analysis/v2/pdf": {
-      "main": [[{"node":"Document Extract PDF","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Document Extract PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Document Extract PDF": {
-      "main": [[{"node":"Validate Project Context","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Validate Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Validate Project Context": {
-      "main": [[{"node":"Create Project Context","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Create Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Create Project Context": {
-      "main": [[{"node":"Expand PDF Pages","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Expand PDF Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Expand PDF Pages": {
-      "main": [[{"node":"Understand Page","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Understand Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Understand Page": {
-      "main": [[{"node":"Build Project Context Query","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Build Project Context Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Project Context Query": {
-      "main": [[{"node":"Search Project Context","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Search Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Search Project Context": {
-      "main": [[{"node":"Augment Project Context","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Augment Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Augment Project Context": {
-      "main": [[{"node":"Build Normative Queries","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Build Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Normative Queries": {
-      "main": [[{"node":"Search Normative","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Search Normative",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Search Normative": {
-      "main": [[{"node":"Check Norms","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Search User Packages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search User Packages": {
+      "main": [
+        [
+          {
+            "node": "Check Norms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Check Norms": {
-      "main": [[{"node":"Prepare Experience Queries","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Prepare Experience Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Prepare Experience Queries": {
-      "main": [[{"node":"Search Experience","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Search Experience",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Search Experience": {
-      "main": [[{"node":"Build Experience Map","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Build Experience Map",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Experience Map": {
-      "main": [[{"node":"Finalize Findings","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Finalize Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Finalize Findings": {
-      "main": [[{"node":"Build Page Result","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Build Page Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Page Result": {
-      "main": [[{"node":"Aggregate PDF Result","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Aggregate PDF Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Aggregate PDF Result": {
-      "main": [[{"node":"Cleanup Project Context","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Cleanup Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Cleanup Project Context": {
-      "main": [[{"node":"Return PDF Result","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Return PDF Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,

@@ -71,6 +71,14 @@ class SubmitAnalysisStub:
             | None
         ) = None
 
+        self.user_package_document_ids: (
+            tuple[
+                UUID,
+                ...,
+            ]
+            | None
+        ) = None
+
         self.normative_prompt_override_enabled = False
 
         self.normative_prompt_override = ""
@@ -90,6 +98,11 @@ class SubmitAnalysisStub:
         note_end_page: str | int | None = None,
         normative_section_id: UUID | None = None,
         normative_document_ids: tuple[
+            UUID,
+            ...,
+        ]
+        | None = None,
+        user_package_document_ids: tuple[
             UUID,
             ...,
         ]
@@ -115,6 +128,8 @@ class SubmitAnalysisStub:
 
         self.normative_document_ids = normative_document_ids
 
+        self.user_package_document_ids = user_package_document_ids
+
         self.normative_prompt_override_enabled = normative_prompt_override_enabled
 
         self.normative_prompt_override = normative_prompt_override
@@ -133,6 +148,7 @@ class SubmitAnalysisStub:
             normative_snapshot = NormativeAnalysisSnapshot.create(
                 section_id=normative_section_id,
                 document_ids=normative_document_ids,
+                user_package_document_ids=(user_package_document_ids or ()),
                 system_prompt=active_prompt,
             )
 
@@ -247,6 +263,8 @@ def test_create_pdf_analysis_returns_202() -> None:
 
     assert payload["normative_document_ids"] == []
 
+    assert payload["user_package_document_ids"] == []
+
     assert submit_stub.pdf_content == b"pdf-content"
 
     assert submit_stub.pdf_file_name == "drawing.pdf"
@@ -260,6 +278,8 @@ def test_create_pdf_analysis_returns_202() -> None:
     assert submit_stub.normative_section_id is None
 
     assert submit_stub.normative_document_ids is None
+
+    assert submit_stub.user_package_document_ids is None
 
 
 def test_create_pdf_analysis_with_note_returns_202() -> None:
@@ -296,6 +316,8 @@ def test_create_pdf_analysis_with_note_returns_202() -> None:
     assert submit_stub.note_start_page == "2"
 
     assert submit_stub.note_end_page == "8"
+
+    assert submit_stub.user_package_document_ids is None
 
 
 def test_create_pdf_cad_analysis_returns_202() -> None:
@@ -334,6 +356,8 @@ def test_create_pdf_cad_analysis_returns_202() -> None:
     assert submit_stub.cad_file_name == "drawing.dxf"
 
     assert submit_stub.pages == "7"
+
+    assert submit_stub.user_package_document_ids is None
 
 
 def test_create_analysis_with_normative_snapshot_returns_202() -> None:
@@ -390,6 +414,8 @@ def test_create_analysis_with_normative_snapshot_returns_202() -> None:
         ),
     ]
 
+    assert payload["user_package_document_ids"] == []
+
     assert submit_stub.normative_section_id == section_id
 
     assert submit_stub.normative_document_ids == (
@@ -397,9 +423,80 @@ def test_create_analysis_with_normative_snapshot_returns_202() -> None:
         document_b_id,
     )
 
+    assert submit_stub.user_package_document_ids is None
+
     assert submit_stub.normative_prompt_override_enabled is True
 
     assert submit_stub.normative_prompt_override == active_prompt
+
+
+def test_create_analysis_with_user_package_snapshot_returns_202() -> None:
+    """Проверяет отдельный multipart transport package selection."""
+    submit_stub = SubmitAnalysisStub()
+
+    section_id = uuid4()
+
+    normative_document_id = uuid4()
+
+    package_a_id = uuid4()
+    package_b_id = uuid4()
+
+    with build_client(
+        submit_stub=submit_stub,
+        get_stub=GetAnalysisStub(
+            None,
+        ),
+    ) as client:
+        response = client.post(
+            "/api/v1/analyses",
+            files={
+                "pdf": (
+                    "drawing.pdf",
+                    b"pdf-content",
+                    "application/pdf",
+                ),
+            },
+            data={
+                "pages": "1",
+                "normative_section_id": str(
+                    section_id,
+                ),
+                "normative_document_ids": (f'["{normative_document_id}"]'),
+                "user_package_document_ids": (f'["{package_a_id}","{package_b_id}"]'),
+            },
+        )
+
+    assert response.status_code == 202
+
+    payload = response.json()
+
+    assert payload["normative_section_id"] == str(
+        section_id,
+    )
+
+    assert payload["normative_document_ids"] == [
+        str(
+            normative_document_id,
+        ),
+    ]
+
+    assert payload["user_package_document_ids"] == [
+        str(
+            package_a_id,
+        ),
+        str(
+            package_b_id,
+        ),
+    ]
+
+    assert submit_stub.normative_section_id == section_id
+
+    assert submit_stub.normative_document_ids == (normative_document_id,)
+
+    assert submit_stub.user_package_document_ids == (
+        package_a_id,
+        package_b_id,
+    )
 
 
 def test_get_analysis_returns_job() -> None:
@@ -435,6 +532,8 @@ def test_get_analysis_returns_job() -> None:
     assert payload["normative_section_id"] is None
 
     assert payload["normative_document_ids"] == []
+
+    assert payload["user_package_document_ids"] == []
 
 
 def test_get_unknown_analysis_returns_404() -> None:

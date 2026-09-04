@@ -173,6 +173,7 @@ def build_container() -> ApplicationContainer:
 
     resolve_normative_snapshot = ResolveNormativeSnapshot(
         catalog_reader=normative_catalog_reader,
+        user_package_reader=user_package_catalog_manager,
     )
 
     submit_analysis = SubmitAnalysis(

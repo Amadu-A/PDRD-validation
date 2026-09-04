@@ -15,6 +15,7 @@ from pdrd_analysis_service.domain.analysis import (
     FindingDraft,
     NormativeSource,
     PageFacts,
+    UserPackageSource,
 )
 
 
@@ -100,7 +101,53 @@ class NormativeSourcePayload(BaseModel):
             document_id=self.document_id,
             section_id=self.section_id,
             category_id=self.category_id,
-            source_sha256=self.source_sha256,
+            source_sha256=(self.source_sha256),
+        )
+
+
+class UserPackageSourcePayload(BaseModel):
+    """User-package source от Knowledge Service."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    source_id: str
+    point_id: str = ""
+
+    score: float
+
+    document_id: str | None = None
+    section_id: str | None = None
+    category_id: str | None = None
+
+    source_sha256: str | None = None
+
+    source_file: str | None = None
+    source_path: str | None = None
+
+    page: int | str | None = None
+    chunk_index: int | str | None = None
+
+    text: str
+
+    def to_domain(
+        self,
+    ) -> UserPackageSource:
+        """Преобразует package source в Domain."""
+        return UserPackageSource(
+            source_id=self.source_id,
+            point_id=self.point_id,
+            score=self.score,
+            source_file=self.source_file,
+            source_path=self.source_path,
+            page=self.page,
+            chunk_index=self.chunk_index,
+            text=self.text,
+            document_id=self.document_id,
+            section_id=self.section_id,
+            category_id=self.category_id,
+            source_sha256=(self.source_sha256),
         )
 
 
@@ -140,11 +187,11 @@ class ExperienceSourcePayload(BaseModel):
             issue_id=self.issue_id,
             issue_text=self.issue_text,
             status=self.status,
-            verified_fixed=self.verified_fixed,
+            verified_fixed=(self.verified_fixed),
             before_page=self.before_page,
             after_page=self.after_page,
-            before_context=self.before_context,
-            after_context=self.after_context,
+            before_context=(self.before_context),
+            after_context=(self.after_context),
         )
 
 
@@ -191,14 +238,14 @@ class FindingDraftPayload(BaseModel):
             status=self.status,  # type: ignore[arg-type]
             comment=self.comment,
             evidence=self.evidence,
-            recommendation_draft=self.recommendation_draft,
+            recommendation_draft=(self.recommendation_draft),
             confidence=self.confidence,
             normative_source_ids=tuple(
                 self.normative_source_ids,
             ),
             basis=self.basis,
             basis_sources=tuple(source.to_domain() for source in self.basis_sources),
-            experience_query=self.experience_query,
+            experience_query=(self.experience_query),
         )
 
 
@@ -244,7 +291,9 @@ class NormativeQueriesRequest(BaseModel):
 
     extracted_text: str
 
-    project_context_texts: list[str] = []
+    project_context_texts: list[str] = Field(
+        default_factory=list,
+    )
 
 
 class NormativeQueriesResponse(BaseModel):
@@ -269,6 +318,10 @@ class CheckNormsRequest(BaseModel):
     page_facts: PageFactsPayload
 
     normative_sources: list[NormativeSourcePayload]
+
+    user_package_sources: list[UserPackageSourcePayload] = Field(
+        default_factory=list,
+    )
 
     image_base64: str = Field(
         min_length=1,

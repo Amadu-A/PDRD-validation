@@ -11,9 +11,40 @@ class InvalidNormativeAnalysisSnapshotError(ValueError):
     """Некорректный immutable snapshot нормативного анализа."""
 
 
+def _deduplicate_ids(
+    values: tuple[
+        UUID,
+        ...,
+    ],
+) -> tuple[
+    UUID,
+    ...,
+]:
+    """Удаляет duplicate UUID, сохраняя исходный порядок."""
+    result: list[UUID] = []
+
+    seen: set[UUID] = set()
+
+    for value in values:
+        if value in seen:
+            continue
+
+        seen.add(
+            value,
+        )
+
+        result.append(
+            value,
+        )
+
+    return tuple(
+        result,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class NormativeAnalysisSnapshot:
-    """Фиксирует нормативный scope и active prompt в момент старта job."""
+    """Фиксирует normative scope, package scope и active prompt."""
 
     section_id: UUID
 
@@ -23,6 +54,11 @@ class NormativeAnalysisSnapshot:
     ]
 
     system_prompt: str
+
+    user_package_document_ids: tuple[
+        UUID,
+        ...,
+    ] = ()
 
     def __post_init__(
         self,
@@ -37,6 +73,30 @@ class NormativeAnalysisSnapshot:
         ):
             raise InvalidNormativeAnalysisSnapshotError(
                 "Normative snapshot не должен содержать duplicate document IDs.",
+            )
+
+        if len(
+            set(
+                self.user_package_document_ids,
+            )
+        ) != len(
+            self.user_package_document_ids,
+        ):
+            raise InvalidNormativeAnalysisSnapshotError(
+                "Normative snapshot не должен содержать "
+                "duplicate user-package document IDs.",
+            )
+
+        overlap = set(
+            self.document_ids,
+        ) & set(
+            self.user_package_document_ids,
+        )
+
+        if overlap:
+            raise InvalidNormativeAnalysisSnapshotError(
+                "Один document ID не может одновременно быть "
+                "нормативным документом и пользовательским пакетом.",
             )
 
         if not isinstance(
@@ -62,30 +122,21 @@ class NormativeAnalysisSnapshot:
             ...,
         ],
         system_prompt: str,
+        user_package_document_ids: tuple[
+            UUID,
+            ...,
+        ] = (),
     ) -> "NormativeAnalysisSnapshot":
-        """Создаёт snapshot с ordered deduplication document IDs."""
-        normalized_document_ids: list[UUID] = []
-
-        seen: set[UUID] = set()
-
-        for document_id in document_ids:
-            if document_id in seen:
-                continue
-
-            seen.add(
-                document_id,
-            )
-
-            normalized_document_ids.append(
-                document_id,
-            )
-
+        """Создаёт snapshot с ordered deduplication IDs."""
         return cls(
             section_id=section_id,
-            document_ids=tuple(
-                normalized_document_ids,
+            document_ids=_deduplicate_ids(
+                document_ids,
             ),
             system_prompt=system_prompt,
+            user_package_document_ids=_deduplicate_ids(
+                user_package_document_ids,
+            ),
         )
 
     def as_payload(
@@ -105,6 +156,12 @@ class NormativeAnalysisSnapshot:
                 )
                 for document_id in self.document_ids
             ],
+            "user_package_document_ids": [
+                str(
+                    document_id,
+                )
+                for document_id in self.user_package_document_ids
+            ],
             "system_prompt": self.system_prompt,
         }
 
@@ -123,6 +180,11 @@ class NormativeAnalysisSnapshot:
 
         document_values = payload.get(
             "document_ids",
+        )
+
+        package_document_values = payload.get(
+            "user_package_document_ids",
+            [],
         )
 
         system_prompt = payload.get(
@@ -157,6 +219,26 @@ class NormativeAnalysisSnapshot:
             )
 
         if not isinstance(
+            package_document_values,
+            list,
+        ):
+            raise InvalidNormativeAnalysisSnapshotError(
+                "Normative snapshot содержит некорректный "
+                "user_package_document_ids array.",
+            )
+
+        if not all(
+            isinstance(
+                document_id,
+                str,
+            )
+            for document_id in package_document_values
+        ):
+            raise InvalidNormativeAnalysisSnapshotError(
+                "Normative snapshot содержит некорректный user-package document_id.",
+            )
+
+        if not isinstance(
             system_prompt,
             str,
         ):
@@ -176,6 +258,13 @@ class NormativeAnalysisSnapshot:
                 for document_id in document_values
             )
 
+            user_package_document_ids = tuple(
+                UUID(
+                    document_id,
+                )
+                for document_id in package_document_values
+            )
+
         except ValueError as error:
             raise InvalidNormativeAnalysisSnapshotError(
                 "Normative snapshot содержит некорректный UUID.",
@@ -185,4 +274,5 @@ class NormativeAnalysisSnapshot:
             section_id=section_id,
             document_ids=document_ids,
             system_prompt=system_prompt,
+            user_package_document_ids=user_package_document_ids,
         )

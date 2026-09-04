@@ -1,6 +1,6 @@
 # tests/architecture/test_normative_sidebar_layout.py
 
-"""Architecture guards нового layout нормативной панели."""
+"""Architecture guards layout managed catalog sidebar."""
 
 from pathlib import Path
 
@@ -19,6 +19,10 @@ FRONTEND_SOURCE = FRONTEND_ROOT / "src"
 INDEX_HTML = FRONTEND_SOURCE / "index.html"
 
 CATALOG_JS = FRONTEND_SOURCE / "js" / "features" / "normative" / "catalog.js"
+
+USER_PACKAGES_JS = (
+    FRONTEND_SOURCE / "js" / "features" / "normative" / "user_packages.js"
+)
 
 GLOBAL_CSS = FRONTEND_SOURCE / "css" / "global.css"
 
@@ -55,7 +59,7 @@ def test_sidebar_blocks_have_requested_order() -> None:
 
 
 def test_normative_selection_is_hidden_but_preserved() -> None:
-    """Пользовательские normative checkbox скрыты через общий state class."""
+    """Normative checkbox скрыты через существующий state class."""
     html = INDEX_HTML.read_text(
         encoding="utf-8",
     )
@@ -80,7 +84,7 @@ def test_normative_selection_is_hidden_but_preserved() -> None:
 
 
 def test_new_ready_normatives_are_selected_automatically() -> None:
-    """READY нормативы автоматически входят в пользовательский snapshot."""
+    """READY нормативы автоматически входят в normative snapshot."""
     catalog = CATALOG_JS.read_text(
         encoding="utf-8",
     )
@@ -111,20 +115,22 @@ def test_new_ready_normatives_are_selected_automatically() -> None:
     assert selection_position > assignment_position
 
 
-def test_tz_and_user_packages_have_safe_scaffolding() -> None:
-    """ТЗ недоступно, а packages имеют отдельный будущий DOM API."""
+def test_tz_disabled_and_user_packages_are_live() -> None:
+    """ТЗ остаётся disabled, package block получает рабочий DOM API."""
     html = INDEX_HTML.read_text(
         encoding="utf-8",
     )
 
     required = (
         "data-specification-placeholder",
-        'aria-disabled="true"',
         "data-user-packages-block",
         "data-user-packages-select-all",
         "data-user-packages-clear",
         "data-user-package-create",
-        "data-user-packages-placeholder",
+        "data-user-package-upload-zone",
+        "data-user-package-file-input",
+        "data-user-packages-tree",
+        "data-user-packages-status",
     )
 
     missing = [marker for marker in required if marker not in html]
@@ -132,6 +138,8 @@ def test_tz_and_user_packages_have_safe_scaffolding() -> None:
     assert not missing, "\n".join(
         missing,
     )
+
+    assert "data-user-packages-placeholder" not in html
 
     specification_start = html.find("data-specification-placeholder")
 
@@ -142,11 +150,21 @@ def test_tz_and_user_packages_have_safe_scaffolding() -> None:
 
     specification_markup = html[specification_start:specification_end]
 
+    assert 'aria-disabled="true"' in specification_markup
+
     assert "disabled" in specification_markup
+
+    package_controller = USER_PACKAGES_JS.read_text(
+        encoding="utf-8",
+    )
+
+    assert '"normative-sidebar__checkbox"' in package_controller
+
+    assert '"normative-sidebar__checkbox is-hidden"' not in package_controller
 
 
 def test_frontend_static_assets_are_not_mixed_between_deploys() -> None:
-    """HTML/JS/CSS не должны оставаться stale после нового deploy."""
+    """HTML/JS/CSS не должны оставаться stale после deploy."""
     content = NGINX_CONFIG.read_text(
         encoding="utf-8",
     )

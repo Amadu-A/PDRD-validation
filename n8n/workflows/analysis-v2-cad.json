@@ -12,7 +12,10 @@
       "name": "POST /analysis/v2/cad",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [-1200, 0],
+      "position": [
+        -1200,
+        0
+      ],
       "webhookId": "ad01c934-a691-45da-8c3a-b986f3e70ce1"
     },
     {
@@ -38,7 +41,10 @@
       "name": "Document Extract CAD",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-980, 0]
+      "position": [
+        -980,
+        0
+      ]
     },
     {
       "parameters": {
@@ -48,7 +54,10 @@
       "name": "Prepare CAD Context",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-760, 0]
+      "position": [
+        -760,
+        0
+      ]
     },
     {
       "parameters": {
@@ -66,7 +75,10 @@
       "name": "Understand CAD",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-540, 0]
+      "position": [
+        -540,
+        0
+      ]
     },
     {
       "parameters": {
@@ -84,7 +96,10 @@
       "name": "Build Normative Queries",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-320, 0]
+      "position": [
+        -320,
+        0
+      ]
     },
     {
       "parameters": {
@@ -102,7 +117,31 @@
       "name": "Search Normative",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-100, 0]
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/search/user-packages",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ queries: $('Build Normative Queries').item.json.queries ?? [], ...($('POST /analysis/v2/cad').first().json.body?.normative_section_id ? { section_id: $('POST /analysis/v2/cad').first().json.body.normative_section_id, document_ids: JSON.parse($('POST /analysis/v2/cad').first().json.body?.user_package_document_ids ?? '[]') } : {}) }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "04f10d88-1e56-4e10-b231-7446ec352001",
+      "name": "Search User Packages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        120,
+        0
+      ]
     },
     {
       "parameters": {
@@ -111,7 +150,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_number: 1, extracted_text: $('Prepare CAD Context').item.json.page.text, page_facts: $('Understand CAD').item.json.facts, normative_sources: $json.sources ?? [], image_base64: $('Prepare CAD Context').item.json.page.image_base64, normative_system_prompt: $('POST /analysis/v2/cad').first().json.body?.normative_system_prompt ?? null }) }}",
+        "body": "={{ JSON.stringify({ page_number: 1, extracted_text: $('Prepare CAD Context').item.json.page.text, page_facts: $('Understand CAD').item.json.facts, normative_sources: $('Search Normative').item.json.sources ?? [], user_package_sources: $json.sources ?? [], image_base64: $('Prepare CAD Context').item.json.page.image_base64, normative_system_prompt: $('POST /analysis/v2/cad').first().json.body?.normative_system_prompt ?? null }) }}",
         "options": {
           "timeout": 1800000
         }
@@ -120,7 +159,10 @@
       "name": "Check Norms",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [120, 0]
+      "position": [
+        340,
+        0
+      ]
     },
     {
       "parameters": {
@@ -131,7 +173,10 @@
       "name": "Prepare Experience Queries",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [340, 0]
+      "position": [
+        560,
+        0
+      ]
     },
     {
       "parameters": {
@@ -149,7 +194,10 @@
       "name": "Search Experience",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [560, 0]
+      "position": [
+        780,
+        0
+      ]
     },
     {
       "parameters": {
@@ -160,7 +208,10 @@
       "name": "Build Experience Map",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [780, 0]
+      "position": [
+        1000,
+        0
+      ]
     },
     {
       "parameters": {
@@ -178,54 +229,159 @@
       "name": "Finalize Findings",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1000, 0]
+      "position": [
+        1220,
+        0
+      ]
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const prepared = $('Prepare CAD Context').item.json;\nconst understanding = $('Understand CAD').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst normative = $('Search Normative').item.json;\nconst check = $('Check Norms').item.json;\nconst finalization = $json;\nconst findings = Array.isArray(finalization.findings)\n  ? finalization.findings\n  : [];\n\nreturn {\n  json: {\n    status: 'completed',\n    source_mode: 'cad_only',\n    file_name: prepared.cad.original_file_name,\n    analyzed_pages: 1,\n    findings_count: findings.length,\n    summary:\n      findings.length > 0\n        ? `Найдено замечаний: ${findings.length}.`\n        : 'Замечания по CAD-чертежу не найдены.',\n    findings,\n    cad: prepared.cad,\n    page: {\n      page_number: 1,\n      heuristic_page_type: 'cad',\n      facts: understanding.facts ?? {},\n      understanding_metrics: understanding.metrics ?? {},\n      normative_queries: queries.queries ?? [],\n      normative_sources: normative.sources ?? [],\n      normative_embedding_model: normative.embedding_model ?? '',\n      normative_check: {\n        summary: check.summary ?? '',\n        findings: check.findings ?? [],\n        metrics: check.metrics ?? {},\n      },\n      finalization: {\n        summary: finalization.summary ?? '',\n        metrics: finalization.metrics ?? {},\n      },\n    },\n    pipeline: [\n      'cad_extract',\n      'page_understanding',\n      'normative_queries',\n      'normative_search',\n      'normative_check',\n      'experience_search',\n      'finalization',\n    ],\n    limitations: [\n      'В этом workflow пока не подключён контекст пояснительной записки.',\n      'Этот workflow обрабатывает CAD отдельно от PDF.',\n      'Совмещённый PDF+CAD pipeline будет добавлен отдельным шагом.',\n    ],\n  },\n};"
+        "jsCode": "const prepared = $('Prepare CAD Context').item.json;\nconst understanding = $('Understand CAD').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst normative = $('Search Normative').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst finalization = $json;\nconst findings = Array.isArray(finalization.findings)\n  ? finalization.findings\n  : [];\n\nreturn {\n  json: {\n    status: 'completed',\n    source_mode: 'cad_only',\n    file_name: prepared.cad.original_file_name,\n    analyzed_pages: 1,\n    findings_count: findings.length,\n    summary:\n      findings.length > 0\n        ? `Найдено замечаний: ${findings.length}.`\n        : 'Замечания по CAD-чертежу не найдены.',\n    findings,\n    cad: prepared.cad,\n    page: {\n      page_number: 1,\n      heuristic_page_type: 'cad',\n      facts: understanding.facts ?? {},\n      understanding_metrics: understanding.metrics ?? {},\n      normative_queries: queries.queries ?? [],\n      normative_sources: normative.sources ?? [],\n      user_package_sources: userPackages.sources ?? [],\n      normative_embedding_model: normative.embedding_model ?? '',\n      user_package_embedding_model: userPackages.embedding_model ?? '',\n      normative_check: {\n        summary: check.summary ?? '',\n        findings: check.findings ?? [],\n        metrics: check.metrics ?? {},\n      },\n      finalization: {\n        summary: finalization.summary ?? '',\n        metrics: finalization.metrics ?? {},\n      },\n    },\n    pipeline: [\n      'cad_extract',\n      'page_understanding',\n      'normative_queries',\n      'normative_search',\n      'user_package_search',\n      'normative_check',\n      'experience_search',\n      'finalization',\n    ],\n    limitations: [\n      'Пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.',\n      'В CAD-only workflow не используется контекст пояснительной записки.',\n    ],\n  },\n};"
       },
       "id": "fd6e589b-c751-471a-bfc2-e47e710c7c6e",
       "name": "Build CAD Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1220, 0]
+      "position": [
+        1440,
+        0
+      ]
     }
   ],
   "pinData": {},
   "connections": {
     "POST /analysis/v2/cad": {
-      "main": [[{"node":"Document Extract CAD","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Document Extract CAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Document Extract CAD": {
-      "main": [[{"node":"Prepare CAD Context","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Prepare CAD Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Prepare CAD Context": {
-      "main": [[{"node":"Understand CAD","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Understand CAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Understand CAD": {
-      "main": [[{"node":"Build Normative Queries","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Build Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Normative Queries": {
-      "main": [[{"node":"Search Normative","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Search Normative",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Search Normative": {
-      "main": [[{"node":"Check Norms","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Search User Packages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search User Packages": {
+      "main": [
+        [
+          {
+            "node": "Check Norms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Check Norms": {
-      "main": [[{"node":"Prepare Experience Queries","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Prepare Experience Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Prepare Experience Queries": {
-      "main": [[{"node":"Search Experience","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Search Experience",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Search Experience": {
-      "main": [[{"node":"Build Experience Map","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Build Experience Map",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Experience Map": {
-      "main": [[{"node":"Finalize Findings","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Finalize Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Finalize Findings": {
-      "main": [[{"node":"Build CAD Result","type":"main","index":0}]]
+      "main": [
+        [
+          {
+            "node": "Build CAD Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,

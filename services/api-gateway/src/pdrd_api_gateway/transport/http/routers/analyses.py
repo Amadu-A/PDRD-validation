@@ -22,6 +22,9 @@ from fastapi import (
 from pdrd_api_gateway.application.ports.normative_catalog import (
     NormativeCatalogReadError,
 )
+from pdrd_api_gateway.application.ports.normative_catalog_management import (
+    NormativeCatalogUnavailableError,
+)
 from pdrd_api_gateway.application.use_cases.get_analysis_job import (
     GetAnalysisJob,
 )
@@ -34,6 +37,7 @@ from pdrd_api_gateway.application.use_cases.get_analysis_result import (
 from pdrd_api_gateway.application.use_cases.resolve_normative_snapshot import (
     InvalidNormativeSelectionError,
     NormativeSelectionConflictError,
+    UserPackageReaderNotConfiguredError,
 )
 from pdrd_api_gateway.application.use_cases.submit_analysis import (
     EmptyAnalysisFileError,
@@ -130,7 +134,7 @@ async def read_upload(
     ):
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail="Размер загруженного файла превышает допустимый предел.",
+            detail=("Размер загруженного файла превышает допустимый предел."),
         )
 
     return (
@@ -139,8 +143,10 @@ async def read_upload(
     )
 
 
-def parse_normative_document_ids(
+def _parse_document_ids(
     raw_value: str | None,
+    *,
+    field_name: str,
 ) -> (
     tuple[
         UUID,
@@ -160,7 +166,7 @@ def parse_normative_document_ids(
     except json.JSONDecodeError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="normative_document_ids должен быть JSON array UUID.",
+            detail=(f"{field_name} должен быть JSON array UUID."),
         ) from error
 
     if not isinstance(
@@ -169,7 +175,7 @@ def parse_normative_document_ids(
     ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="normative_document_ids должен быть JSON array.",
+            detail=f"{field_name} должен быть JSON array.",
         )
 
     result: list[UUID] = []
@@ -181,7 +187,7 @@ def parse_normative_document_ids(
         ):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Каждый normative_document_id должен быть строкой UUID.",
+                detail=(f"Каждый элемент {field_name} должен быть строкой UUID."),
             )
 
         try:
@@ -194,11 +200,43 @@ def parse_normative_document_ids(
         except ValueError as error:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"Некорректный normative_document_id: {value}.",
+                detail=(f"Некорректный UUID в {field_name}: {value}."),
             ) from error
 
     return tuple(
         result,
+    )
+
+
+def parse_normative_document_ids(
+    raw_value: str | None,
+) -> (
+    tuple[
+        UUID,
+        ...,
+    ]
+    | None
+):
+    """Разбирает normative_document_ids."""
+    return _parse_document_ids(
+        raw_value,
+        field_name="normative_document_ids",
+    )
+
+
+def parse_user_package_document_ids(
+    raw_value: str | None,
+) -> (
+    tuple[
+        UUID,
+        ...,
+    ]
+    | None
+):
+    """Разбирает user_package_document_ids."""
+    return _parse_document_ids(
+        raw_value,
+        field_name="user_package_document_ids",
     )
 
 
@@ -246,6 +284,10 @@ async def create_analysis(
         str | None,
         Form(),
     ] = None,
+    user_package_document_ids: Annotated[
+        str | None,
+        Form(),
+    ] = None,
     normative_prompt_override_enabled: Annotated[
         bool,
         Form(),
@@ -272,6 +314,10 @@ async def create_analysis(
         normative_document_ids,
     )
 
+    parsed_user_package_document_ids = parse_user_package_document_ids(
+        user_package_document_ids,
+    )
+
     use_case = require_submit_analysis(
         container,
     )
@@ -287,9 +333,10 @@ async def create_analysis(
             note_start_page=note_start_page,
             note_end_page=note_end_page,
             normative_section_id=normative_section_id,
-            normative_document_ids=parsed_normative_document_ids,
+            normative_document_ids=(parsed_normative_document_ids),
+            user_package_document_ids=(parsed_user_package_document_ids),
             normative_prompt_override_enabled=(normative_prompt_override_enabled),
-            normative_prompt_override=normative_prompt_override,
+            normative_prompt_override=(normative_prompt_override),
         )
 
     except EmptyAnalysisFileError as error:
@@ -322,7 +369,9 @@ async def create_analysis(
 
     except (
         NormativeCatalogReadError,
+        NormativeCatalogUnavailableError,
         NormativeSnapshotResolverNotConfiguredError,
+        UserPackageReaderNotConfiguredError,
     ) as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -347,6 +396,13 @@ async def create_analysis(
         normative_document_ids=(
             list(
                 snapshot.document_ids,
+            )
+            if snapshot is not None
+            else []
+        ),
+        user_package_document_ids=(
+            list(
+                snapshot.user_package_document_ids,
             )
             if snapshot is not None
             else []
@@ -452,6 +508,13 @@ async def get_analysis(
         normative_document_ids=(
             list(
                 snapshot.document_ids,
+            )
+            if snapshot is not None
+            else []
+        ),
+        user_package_document_ids=(
+            list(
+                snapshot.user_package_document_ids,
             )
             if snapshot is not None
             else []

@@ -4,8 +4,8 @@
   Главная страница PDRD Validation.
 
   Browser взаимодействует только с публичным API Gateway.
-  Normative sidebar управляет разделами, нормативными документами,
-  пользовательскими пакетами, prompt и selection.
+  Sidebar управляет разделами, нормативами, пользовательскими
+  пакетами, prompt и selection.
 -->
 
 <!doctype html>
@@ -250,20 +250,21 @@
             </h3>
 
             <p class="normative-sidebar__block-hint">
-              Дополнительные документы выбранного раздела.
+              Выбранные документы используются как дополнительный
+              пользовательский контекст, а не как нормативное основание.
             </p>
           </div>
 
           <div
             class="normative-sidebar__utility-actions"
-            aria-label="Выбор пользовательских пакетов"
+            aria-label="Выбор пользовательских документов"
           >
             <button
               class="normative-sidebar__utility-button"
               data-user-packages-select-all
               type="button"
-              title="Выбрать все пакеты"
-              aria-label="Выбрать все пакеты"
+              title="Выбрать все готовые документы"
+              aria-label="Выбрать все готовые документы"
               disabled
             >
               <svg
@@ -290,8 +291,8 @@
               class="normative-sidebar__utility-button"
               data-user-packages-clear
               type="button"
-              title="Снять выбор со всех пакетов"
-              aria-label="Снять выбор со всех пакетов"
+              title="Снять выбор со всех документов"
+              aria-label="Снять выбор со всех документов"
               disabled
             >
               <svg
@@ -324,15 +325,51 @@
         </div>
 
         <div
-          class="normative-sidebar__packages-placeholder"
-          data-user-packages-placeholder
-          aria-disabled="true"
+          class="normative-sidebar__upload"
+          data-user-package-upload-zone
+          data-disabled="true"
+          role="button"
+          tabindex="-1"
+          aria-label="Загрузить пользовательские документы"
         >
-          <p class="normative-sidebar__empty">
-            Пользовательские пакеты будут подключены
-            следующим этапом.
-          </p>
+          <strong class="normative-sidebar__upload-title">
+            Добавить документ
+          </strong>
+
+          <span class="normative-sidebar__upload-text">
+            PDF, DOC или DOCX.
+          </span>
+
+          <span class="normative-sidebar__upload-text">
+            Можно загрузить сюда или непосредственно в пакет.
+          </span>
+
+          <input
+            class="normative-sidebar__file-input"
+            data-user-package-file-input
+            type="file"
+            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            multiple
+            disabled
+            tabindex="-1"
+          >
         </div>
+
+        <div
+          class="normative-sidebar__tree normative-sidebar__packages-tree"
+          data-user-packages-tree
+          aria-label="Пользовательские пакеты документов"
+        ></div>
+
+        <p
+          class="normative-sidebar__status"
+          data-user-packages-status
+          data-state="normal"
+          role="status"
+          aria-live="polite"
+        >
+          Выберите нормативный раздел.
+        </p>
       </section>
 
       <section
