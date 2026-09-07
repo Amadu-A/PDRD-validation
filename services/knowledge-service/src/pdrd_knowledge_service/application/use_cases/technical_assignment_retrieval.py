@@ -44,6 +44,9 @@ from pdrd_knowledge_service.domain.search import (
 from pdrd_knowledge_service.domain.technical_assignment import (
     TechnicalAssignmentIndexStatus,
 )
+from pdrd_knowledge_service.domain.technical_assignment_indexing import (
+    canonicalize_normative_reference,
+)
 from pdrd_knowledge_service.domain.technical_assignment_retrieval import (
     NormativeReferenceResolution,
     NormativeReferenceResolutionStatus,
@@ -121,7 +124,7 @@ class SearchTechnicalAssignment:
         inputs = tuple(
             MultimodalEmbeddingInput(
                 text=query,
-                instruction=(TECHNICAL_ASSIGNMENT_QUERY_INSTRUCTION),
+                instruction=TECHNICAL_ASSIGNMENT_QUERY_INSTRUCTION,
             )
             for query in normalized_queries
         )
@@ -473,7 +476,7 @@ class SearchTechnicalAssignmentGuidedNormative:
 
         resolutions = await self._resolve_references(
             section_id=section_id,
-            normative_document_ids=(normative_document_ids),
+            normative_document_ids=normative_document_ids,
             references=references,
         )
 
@@ -495,7 +498,7 @@ class SearchTechnicalAssignmentGuidedNormative:
                 document_ids=list(
                     targeted_document_ids,
                 ),
-                expected_area=(CatalogArea.NORMATIVE),
+                expected_area=CatalogArea.NORMATIVE,
                 source_prefix="TN",
                 allow_unscoped=False,
             )
@@ -508,8 +511,8 @@ class SearchTechnicalAssignmentGuidedNormative:
             )
 
         normative_sources = self._merge_normative_sources(
-            targeted=(targeted_normative_result.sources),
-            general=(general_normative_result.sources),
+            targeted=targeted_normative_result.sources,
+            general=general_normative_result.sources,
         )
 
         diagnostics = self._build_diagnostics(
@@ -525,14 +528,14 @@ class SearchTechnicalAssignmentGuidedNormative:
         )
 
         return TechnicalAssignmentGuidedSearchResult(
-            queries=(technical_assignment_result.queries),
+            queries=technical_assignment_result.queries,
             technical_assignment_sources=(technical_assignment_result.sources),
             reference_resolutions=resolutions,
             targeted_normative_sources=(targeted_normative_result.sources),
             general_normative_sources=(general_normative_result.sources),
             normative_sources=normative_sources,
             diagnostics=diagnostics,
-            conflict_candidates=(conflict_candidates),
+            conflict_candidates=conflict_candidates,
             technical_assignment_embedding_model=(
                 technical_assignment_result.embedding_model
             ),
@@ -630,7 +633,7 @@ class SearchTechnicalAssignmentGuidedNormative:
 
         return NormativeReferenceResolution(
             reference=reference,
-            normalized_reference=(normalized_reference),
+            normalized_reference=normalized_reference,
             status=status,
             document_ids=tuple(
                 str(
@@ -645,13 +648,10 @@ class SearchTechnicalAssignmentGuidedNormative:
     def _normalize_reference(
         value: str,
     ) -> str:
-        """Приводит имя N/reference к comparison key."""
-        normalized = value.upper().replace(
-            "Ё",
-            "Е",
+        """Приводит N/reference к language-independent comparison key."""
+        return canonicalize_normative_reference(
+            value,
         )
-
-        return "".join(character for character in normalized if character.isalnum())
 
     @staticmethod
     def _collect_references(
@@ -707,7 +707,7 @@ class SearchTechnicalAssignmentGuidedNormative:
         seen: set[UUID] = set()
 
         for resolution in resolutions:
-            if resolution.status is not (NormativeReferenceResolutionStatus.RESOLVED):
+            if resolution.status is not NormativeReferenceResolutionStatus.RESOLVED:
                 continue
 
             for document_id in resolution.document_ids:
@@ -747,9 +747,9 @@ class SearchTechnicalAssignmentGuidedNormative:
     ]:
         """Строит N queries непосредственно из требований T."""
         resolved_by_key = {
-            resolution.normalized_reference: (resolution)
+            resolution.normalized_reference: resolution
             for resolution in resolutions
-            if (resolution.status is (NormativeReferenceResolutionStatus.RESOLVED))
+            if (resolution.status is NormativeReferenceResolutionStatus.RESOLVED)
         }
 
         result: list[str] = []
@@ -887,35 +887,35 @@ class SearchTechnicalAssignmentGuidedNormative:
         if not technical_assignment_sources:
             diagnostics.append(
                 RetrievalDiagnostic(
-                    code=("technical_assignment_no_hits"),
+                    code="technical_assignment_no_hits",
                     message=("По запросам не найдено релевантных страниц ТЗ."),
                 )
             )
 
         for resolution in resolutions:
-            if resolution.status is (NormativeReferenceResolutionStatus.MISSING):
+            if resolution.status is NormativeReferenceResolutionStatus.MISSING:
                 diagnostics.append(
                     RetrievalDiagnostic(
-                        code=("missing_referenced_normative"),
+                        code="missing_referenced_normative",
                         message=(
                             "ТЗ ссылается на нормативный "
                             "документ, которого нет "
                             "в immutable N snapshot."
                         ),
-                        reference=(resolution.reference),
+                        reference=resolution.reference,
                     )
                 )
 
-            elif resolution.status is (NormativeReferenceResolutionStatus.AMBIGUOUS):
+            elif resolution.status is NormativeReferenceResolutionStatus.AMBIGUOUS:
                 diagnostics.append(
                     RetrievalDiagnostic(
-                        code=("ambiguous_referenced_normative"),
+                        code="ambiguous_referenced_normative",
                         message=(
                             "Ссылка ТЗ соответствует "
                             "нескольким нормативным "
                             "документам snapshot."
                         ),
-                        reference=(resolution.reference),
+                        reference=resolution.reference,
                     )
                 )
 
@@ -926,7 +926,7 @@ class SearchTechnicalAssignmentGuidedNormative:
         }
 
         for resolution in resolutions:
-            if resolution.status is not (NormativeReferenceResolutionStatus.RESOLVED):
+            if resolution.status is not NormativeReferenceResolutionStatus.RESOLVED:
                 continue
 
             for document_id in resolution.document_ids:
@@ -935,14 +935,14 @@ class SearchTechnicalAssignmentGuidedNormative:
 
                 diagnostics.append(
                     RetrievalDiagnostic(
-                        code=("referenced_normative_no_hit"),
+                        code="referenced_normative_no_hit",
                         message=(
                             "Норматив из ссылки ТЗ "
                             "разрешён, но targeted "
                             "vector search не вернул "
                             "релевантный fragment."
                         ),
-                        reference=(resolution.reference),
+                        reference=resolution.reference,
                     )
                 )
 
@@ -972,9 +972,9 @@ class SearchTechnicalAssignmentGuidedNormative:
     ]:
         """Готовит T/N pairs для semantic validation на TZ-5."""
         resolved_by_key = {
-            resolution.normalized_reference: (resolution)
+            resolution.normalized_reference: resolution
             for resolution in resolutions
-            if (resolution.status is (NormativeReferenceResolutionStatus.RESOLVED))
+            if (resolution.status is NormativeReferenceResolutionStatus.RESOLVED)
         }
 
         normative_by_document: dict[
@@ -1037,7 +1037,7 @@ class SearchTechnicalAssignmentGuidedNormative:
 
             candidates.append(
                 TechnicalAssignmentConflictCandidate(
-                    technical_assignment_source_id=(source.source_id),
+                    technical_assignment_source_id=source.source_id,
                     normative_source_ids=tuple(
                         normative_source_ids,
                     ),
