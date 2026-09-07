@@ -4,8 +4,8 @@
  * Строит безопасное DOM-представление результата анализа.
  *
  * Пользовательские и модельные строки вставляются только через textContent.
- * Нормативные и пользовательские citations открывают managed PDF
- * или Word PDF-preview на физической странице из Knowledge Service.
+ * N, T и U citations открывают managed PDF или PDF-preview
+ * на физической странице источника.
  */
 
 import {
@@ -224,7 +224,9 @@ function uniqueSources(
       }
 
       const key = [
-        source.document_id || "",
+        source.document_id
+          || source.technical_assignment_id
+          || "",
         source.page ?? "",
         source.point_id || "",
         source.source_file || "",
@@ -283,6 +285,18 @@ function normativeSources(
 }
 
 
+function technicalAssignmentSources(
+  finding,
+) {
+  return uniqueSources(
+    preferredSourceArray(
+      finding.technical_assignment_basis_sources,
+      finding.technical_assignment_sources,
+    ),
+  );
+}
+
+
 function userPackageSources(
   finding,
 ) {
@@ -320,6 +334,35 @@ function managedCitationUrl(
   return (
     pathPrefix
     + `${encodeURIComponent(documentId)}`
+    + `/content#page=${page}`
+  );
+}
+
+
+function technicalAssignmentCitationUrl(
+  source,
+) {
+  const technicalAssignmentId = (
+    typeof source.technical_assignment_id === "string"
+      ? source.technical_assignment_id.trim()
+      : ""
+  );
+
+  const page = normalizePage(
+    source.page
+    ?? source.page_number,
+  );
+
+  if (
+    !technicalAssignmentId
+    || page === null
+  ) {
+    return null;
+  }
+
+  return (
+    "/api/v1/normative/technical-assignments/"
+    + `${encodeURIComponent(technicalAssignmentId)}`
     + `/content#page=${page}`
   );
 }
@@ -370,12 +413,8 @@ function createManagedCitation(
   );
 
   link.href = url;
-
   link.target = "_blank";
-
-  link.rel = (
-    "noopener noreferrer"
-  );
+  link.rel = "noopener noreferrer";
 
   if (datasetName === "normativeCitation") {
     link.dataset.normativeCitation = "";
@@ -385,10 +424,7 @@ function createManagedCitation(
     link.dataset.userPackageCitation = "";
   }
 
-  link.dataset.documentId = (
-    source.document_id
-  );
-
+  link.dataset.documentId = source.document_id;
   link.dataset.page = String(
     page,
   );
@@ -413,6 +449,63 @@ function createNormativeCitation(
       titlePrefix: "Открыть нормативный документ",
     },
   );
+}
+
+
+function createTechnicalAssignmentCitation(
+  source,
+) {
+  const fileName = sourceFileName(
+    source,
+    "Техническое задание",
+  );
+
+  const page = normalizePage(
+    source.page
+    ?? source.page_number,
+  );
+
+  const label = (
+    page === null
+      ? fileName
+      : `${fileName}, стр. ${page}`
+  );
+
+  const url = technicalAssignmentCitationUrl(
+    source,
+  );
+
+  if (!url) {
+    return createElement(
+      "span",
+      "analysis-result__source-text",
+      label,
+    );
+  }
+
+  const link = createElement(
+    "a",
+    "analysis-result__source-link",
+    label,
+  );
+
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+
+  link.dataset.technicalAssignmentCitation = "";
+  link.dataset.technicalAssignmentId = (
+    source.technical_assignment_id
+  );
+  link.dataset.page = String(
+    page,
+  );
+
+  link.title = (
+    `Открыть техническое задание на странице ${page}`
+  );
+
+  return link;
 }
 
 
@@ -502,6 +595,21 @@ function appendNormativeSources(
       finding,
     ),
     createNormativeCitation,
+  );
+}
+
+
+function appendTechnicalAssignmentSources(
+  finding,
+  parent,
+) {
+  appendSourceList(
+    parent,
+    "Требования технического задания",
+    technicalAssignmentSources(
+      finding,
+    ),
+    createTechnicalAssignmentCitation,
   );
 }
 
@@ -704,6 +812,11 @@ function appendFinding(
   );
 
   appendNormativeSources(
+    finding,
+    article,
+  );
+
+  appendTechnicalAssignmentSources(
     finding,
     article,
   );

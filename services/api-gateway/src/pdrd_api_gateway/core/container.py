@@ -10,6 +10,9 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
+from pdrd_api_gateway.application.ports.technical_assignment_content import (
+    TechnicalAssignmentContentReader,
+)
 from pdrd_api_gateway.application.use_cases.check_readiness import (
     CheckReadiness,
 )
@@ -54,6 +57,9 @@ from pdrd_api_gateway.infrastructure.knowledge.normative_catalog import (
 from pdrd_api_gateway.infrastructure.knowledge.normative_catalog_management import (
     HttpNormativeCatalogManager,
 )
+from pdrd_api_gateway.infrastructure.knowledge.technical_assignment_content import (
+    HttpTechnicalAssignmentContentReader,
+)
 from pdrd_api_gateway.infrastructure.knowledge.user_package_catalog import (
     HttpUserPackageCatalogManager,
 )
@@ -92,6 +98,8 @@ class ApplicationContainer:
     normative_catalog: NormativeCatalogFacade | None = None
 
     user_package_catalog: UserPackageCatalogFacade | None = None
+
+    technical_assignment_content_reader: TechnicalAssignmentContentReader | None = None
 
     async def close(
         self,
@@ -171,6 +179,10 @@ def build_container() -> ApplicationContainer:
         manager=user_package_catalog_manager,
     )
 
+    technical_assignment_content_reader = HttpTechnicalAssignmentContentReader(
+        settings=settings.knowledge_service,
+    )
+
     resolve_normative_snapshot = ResolveNormativeSnapshot(
         catalog_reader=normative_catalog_reader,
         user_package_reader=user_package_catalog_manager,
@@ -200,4 +212,5 @@ def build_container() -> ApplicationContainer:
         submit_analysis=submit_analysis,
         normative_catalog=normative_catalog,
         user_package_catalog=user_package_catalog,
+        technical_assignment_content_reader=(technical_assignment_content_reader),
     )

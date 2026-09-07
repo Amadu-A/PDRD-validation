@@ -15,6 +15,8 @@ from pdrd_analysis_service.domain.analysis import (
     FindingDraft,
     NormativeSource,
     PageFacts,
+    TechnicalAssignmentConflictCandidate,
+    TechnicalAssignmentSource,
     UserPackageSource,
 )
 
@@ -68,13 +70,11 @@ class NormativeSourcePayload(BaseModel):
 
     source_id: str
     point_id: str = ""
-
     score: float
 
     document_id: str | None = None
     section_id: str | None = None
     category_id: str | None = None
-
     source_sha256: str | None = None
 
     source_file: str | None = None
@@ -105,6 +105,80 @@ class NormativeSourcePayload(BaseModel):
         )
 
 
+class TechnicalAssignmentSourcePayload(BaseModel):
+    """T-source от Knowledge Service."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    source_id: str
+    point_id: str = ""
+    score: float
+
+    technical_assignment_id: str | None = None
+    analysis_document_id: str | None = None
+    section_id: str | None = None
+
+    source_sha256: str | None = None
+    source_file: str | None = None
+
+    page: int | str | None = None
+    text: str
+
+    normative_refs: list[str] = Field(
+        default_factory=list,
+    )
+
+    def to_domain(
+        self,
+    ) -> TechnicalAssignmentSource:
+        """Преобразует T-source в Domain."""
+        return TechnicalAssignmentSource(
+            source_id=self.source_id,
+            point_id=self.point_id,
+            score=self.score,
+            technical_assignment_id=self.technical_assignment_id,
+            analysis_document_id=self.analysis_document_id,
+            section_id=self.section_id,
+            source_sha256=self.source_sha256,
+            source_file=self.source_file,
+            page=self.page,
+            text=self.text,
+            normative_refs=tuple(
+                self.normative_refs,
+            ),
+        )
+
+
+class TechnicalAssignmentConflictCandidatePayload(
+    BaseModel,
+):
+    """T/N candidate для semantic validation."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    technical_assignment_source_id: str
+
+    normative_source_ids: list[str]
+
+    reason: str
+
+    def to_domain(
+        self,
+    ) -> TechnicalAssignmentConflictCandidate:
+        """Преобразует candidate в Domain."""
+        return TechnicalAssignmentConflictCandidate(
+            technical_assignment_source_id=(self.technical_assignment_source_id),
+            normative_source_ids=tuple(
+                self.normative_source_ids,
+            ),
+            reason=self.reason,
+        )
+
+
 class UserPackageSourcePayload(BaseModel):
     """User-package source от Knowledge Service."""
 
@@ -114,13 +188,11 @@ class UserPackageSourcePayload(BaseModel):
 
     source_id: str
     point_id: str = ""
-
     score: float
 
     document_id: str | None = None
     section_id: str | None = None
     category_id: str | None = None
-
     source_sha256: str | None = None
 
     source_file: str | None = None
@@ -218,12 +290,18 @@ class FindingDraftPayload(BaseModel):
     confidence: float
 
     normative_source_ids: list[str]
-
     basis: str
-
     basis_sources: list[NormativeSourcePayload]
 
     experience_query: str
+
+    technical_assignment_source_ids: list[str] = Field(
+        default_factory=list,
+    )
+
+    technical_assignment_basis_sources: list[TechnicalAssignmentSourcePayload] = Field(
+        default_factory=list,
+    )
 
     user_package_source_ids: list[str] = Field(
         default_factory=list,
@@ -254,6 +332,12 @@ class FindingDraftPayload(BaseModel):
             basis=self.basis,
             basis_sources=tuple(source.to_domain() for source in self.basis_sources),
             experience_query=self.experience_query,
+            technical_assignment_source_ids=tuple(
+                self.technical_assignment_source_ids,
+            ),
+            technical_assignment_basis_sources=tuple(
+                source.to_domain() for source in self.technical_assignment_basis_sources
+            ),
             user_package_source_ids=tuple(
                 self.user_package_source_ids,
             ),
@@ -275,7 +359,6 @@ class UnderstandPageRequest(BaseModel):
     )
 
     heuristic_page_type: str
-
     extracted_text: str
 
     image_base64: str = Field(
@@ -317,7 +400,7 @@ class NormativeQueriesResponse(BaseModel):
 
 
 class CheckNormsRequest(BaseModel):
-    """Запрос проверки требований."""
+    """Запрос проверки N/T/U требований."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -332,6 +415,14 @@ class CheckNormsRequest(BaseModel):
     page_facts: PageFactsPayload
 
     normative_sources: list[NormativeSourcePayload]
+
+    technical_assignment_sources: list[TechnicalAssignmentSourcePayload] = Field(
+        default_factory=list,
+    )
+
+    conflict_candidates: list[TechnicalAssignmentConflictCandidatePayload] = Field(
+        default_factory=list,
+    )
 
     user_package_sources: list[UserPackageSourcePayload] = Field(
         default_factory=list,
@@ -395,6 +486,10 @@ class FinalFindingPayload(BaseModel):
     basis_sources: list[NormativeSourcePayload]
 
     experience_sources: list[ExperienceSourcePayload]
+
+    technical_assignment_basis_sources: list[TechnicalAssignmentSourcePayload] = Field(
+        default_factory=list,
+    )
 
     user_package_basis_sources: list[UserPackageSourcePayload] = Field(
         default_factory=list,

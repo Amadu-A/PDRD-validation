@@ -127,12 +127,47 @@ class NormativeSource:
     text: str
 
     document_id: str | None = None
-
     section_id: str | None = None
-
     category_id: str | None = None
-
     source_sha256: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TechnicalAssignmentSource:
+    """Страница ТЗ, найденная multimodal retrieval."""
+
+    source_id: str
+    point_id: str
+    score: float
+
+    technical_assignment_id: str | None
+    analysis_document_id: str | None
+    section_id: str | None
+
+    source_sha256: str | None
+    source_file: str | None
+
+    page: int | str | None
+    text: str
+
+    normative_refs: tuple[
+        str,
+        ...,
+    ] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class TechnicalAssignmentConflictCandidate:
+    """T/N pair, которую должен семантически проверить VLM."""
+
+    technical_assignment_source_id: str
+
+    normative_source_ids: tuple[
+        str,
+        ...,
+    ]
+
+    reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,11 +187,8 @@ class UserPackageSource:
     text: str
 
     document_id: str | None = None
-
     section_id: str | None = None
-
     category_id: str | None = None
-
     source_sha256: str | None = None
 
 
@@ -215,6 +247,16 @@ class FindingDraft:
 
     experience_query: str
 
+    technical_assignment_source_ids: tuple[
+        str,
+        ...,
+    ] = ()
+
+    technical_assignment_basis_sources: tuple[
+        TechnicalAssignmentSource,
+        ...,
+    ] = ()
+
     user_package_source_ids: tuple[
         str,
         ...,
@@ -256,6 +298,11 @@ class FinalFinding:
         ExperienceSource,
         ...,
     ]
+
+    technical_assignment_basis_sources: tuple[
+        TechnicalAssignmentSource,
+        ...,
+    ] = ()
 
     user_package_basis_sources: tuple[
         UserPackageSource,

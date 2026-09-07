@@ -199,6 +199,11 @@ class N8nAnalysisOrchestrator:
 
             data["normative_system_prompt"] = snapshot.system_prompt
 
+            if snapshot.technical_assignment is not None:
+                data["technical_assignment_id"] = str(
+                    snapshot.technical_assignment.technical_assignment_id,
+                )
+
         return data
 
     def _resolve_endpoint(

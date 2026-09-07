@@ -103,7 +103,7 @@ class FinalizeFindings:
                 generation = await self.vision_model.generate_json(
                     prompt=build_finalization_prompt(
                         findings=batch,
-                        experience_by_finding=(eligible_experience),
+                        experience_by_finding=eligible_experience,
                         experience_context_limit=(self.experience_context_limit),
                     ),
                     schema=build_finalization_schema(
@@ -243,8 +243,11 @@ class FinalizeFindings:
             recommendation=recommendation,
             confidence=finding.confidence,
             basis=finding.basis,
-            basis_sources=(finding.basis_sources),
+            basis_sources=finding.basis_sources,
             experience_sources=(),
+            technical_assignment_basis_sources=(
+                finding.technical_assignment_basis_sources
+            ),
             user_package_basis_sources=(finding.user_package_basis_sources),
         )
 
@@ -306,7 +309,10 @@ class FinalizeFindings:
             recommendation=recommendation,
             confidence=finding.confidence,
             basis=finding.basis,
-            basis_sources=(finding.basis_sources),
+            basis_sources=finding.basis_sources,
             experience_sources=selected_experience,
+            technical_assignment_basis_sources=(
+                finding.technical_assignment_basis_sources
+            ),
             user_package_basis_sources=(finding.user_package_basis_sources),
         )

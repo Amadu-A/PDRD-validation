@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/application/use_cases/technical_assignments.py
 
-"""Use cases регистрации и чтения ТЗ."""
+"""Use cases регистрации, чтения и preview ТЗ."""
 
 from collections.abc import Callable
 from contextlib import suppress
@@ -21,9 +21,16 @@ from zipfile import (
     ZipFile,
 )
 
+from pdrd_knowledge_service.application.normative_document_formats import (
+    is_word_mime_type,
+)
 from pdrd_knowledge_service.application.ports.document_storage import (
     NormativeDocumentStorage,
     NormativeDocumentStorageError,
+)
+from pdrd_knowledge_service.application.ports.office_conversion import (
+    NormativeOfficeConversionError,
+    NormativeOfficeToPdfConverter,
 )
 from pdrd_knowledge_service.application.ports.technical_assignment_persistence import (
     TechnicalAssignmentUnitOfWorkFactory,
@@ -73,6 +80,23 @@ class TechnicalAssignmentRegistrationConflictError(
     RuntimeError,
 ):
     """Повторный technical_assignment_id имеет другое содержимое."""
+
+
+class TechnicalAssignmentContentUnavailableError(
+    RuntimeError,
+):
+    """Physical T content или preview недоступен."""
+
+
+@dataclass(frozen=True, slots=True)
+class TechnicalAssignmentContent:
+    """ТЗ в browser-viewable PDF representation."""
+
+    assignment: TechnicalAssignment
+
+    content: bytes
+
+    mime_type: str
 
 
 def utc_now() -> datetime:
@@ -394,3 +418,71 @@ class GetTechnicalAssignment:
             )
 
         return assignment
+
+
+@dataclass(frozen=True, slots=True)
+class GetTechnicalAssignmentContent:
+    """Возвращает browser-viewable PDF ТЗ."""
+
+    get_technical_assignment: GetTechnicalAssignment
+
+    storage: NormativeDocumentStorage
+
+    office_converter: NormativeOfficeToPdfConverter
+
+    async def execute(
+        self,
+        *,
+        technical_assignment_id: UUID,
+    ) -> TechnicalAssignmentContent:
+        """Читает original и при необходимости конвертирует Word."""
+        assignment = await self.get_technical_assignment.execute(
+            technical_assignment_id=technical_assignment_id,
+        )
+
+        storage_key = build_technical_assignment_storage_key(
+            analysis_document_id=assignment.analysis_document_id,
+            technical_assignment_id=assignment.technical_assignment_id,
+            original_name=assignment.original_name,
+        )
+
+        try:
+            content = await self.storage.read(
+                storage_key=storage_key,
+            )
+
+        except NormativeDocumentStorageError as error:
+            raise TechnicalAssignmentContentUnavailableError(
+                "Physical файл ТЗ недоступен.",
+            ) from error
+
+        if assignment.mime_type == PDF_MIME_TYPE:
+            return TechnicalAssignmentContent(
+                assignment=assignment,
+                content=content,
+                mime_type=PDF_MIME_TYPE,
+            )
+
+        if is_word_mime_type(
+            assignment.mime_type,
+        ):
+            try:
+                preview = await self.office_converter.convert_to_pdf(
+                    content=content,
+                    original_name=assignment.original_name,
+                )
+
+            except NormativeOfficeConversionError as error:
+                raise TechnicalAssignmentContentUnavailableError(
+                    "Не удалось сформировать PDF-preview ТЗ.",
+                ) from error
+
+            return TechnicalAssignmentContent(
+                assignment=assignment,
+                content=preview,
+                mime_type=PDF_MIME_TYPE,
+            )
+
+        raise TechnicalAssignmentContentUnavailableError(
+            "Формат ТЗ невозможно показать в браузере.",
+        )

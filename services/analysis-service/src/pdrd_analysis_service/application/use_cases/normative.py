@@ -29,6 +29,8 @@ from pdrd_analysis_service.domain.analysis import (
     GenerationMetrics,
     NormativeSource,
     PageFacts,
+    TechnicalAssignmentConflictCandidate,
+    TechnicalAssignmentSource,
     UserPackageSource,
 )
 
@@ -115,7 +117,7 @@ class BuildNormativeQueries:
 
 @dataclass(frozen=True, slots=True)
 class CheckPageAgainstNorms:
-    """Проверяет лист по нормативным и пользовательским требованиям."""
+    """Проверяет лист по N/T/U требованиям."""
 
     vision_model: StructuredVisionModel
 
@@ -135,6 +137,14 @@ class CheckPageAgainstNorms:
         ],
         image_bytes: bytes,
         normative_system_prompt: str | None = None,
+        technical_assignment_sources: tuple[
+            TechnicalAssignmentSource,
+            ...,
+        ] = (),
+        conflict_candidates: tuple[
+            TechnicalAssignmentConflictCandidate,
+            ...,
+        ] = (),
         user_package_sources: tuple[
             UserPackageSource,
             ...,
@@ -147,16 +157,26 @@ class CheckPageAgainstNorms:
         ],
         GenerationMetrics,
     ]:
-        """Выполняет VLM-проверку по раздельным N- и U-sources."""
+        """Выполняет VLM-проверку по N/T/U evidence."""
         normative_source_ids = tuple(
             source.source_id for source in normative_sources if source.source_id
+        )
+
+        technical_assignment_source_ids = tuple(
+            source.source_id
+            for source in technical_assignment_sources
+            if source.source_id
         )
 
         user_package_source_ids = tuple(
             source.source_id for source in user_package_sources if source.source_id
         )
 
-        if not normative_source_ids and not user_package_source_ids:
+        if (
+            not normative_source_ids
+            and not technical_assignment_source_ids
+            and not user_package_source_ids
+        ):
             return (
                 "Источники требований для листа не найдены.",
                 (),
@@ -171,22 +191,29 @@ class CheckPageAgainstNorms:
                 extracted_text=extracted_text,
                 page_facts=page_facts,
                 normative_sources=normative_sources,
+                technical_assignment_sources=technical_assignment_sources,
+                conflict_candidates=conflict_candidates,
                 user_package_sources=user_package_sources,
                 normative_text_limit=self.normative_text_limit,
                 normative_system_prompt=normative_system_prompt,
             ),
             schema=build_normative_check_schema(
                 source_ids=normative_source_ids,
-                user_package_source_ids=(user_package_source_ids),
+                technical_assignment_source_ids=(technical_assignment_source_ids),
+                user_package_source_ids=user_package_source_ids,
                 max_issues=self.max_issues,
             ),
             num_predict=self.num_predict,
             seed=200,
-            stage=(f"normative_check:{page_number}"),
+            stage=f"normative_check:{page_number}",
             image_bytes=image_bytes,
         )
 
         source_by_id = {source.source_id: source for source in normative_sources}
+
+        technical_assignment_by_id = {
+            source.source_id: source for source in technical_assignment_sources
+        }
 
         user_package_by_id = {
             source.source_id: source for source in user_package_sources
@@ -207,6 +234,13 @@ class CheckPageAgainstNorms:
                 limit=3,
             )
 
+            requested_technical_assignment_ids = string_tuple(
+                violation.get(
+                    "technical_assignment_source_ids",
+                ),
+                limit=3,
+            )
+
             requested_user_package_ids = string_tuple(
                 violation.get(
                     "user_package_source_ids",
@@ -220,13 +254,23 @@ class CheckPageAgainstNorms:
                 if source_id in source_by_id
             )
 
+            selected_technical_assignment_sources = tuple(
+                technical_assignment_by_id[source_id]
+                for source_id in requested_technical_assignment_ids
+                if source_id in technical_assignment_by_id
+            )
+
             selected_user_package_sources = tuple(
                 user_package_by_id[source_id]
                 for source_id in requested_user_package_ids
                 if source_id in user_package_by_id
             )
 
-            if not selected_normative_sources and not selected_user_package_sources:
+            if (
+                not selected_normative_sources
+                and not selected_technical_assignment_sources
+                and not selected_user_package_sources
+            ):
                 continue
 
             comment = str(
@@ -260,7 +304,10 @@ class CheckPageAgainstNorms:
 
             if (
                 not selected_normative_sources
-                and selected_user_package_sources
+                and (
+                    selected_technical_assignment_sources
+                    or selected_user_package_sources
+                )
                 and finding_category == "normative_control"
             ):
                 finding_category = "customer_requirements"
@@ -283,7 +330,7 @@ class CheckPageAgainstNorms:
                     ),
                     comment=comment,
                     evidence=evidence,
-                    recommendation_draft=(recommendation_draft),
+                    recommendation_draft=recommendation_draft,
                     confidence=confidence(
                         violation.get(
                             "confidence",
@@ -295,12 +342,19 @@ class CheckPageAgainstNorms:
                     basis=build_basis(
                         selected_normative_sources,
                     ),
-                    basis_sources=(selected_normative_sources),
+                    basis_sources=selected_normative_sources,
                     experience_query=build_experience_query(
                         category=finding_category,
                         comment=comment,
                         evidence=evidence,
-                        recommendation_draft=(recommendation_draft),
+                        recommendation_draft=recommendation_draft,
+                    ),
+                    technical_assignment_source_ids=tuple(
+                        source.source_id
+                        for source in selected_technical_assignment_sources
+                    ),
+                    technical_assignment_basis_sources=(
+                        selected_technical_assignment_sources
                     ),
                     user_package_source_ids=tuple(
                         source.source_id for source in selected_user_package_sources

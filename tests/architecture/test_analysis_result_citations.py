@@ -2,6 +2,7 @@
 
 """Architecture guards структурированного результата и citations."""
 
+import ast
 from pathlib import Path
 
 REPOSITORY_ROOT = (
@@ -54,6 +55,76 @@ NORMATIVE_ROUTER = (
     / "routers"
     / "normative_catalog.py"
 )
+
+
+def _final_finding_preserves_attribute(
+    source: str,
+    *,
+    keyword_name: str,
+    owner_name: str,
+    attribute_name: str,
+) -> bool:
+    """Проверяет передачу domain attribute в FinalFinding через AST."""
+    tree = ast.parse(
+        source,
+    )
+
+    for node in ast.walk(
+        tree,
+    ):
+        if not isinstance(
+            node,
+            ast.Call,
+        ):
+            continue
+
+        function = node.func
+
+        if isinstance(
+            function,
+            ast.Name,
+        ):
+            function_name = function.id
+
+        elif isinstance(
+            function,
+            ast.Attribute,
+        ):
+            function_name = function.attr
+
+        else:
+            continue
+
+        if function_name != "FinalFinding":
+            continue
+
+        for keyword in node.keywords:
+            if keyword.arg != keyword_name:
+                continue
+
+            value = keyword.value
+
+            if not isinstance(
+                value,
+                ast.Attribute,
+            ):
+                continue
+
+            if value.attr != attribute_name:
+                continue
+
+            owner = value.value
+
+            if (
+                isinstance(
+                    owner,
+                    ast.Name,
+                )
+                and owner.id == owner_name
+            ):
+                return True
+
+    return False
 
 
 def test_analysis_result_is_structured_container() -> None:
@@ -132,7 +203,12 @@ def test_backend_preserves_managed_citation_metadata() -> None:
 
     assert "page: int | str | None" in domain
 
-    assert "basis_sources=(finding.basis_sources)" in finalization
+    assert _final_finding_preserves_attribute(
+        finalization,
+        keyword_name="basis_sources",
+        owner_name="finding",
+        attribute_name="basis_sources",
+    )
 
     assert '"/documents/{document_id}/content"' in router
 

@@ -122,9 +122,10 @@ def build_normative_check_schema(
     *,
     source_ids: tuple[str, ...],
     max_issues: int,
+    technical_assignment_source_ids: tuple[str, ...] = (),
     user_package_source_ids: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """Возвращает schema проверки нормативных и пользовательских требований."""
+    """Возвращает schema проверки N/T/U требований."""
     return {
         "type": "object",
         "additionalProperties": False,
@@ -180,6 +181,9 @@ def build_normative_check_schema(
                         "normative_source_ids": _source_ids_schema(
                             source_ids,
                         ),
+                        "technical_assignment_source_ids": _source_ids_schema(
+                            technical_assignment_source_ids,
+                        ),
                         "user_package_source_ids": _source_ids_schema(
                             user_package_source_ids,
                         ),
@@ -193,6 +197,7 @@ def build_normative_check_schema(
                         "recommendation_draft",
                         "confidence",
                         "normative_source_ids",
+                        "technical_assignment_source_ids",
                         "user_package_source_ids",
                     ],
                 },

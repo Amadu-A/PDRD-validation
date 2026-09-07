@@ -25,6 +25,7 @@ from pdrd_analysis_service.domain.analysis import (
     FindingDraft,
     NormativeSource,
     PageFacts,
+    TechnicalAssignmentSource,
     UserPackageSource,
 )
 from pdrd_analysis_service.transport.http.dependencies import (
@@ -44,6 +45,7 @@ from pdrd_analysis_service.transport.http.schemas import (
     NormativeSourcePayload,
     PageFactsPayload,
     ReadyHealthResponse,
+    TechnicalAssignmentSourcePayload,
     UnderstandPageRequest,
     UnderstandPageResponse,
     UserPackageSourcePayload,
@@ -69,20 +71,20 @@ def _decode_image(
         ValueError,
     ) as error:
         raise HTTPException(
-            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
-            detail=("image_base64 содержит некорректный Base64."),
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="image_base64 содержит некорректный Base64.",
         ) from error
 
     if not content:
         raise HTTPException(
-            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Передано пустое изображение.",
         )
 
     if len(content) > max_bytes:
         raise HTTPException(
-            status_code=(status.HTTP_413_CONTENT_TOO_LARGE),
-            detail=("Изображение превышает допустимый размер."),
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="Изображение превышает допустимый размер.",
         )
 
     return content
@@ -128,6 +130,27 @@ def _normative_source_payload(
         page=source.page,
         chunk_index=source.chunk_index,
         text=source.text,
+    )
+
+
+def _technical_assignment_source_payload(
+    source: TechnicalAssignmentSource,
+) -> TechnicalAssignmentSourcePayload:
+    """Преобразует T-source в HTTP payload."""
+    return TechnicalAssignmentSourcePayload(
+        source_id=source.source_id,
+        point_id=source.point_id,
+        score=source.score,
+        technical_assignment_id=source.technical_assignment_id,
+        analysis_document_id=source.analysis_document_id,
+        section_id=source.section_id,
+        source_sha256=source.source_sha256,
+        source_file=source.source_file,
+        page=source.page,
+        text=source.text,
+        normative_refs=list(
+            source.normative_refs,
+        ),
     )
 
 
@@ -184,7 +207,7 @@ def _finding_draft_payload(
         status=finding.status,
         comment=finding.comment,
         evidence=finding.evidence,
-        recommendation_draft=(finding.recommendation_draft),
+        recommendation_draft=finding.recommendation_draft,
         confidence=finding.confidence,
         normative_source_ids=list(
             finding.normative_source_ids,
@@ -197,6 +220,15 @@ def _finding_draft_payload(
             for source in finding.basis_sources
         ],
         experience_query=finding.experience_query,
+        technical_assignment_source_ids=list(
+            finding.technical_assignment_source_ids,
+        ),
+        technical_assignment_basis_sources=[
+            _technical_assignment_source_payload(
+                source,
+            )
+            for source in finding.technical_assignment_basis_sources
+        ],
         user_package_source_ids=list(
             finding.user_package_source_ids,
         ),
@@ -236,6 +268,12 @@ def _final_finding_payload(
                 source,
             )
             for source in finding.experience_sources
+        ],
+        technical_assignment_basis_sources=[
+            _technical_assignment_source_payload(
+                source,
+            )
+            for source in finding.technical_assignment_basis_sources
         ],
         user_package_basis_sources=[
             _user_package_source_payload(
@@ -287,7 +325,7 @@ async def health_ready(
 
     if not report.ready:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "status": "not_ready",
                 "dependencies": dependencies,
@@ -318,20 +356,20 @@ async def understand_page(
     """Получает объективные факты листа."""
     image = _decode_image(
         encoded=request.image_base64,
-        max_bytes=(container.settings.pipeline.max_image_bytes),
+        max_bytes=container.settings.pipeline.max_image_bytes,
     )
 
     try:
         facts, metrics = await container.understand_page.execute(
             page_number=request.page_number,
-            heuristic_page_type=(request.heuristic_page_type),
+            heuristic_page_type=request.heuristic_page_type,
             extracted_text=request.extracted_text,
             image_bytes=image,
         )
 
     except VisionModelError as error:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(
                 error,
             ),
@@ -387,10 +425,10 @@ async def check_norms(
         ),
     ],
 ) -> CheckNormsResponse:
-    """Проверяет лист по N-sources и отдельным U-sources."""
+    """Проверяет лист по N/T/U sources."""
     image = _decode_image(
         encoded=request.image_base64,
-        max_bytes=(container.settings.pipeline.max_image_bytes),
+        max_bytes=container.settings.pipeline.max_image_bytes,
     )
 
     try:
@@ -405,16 +443,22 @@ async def check_norms(
             normative_sources=tuple(
                 source.to_domain() for source in request.normative_sources
             ),
+            technical_assignment_sources=tuple(
+                source.to_domain() for source in request.technical_assignment_sources
+            ),
+            conflict_candidates=tuple(
+                candidate.to_domain() for candidate in request.conflict_candidates
+            ),
             user_package_sources=tuple(
                 source.to_domain() for source in request.user_package_sources
             ),
             image_bytes=image,
-            normative_system_prompt=(request.normative_system_prompt),
+            normative_system_prompt=request.normative_system_prompt,
         )
 
     except VisionModelError as error:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(
                 error,
             ),
@@ -445,7 +489,7 @@ async def finalize_findings(
         ),
     ],
 ) -> FinalizeResponse:
-    """Финализирует findings, сохраняя N/U evidence отдельно."""
+    """Финализирует findings, сохраняя N/T/U evidence отдельно."""
     (
         summary,
         findings,
@@ -454,7 +498,7 @@ async def finalize_findings(
         findings=tuple(finding.to_domain() for finding in request.findings),
         experience_by_finding={
             finding_id: tuple(source.to_domain() for source in sources)
-            for finding_id, sources in (request.experience_by_finding.items())
+            for finding_id, sources in request.experience_by_finding.items()
         },
     )
 

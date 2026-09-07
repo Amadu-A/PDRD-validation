@@ -11,6 +11,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Response,
     UploadFile,
     status,
 )
@@ -18,7 +19,9 @@ from pydantic import BaseModel
 
 from pdrd_knowledge_service.application.use_cases.technical_assignments import (
     GetTechnicalAssignment,
+    GetTechnicalAssignmentContent,
     RegisterTechnicalAssignment,
+    TechnicalAssignmentContentUnavailableError,
     TechnicalAssignmentNotFoundError,
     TechnicalAssignmentRegistrationConflictError,
     TechnicalAssignmentUploadError,
@@ -35,7 +38,9 @@ from pdrd_knowledge_service.transport.http.dependencies import (
 
 router = APIRouter(
     prefix="/internal/v1/technical-assignments",
-    tags=["technical-assignments"],
+    tags=[
+        "technical-assignments",
+    ],
 )
 
 
@@ -68,8 +73,8 @@ def _response(
 ) -> TechnicalAssignmentResponse:
     """Domain -> HTTP schema."""
     return TechnicalAssignmentResponse(
-        technical_assignment_id=(assignment.technical_assignment_id),
-        analysis_document_id=(assignment.analysis_document_id),
+        technical_assignment_id=assignment.technical_assignment_id,
+        analysis_document_id=assignment.analysis_document_id,
         section_id=assignment.section_id,
         source_file=assignment.original_name,
         mime_type=assignment.mime_type,
@@ -102,6 +107,18 @@ def _require_get(
         )
 
     return container.get_technical_assignment
+
+
+def _require_content(
+    container: ApplicationContainer,
+) -> GetTechnicalAssignmentContent:
+    """Возвращает configured preview use case."""
+    if container.get_technical_assignment_content is None:
+        raise RuntimeError(
+            "GetTechnicalAssignmentContent is not configured.",
+        )
+
+    return container.get_technical_assignment_content
 
 
 @router.post(
@@ -159,7 +176,7 @@ async def register_technical_assignment(
         > limit
     ):
         raise HTTPException(
-            status_code=(status.HTTP_413_CONTENT_TOO_LARGE),
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="Размер ТЗ превышает configured limit.",
         )
 
@@ -179,7 +196,7 @@ async def register_technical_assignment(
 
     except TechnicalAssignmentUploadError as error:
         raise HTTPException(
-            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(
                 error,
             ),
@@ -187,7 +204,7 @@ async def register_technical_assignment(
 
     except TechnicalAssignmentRegistrationConflictError as error:
         raise HTTPException(
-            status_code=(status.HTTP_409_CONFLICT),
+            status_code=status.HTTP_409_CONFLICT,
             detail=str(
                 error,
             ),
@@ -195,6 +212,53 @@ async def register_technical_assignment(
 
     return _response(
         assignment,
+    )
+
+
+@router.get(
+    "/{technical_assignment_id}/content",
+)
+async def get_technical_assignment_content(
+    technical_assignment_id: UUID,
+    container: Annotated[
+        ApplicationContainer,
+        Depends(
+            get_container,
+        ),
+    ],
+) -> Response:
+    """Возвращает inline PDF или Word PDF-preview ТЗ."""
+    use_case = _require_content(
+        container,
+    )
+
+    try:
+        content = await use_case.execute(
+            technical_assignment_id=technical_assignment_id,
+        )
+
+    except TechnicalAssignmentNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    except TechnicalAssignmentContentUnavailableError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    return Response(
+        content=content.content,
+        media_type=content.mime_type,
+        headers={
+            "Content-Disposition": "inline",
+        },
     )
 
 
@@ -223,7 +287,7 @@ async def get_technical_assignment(
 
     except TechnicalAssignmentNotFoundError as error:
         raise HTTPException(
-            status_code=(status.HTTP_404_NOT_FOUND),
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(
                 error,
             ),

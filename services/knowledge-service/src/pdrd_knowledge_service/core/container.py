@@ -60,6 +60,7 @@ from pdrd_knowledge_service.application.use_cases.technical_assignment_retrieval
 )
 from pdrd_knowledge_service.application.use_cases.technical_assignments import (
     GetTechnicalAssignment,
+    GetTechnicalAssignmentContent,
     RegisterTechnicalAssignment,
 )
 from pdrd_knowledge_service.application.use_cases.user_packages import (
@@ -87,6 +88,9 @@ from pdrd_knowledge_service.infrastructure.embedding.multimodal_http import (
 )
 from pdrd_knowledge_service.infrastructure.embedding.ollama import (
     OllamaEmbeddingProvider,
+)
+from pdrd_knowledge_service.infrastructure.office.libreoffice import (
+    LibreOfficeNormativeOfficeToPdfConverter,
 )
 from pdrd_knowledge_service.infrastructure.storage.filesystem import (
     LocalFilesystemNormativeDocumentStorage,
@@ -123,6 +127,8 @@ class ApplicationContainer:
     register_technical_assignment: RegisterTechnicalAssignment | None = None
 
     get_technical_assignment: GetTechnicalAssignment | None = None
+
+    get_technical_assignment_content: GetTechnicalAssignmentContent | None = None
 
     search_technical_assignment_guided: (
         SearchTechnicalAssignmentGuidedNormative | None
@@ -167,99 +173,99 @@ def build_container() -> ApplicationContainer:
         ),
     )
 
+    office_converter = LibreOfficeNormativeOfficeToPdfConverter()
+
     vector_store = QdrantVectorStore(
         base_url=settings.qdrant.base_url,
-        request_timeout_seconds=(settings.qdrant.request_timeout_seconds),
-        health_timeout_seconds=(settings.qdrant.health_timeout_seconds),
+        request_timeout_seconds=settings.qdrant.request_timeout_seconds,
+        health_timeout_seconds=settings.qdrant.health_timeout_seconds,
     )
 
     normative_sections = NormativeSectionUseCases(
         list_sections=ListNormativeSections(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         get_section=GetNormativeSection(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         create_section=CreateNormativeSection(
-            unit_of_work_factory=(normative_catalog_uow_factory),
-            default_system_prompt=(DEFAULT_SECTION_SYSTEM_PROMPT),
+            unit_of_work_factory=normative_catalog_uow_factory,
+            default_system_prompt=DEFAULT_SECTION_SYSTEM_PROMPT,
         ),
         update_section=UpdateNormativeSection(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         delete_section=DeleteNormativeSection(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
     )
 
     normative_categories = NormativeCategoryUseCases(
         list_categories=ListNormativeCategories(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         get_category=GetNormativeCategory(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         create_category=CreateNormativeCategory(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         update_category=UpdateNormativeCategory(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         delete_category=DeleteNormativeCategory(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
     )
 
     normative_documents = NormativeDocumentUseCases(
         list_documents=ListNormativeDocuments(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         get_document=GetNormativeDocument(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
         ),
         upload_document=UploadNormativeDocument(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
             storage=document_storage,
-            max_upload_bytes=(settings.storage.max_upload_bytes),
+            max_upload_bytes=settings.storage.max_upload_bytes,
         ),
-        get_document_content=(
-            GetNormativeDocumentContent(
-                unit_of_work_factory=(normative_catalog_uow_factory),
-                storage=document_storage,
-            )
+        get_document_content=GetNormativeDocumentContent(
+            unit_of_work_factory=normative_catalog_uow_factory,
+            storage=document_storage,
         ),
         move_document=MoveNormativeDocument(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
             vector_store=vector_store,
-            collection=(settings.qdrant.normative_collection),
+            collection=settings.qdrant.normative_collection,
         ),
         delete_document=DeleteNormativeDocument(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+            unit_of_work_factory=normative_catalog_uow_factory,
             storage=document_storage,
             vector_store=vector_store,
-            collection=(settings.qdrant.normative_collection),
+            collection=settings.qdrant.normative_collection,
         ),
     )
 
     queue_normative_document = QueueNormativeDocument(
-        unit_of_work_factory=(normative_catalog_uow_factory),
+        unit_of_work_factory=normative_catalog_uow_factory,
     )
 
     database_probe = DatabaseReadinessProbe(
         engine=database_engine,
-        timeout_seconds=(settings.database.health_timeout_seconds),
+        timeout_seconds=settings.database.health_timeout_seconds,
     )
 
     embedding_provider = OllamaEmbeddingProvider(
         base_url=settings.embedding.base_url,
         model=settings.embedding.model,
-        request_timeout_seconds=(settings.embedding.request_timeout_seconds),
-        connect_timeout_seconds=(settings.embedding.connect_timeout_seconds),
-        health_timeout_seconds=(settings.embedding.health_timeout_seconds),
+        request_timeout_seconds=settings.embedding.request_timeout_seconds,
+        connect_timeout_seconds=settings.embedding.connect_timeout_seconds,
+        health_timeout_seconds=settings.embedding.health_timeout_seconds,
     )
 
     multimodal_embedding_provider = HttpMultimodalEmbeddingProvider(
-        base_url=(settings.multimodal_embedding.base_url),
+        base_url=settings.multimodal_embedding.base_url,
         request_timeout_seconds=(settings.multimodal_embedding.request_timeout_seconds),
         connect_timeout_seconds=(settings.multimodal_embedding.connect_timeout_seconds),
         health_timeout_seconds=(settings.multimodal_embedding.health_timeout_seconds),
@@ -268,28 +274,28 @@ def build_container() -> ApplicationContainer:
     search_normative = SearchNormative(
         embedding_provider=embedding_provider,
         vector_store=vector_store,
-        collection=(settings.qdrant.normative_collection),
+        collection=settings.qdrant.normative_collection,
         embedding_model=settings.embedding.model,
         top_k=settings.search.normative_top_k,
-        max_sources=(settings.search.normative_max_sources),
-        unit_of_work_factory=(normative_catalog_uow_factory),
+        max_sources=settings.search.normative_max_sources,
+        unit_of_work_factory=normative_catalog_uow_factory,
     )
 
     search_technical_assignment = SearchTechnicalAssignment(
-        embedding_provider=(multimodal_embedding_provider),
+        embedding_provider=multimodal_embedding_provider,
         vector_store=vector_store,
-        unit_of_work_factory=(technical_assignment_uow_factory),
-        collection=(settings.qdrant.multimodal_collection),
-        embedding_model=(settings.multimodal_embedding.model),
-        top_k=(settings.technical_assignment.retrieval_top_k),
-        max_sources=(settings.technical_assignment.max_sources),
+        unit_of_work_factory=technical_assignment_uow_factory,
+        collection=settings.qdrant.multimodal_collection,
+        embedding_model=settings.multimodal_embedding.model,
+        top_k=settings.technical_assignment.retrieval_top_k,
+        max_sources=settings.technical_assignment.max_sources,
     )
 
     search_technical_assignment_guided = SearchTechnicalAssignmentGuidedNormative(
-        search_technical_assignment=(search_technical_assignment),
+        search_technical_assignment=search_technical_assignment,
         search_normative=search_normative,
-        normative_catalog_uow_factory=(normative_catalog_uow_factory),
-        combined_max_sources=(settings.search.normative_max_sources),
+        normative_catalog_uow_factory=normative_catalog_uow_factory,
+        combined_max_sources=settings.search.normative_max_sources,
     )
 
     search_user_packages = SearchUserPackages(
@@ -299,7 +305,7 @@ def build_container() -> ApplicationContainer:
     search_experience = SearchExperience(
         embedding_provider=embedding_provider,
         vector_store=vector_store,
-        collection=(settings.qdrant.experience_collection),
+        collection=settings.qdrant.experience_collection,
         embedding_model=settings.embedding.model,
         top_k=settings.search.experience_top_k,
     )
@@ -308,8 +314,12 @@ def build_container() -> ApplicationContainer:
         database_probe=database_probe,
         embedding_provider=embedding_provider,
         vector_store=vector_store,
-        normative_collection=(settings.qdrant.normative_collection),
-        experience_collection=(settings.qdrant.experience_collection),
+        normative_collection=settings.qdrant.normative_collection,
+        experience_collection=settings.qdrant.experience_collection,
+    )
+
+    get_technical_assignment = GetTechnicalAssignment(
+        unit_of_work_factory=technical_assignment_uow_factory,
     )
 
     project_settings = settings.project_context
@@ -320,43 +330,42 @@ def build_container() -> ApplicationContainer:
         search_user_packages=search_user_packages,
         search_experience=search_experience,
         check_readiness=check_readiness,
-        normative_catalog_uow_factory=(normative_catalog_uow_factory),
+        normative_catalog_uow_factory=normative_catalog_uow_factory,
         normative_sections=normative_sections,
         normative_categories=normative_categories,
         normative_documents=normative_documents,
-        queue_normative_document=(queue_normative_document),
-        register_technical_assignment=(
-            RegisterTechnicalAssignment(
-                unit_of_work_factory=(technical_assignment_uow_factory),
-                storage=technical_assignment_storage,
-                max_upload_bytes=(settings.technical_assignment.max_upload_bytes),
-            )
+        queue_normative_document=queue_normative_document,
+        register_technical_assignment=RegisterTechnicalAssignment(
+            unit_of_work_factory=technical_assignment_uow_factory,
+            storage=technical_assignment_storage,
+            max_upload_bytes=settings.technical_assignment.max_upload_bytes,
         ),
-        get_technical_assignment=(
-            GetTechnicalAssignment(
-                unit_of_work_factory=(technical_assignment_uow_factory),
-            )
+        get_technical_assignment=get_technical_assignment,
+        get_technical_assignment_content=GetTechnicalAssignmentContent(
+            get_technical_assignment=get_technical_assignment,
+            storage=technical_assignment_storage,
+            office_converter=office_converter,
         ),
-        search_technical_assignment_guided=(search_technical_assignment_guided),
+        search_technical_assignment_guided=search_technical_assignment_guided,
         create_project_context=CreateProjectContext(
             embedding_provider=embedding_provider,
             vector_store=vector_store,
-            collection_prefix=(project_settings.collection_prefix),
+            collection_prefix=project_settings.collection_prefix,
             embedding_model=settings.embedding.model,
             chunk_size=project_settings.chunk_size,
-            chunk_overlap=(project_settings.chunk_overlap),
-            embed_batch_size=(project_settings.embed_batch_size),
-            upsert_batch_size=(project_settings.upsert_batch_size),
+            chunk_overlap=project_settings.chunk_overlap,
+            embed_batch_size=project_settings.embed_batch_size,
+            upsert_batch_size=project_settings.upsert_batch_size,
         ),
         search_project_context=SearchProjectContext(
             embedding_provider=embedding_provider,
             vector_store=vector_store,
-            collection_prefix=(project_settings.collection_prefix),
+            collection_prefix=project_settings.collection_prefix,
             embedding_model=settings.embedding.model,
             top_k=project_settings.top_k,
         ),
         delete_project_context=DeleteProjectContext(
             vector_store=vector_store,
-            collection_prefix=(project_settings.collection_prefix),
+            collection_prefix=project_settings.collection_prefix,
         ),
     )

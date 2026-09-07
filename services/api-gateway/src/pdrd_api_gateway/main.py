@@ -20,6 +20,9 @@ from pdrd_api_gateway.transport.http.routers.health import (
 from pdrd_api_gateway.transport.http.routers.normative_catalog import (
     router as normative_catalog_router,
 )
+from pdrd_api_gateway.transport.http.routers.technical_assignments import (
+    router as technical_assignments_router,
+)
 from pdrd_api_gateway.transport.http.routers.user_packages import (
     router as user_packages_router,
 )
@@ -77,6 +80,10 @@ def create_app(
 
     application.include_router(
         user_packages_router,
+    )
+
+    application.include_router(
+        technical_assignments_router,
     )
 
     return application
