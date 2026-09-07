@@ -8,6 +8,7 @@ import importlib
 from contextlib import suppress
 from dataclasses import dataclass
 from io import BytesIO
+from time import monotonic
 from typing import Any
 
 from pdrd_multimodal_embedding_service.settings import (
@@ -74,6 +75,10 @@ class Qwen3VlEmbeddingRuntime:
             settings.max_concurrency,
         )
 
+        self._last_activity_at: float | None = None
+
+        self._idle_release_task: asyncio.Task[None] | None = None
+
     async def embed(
         self,
         inputs: tuple[
@@ -96,10 +101,16 @@ class Qwen3VlEmbeddingRuntime:
             )
 
         async with self._semaphore:
-            return await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 self._embed_sync,
                 inputs,
             )
+
+            self._last_activity_at = monotonic()
+
+        self._ensure_idle_release_watchdog()
+
+        return result
 
     async def release(
         self,
@@ -110,6 +121,10 @@ class Qwen3VlEmbeddingRuntime:
                 self._release_sync,
             )
 
+            self._last_activity_at = None
+
+        self._cancel_idle_release_watchdog()
+
     async def status(
         self,
     ) -> RuntimeStatus:
@@ -117,6 +132,84 @@ class Qwen3VlEmbeddingRuntime:
         return await asyncio.to_thread(
             self._status_sync,
         )
+
+    def _ensure_idle_release_watchdog(
+        self,
+    ) -> None:
+        """Запускает один watchdog automatic idle release."""
+        task = self._idle_release_task
+
+        if task is not None and not task.done():
+            return
+
+        self._idle_release_task = asyncio.create_task(
+            self._release_after_idle(),
+        )
+
+    def _cancel_idle_release_watchdog(
+        self,
+    ) -> None:
+        """Останавливает sleeping watchdog после explicit release."""
+        task = self._idle_release_task
+
+        if task is None:
+            return
+
+        if not task.done():
+            task.cancel()
+
+        self._idle_release_task = None
+
+    async def _release_after_idle(
+        self,
+    ) -> None:
+        """Выгружает checkpoint после configured периода без запросов."""
+        try:
+            while True:
+                last_activity_at = self._last_activity_at
+
+                if last_activity_at is None:
+                    return
+
+                remaining_seconds = self._settings.idle_release_seconds - (
+                    monotonic() - last_activity_at
+                )
+
+                if remaining_seconds > 0:
+                    await asyncio.sleep(
+                        remaining_seconds,
+                    )
+
+                async with self._semaphore:
+                    if self._model is None:
+                        self._last_activity_at = None
+
+                        return
+
+                    last_activity_at = self._last_activity_at
+
+                    if last_activity_at is None:
+                        return
+
+                    idle_seconds = monotonic() - last_activity_at
+
+                    if idle_seconds < self._settings.idle_release_seconds:
+                        continue
+
+                    await asyncio.to_thread(
+                        self._release_sync,
+                    )
+
+                    self._last_activity_at = None
+
+                    return
+
+        except asyncio.CancelledError:
+            return
+
+        finally:
+            if self._idle_release_task is asyncio.current_task():
+                self._idle_release_task = None
 
     def _embed_sync(
         self,
@@ -165,7 +258,9 @@ class Qwen3VlEmbeddingRuntime:
 
                     payload["image"] = image
 
-                prepared.append(payload)
+                prepared.append(
+                    payload,
+                )
 
             instruction = (
                 inputs[0].instruction
@@ -184,7 +279,7 @@ class Qwen3VlEmbeddingRuntime:
                 "convert_to_numpy": True,
                 "normalize_embeddings": True,
                 "show_progress_bar": False,
-                "truncate_dim": self._settings.output_dimension,
+                "truncate_dim": (self._settings.output_dimension),
             }
 
             if instruction is not None and instruction.strip():
@@ -281,7 +376,8 @@ class Qwen3VlEmbeddingRuntime:
                 "Недостаточно свободной VRAM для безопасной "
                 "загрузки Qwen3-VL-Embedding-8B: "
                 f"free={int(free_vram)} bytes, "
-                f"required={self._settings.min_free_vram_bytes} bytes.",
+                f"required="
+                f"{self._settings.min_free_vram_bytes} bytes.",
             )
 
         sentence_transformers = importlib.import_module(
@@ -367,7 +463,7 @@ class Qwen3VlEmbeddingRuntime:
 
         except ModuleNotFoundError:
             return RuntimeStatus(
-                model_loaded=self._model is not None,
+                model_loaded=(self._model is not None),
                 cuda_available=False,
                 free_vram_bytes=None,
                 total_vram_bytes=None,
@@ -375,7 +471,7 @@ class Qwen3VlEmbeddingRuntime:
 
         if not torch.cuda.is_available():
             return RuntimeStatus(
-                model_loaded=self._model is not None,
+                model_loaded=(self._model is not None),
                 cuda_available=False,
                 free_vram_bytes=None,
                 total_vram_bytes=None,
@@ -384,7 +480,7 @@ class Qwen3VlEmbeddingRuntime:
         free_vram, total_vram = torch.cuda.mem_get_info()
 
         return RuntimeStatus(
-            model_loaded=self._model is not None,
+            model_loaded=(self._model is not None),
             cuda_available=True,
             free_vram_bytes=int(
                 free_vram,

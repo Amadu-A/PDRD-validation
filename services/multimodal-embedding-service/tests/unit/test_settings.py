@@ -31,3 +31,5 @@ def test_default_runtime_is_memory_bounded() -> None:
     assert settings.max_concurrency == 1
 
     assert settings.min_free_vram_gib == 18.0
+
+    assert settings.idle_release_seconds == 60.0

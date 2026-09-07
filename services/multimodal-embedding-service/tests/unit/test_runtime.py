@@ -2,6 +2,10 @@
 
 """Unit tests lightweight multimodal runtime contracts."""
 
+import asyncio
+from time import monotonic
+
+import pytest
 from pdrd_multimodal_embedding_service.runtime import (
     Qwen3VlEmbeddingRuntime,
     RuntimeEmbeddingInput,
@@ -37,3 +41,48 @@ def test_runtime_input_keeps_mixed_modalities() -> None:
     assert item.image_bytes == b"png"
 
     assert item.instruction is not None
+
+
+@pytest.mark.asyncio
+async def test_idle_watchdog_releases_loaded_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fallback автоматически освобождает idle checkpoint."""
+    runtime = Qwen3VlEmbeddingRuntime(
+        settings=ModelSettings(
+            idle_release_seconds=0.01,
+        ),
+    )
+
+    runtime._model = object()
+
+    runtime._last_activity_at = monotonic()
+
+    released: list[bool] = []
+
+    def fake_release_sync() -> None:
+        runtime._model = None
+
+        released.append(
+            True,
+        )
+
+    monkeypatch.setattr(
+        runtime,
+        "_release_sync",
+        fake_release_sync,
+    )
+
+    runtime._ensure_idle_release_watchdog()
+
+    await asyncio.sleep(
+        0.05,
+    )
+
+    assert released == [
+        True,
+    ]
+
+    assert runtime._model is None
+
+    assert runtime._idle_release_task is None

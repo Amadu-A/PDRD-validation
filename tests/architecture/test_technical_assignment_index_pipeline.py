@@ -97,8 +97,32 @@ def test_analysis_waits_for_t_before_n8n() -> None:
     assert orchestrator_position > wait_position
 
 
-def test_gpu_runtime_is_bounded_and_lazy() -> None:
-    """Checkpoint не должен жить в обычном quality environment."""
+def test_t_releases_gpu_before_ready() -> None:
+    """READY нельзя публиковать до explicit GPU release."""
+    use_case = (
+        ROOT
+        / "services"
+        / "knowledge-service"
+        / "src"
+        / "pdrd_knowledge_service"
+        / "application"
+        / "use_cases"
+        / "index_technical_assignment.py"
+    ).read_text(
+        encoding="utf-8",
+    )
+
+    release_position = use_case.find("await self.embedding_provider.release()")
+
+    ready_position = use_case.find("return await self._mark_ready(")
+
+    assert release_position >= 0
+
+    assert ready_position > release_position
+
+
+def test_gpu_runtime_is_bounded_lazy_and_idle_released() -> None:
+    """Checkpoint lazy-loaded и имеет bounded idle fallback."""
     pyproject = (
         ROOT / "services" / "multimodal-embedding-service" / "pyproject.toml"
     ).read_text(
@@ -112,6 +136,17 @@ def test_gpu_runtime_is_bounded_and_lazy() -> None:
         / "src"
         / "pdrd_multimodal_embedding_service"
         / "runtime.py"
+    ).read_text(
+        encoding="utf-8",
+    )
+
+    settings = (
+        ROOT
+        / "services"
+        / "multimodal-embedding-service"
+        / "src"
+        / "pdrd_multimodal_embedding_service"
+        / "settings.py"
     ).read_text(
         encoding="utf-8",
     )
@@ -133,3 +168,9 @@ def test_gpu_runtime_is_bounded_and_lazy() -> None:
     assert "_ensure_model_sync" in runtime
 
     assert "_release_sync" in runtime
+
+    assert "_release_after_idle" in runtime
+
+    assert "idle_release_seconds" in settings
+
+    assert "default=60.0" in settings

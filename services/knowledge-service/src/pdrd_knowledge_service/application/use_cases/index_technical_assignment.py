@@ -146,12 +146,16 @@ class IndexTechnicalAssignment:
                 ),
             )
 
+        model_released = False
+
         try:
             raw_content = await self.storage.read(
-                storage_key=build_technical_assignment_storage_key(
-                    analysis_document_id=assignment.analysis_document_id,
-                    technical_assignment_id=assignment.technical_assignment_id,
-                    original_name=assignment.original_name,
+                storage_key=(
+                    build_technical_assignment_storage_key(
+                        analysis_document_id=(assignment.analysis_document_id),
+                        technical_assignment_id=(assignment.technical_assignment_id),
+                        original_name=(assignment.original_name),
+                    )
                 ),
             )
 
@@ -181,7 +185,7 @@ class IndexTechnicalAssignment:
                         MultimodalEmbeddingInput(
                             text=page.text,
                             image_bytes=page.image_bytes,
-                            instruction=_T_EMBEDDING_INSTRUCTION,
+                            instruction=(_T_EMBEDDING_INSTRUCTION),
                         ),
                     )
                 )
@@ -226,8 +230,8 @@ class IndexTechnicalAssignment:
                             point_id=point_id,
                             vector=vector,
                             payload={
-                                "source_type": "technical_assignment",
-                                "representation": "page_multimodal",
+                                "source_type": ("technical_assignment"),
+                                "representation": ("page_multimodal"),
                                 "technical_assignment_id": str(
                                     assignment.technical_assignment_id,
                                 ),
@@ -237,11 +241,11 @@ class IndexTechnicalAssignment:
                                 "section_id": str(
                                     assignment.section_id,
                                 ),
-                                "source_file": assignment.original_name,
-                                "source_sha256": assignment.sha256,
-                                "page": page.page_number,
-                                "pixel_width": page.pixel_width,
-                                "pixel_height": page.pixel_height,
+                                "source_file": (assignment.original_name),
+                                "source_sha256": (assignment.sha256),
+                                "page": (page.page_number),
+                                "pixel_width": (page.pixel_width),
+                                "pixel_height": (page.pixel_height),
                                 "normative_refs": list(
                                     extract_normative_references(
                                         page.text,
@@ -252,6 +256,13 @@ class IndexTechnicalAssignment:
                         ),
                     ),
                 )
+
+            # Критический GPU barrier:
+            # READY становится видимым только после освобождения
+            # multimodal checkpoint из VRAM.
+            await self.embedding_provider.release()
+
+            model_released = True
 
             return await self._mark_ready(
                 technical_assignment_id=technical_assignment_id,
@@ -321,10 +332,11 @@ class IndexTechnicalAssignment:
             ) from error
 
         finally:
-            with suppress(
-                MultimodalEmbeddingProviderError,
-            ):
-                await self.embedding_provider.release()
+            if not model_released:
+                with suppress(
+                    MultimodalEmbeddingProviderError,
+                ):
+                    await self.embedding_provider.release()
 
     async def _prepare_pdf(
         self,
@@ -377,7 +389,7 @@ class IndexTechnicalAssignment:
                 )
 
             changed = assignment.transition_indexing(
-                target_status=TechnicalAssignmentIndexStatus.INDEXING,
+                target_status=(TechnicalAssignmentIndexStatus.INDEXING),
                 changed_at=self.clock(),
             )
 
@@ -394,7 +406,7 @@ class IndexTechnicalAssignment:
         *,
         technical_assignment_id: UUID,
     ) -> TechnicalAssignment:
-        """Фиксирует successful index."""
+        """Фиксирует successful index после GPU release."""
         async with self.unit_of_work_factory() as unit_of_work:
             assignment = await unit_of_work.assignments.get_for_update(
                 technical_assignment_id,
@@ -406,7 +418,7 @@ class IndexTechnicalAssignment:
                 )
 
             ready = assignment.transition_indexing(
-                target_status=TechnicalAssignmentIndexStatus.READY,
+                target_status=(TechnicalAssignmentIndexStatus.READY),
                 changed_at=self.clock(),
             )
 
@@ -436,7 +448,7 @@ class IndexTechnicalAssignment:
                 return
 
             queued = assignment.transition_indexing(
-                target_status=TechnicalAssignmentIndexStatus.QUEUED,
+                target_status=(TechnicalAssignmentIndexStatus.QUEUED),
                 changed_at=self.clock(),
             )
 
@@ -465,7 +477,7 @@ class IndexTechnicalAssignment:
                 return
 
             failed = assignment.transition_indexing(
-                target_status=TechnicalAssignmentIndexStatus.FAILED,
+                target_status=(TechnicalAssignmentIndexStatus.FAILED),
                 changed_at=self.clock(),
                 error=(f"{type(error).__name__}: {error}")[:2000],
             )

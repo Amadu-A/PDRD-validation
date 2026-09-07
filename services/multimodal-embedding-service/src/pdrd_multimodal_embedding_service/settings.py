@@ -81,6 +81,12 @@ class ModelSettings(BaseModel):
         le=128.0,
     )
 
+    idle_release_seconds: float = Field(
+        default=60.0,
+        ge=0.01,
+        le=3600.0,
+    )
+
     dtype: TorchDtype = "bfloat16"
 
     @property
