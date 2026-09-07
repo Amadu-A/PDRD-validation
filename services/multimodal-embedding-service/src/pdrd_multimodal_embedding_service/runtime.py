@@ -5,6 +5,7 @@
 import asyncio
 import gc
 import importlib
+import logging
 from contextlib import suppress
 from dataclasses import dataclass
 from io import BytesIO
@@ -13,6 +14,10 @@ from typing import Any
 
 from pdrd_multimodal_embedding_service.settings import (
     ModelSettings,
+)
+
+LOGGER = logging.getLogger(
+    __name__,
 )
 
 
@@ -326,10 +331,18 @@ class Qwen3VlEmbeddingRuntime:
             ):
                 self._release_sync()
 
+                LOGGER.exception(
+                    "qwen3_vl_embedding_cuda_oom",
+                )
+
                 raise GpuAdmissionError(
                     "CUDA OOM при multimodal embedding. "
                     "Checkpoint выгружен для безопасного retry.",
                 ) from error
+
+            LOGGER.exception(
+                "qwen3_vl_embedding_failed",
+            )
 
             raise MultimodalModelExecutionError(
                 f"Ошибка Qwen3-VL-Embedding inference: {type(error).__name__}: {error}",
@@ -351,7 +364,7 @@ class Qwen3VlEmbeddingRuntime:
     def _ensure_model_sync(
         self,
     ) -> Any:
-        """Lazy-load checkpoint только после VRAM admission."""
+        """Lazy-load checkpoint напрямую в GPU с bounded CPU RAM."""
         if self._model is not None:
             return self._model
 
@@ -364,18 +377,31 @@ class Qwen3VlEmbeddingRuntime:
                 "CUDA недоступна внутри multimodal embedding service.",
             )
 
-        free_vram, _ = torch.cuda.mem_get_info()
+        free_vram, total_vram = torch.cuda.mem_get_info()
 
-        if (
-            int(
-                free_vram,
+        free_vram_bytes = int(
+            free_vram,
+        )
+
+        total_vram_bytes = int(
+            total_vram,
+        )
+
+        if free_vram_bytes < self._settings.min_free_vram_bytes:
+            LOGGER.warning(
+                (
+                    "qwen3_vl_model_admission_rejected "
+                    "free_vram_bytes=%s "
+                    "required_vram_bytes=%s"
+                ),
+                free_vram_bytes,
+                self._settings.min_free_vram_bytes,
             )
-            < self._settings.min_free_vram_bytes
-        ):
+
             raise GpuAdmissionError(
                 "Недостаточно свободной VRAM для безопасной "
                 "загрузки Qwen3-VL-Embedding-8B: "
-                f"free={int(free_vram)} bytes, "
+                f"free={free_vram_bytes} bytes, "
                 f"required="
                 f"{self._settings.min_free_vram_bytes} bytes.",
             )
@@ -386,24 +412,55 @@ class Qwen3VlEmbeddingRuntime:
 
         model_class = sentence_transformers.SentenceTransformer
 
-        torch_dtype = getattr(
+        model_dtype = getattr(
             torch,
             self._settings.dtype,
+        )
+
+        LOGGER.info(
+            (
+                "qwen3_vl_model_load_started "
+                "model=%s dtype=%s "
+                "free_vram_bytes=%s "
+                "total_vram_bytes=%s "
+                "device_map=cuda:0"
+            ),
+            self._settings.name,
+            self._settings.dtype,
+            free_vram_bytes,
+            total_vram_bytes,
         )
 
         try:
             model = model_class(
                 self._settings.name,
-                device="cuda",
                 model_kwargs={
-                    "torch_dtype": torch_dtype,
+                    "dtype": model_dtype,
+                    "device_map": "cuda:0",
+                    "low_cpu_mem_usage": True,
                 },
             )
 
             model.max_seq_length = self._settings.max_input_tokens
 
-        except RuntimeError as error:
+        except Exception as error:
             self._release_sync()
+
+            LOGGER.exception(
+                ("qwen3_vl_model_load_failed model=%s error_type=%s"),
+                self._settings.name,
+                type(
+                    error,
+                ).__name__,
+            )
+
+            if isinstance(
+                error,
+                MemoryError,
+            ):
+                raise MultimodalModelExecutionError(
+                    "Недостаточно CPU RAM при загрузке Qwen3-VL-Embedding-8B.",
+                ) from error
 
             lowered = str(
                 error,
@@ -413,7 +470,7 @@ class Qwen3VlEmbeddingRuntime:
                 "cuda" in lowered and "memory" in lowered
             ):
                 raise GpuAdmissionError(
-                    "CUDA OOM при загрузке Qwen3-VL-Embedding-8B.",
+                    f"CUDA OOM при загрузке Qwen3-VL-Embedding-8B: {str(error)[:1000]}",
                 ) from error
 
             raise MultimodalModelExecutionError(
@@ -424,12 +481,19 @@ class Qwen3VlEmbeddingRuntime:
 
         self._model = model
 
+        LOGGER.info(
+            ("qwen3_vl_model_load_completed model=%s device_map=cuda:0"),
+            self._settings.name,
+        )
+
         return model
 
     def _release_sync(
         self,
     ) -> None:
         """Удаляет model reference и очищает CUDA allocator."""
+        model_was_loaded = self._model is not None
+
         self._model = None
 
         gc.collect()
@@ -451,6 +515,11 @@ class Qwen3VlEmbeddingRuntime:
             RuntimeError,
         ):
             torch.cuda.ipc_collect()
+
+        if model_was_loaded:
+            LOGGER.info(
+                "qwen3_vl_model_released",
+            )
 
     def _status_sync(
         self,

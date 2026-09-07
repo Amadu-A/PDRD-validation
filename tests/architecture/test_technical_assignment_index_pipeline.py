@@ -174,3 +174,46 @@ def test_gpu_runtime_is_bounded_lazy_and_idle_released() -> None:
     assert "idle_release_seconds" in settings
 
     assert "default=60.0" in settings
+
+
+def test_gpu_loader_uses_bounded_direct_dispatch() -> None:
+    """8B checkpoint нельзя сначала материализовать целиком в RAM."""
+    pyproject = (
+        ROOT / "services" / "multimodal-embedding-service" / "pyproject.toml"
+    ).read_text(
+        encoding="utf-8",
+    )
+
+    runtime = (
+        ROOT
+        / "services"
+        / "multimodal-embedding-service"
+        / "src"
+        / "pdrd_multimodal_embedding_service"
+        / "runtime.py"
+    ).read_text(
+        encoding="utf-8",
+    )
+
+    assert '"accelerate==1.14.0"' in pyproject
+
+    assert '"device_map": "cuda:0"' in runtime
+
+    assert '"low_cpu_mem_usage": True' in runtime
+
+    assert '"dtype": model_dtype' in runtime
+
+    assert '"torch_dtype": model_dtype' not in runtime
+
+
+def test_knowledge_runtime_prepares_t_storage_permissions() -> None:
+    """Non-root Knowledge runtime должен владеть T storage."""
+    dockerfile = (ROOT / "services" / "knowledge-service" / "Dockerfile").read_text(
+        encoding="utf-8",
+    )
+
+    assert "/data/normative" in dockerfile
+
+    assert "/data/technical-assignments" in dockerfile
+
+    assert "chown -R app:app" in dockerfile

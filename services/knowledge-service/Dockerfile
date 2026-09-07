@@ -45,8 +45,12 @@ RUN useradd \
     --create-home \
     --uid 1000 \
     app \
-    && mkdir -p /data/normative \
-    && chown -R app:app /data/normative
+    && mkdir -p \
+        /data/normative \
+        /data/technical-assignments \
+    && chown -R app:app \
+        /data/normative \
+        /data/technical-assignments
 
 ENV HOME=/home/app
 
