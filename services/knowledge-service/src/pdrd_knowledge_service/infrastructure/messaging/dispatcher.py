@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/infrastructure/messaging/dispatcher.py
 
-"""Фоновый process transactional outbox Knowledge Service."""
+"""Фоновый dispatcher обоих Knowledge transactional outboxes."""
 
 import asyncio
 import logging
@@ -9,12 +9,18 @@ from functools import partial
 from pdrd_knowledge_service.application.use_cases.dispatch_normative_outbox import (
     DispatchNormativeOutbox,
 )
+from pdrd_knowledge_service.application.use_cases.dispatch_technical_assignment_outbox import (
+    DispatchTechnicalAssignmentOutbox,
+)
 from pdrd_knowledge_service.core.settings import (
     get_settings,
 )
 from pdrd_knowledge_service.infrastructure.database.engine import (
     build_async_engine,
     build_session_factory,
+)
+from pdrd_knowledge_service.infrastructure.database.technical_assignment_persistence import (
+    SqlAlchemyTechnicalAssignmentUnitOfWork,
 )
 from pdrd_knowledge_service.infrastructure.database.unit_of_work import (
     SqlAlchemyNormativeCatalogUnitOfWork,
@@ -24,6 +30,7 @@ from pdrd_knowledge_service.infrastructure.messaging.celery_app import (
 )
 from pdrd_knowledge_service.infrastructure.messaging.publisher import (
     CeleryNormativeOutboxPublisher,
+    CeleryTechnicalAssignmentOutboxPublisher,
 )
 
 LOGGER = logging.getLogger(
@@ -32,7 +39,7 @@ LOGGER = logging.getLogger(
 
 
 async def run_dispatcher() -> None:
-    """Непрерывно публикует committed normative outbox messages."""
+    """Публикует normative и T outbox events."""
     settings = get_settings()
 
     engine = build_async_engine(
@@ -43,36 +50,71 @@ async def run_dispatcher() -> None:
         engine,
     )
 
-    unit_of_work_factory = partial(
+    normative_uow_factory = partial(
         SqlAlchemyNormativeCatalogUnitOfWork,
         session_factory,
     )
 
-    publisher = CeleryNormativeOutboxPublisher(
-        celery_app=celery_app,
-        broker_settings=settings.broker,
+    technical_uow_factory = partial(
+        SqlAlchemyTechnicalAssignmentUnitOfWork,
+        session_factory,
     )
 
-    use_case = DispatchNormativeOutbox(
-        unit_of_work_factory=unit_of_work_factory,
-        publisher=publisher,
+    normative_dispatcher = DispatchNormativeOutbox(
+        unit_of_work_factory=normative_uow_factory,
+        publisher=CeleryNormativeOutboxPublisher(
+            celery_app=celery_app,
+            broker_settings=settings.broker,
+        ),
+    )
+
+    technical_dispatcher = DispatchTechnicalAssignmentOutbox(
+        unit_of_work_factory=technical_uow_factory,
+        publisher=(
+            CeleryTechnicalAssignmentOutboxPublisher(
+                celery_app=celery_app,
+                queue_settings=(settings.technical_assignment_queue),
+            )
+        ),
     )
 
     try:
         while True:
-            report = await use_case.execute(
+            normative_report = await normative_dispatcher.execute(
                 limit=settings.outbox.batch_size,
             )
 
-            if report.published or report.failed:
+            technical_report = await technical_dispatcher.execute(
+                limit=settings.outbox.batch_size,
+            )
+
+            selected = normative_report.selected + technical_report.selected
+
+            failed = normative_report.failed + technical_report.failed
+
+            if (
+                normative_report.published
+                or normative_report.failed
+                or technical_report.published
+                or technical_report.failed
+            ):
                 LOGGER.info(
-                    "normative_outbox_dispatch selected=%s published=%s failed=%s",
-                    report.selected,
-                    report.published,
-                    report.failed,
+                    "knowledge_outbox_dispatch "
+                    "normative_selected=%s "
+                    "normative_published=%s "
+                    "normative_failed=%s "
+                    "technical_selected=%s "
+                    "technical_published=%s "
+                    "technical_failed=%s",
+                    normative_report.selected,
+                    normative_report.published,
+                    normative_report.failed,
+                    technical_report.selected,
+                    technical_report.published,
+                    technical_report.failed,
                 )
 
-            if report.selected == 0 or report.failed > 0:
+            if selected == 0 or failed > 0:
                 await asyncio.sleep(
                     settings.outbox.poll_interval_seconds,
                 )
@@ -87,7 +129,7 @@ async def run_dispatcher() -> None:
 
 
 def main() -> None:
-    """Запускает отдельный Knowledge outbox dispatcher process."""
+    """Запускает Knowledge outbox dispatcher."""
     logging.basicConfig(
         level=logging.INFO,
         format=("%(asctime)s %(levelname)s %(name)s %(message)s"),

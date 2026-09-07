@@ -5,8 +5,12 @@
 import asyncio
 
 from alembic import context
-from pdrd_knowledge_service.core.settings import get_settings
-from pdrd_knowledge_service.infrastructure.database.base import Base
+from pdrd_knowledge_service.core.settings import (
+    get_settings,
+)
+from pdrd_knowledge_service.infrastructure.database.base import (
+    Base,
+)
 from pdrd_knowledge_service.infrastructure.database.engine import (
     build_database_url,
 )
@@ -18,13 +22,21 @@ from pdrd_knowledge_service.infrastructure.database.models import (
 from pdrd_knowledge_service.infrastructure.database.outbox_model import (
     NormativeOutboxMessageModel,
 )
+from pdrd_knowledge_service.infrastructure.database.technical_assignment_models import (
+    TechnicalAssignmentModel,
+    TechnicalAssignmentOutboxMessageModel,
+)
 from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import (
+    async_engine_from_config,
+)
 
 del NormativeCategoryModel
 del NormativeDocumentModel
 del NormativeSectionModel
 del NormativeOutboxMessageModel
+del TechnicalAssignmentModel
+del TechnicalAssignmentOutboxMessageModel
 
 config = context.config
 
@@ -63,7 +75,7 @@ def _configure_context(
 
 
 def run_migrations_offline() -> None:
-    """Выполняет migrations без активного PostgreSQL connection."""
+    """Выполняет migrations без active connection."""
     _configure_context(
         url=database_url,
         literal_binds=True,
@@ -79,7 +91,7 @@ def run_migrations_offline() -> None:
 def _run_migrations(
     connection: object,
 ) -> None:
-    """Выполняет migrations через переданный sync facade connection."""
+    """Выполняет migrations через sync facade connection."""
     _configure_context(
         connection=connection,
     )

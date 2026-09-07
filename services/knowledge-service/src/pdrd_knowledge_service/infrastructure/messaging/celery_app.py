@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/infrastructure/messaging/celery_app.py
 
-"""Celery configuration normative indexing queue."""
+"""Celery configuration Knowledge indexing queues."""
 
 from celery import Celery
 from kombu import (
@@ -19,16 +19,31 @@ settings = get_settings()
 
 broker_settings = settings.broker
 
-index_exchange = Exchange(
+technical_settings = settings.technical_assignment_queue
+
+normative_exchange = Exchange(
     broker_settings.exchange_name,
     type="direct",
     durable=True,
 )
 
-index_queue = Queue(
+normative_queue = Queue(
     name=broker_settings.queue_name,
-    exchange=index_exchange,
+    exchange=normative_exchange,
     routing_key=broker_settings.routing_key,
+    durable=True,
+)
+
+technical_exchange = Exchange(
+    technical_settings.exchange_name,
+    type="direct",
+    durable=True,
+)
+
+technical_queue = Queue(
+    name=technical_settings.queue_name,
+    exchange=technical_exchange,
+    routing_key=technical_settings.routing_key,
     durable=True,
 )
 
@@ -50,13 +65,26 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    task_queues=(index_queue,),
+    task_queues=(
+        normative_queue,
+        technical_queue,
+    ),
     task_default_queue=broker_settings.queue_name,
     task_default_exchange=broker_settings.exchange_name,
     task_default_exchange_type="direct",
     task_default_routing_key=broker_settings.routing_key,
     task_default_delivery_mode="persistent",
     task_create_missing_queues=False,
+    task_routes={
+        "pdrd.knowledge.normative.index": {
+            "queue": broker_settings.queue_name,
+            "routing_key": (broker_settings.routing_key),
+        },
+        "pdrd.knowledge.technical_assignment.index": {
+            "queue": technical_settings.queue_name,
+            "routing_key": (technical_settings.routing_key),
+        },
+    },
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,

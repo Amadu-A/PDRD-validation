@@ -30,10 +30,6 @@ select = [
     "W",
 ]
 
-# Русские строки, комментарии и docstring являются обязательной частью
-# project code-style. RUF001-RUF003 считают отдельные кириллические символы
-# визуально похожими на латиницу, поэтому эти проверки несовместимы
-# с принятой русскоязычной документацией проекта.
 ignore = [
     "RUF001",
     "RUF002",
@@ -43,9 +39,6 @@ ignore = [
 fixable = ["ALL"]
 
 [tool.ruff.lint.pycodestyle]
-# Formatter по-прежнему стремится к 88 символам.
-# Более высокий предел E501 нужен для машинно-проверяемой первой строки
-# с полным относительным путём к Python-файлу.
 max-line-length = 120
 
 [tool.ruff.lint.pydocstyle]
@@ -73,6 +66,7 @@ testpaths = [
     "services/document-service/tests",
     "services/knowledge-service/tests",
     "services/analysis-service/tests",
+    "services/multimodal-embedding-service/tests",
 ]
 
 markers = [

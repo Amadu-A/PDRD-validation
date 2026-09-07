@@ -4,6 +4,7 @@
 
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 
 from pdrd_knowledge_service.application.normative_catalog_defaults import (
     DEFAULT_SECTION_SYSTEM_PROMPT,
@@ -53,6 +54,10 @@ from pdrd_knowledge_service.application.use_cases.project_context import (
     DeleteProjectContext,
     SearchProjectContext,
 )
+from pdrd_knowledge_service.application.use_cases.technical_assignments import (
+    GetTechnicalAssignment,
+    RegisterTechnicalAssignment,
+)
 from pdrd_knowledge_service.application.use_cases.user_packages import (
     SearchUserPackages,
 )
@@ -66,6 +71,9 @@ from pdrd_knowledge_service.infrastructure.database.engine import (
 )
 from pdrd_knowledge_service.infrastructure.database.health import (
     DatabaseReadinessProbe,
+)
+from pdrd_knowledge_service.infrastructure.database.technical_assignment_persistence import (
+    SqlAlchemyTechnicalAssignmentUnitOfWork,
 )
 from pdrd_knowledge_service.infrastructure.database.unit_of_work import (
     SqlAlchemyNormativeCatalogUnitOfWork,
@@ -105,6 +113,10 @@ class ApplicationContainer:
 
     queue_normative_document: QueueNormativeDocument | None = None
 
+    register_technical_assignment: RegisterTechnicalAssignment | None = None
+
+    get_technical_assignment: GetTechnicalAssignment | None = None
+
     create_project_context: CreateProjectContext | None = None
 
     search_project_context: SearchProjectContext | None = None
@@ -129,8 +141,19 @@ def build_container() -> ApplicationContainer:
         session_factory,
     )
 
+    technical_assignment_uow_factory = partial(
+        SqlAlchemyTechnicalAssignmentUnitOfWork,
+        session_factory,
+    )
+
     document_storage = LocalFilesystemNormativeDocumentStorage(
-        root_path=(settings.storage.root_path),
+        root_path=settings.storage.root_path,
+    )
+
+    technical_assignment_storage = LocalFilesystemNormativeDocumentStorage(
+        root_path=Path(
+            settings.technical_assignment.storage_root_path,
+        ),
     )
 
     vector_store = QdrantVectorStore(
@@ -159,67 +182,49 @@ def build_container() -> ApplicationContainer:
     )
 
     normative_categories = NormativeCategoryUseCases(
-        list_categories=(
-            ListNormativeCategories(
-                unit_of_work_factory=(normative_catalog_uow_factory),
-            )
+        list_categories=ListNormativeCategories(
+            unit_of_work_factory=(normative_catalog_uow_factory),
         ),
         get_category=GetNormativeCategory(
             unit_of_work_factory=(normative_catalog_uow_factory),
         ),
-        create_category=(
-            CreateNormativeCategory(
-                unit_of_work_factory=(normative_catalog_uow_factory),
-            )
+        create_category=CreateNormativeCategory(
+            unit_of_work_factory=(normative_catalog_uow_factory),
         ),
-        update_category=(
-            UpdateNormativeCategory(
-                unit_of_work_factory=(normative_catalog_uow_factory),
-            )
+        update_category=UpdateNormativeCategory(
+            unit_of_work_factory=(normative_catalog_uow_factory),
         ),
-        delete_category=(
-            DeleteNormativeCategory(
-                unit_of_work_factory=(normative_catalog_uow_factory),
-            )
+        delete_category=DeleteNormativeCategory(
+            unit_of_work_factory=(normative_catalog_uow_factory),
         ),
     )
 
     normative_documents = NormativeDocumentUseCases(
-        list_documents=(
-            ListNormativeDocuments(
-                unit_of_work_factory=(normative_catalog_uow_factory),
-            )
+        list_documents=ListNormativeDocuments(
+            unit_of_work_factory=(normative_catalog_uow_factory),
         ),
         get_document=GetNormativeDocument(
             unit_of_work_factory=(normative_catalog_uow_factory),
         ),
-        upload_document=(
-            UploadNormativeDocument(
-                unit_of_work_factory=(normative_catalog_uow_factory),
-                storage=document_storage,
-                max_upload_bytes=(settings.storage.max_upload_bytes),
-            )
+        upload_document=UploadNormativeDocument(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+            storage=document_storage,
+            max_upload_bytes=(settings.storage.max_upload_bytes),
         ),
-        get_document_content=(
-            GetNormativeDocumentContent(
-                unit_of_work_factory=(normative_catalog_uow_factory),
-                storage=document_storage,
-            )
+        get_document_content=GetNormativeDocumentContent(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+            storage=document_storage,
         ),
-        move_document=(
-            MoveNormativeDocument(
-                unit_of_work_factory=(normative_catalog_uow_factory),
-                vector_store=vector_store,
-                collection=(settings.qdrant.normative_collection),
-            )
+        move_document=MoveNormativeDocument(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+            vector_store=vector_store,
+            collection=(settings.qdrant.normative_collection),
         ),
-        delete_document=(
-            DeleteNormativeDocument(
-                unit_of_work_factory=(normative_catalog_uow_factory),
-                storage=document_storage,
-                vector_store=vector_store,
-                collection=(settings.qdrant.normative_collection),
-            )
+        delete_document=DeleteNormativeDocument(
+            unit_of_work_factory=(normative_catalog_uow_factory),
+            storage=document_storage,
+            vector_store=vector_store,
+            collection=(settings.qdrant.normative_collection),
         ),
     )
 
@@ -244,8 +249,8 @@ def build_container() -> ApplicationContainer:
         embedding_provider=embedding_provider,
         vector_store=vector_store,
         collection=(settings.qdrant.normative_collection),
-        embedding_model=(settings.embedding.model),
-        top_k=(settings.search.normative_top_k),
+        embedding_model=settings.embedding.model,
+        top_k=settings.search.normative_top_k,
         max_sources=(settings.search.normative_max_sources),
         unit_of_work_factory=(normative_catalog_uow_factory),
     )
@@ -258,7 +263,7 @@ def build_container() -> ApplicationContainer:
         embedding_provider=embedding_provider,
         vector_store=vector_store,
         collection=(settings.qdrant.experience_collection),
-        embedding_model=(settings.embedding.model),
+        embedding_model=settings.embedding.model,
         top_k=settings.search.experience_top_k,
     )
 
@@ -275,7 +280,7 @@ def build_container() -> ApplicationContainer:
     return ApplicationContainer(
         settings=settings,
         search_normative=search_normative,
-        search_user_packages=(search_user_packages),
+        search_user_packages=search_user_packages,
         search_experience=search_experience,
         check_readiness=check_readiness,
         normative_catalog_uow_factory=(normative_catalog_uow_factory),
@@ -283,31 +288,37 @@ def build_container() -> ApplicationContainer:
         normative_categories=normative_categories,
         normative_documents=normative_documents,
         queue_normative_document=(queue_normative_document),
-        create_project_context=(
-            CreateProjectContext(
-                embedding_provider=(embedding_provider),
-                vector_store=vector_store,
-                collection_prefix=(project_settings.collection_prefix),
-                embedding_model=(settings.embedding.model),
-                chunk_size=(project_settings.chunk_size),
-                chunk_overlap=(project_settings.chunk_overlap),
-                embed_batch_size=(project_settings.embed_batch_size),
-                upsert_batch_size=(project_settings.upsert_batch_size),
+        register_technical_assignment=(
+            RegisterTechnicalAssignment(
+                unit_of_work_factory=(technical_assignment_uow_factory),
+                storage=technical_assignment_storage,
+                max_upload_bytes=(settings.technical_assignment.max_upload_bytes),
             )
         ),
-        search_project_context=(
-            SearchProjectContext(
-                embedding_provider=(embedding_provider),
-                vector_store=vector_store,
-                collection_prefix=(project_settings.collection_prefix),
-                embedding_model=(settings.embedding.model),
-                top_k=(project_settings.top_k),
+        get_technical_assignment=(
+            GetTechnicalAssignment(
+                unit_of_work_factory=(technical_assignment_uow_factory),
             )
         ),
-        delete_project_context=(
-            DeleteProjectContext(
-                vector_store=vector_store,
-                collection_prefix=(project_settings.collection_prefix),
-            )
+        create_project_context=CreateProjectContext(
+            embedding_provider=embedding_provider,
+            vector_store=vector_store,
+            collection_prefix=(project_settings.collection_prefix),
+            embedding_model=settings.embedding.model,
+            chunk_size=project_settings.chunk_size,
+            chunk_overlap=(project_settings.chunk_overlap),
+            embed_batch_size=(project_settings.embed_batch_size),
+            upsert_batch_size=(project_settings.upsert_batch_size),
+        ),
+        search_project_context=SearchProjectContext(
+            embedding_provider=embedding_provider,
+            vector_store=vector_store,
+            collection_prefix=(project_settings.collection_prefix),
+            embedding_model=settings.embedding.model,
+            top_k=project_settings.top_k,
+        ),
+        delete_project_context=DeleteProjectContext(
+            vector_store=vector_store,
+            collection_prefix=(project_settings.collection_prefix),
         ),
     )

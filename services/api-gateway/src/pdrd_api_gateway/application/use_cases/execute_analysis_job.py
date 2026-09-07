@@ -22,6 +22,9 @@ from pdrd_api_gateway.application.ports.persistence import (
 from pdrd_api_gateway.application.ports.project_context import (
     ProjectContextCleaner,
 )
+from pdrd_api_gateway.application.ports.technical_assignment_index import (
+    TechnicalAssignmentIndexCoordinator,
+)
 from pdrd_api_gateway.domain.analysis_job import (
     AnalysisJob,
     AnalysisJobStatus,
@@ -32,21 +35,27 @@ LOGGER = logging.getLogger(
 )
 
 
-class AnalysisJobNotFoundError(LookupError):
+class AnalysisJobNotFoundError(
+    LookupError,
+):
     """Worker получил неизвестный analysis job."""
 
 
-class AnalysisJobNotExecutableError(RuntimeError):
-    """Analysis job находится в терминальном состоянии."""
+class AnalysisJobNotExecutableError(
+    RuntimeError,
+):
+    """Analysis job находится в terminal state."""
 
 
-class AnalysisExecutionError(RuntimeError):
+class AnalysisExecutionError(
+    RuntimeError,
+):
     """Ошибка фактического выполнения анализа."""
 
 
 @dataclass(frozen=True, slots=True)
 class ExecuteAnalysisJob:
-    """Выполняет одно асинхронное задание анализа."""
+    """Выполняет одно asynchronous analysis job."""
 
     unit_of_work_factory: UnitOfWorkFactory
 
@@ -56,6 +65,8 @@ class ExecuteAnalysisJob:
 
     project_context_cleaner: ProjectContextCleaner | None = None
 
+    technical_assignment_coordinator: TechnicalAssignmentIndexCoordinator | None = None
+
     async def execute(
         self,
         *,
@@ -64,7 +75,7 @@ class ExecuteAnalysisJob:
         str,
         Any,
     ]:
-        """Запускает job, сохраняет result и очищает Project Context."""
+        """Запускает job только после READY ТЗ."""
         job = await self._prepare_job(
             job_id=job_id,
         )
@@ -114,6 +125,11 @@ class ExecuteAnalysisJob:
                 document_id=document_id,
             )
 
+            await self._ensure_technical_assignment_ready(
+                job=job,
+                document_id=document_id,
+            )
+
             artifacts = replace(
                 artifacts,
                 normative_snapshot=job.normative_snapshot,
@@ -151,12 +167,45 @@ class ExecuteAnalysisJob:
 
         return result
 
+    async def _ensure_technical_assignment_ready(
+        self,
+        *,
+        job: AnalysisJob,
+        document_id: UUID,
+    ) -> None:
+        """Не разрешает n8n до READY T-index."""
+        snapshot = job.normative_snapshot
+
+        if snapshot is None or snapshot.technical_assignment is None:
+            return
+
+        coordinator = self.technical_assignment_coordinator
+
+        if coordinator is None:
+            raise RuntimeError(
+                "Analysis job содержит ТЗ, но T-index coordinator не настроен.",
+            )
+
+        content = await self.artifact_store.load_technical_assignment(
+            document_id=document_id,
+        )
+
+        if content is None:
+            raise RuntimeError(
+                "Immutable snapshot содержит ТЗ, но physical artifact отсутствует.",
+            )
+
+        await coordinator.ensure_ready(
+            snapshot=snapshot.technical_assignment,
+            content=content,
+        )
+
     async def _cleanup_project_context(
         self,
         *,
         context_id: UUID | None,
     ) -> None:
-        """Выполняет best-effort cleanup без подмены результата job."""
+        """Best-effort cleanup Project Context."""
         if context_id is None or self.project_context_cleaner is None:
             return
 
@@ -167,7 +216,7 @@ class ExecuteAnalysisJob:
 
         except Exception as error:
             LOGGER.warning(
-                ("project_context_cleanup_failed context_id=%s error_type=%s error=%s"),
+                "project_context_cleanup_failed context_id=%s error_type=%s error=%s",
                 context_id,
                 type(
                     error,
@@ -180,7 +229,7 @@ class ExecuteAnalysisJob:
         *,
         job_id: UUID,
     ) -> AnalysisJob:
-        """Загружает job и переводит его в processing."""
+        """Загружает job и переводит в processing."""
         async with self.unit_of_work_factory() as unit_of_work:
             job = await unit_of_work.analysis_jobs.get(
                 job_id,
@@ -208,6 +257,7 @@ class ExecuteAnalysisJob:
 
             if job.status is AnalysisJobStatus.PENDING:
                 job.mark_queued()
+
                 job.mark_processing()
 
                 changed = True
@@ -237,7 +287,7 @@ class ExecuteAnalysisJob:
         str,
         Any,
     ]:
-        """Возвращает результат уже завершённого job."""
+        """Возвращает result уже completed job."""
         if job.document_id is None:
             raise AnalysisExecutionError(
                 "Completed analysis job не содержит document_id.",
@@ -249,7 +299,7 @@ class ExecuteAnalysisJob:
 
         if result is None:
             raise AnalysisExecutionError(
-                ("Analysis job имеет status=completed, но result.json отсутствует."),
+                "Analysis job имеет status=completed, но result.json отсутствует.",
             )
 
         return result
@@ -259,7 +309,7 @@ class ExecuteAnalysisJob:
         *,
         job_id: UUID,
     ) -> None:
-        """Фиксирует успешное завершение job."""
+        """Фиксирует успешное завершение."""
         async with self.unit_of_work_factory() as unit_of_work:
             job = await unit_of_work.analysis_jobs.get(
                 job_id,
@@ -294,7 +344,7 @@ class ExecuteAnalysisJob:
         job_id: UUID,
         error: Exception,
     ) -> None:
-        """Фиксирует терминальную ошибку выполнения."""
+        """Фиксирует terminal execution error."""
         async with self.unit_of_work_factory() as unit_of_work:
             job = await unit_of_work.analysis_jobs.get(
                 job_id,

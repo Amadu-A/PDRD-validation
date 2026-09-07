@@ -75,7 +75,7 @@ class DatabaseSettings(BaseModel):
 
 
 class BrokerSettings(BaseModel):
-    """Настройки project-specific RabbitMQ namespace."""
+    """Настройки project RabbitMQ namespace."""
 
     host: str = "rabbitmq"
 
@@ -119,7 +119,7 @@ class BrokerSettings(BaseModel):
 
 
 class OutboxSettings(BaseModel):
-    """Настройки transactional outbox dispatcher."""
+    """Transactional outbox dispatcher."""
 
     poll_interval_seconds: float = Field(
         default=1.0,
@@ -135,7 +135,7 @@ class OutboxSettings(BaseModel):
 
 
 class StorageSettings(BaseModel):
-    """Настройки временного хранения документов."""
+    """Temporary analysis storage."""
 
     root_path: str = "/data/analyses"
 
@@ -149,14 +149,14 @@ class StorageSettings(BaseModel):
     def max_upload_bytes(
         self,
     ) -> int:
-        """Возвращает максимальный размер файла."""
+        """Возвращает максимальный размер."""
         return self.max_upload_mb * 1024 * 1024
 
 
 class TechnicalAssignmentSettings(
     BaseModel,
 ):
-    """Gateway limits uploaded технического задания."""
+    """Gateway lifecycle ТЗ."""
 
     max_upload_mb: int = Field(
         default=100,
@@ -164,16 +164,28 @@ class TechnicalAssignmentSettings(
         le=500,
     )
 
+    index_wait_timeout_seconds: float = Field(
+        default=1800.0,
+        gt=0,
+        le=7200,
+    )
+
+    index_poll_interval_seconds: float = Field(
+        default=2.0,
+        gt=0,
+        le=60,
+    )
+
     @property
     def max_upload_bytes(
         self,
     ) -> int:
-        """Возвращает максимальный размер ТЗ."""
+        """Возвращает T upload limit."""
         return self.max_upload_mb * 1024 * 1024
 
 
 class OrchestrationSettings(BaseModel):
-    """Настройки опубликованных PDRD n8n workflows."""
+    """Published PDRD n8n workflows."""
 
     base_url: str = "http://n8n:5678"
 
@@ -197,14 +209,14 @@ class OrchestrationSettings(BaseModel):
 
 
 class KnowledgeServiceSettings(BaseModel):
-    """Настройки internal API Knowledge Service."""
+    """Internal API Knowledge Service."""
 
     base_url: str = "http://pdrd-knowledge-service:8401"
 
     request_timeout_seconds: float = Field(
-        default=30.0,
+        default=120.0,
         gt=0,
-        le=300,
+        le=600,
     )
 
     connect_timeout_seconds: float = Field(
@@ -223,12 +235,12 @@ class KnowledgeServiceSettings(BaseModel):
     def max_upload_bytes(
         self,
     ) -> int:
-        """Возвращает Gateway limit нормативного upload."""
+        """Gateway limit managed upload."""
         return self.max_upload_mb * 1024 * 1024
 
 
 class ProjectContextCleanupSettings(BaseModel):
-    """Настройки страховочного cleanup через Knowledge Service."""
+    """Best-effort Project Context cleanup."""
 
     base_url: str = "http://pdrd-knowledge-service:8401"
 
@@ -246,7 +258,7 @@ class ProjectContextCleanupSettings(BaseModel):
 
 
 class Settings(BaseSettings):
-    """Описывает runtime-конфигурацию API Gateway."""
+    """Runtime API Gateway settings."""
 
     model_config = SettingsConfigDict(
         env_file=(
@@ -292,7 +304,7 @@ class Settings(BaseSettings):
     )
 
     technical_assignment: TechnicalAssignmentSettings = Field(
-        default_factory=(TechnicalAssignmentSettings),
+        default_factory=TechnicalAssignmentSettings,
     )
 
     orchestration: OrchestrationSettings = Field(
@@ -300,15 +312,15 @@ class Settings(BaseSettings):
     )
 
     knowledge_service: KnowledgeServiceSettings = Field(
-        default_factory=(KnowledgeServiceSettings),
+        default_factory=KnowledgeServiceSettings,
     )
 
     project_context_cleanup: ProjectContextCleanupSettings = Field(
-        default_factory=(ProjectContextCleanupSettings),
+        default_factory=ProjectContextCleanupSettings,
     )
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Возвращает единственный экземпляр конфигурации."""
+    """Возвращает cached settings."""
     return Settings()

@@ -1,0 +1,50 @@
+# services/multimodal-embedding-service/pyproject.toml
+# Runtime и test dependencies multimodal embedding service.
+
+[build-system]
+requires = ["setuptools>=80,<82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdrd-multimodal-embedding-service"
+version = "0.1.0"
+description = "GPU-сервис Qwen3-VL-Embedding для multimodal retrieval PDRD."
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi==0.141.1",
+    "pydantic-settings==2.15.0",
+    "uvicorn[standard]==0.52.4",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "pillow>=11.3,<12.0",
+    "qwen-vl-utils>=0.0.14,<0.1",
+    "sentence-transformers==5.4.0",
+    "transformers>=4.57,<5.0",
+]
+
+test = [
+    "httpx==0.28.1",
+    "pytest>=8.4,<10.0",
+    "pytest-asyncio>=1.1,<2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+]
+
+testpaths = [
+    "tests",
+]
+
+asyncio_mode = "auto"

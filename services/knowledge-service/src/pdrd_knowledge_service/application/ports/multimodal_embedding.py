@@ -12,6 +12,12 @@ class MultimodalEmbeddingProviderError(
     """Ошибка multimodal embedding provider."""
 
 
+class MultimodalEmbeddingTemporaryError(
+    MultimodalEmbeddingProviderError,
+):
+    """Временная GPU/provider ошибка, допускающая retry."""
+
+
 @dataclass(frozen=True, slots=True)
 class MultimodalEmbeddingInput:
     """Один text/image/mixed input для embedding-модели."""
@@ -83,8 +89,14 @@ class MultimodalEmbeddingProvider(
         """Строит embedding для каждого multimodal input."""
         ...
 
+    async def release(
+        self,
+    ) -> None:
+        """Просит provider явно выгрузить checkpoint."""
+        ...
+
     async def is_ready(
         self,
     ) -> bool:
-        """Проверяет готовность multimodal provider."""
+        """Проверяет готовность provider."""
         ...

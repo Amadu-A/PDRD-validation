@@ -39,10 +39,16 @@ from pdrd_knowledge_service.infrastructure.database.repositories import (
     SqlAlchemyNormativeDocumentRepository,
     SqlAlchemyNormativeSectionRepository,
 )
+from pdrd_knowledge_service.infrastructure.database.technical_assignment_models import (
+    TechnicalAssignmentModel,
+    TechnicalAssignmentOutboxMessageModel,
+)
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 del NormativeOutboxMessageModel
+del TechnicalAssignmentModel
+del TechnicalAssignmentOutboxMessageModel
 
 BASE_TIME = datetime(
     2026,
@@ -78,13 +84,15 @@ def test_database_url_uses_asyncpg_and_secret_password() -> None:
     assert url.password == "p@ss:word"
 
 
-def test_normative_tables_belong_to_knowledge_schema() -> None:
-    """Все ORM tables принадлежат bounded context Knowledge Service."""
+def test_knowledge_tables_belong_to_knowledge_schema() -> None:
+    """Все ORM tables bounded context принадлежат schema knowledge."""
     expected = {
         f"{KNOWLEDGE_SCHEMA}.normative_sections",
         f"{KNOWLEDGE_SCHEMA}.normative_categories",
         f"{KNOWLEDGE_SCHEMA}.normative_documents",
         f"{KNOWLEDGE_SCHEMA}.normative_outbox_messages",
+        f"{KNOWLEDGE_SCHEMA}.technical_assignments",
+        f"{KNOWLEDGE_SCHEMA}.technical_assignment_outbox_messages",
     }
 
     assert (

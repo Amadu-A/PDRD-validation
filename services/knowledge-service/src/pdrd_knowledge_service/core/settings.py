@@ -110,7 +110,7 @@ class BrokerSettings(BaseModel):
 class TechnicalAssignmentQueueSettings(
     BaseModel,
 ):
-    """Отдельная очередь multimodal индексации ТЗ."""
+    """Отдельная RabbitMQ очередь ТЗ."""
 
     queue_name: str = "pdrd.knowledge.technical-assignment"
 
@@ -142,7 +142,7 @@ class OutboxSettings(BaseModel):
 
 
 class NormativeStorageSettings(BaseModel):
-    """Настройки managed storage нормативных документов."""
+    """Managed storage нормативов."""
 
     root_path: Path = Path(
         "/data/normative",
@@ -158,12 +158,12 @@ class NormativeStorageSettings(BaseModel):
     def max_upload_bytes(
         self,
     ) -> int:
-        """Возвращает upload limit в bytes."""
+        """Возвращает upload limit."""
         return self.max_upload_mb * 1024 * 1024
 
 
 class NormativeIndexingSettings(BaseModel):
-    """Параметры managed нормативной индексации."""
+    """Параметры text normative indexing."""
 
     chunk_size: int = Field(
         default=3500,
@@ -193,7 +193,11 @@ class NormativeIndexingSettings(BaseModel):
 class TechnicalAssignmentSettings(
     BaseModel,
 ):
-    """Параметры ingestion и retrieval технического задания."""
+    """Параметры ingestion/indexing ТЗ."""
+
+    storage_root_path: Path = Path(
+        "/data/technical-assignments",
+    )
 
     max_upload_mb: int = Field(
         default=100,
@@ -213,6 +217,12 @@ class TechnicalAssignmentSettings(
         le=300,
     )
 
+    page_text_limit: int = Field(
+        default=16_000,
+        ge=1000,
+        le=100_000,
+    )
+
     retrieval_top_k: int = Field(
         default=6,
         ge=1,
@@ -225,16 +235,36 @@ class TechnicalAssignmentSettings(
         le=100,
     )
 
+    retry_delay_seconds: int = Field(
+        default=30,
+        ge=1,
+        le=3600,
+    )
+
+    max_retries: int = Field(
+        default=8,
+        ge=0,
+        le=100,
+    )
+
+    ollama_models_to_release: tuple[
+        str,
+        ...,
+    ] = (
+        "qwen3-vl:8b-instruct",
+        "qwen3-embedding:4b",
+    )
+
     @property
     def max_upload_bytes(
         self,
     ) -> int:
-        """Возвращает upload limit ТЗ в bytes."""
+        """Возвращает T upload limit."""
         return self.max_upload_mb * 1024 * 1024
 
 
 class OfficeConversionSettings(BaseModel):
-    """Настройки нормализации Word через LibreOffice."""
+    """Нормализация Word через LibreOffice."""
 
     executable: str = "soffice"
 
@@ -274,7 +304,7 @@ class EmbeddingSettings(BaseModel):
 class MultimodalEmbeddingSettings(
     BaseModel,
 ):
-    """Настройки Qwen3-VL-Embedding provider и safety envelope."""
+    """Qwen3-VL-Embedding provider settings."""
 
     base_url: str = "http://pdrd-multimodal-embedding-service:8601"
 
@@ -360,7 +390,7 @@ class QdrantSettings(BaseModel):
 
 
 class SearchSettings(BaseModel):
-    """Параметры runtime RAG retrieval."""
+    """Runtime RAG retrieval."""
 
     normative_top_k: int = Field(
         default=4,
@@ -382,7 +412,7 @@ class SearchSettings(BaseModel):
 
 
 class ProjectContextSettings(BaseModel):
-    """Настройки временного Project Context RAG."""
+    """Временный Project Context RAG."""
 
     chunk_size: int = Field(
         default=1800,

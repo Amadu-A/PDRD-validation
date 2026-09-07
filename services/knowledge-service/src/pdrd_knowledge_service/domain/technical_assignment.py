@@ -31,11 +31,15 @@ _SHA256_PATTERN = re.compile(
 )
 
 
-class TechnicalAssignmentError(ValueError):
+class TechnicalAssignmentError(
+    ValueError,
+):
     """Нарушение domain-инварианта ТЗ."""
 
 
-class TechnicalAssignmentIndexStatus(StrEnum):
+class TechnicalAssignmentIndexStatus(
+    StrEnum,
+):
     """Состояние ТЗ относительно multimodal index."""
 
     UPLOADED = "uploaded"
@@ -69,6 +73,7 @@ _ALLOWED_TRANSITIONS: dict[
     ),
     TechnicalAssignmentIndexStatus.INDEXING: frozenset(
         {
+            TechnicalAssignmentIndexStatus.QUEUED,
             TechnicalAssignmentIndexStatus.READY,
             TechnicalAssignmentIndexStatus.FAILED,
             TechnicalAssignmentIndexStatus.DELETING,
