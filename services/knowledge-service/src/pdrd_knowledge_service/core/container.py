@@ -54,6 +54,10 @@ from pdrd_knowledge_service.application.use_cases.project_context import (
     DeleteProjectContext,
     SearchProjectContext,
 )
+from pdrd_knowledge_service.application.use_cases.technical_assignment_retrieval import (
+    SearchTechnicalAssignment,
+    SearchTechnicalAssignmentGuidedNormative,
+)
 from pdrd_knowledge_service.application.use_cases.technical_assignments import (
     GetTechnicalAssignment,
     RegisterTechnicalAssignment,
@@ -77,6 +81,9 @@ from pdrd_knowledge_service.infrastructure.database.technical_assignment_persist
 )
 from pdrd_knowledge_service.infrastructure.database.unit_of_work import (
     SqlAlchemyNormativeCatalogUnitOfWork,
+)
+from pdrd_knowledge_service.infrastructure.embedding.multimodal_http import (
+    HttpMultimodalEmbeddingProvider,
 )
 from pdrd_knowledge_service.infrastructure.embedding.ollama import (
     OllamaEmbeddingProvider,
@@ -116,6 +123,10 @@ class ApplicationContainer:
     register_technical_assignment: RegisterTechnicalAssignment | None = None
 
     get_technical_assignment: GetTechnicalAssignment | None = None
+
+    search_technical_assignment_guided: (
+        SearchTechnicalAssignmentGuidedNormative | None
+    ) = None
 
     create_project_context: CreateProjectContext | None = None
 
@@ -211,9 +222,11 @@ def build_container() -> ApplicationContainer:
             storage=document_storage,
             max_upload_bytes=(settings.storage.max_upload_bytes),
         ),
-        get_document_content=GetNormativeDocumentContent(
-            unit_of_work_factory=(normative_catalog_uow_factory),
-            storage=document_storage,
+        get_document_content=(
+            GetNormativeDocumentContent(
+                unit_of_work_factory=(normative_catalog_uow_factory),
+                storage=document_storage,
+            )
         ),
         move_document=MoveNormativeDocument(
             unit_of_work_factory=(normative_catalog_uow_factory),
@@ -245,6 +258,13 @@ def build_container() -> ApplicationContainer:
         health_timeout_seconds=(settings.embedding.health_timeout_seconds),
     )
 
+    multimodal_embedding_provider = HttpMultimodalEmbeddingProvider(
+        base_url=(settings.multimodal_embedding.base_url),
+        request_timeout_seconds=(settings.multimodal_embedding.request_timeout_seconds),
+        connect_timeout_seconds=(settings.multimodal_embedding.connect_timeout_seconds),
+        health_timeout_seconds=(settings.multimodal_embedding.health_timeout_seconds),
+    )
+
     search_normative = SearchNormative(
         embedding_provider=embedding_provider,
         vector_store=vector_store,
@@ -253,6 +273,23 @@ def build_container() -> ApplicationContainer:
         top_k=settings.search.normative_top_k,
         max_sources=(settings.search.normative_max_sources),
         unit_of_work_factory=(normative_catalog_uow_factory),
+    )
+
+    search_technical_assignment = SearchTechnicalAssignment(
+        embedding_provider=(multimodal_embedding_provider),
+        vector_store=vector_store,
+        unit_of_work_factory=(technical_assignment_uow_factory),
+        collection=(settings.qdrant.multimodal_collection),
+        embedding_model=(settings.multimodal_embedding.model),
+        top_k=(settings.technical_assignment.retrieval_top_k),
+        max_sources=(settings.technical_assignment.max_sources),
+    )
+
+    search_technical_assignment_guided = SearchTechnicalAssignmentGuidedNormative(
+        search_technical_assignment=(search_technical_assignment),
+        search_normative=search_normative,
+        normative_catalog_uow_factory=(normative_catalog_uow_factory),
+        combined_max_sources=(settings.search.normative_max_sources),
     )
 
     search_user_packages = SearchUserPackages(
@@ -300,6 +337,7 @@ def build_container() -> ApplicationContainer:
                 unit_of_work_factory=(technical_assignment_uow_factory),
             )
         ),
+        search_technical_assignment_guided=(search_technical_assignment_guided),
         create_project_context=CreateProjectContext(
             embedding_provider=embedding_provider,
             vector_store=vector_store,
