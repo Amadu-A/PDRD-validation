@@ -177,7 +177,7 @@ def test_gpu_runtime_is_bounded_lazy_and_idle_released() -> None:
 
 
 def test_gpu_loader_uses_bounded_direct_dispatch() -> None:
-    """8B checkpoint нельзя сначала материализовать целиком в RAM."""
+    """Большой checkpoint нельзя сначала материализовать целиком в RAM."""
     pyproject = (
         ROOT / "services" / "multimodal-embedding-service" / "pyproject.toml"
     ).read_text(
@@ -204,6 +204,31 @@ def test_gpu_loader_uses_bounded_direct_dispatch() -> None:
     assert '"dtype": model_dtype' in runtime
 
     assert '"torch_dtype": model_dtype' not in runtime
+
+
+def test_gpu_image_runtime_dependencies_are_pinned() -> None:
+    """Vision processor должен иметь reproducible CUDA dependencies."""
+    pyproject = (
+        ROOT / "services" / "multimodal-embedding-service" / "pyproject.toml"
+    ).read_text(
+        encoding="utf-8",
+    )
+
+    dockerfile = (
+        ROOT / "services" / "multimodal-embedding-service" / "Dockerfile"
+    ).read_text(
+        encoding="utf-8",
+    )
+
+    assert '"torchvision==0.23.0"' in pyproject
+
+    assert '"transformers==5.16.1"' in pyproject
+
+    assert "torch==2.8.0" in dockerfile
+
+    assert "torchvision==0.23.0" in dockerfile
+
+    assert "https://download.pytorch.org/whl/cu128" in dockerfile
 
 
 def test_knowledge_runtime_prepares_t_storage_permissions() -> None:

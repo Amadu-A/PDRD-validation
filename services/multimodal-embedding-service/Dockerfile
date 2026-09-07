@@ -35,7 +35,8 @@ RUN pip install \
     --timeout 1000 \
     --retries 10 \
     --index-url https://download.pytorch.org/whl/cu128 \
-    torch==2.8.0
+    torch==2.8.0 \
+    torchvision==0.23.0
 
 RUN pip install \
     --no-cache-dir \
