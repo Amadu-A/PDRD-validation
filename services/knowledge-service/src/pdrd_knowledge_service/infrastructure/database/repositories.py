@@ -344,6 +344,26 @@ class SqlAlchemyNormativeDocumentRepository:
             model,
         )
 
+    async def list_all(
+        self,
+    ) -> list[NormativeDocument]:
+        """Возвращает persisted документы в стабильном порядке."""
+        result = await self._session.scalars(
+            select(
+                NormativeDocumentModel,
+            ).order_by(
+                NormativeDocumentModel.created_at,
+                NormativeDocumentModel.id,
+            )
+        )
+
+        return [
+            self._to_domain(
+                model,
+            )
+            for model in result.all()
+        ]
+
     async def list_by_ids(
         self,
         document_ids: tuple[

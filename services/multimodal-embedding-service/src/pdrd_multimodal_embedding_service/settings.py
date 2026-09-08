@@ -3,11 +3,13 @@
 """Runtime settings multimodal embedding service."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import (
     BaseModel,
     Field,
+    model_validator,
 )
 from pydantic_settings import (
     BaseSettings,
@@ -29,7 +31,7 @@ TorchDtype = Literal[
 
 
 class ModelSettings(BaseModel):
-    """Настройки Qwen3-VL-Embedding и memory safety envelope."""
+    """Настройки unified Qwen3-VL-Embedding runtime."""
 
     name: str = "Qwen/Qwen3-VL-Embedding-8B"
 
@@ -93,25 +95,53 @@ class ModelSettings(BaseModel):
         le=3600.0,
     )
 
+    admission_wait_timeout_seconds: float = Field(
+        default=1800.0,
+        gt=0,
+        le=7200,
+    )
+
+    admission_poll_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        le=30,
+    )
+
+    gpu_lease_path: Path = Path(
+        "/var/lock/pdrd-gpu/gpu.lock",
+    )
+
+    gpu_lease_timeout_seconds: float = Field(
+        default=1800.0,
+        gt=0,
+        le=7200,
+    )
+
+    gpu_lease_poll_seconds: float = Field(
+        default=0.25,
+        gt=0,
+        le=30,
+    )
+
     dtype: TorchDtype = "bfloat16"
 
     @property
     def min_free_ram_bytes(
         self,
     ) -> int:
-        """Возвращает RAM admission threshold в bytes."""
-        return int(self.min_free_ram_gib * 1024 * 1024 * 1024)
+        """Возвращает RAM admission threshold."""
+        return int(self.min_free_ram_gib * 1024**3)
 
     @property
     def min_free_vram_bytes(
         self,
     ) -> int:
-        """Возвращает VRAM admission threshold в bytes."""
-        return int(self.min_free_vram_gib * 1024 * 1024 * 1024)
+        """Возвращает VRAM admission threshold."""
+        return int(self.min_free_vram_gib * 1024**3)
 
 
 class Settings(BaseSettings):
-    """Настройки процесса multimodal embedding service."""
+    """Настройки процесса embedding service."""
 
     model_config = SettingsConfigDict(
         env_file=(
@@ -122,6 +152,19 @@ class Settings(BaseSettings):
         env_nested_delimiter="__",
         case_sensitive=False,
         extra="ignore",
+        populate_by_name=True,
+    )
+
+    embedding_model: str = Field(
+        default="Qwen/Qwen3-VL-Embedding-8B",
+        validation_alias="PDRD_EMBEDDING_MODEL",
+    )
+
+    embedding_dimension: int = Field(
+        default=4096,
+        ge=64,
+        le=4096,
+        validation_alias="PDRD_EMBEDDING_DIMENSION",
     )
 
     service_name: str = "PDRD Multimodal Embedding Service"
@@ -143,6 +186,22 @@ class Settings(BaseSettings):
     model: ModelSettings = Field(
         default_factory=ModelSettings,
     )
+
+    @model_validator(
+        mode="after",
+    )
+    def apply_shared_embedding_identity(
+        self,
+    ) -> "Settings":
+        """Синхронизирует runtime с PDRD embedding identity."""
+        self.model = self.model.model_copy(
+            update={
+                "name": self.embedding_model,
+                "output_dimension": (self.embedding_dimension),
+            }
+        )
+
+        return self
 
 
 @lru_cache

@@ -25,9 +25,6 @@ from pdrd_knowledge_service.infrastructure.database.technical_assignment_persist
 from pdrd_knowledge_service.infrastructure.embedding.multimodal_http import (
     HttpMultimodalEmbeddingProvider,
 )
-from pdrd_knowledge_service.infrastructure.embedding.ollama_release import (
-    OllamaLoadedModelReleaser,
-)
 from pdrd_knowledge_service.infrastructure.office.libreoffice import (
     LibreOfficeNormativeOfficeToPdfConverter,
 )
@@ -47,7 +44,7 @@ async def execute_technical_assignment_indexing(
     technical_assignment_id: UUID,
     allow_retry: bool,
 ) -> TechnicalAssignment:
-    """Собирает T-indexing dependencies."""
+    """Индексирует ТЗ через unified embedding model."""
     settings = get_settings()
 
     engine = build_async_engine(
@@ -63,55 +60,42 @@ async def execute_technical_assignment_indexing(
         session_factory,
     )
 
-    storage = LocalFilesystemNormativeDocumentStorage(
-        root_path=Path(
-            settings.technical_assignment.storage_root_path,
-        ),
-    )
-
     multimodal = HttpMultimodalEmbeddingProvider(
-        base_url=(settings.multimodal_embedding.base_url),
-        request_timeout_seconds=(settings.multimodal_embedding.request_timeout_seconds),
-        connect_timeout_seconds=(settings.multimodal_embedding.connect_timeout_seconds),
-        health_timeout_seconds=(settings.multimodal_embedding.health_timeout_seconds),
-    )
-
-    vector_store = QdrantVectorStore(
-        base_url=settings.qdrant.base_url,
-        request_timeout_seconds=(settings.qdrant.request_timeout_seconds),
-        health_timeout_seconds=(settings.qdrant.health_timeout_seconds),
-    )
-
-    office_converter = LibreOfficeNormativeOfficeToPdfConverter(
-        executable=(settings.office_conversion.executable),
-        timeout_seconds=(settings.office_conversion.timeout_seconds),
-    )
-
-    ollama_releaser = OllamaLoadedModelReleaser(
         base_url=settings.embedding.base_url,
-        timeout_seconds=10.0,
+        request_timeout_seconds=(settings.embedding.request_timeout_seconds),
+        connect_timeout_seconds=(settings.embedding.connect_timeout_seconds),
+        health_timeout_seconds=(settings.embedding.health_timeout_seconds),
     )
 
     use_case = IndexTechnicalAssignment(
         unit_of_work_factory=unit_of_work_factory,
-        storage=storage,
+        storage=LocalFilesystemNormativeDocumentStorage(
+            root_path=Path(
+                settings.technical_assignment.storage_root_path,
+            ),
+        ),
         pdf_processor=(PyMuPdfTechnicalAssignmentProcessor()),
         embedding_provider=multimodal,
-        vector_store=vector_store,
-        office_converter=office_converter,
-        collection=(settings.qdrant.multimodal_collection),
-        output_dimension=(settings.multimodal_embedding.output_dimension),
-        max_pages=(settings.technical_assignment.max_pages),
-        render_dpi=(settings.technical_assignment.render_dpi),
+        vector_store=QdrantVectorStore(
+            base_url=settings.qdrant.base_url,
+            request_timeout_seconds=(settings.qdrant.request_timeout_seconds),
+            health_timeout_seconds=(settings.qdrant.health_timeout_seconds),
+        ),
+        office_converter=(
+            LibreOfficeNormativeOfficeToPdfConverter(
+                executable=(settings.office_conversion.executable),
+                timeout_seconds=(settings.office_conversion.timeout_seconds),
+            )
+        ),
+        collection=settings.qdrant.multimodal_collection,
+        output_dimension=settings.embedding_dimension,
+        max_pages=settings.technical_assignment.max_pages,
+        render_dpi=settings.technical_assignment.render_dpi,
         max_image_pixels=(settings.multimodal_embedding.max_image_pixels),
         page_text_limit=(settings.technical_assignment.page_text_limit),
     )
 
     try:
-        await ollama_releaser.release_loaded(
-            model_names=(settings.technical_assignment.ollama_models_to_release),
-        )
-
         return await use_case.execute(
             technical_assignment_id=(technical_assignment_id),
             allow_retry=allow_retry,

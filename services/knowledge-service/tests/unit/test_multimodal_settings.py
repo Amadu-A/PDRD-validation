@@ -1,6 +1,6 @@
 # services/knowledge-service/tests/unit/test_multimodal_settings.py
 
-"""Unit tests safety settings multimodal retrieval."""
+"""Unit tests safety settings unified embedding retrieval."""
 
 from pdrd_knowledge_service.core.settings import (
     MultimodalEmbeddingSettings,
@@ -38,19 +38,27 @@ def test_technical_assignment_queue_uses_single_prefetch() -> None:
     assert settings.routing_key == "technical_assignment.index"
 
 
-def test_technical_assignment_has_separate_8b_collection() -> None:
-    """T-index 8B не смешивается с 2B и N/U vector spaces."""
+def test_unified_embedding_spaces_use_separate_stable_aliases() -> None:
+    """N/U, T и E не смешиваются при общей embedding model."""
     qdrant = QdrantSettings()
 
     technical_assignment = TechnicalAssignmentSettings()
 
-    assert qdrant.normative_collection == "dva_normative_v2"
+    assert qdrant.normative_collection == "dva_catalog_active"
 
-    assert qdrant.multimodal_collection == "dva_multimodal_qwen3vl8b_v1"
+    assert qdrant.multimodal_collection == "dva_technical_assignment_active"
+
+    assert qdrant.experience_collection == "dva_experience_active"
 
     assert qdrant.multimodal_collection != qdrant.normative_collection
 
+    assert qdrant.experience_collection != qdrant.normative_collection
+
+    assert qdrant.experience_collection != qdrant.multimodal_collection
+
     assert qdrant.multimodal_collection != "dva_multimodal_qwen3vl2b_v1"
+
+    assert qdrant.multimodal_collection != "dva_multimodal_qwen3vl8b_v1"
 
     assert technical_assignment.max_pages == 300
 

@@ -49,7 +49,9 @@ RUN useradd \
     --uid 1000 \
     app \
     && mkdir -p /models/huggingface \
-    && chown -R app:app /models
+    && mkdir -p /var/lock/pdrd-gpu \
+    && chown -R app:app /models \
+    && chown -R app:app /var/lock/pdrd-gpu
 
 ENV HOME=/home/app
 ENV HF_HOME=/models/huggingface

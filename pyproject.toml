@@ -71,6 +71,7 @@ testpaths = [
 
 markers = [
     "database: integration tests requiring a real PostgreSQL instance",
+    "gpu_runtime: integration tests requiring the real shared RTX GPU runtime",
 ]
 
 asyncio_mode = "auto"

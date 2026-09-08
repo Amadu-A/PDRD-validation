@@ -89,6 +89,26 @@ class SqlAlchemyTechnicalAssignmentRepository:
             else None
         )
 
+    async def list_all(
+        self,
+    ) -> list[TechnicalAssignment]:
+        """Возвращает persisted ТЗ в стабильном порядке."""
+        result = await self._session.scalars(
+            select(
+                TechnicalAssignmentModel,
+            ).order_by(
+                TechnicalAssignmentModel.created_at,
+                TechnicalAssignmentModel.id,
+            )
+        )
+
+        return [
+            self._to_domain(
+                model,
+            )
+            for model in result.all()
+        ]
+
     async def update(
         self,
         assignment: TechnicalAssignment,

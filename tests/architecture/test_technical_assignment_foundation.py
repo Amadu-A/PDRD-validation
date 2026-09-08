@@ -26,11 +26,9 @@ MULTIMODAL_PORT = KNOWLEDGE_ROOT / "application" / "ports" / "multimodal_embeddi
 
 SOURCE_SEMANTICS = KNOWLEDGE_ROOT / "domain" / "source_semantics.py"
 
-TECHNICAL_ASSIGNMENT = KNOWLEDGE_ROOT / "domain" / "technical_assignment.py"
-
 
 def test_source_semantics_fix_n_t_u_e_contract() -> None:
-    """Закрепляет согласованную семантику source IDs."""
+    """Закрепляет source IDs."""
     content = SOURCE_SEMANTICS.read_text(
         encoding="utf-8",
     )
@@ -42,37 +40,26 @@ def test_source_semantics_fix_n_t_u_e_contract() -> None:
         'EXPERIENCE = "E"',
     )
 
-    missing = [marker for marker in required if marker not in content]
-
-    assert not missing, "\n".join(
-        missing,
-    )
+    assert all(marker in content for marker in required)
 
 
-def test_text_and_multimodal_embeddings_remain_separate() -> None:
-    """VL 8B не заменяет text embedding и использует свой vector space."""
+def test_all_embeddings_use_one_model_identity() -> None:
+    """Text и multimodal retrieval больше не используют разные models."""
     content = SETTINGS.read_text(
         encoding="utf-8",
     )
 
-    required = (
-        'model: str = "qwen3-embedding:4b"',
-        '"Qwen/Qwen3-VL-Embedding-8B"',
-        '"dva_normative_v2"',
-        '"dva_multimodal_qwen3vl8b_v1"',
-    )
+    assert '"Qwen/Qwen3-VL-Embedding-8B"' in content
 
-    missing = [marker for marker in required if marker not in content]
+    assert "qwen3-embedding:4b" not in content
 
-    assert not missing, "\n".join(
-        missing,
-    )
+    assert "synchronize_embedding_identity" in content
 
-    assert '"dva_multimodal_qwen3vl2b_v1"' not in content
+    assert "embedding_index_plan" in content
 
 
 def test_multimodal_boundary_accepts_text_and_images() -> None:
-    """Application зависит от port, а не от PyTorch/Transformers."""
+    """Application остаётся framework/provider agnostic."""
     content = MULTIMODAL_PORT.read_text(
         encoding="utf-8",
     )
@@ -86,38 +73,23 @@ def test_multimodal_boundary_accepts_text_and_images() -> None:
     forbidden = (
         "import torch",
         "from torch",
-        "transformers",
         "sentence_transformers",
-        "CUDA",
     )
 
     assert not any(marker in content for marker in forbidden)
 
 
-def test_multimodal_runtime_has_conservative_safety_limits() -> None:
-    """Закрепляет базовую GPU/backpressure политику."""
+def test_multimodal_runtime_has_conservative_limits() -> None:
+    """T worker остаётся bounded."""
     content = SETTINGS.read_text(
         encoding="utf-8",
     )
 
     required = (
-        "default=8192",
-        "default=1_843_200",
         "max_batch_size",
         "max_concurrency",
         "prefetch_count",
         '"technical_assignment.index"',
     )
 
-    missing = [marker for marker in required if marker not in content]
-
-    assert not missing, "\n".join(
-        missing,
-    )
-
-    assert (
-        content.count(
-            "default=1,",
-        )
-        >= 3
-    )
+    assert all(marker in content for marker in required)

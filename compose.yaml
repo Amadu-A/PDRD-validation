@@ -107,6 +107,7 @@ services:
 
     volumes:
       - multimodal_model_cache:/models/huggingface
+      - gpu_coordination:/var/lock/pdrd-gpu
 
     ports:
       - "${MULTIMODAL_EMBEDDING_BIND_IP:-127.0.0.1}:${MULTIMODAL_EMBEDDING_HOST_PORT:-8601}:8601"
@@ -325,6 +326,43 @@ services:
         aliases:
           - pdrd-document-service
 
+  knowledge-embedding-migrator:
+    build:
+      context: ./services/knowledge-service
+      target: runtime
+
+    restart: "no"
+
+    env_file: *app-env-files
+
+    environment: *knowledge-service-environment
+
+    command:
+      [
+        "python",
+        "-m",
+        "pdrd_knowledge_service.infrastructure.migration.embedding_index_migrator"
+      ]
+
+    volumes:
+      - normative_documents:/data/normative
+      - technical_assignment_documents:/data/technical-assignments
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      qdrant:
+        condition: service_started
+
+      multimodal-embedding-service:
+        condition: service_healthy
+
+    logging: *default-logging
+
+    networks:
+      - app-net
+
   knowledge-service:
     build:
       context: ./services/knowledge-service
@@ -363,6 +401,12 @@ services:
       qdrant:
         condition: service_started
 
+      multimodal-embedding-service:
+        condition: service_healthy
+
+      knowledge-embedding-migrator:
+        condition: service_completed_successfully
+
     logging: *default-logging
 
     networks:
@@ -392,6 +436,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+      knowledge-embedding-migrator:
+        condition: service_completed_successfully
 
     logging: *default-logging
 
@@ -443,13 +490,18 @@ services:
       qdrant:
         condition: service_started
 
+      multimodal-embedding-service:
+        condition: service_healthy
+
+      knowledge-embedding-migrator:
+        condition: service_completed_successfully
+
     stop_grace_period: 30s
 
     logging: *default-logging
 
     networks:
       - app-net
-      - ai-shared
 
   technical-assignment-indexer:
     build:
@@ -499,13 +551,15 @@ services:
       multimodal-embedding-service:
         condition: service_healthy
 
+      knowledge-embedding-migrator:
+        condition: service_completed_successfully
+
     stop_grace_period: 60s
 
     logging: *default-logging
 
     networks:
       - app-net
-      - ai-shared
 
   knowledge-service-tests:
     build:
@@ -545,6 +599,9 @@ services:
 
     env_file: *app-env-files
 
+    volumes:
+      - gpu_coordination:/var/lock/pdrd-gpu
+
     ports:
       - "${ANALYSIS_SERVICE_BIND_IP:-127.0.0.1}:${ANALYSIS_SERVICE_HOST_PORT:-8501}:8501"
 
@@ -561,6 +618,10 @@ services:
       retries: 12
       start_period: 15s
 
+    depends_on:
+      multimodal-embedding-service:
+        condition: service_healthy
+
     logging: *default-logging
 
     networks:
@@ -568,6 +629,43 @@ services:
       ai-shared:
         aliases:
           - pdrd-analysis-service
+
+  gpu-runtime-tests:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile.quality
+
+    profiles:
+      - gpu-runtime-test
+
+    env_file: *app-env-files
+
+    environment:
+      PDRD_RUN_GPU_RUNTIME_TESTS: "1"
+
+    command:
+      [
+        "python",
+        "-m",
+        "pytest",
+        "tests/runtime/test_gpu_coordination_runtime.py",
+        "-q",
+        "--import-mode=importlib"
+      ]
+
+    depends_on:
+      analysis-service:
+        condition: service_healthy
+
+      multimodal-embedding-service:
+        condition: service_healthy
+
+      knowledge-service:
+        condition: service_healthy
+
+    networks:
+      - app-net
+      - ai-shared
 
   frontend:
     build:
@@ -590,6 +688,7 @@ volumes:
   normative_documents:
   technical_assignment_documents:
   multimodal_model_cache:
+  gpu_coordination:
 
 networks:
   app-net:

@@ -23,10 +23,54 @@ from pdrd_multimodal_embedding_service.settings import (
 GIB = 1024**3
 
 
-async def test_empty_embedding_batch_does_not_load_model() -> None:
+class FakeGpuLease:
+    """In-memory lease для unit-тестов model runtime."""
+
+    def __init__(
+        self,
+    ) -> None:
+        """Создаёт свободный fake lease."""
+        self.acquired = False
+
+        self.acquire_calls = 0
+
+        self.release_calls = 0
+
+    def acquire(
+        self,
+        *,
+        timeout_seconds: float,
+    ) -> None:
+        """Фиксирует acquire без обращения к OS file lock."""
+        assert timeout_seconds > 0
+
+        self.acquire_calls += 1
+
+        self.acquired = True
+
+    def release(
+        self,
+    ) -> None:
+        """Фиксирует release."""
+        if self.acquired:
+            self.release_calls += 1
+
+        self.acquired = False
+
+
+@pytest.fixture
+def gpu_lease() -> FakeGpuLease:
+    """Возвращает независимый fake lease каждому unit-test."""
+    return FakeGpuLease()
+
+
+async def test_empty_embedding_batch_does_not_load_model(
+    gpu_lease: FakeGpuLease,
+) -> None:
     """Пустой batch возвращается без CUDA/model imports."""
     runtime = Qwen3VlEmbeddingRuntime(
         settings=ModelSettings(),
+        gpu_lease=gpu_lease,
     )
 
     result = await runtime.embed(
@@ -34,6 +78,10 @@ async def test_empty_embedding_batch_does_not_load_model() -> None:
     )
 
     assert result == []
+
+    assert gpu_lease.acquire_calls == 0
+
+    assert gpu_lease.release_calls == 0
 
 
 def test_runtime_input_keeps_mixed_modalities() -> None:
@@ -53,8 +101,9 @@ def test_runtime_input_keeps_mixed_modalities() -> None:
 
 def test_model_loader_rejects_low_system_ram_before_imports(
     monkeypatch: pytest.MonkeyPatch,
+    gpu_lease: FakeGpuLease,
 ) -> None:
-    """Checkpoint не начинает загрузку при недостатке системной RAM."""
+    """RAM guard выполняется до CUDA/model imports."""
     imported_modules: list[str] = []
 
     monkeypatch.setattr(
@@ -84,6 +133,7 @@ def test_model_loader_rejects_low_system_ram_before_imports(
         settings=ModelSettings(
             min_free_ram_gib=20,
         ),
+        gpu_lease=gpu_lease,
     )
 
     with pytest.raises(
@@ -96,19 +146,46 @@ def test_model_loader_rejects_low_system_ram_before_imports(
 
     assert runtime._model is None
 
+    assert gpu_lease.acquire_calls == 1
+
+    assert gpu_lease.release_calls == 1
+
+    assert gpu_lease.acquired is False
+
 
 def test_model_loader_rejects_unknown_system_ram(
     monkeypatch: pytest.MonkeyPatch,
+    gpu_lease: FakeGpuLease,
 ) -> None:
     """Неизвестный RAM budget трактуется как unsafe admission."""
+    imported_modules: list[str] = []
+
     monkeypatch.setattr(
         runtime_module,
         "_available_system_ram_bytes",
         lambda: None,
     )
 
+    def fake_import(
+        module_name: str,
+    ) -> object:
+        imported_modules.append(
+            module_name,
+        )
+
+        raise AssertionError(
+            "Torch не должен импортироваться при unknown RAM budget.",
+        )
+
+    monkeypatch.setattr(
+        runtime_module.importlib,
+        "import_module",
+        fake_import,
+    )
+
     runtime = Qwen3VlEmbeddingRuntime(
         settings=ModelSettings(),
+        gpu_lease=gpu_lease,
     )
 
     with pytest.raises(
@@ -117,13 +194,20 @@ def test_model_loader_rejects_unknown_system_ram(
     ):
         runtime._ensure_model_sync()
 
+    assert imported_modules == []
+
     assert runtime._model is None
 
+    assert gpu_lease.acquire_calls == 1
 
-def test_model_loader_rejects_low_vram_after_ram_admission(
+    assert gpu_lease.release_calls == 1
+
+
+def test_model_loader_times_out_waiting_for_vram_after_ram_admission(
     monkeypatch: pytest.MonkeyPatch,
+    gpu_lease: FakeGpuLease,
 ) -> None:
-    """Достаточная RAM не отменяет отдельный VRAM admission."""
+    """После lease runtime bounded-временем ждёт VRAM."""
     monkeypatch.setattr(
         runtime_module,
         "_available_system_ram_bytes",
@@ -136,6 +220,8 @@ def test_model_loader_rejects_low_vram_after_ram_admission(
             10 * GIB,
             24 * GIB,
         ),
+        empty_cache=lambda: None,
+        ipc_collect=lambda: None,
     )
 
     fake_torch = SimpleNamespace(
@@ -144,16 +230,22 @@ def test_model_loader_rejects_low_vram_after_ram_admission(
 
     original_import = runtime_module.importlib.import_module
 
+    imported_sentence_transformers = False
+
     def fake_import(
         module_name: str,
     ) -> object:
+        nonlocal imported_sentence_transformers
+
         if module_name == "torch":
             return fake_torch
 
         if module_name == "sentence_transformers":
+            imported_sentence_transformers = True
+
             raise AssertionError(
                 "SentenceTransformer не должен импортироваться "
-                "после VRAM admission reject.",
+                "после VRAM admission timeout.",
             )
 
         return original_import(
@@ -169,7 +261,10 @@ def test_model_loader_rejects_low_vram_after_ram_admission(
     runtime = Qwen3VlEmbeddingRuntime(
         settings=ModelSettings(
             min_free_vram_gib=18,
+            admission_wait_timeout_seconds=0.03,
+            admission_poll_seconds=0.005,
         ),
+        gpu_lease=gpu_lease,
     )
 
     with pytest.raises(
@@ -180,9 +275,18 @@ def test_model_loader_rejects_low_vram_after_ram_admission(
 
     assert runtime._model is None
 
+    assert imported_sentence_transformers is False
+
+    assert gpu_lease.acquire_calls == 1
+
+    assert gpu_lease.release_calls == 1
+
+    assert gpu_lease.acquired is False
+
 
 def test_model_loader_uses_direct_low_cpu_gpu_dispatch(
     monkeypatch: pytest.MonkeyPatch,
+    gpu_lease: FakeGpuLease,
 ) -> None:
     """Большой checkpoint не должен сначала собираться в CPU RAM."""
     captured: dict[
@@ -255,6 +359,7 @@ def test_model_loader_uses_direct_low_cpu_gpu_dispatch(
 
     runtime = Qwen3VlEmbeddingRuntime(
         settings=ModelSettings(),
+        gpu_lease=gpu_lease,
     )
 
     model = runtime._ensure_model_sync()
@@ -287,11 +392,22 @@ def test_model_loader_uses_direct_low_cpu_gpu_dispatch(
 
     assert model.max_seq_length == 8192
 
+    assert gpu_lease.acquired is True
+
+    runtime._release_sync(
+        torch_module=fake_torch,
+    )
+
+    assert gpu_lease.acquired is False
+
+    assert gpu_lease.release_calls == 1
+
 
 def test_memory_error_during_model_load_releases_state(
     monkeypatch: pytest.MonkeyPatch,
+    gpu_lease: FakeGpuLease,
 ) -> None:
-    """MemoryError не оставляет частично загруженный checkpoint."""
+    """MemoryError не оставляет checkpoint или GPU lease."""
     monkeypatch.setattr(
         runtime_module,
         "_available_system_ram_bytes",
@@ -304,6 +420,8 @@ def test_memory_error_during_model_load_releases_state(
             24 * GIB,
             24 * GIB,
         ),
+        empty_cache=lambda: None,
+        ipc_collect=lambda: None,
     )
 
     fake_torch = SimpleNamespace(
@@ -316,6 +434,7 @@ def test_memory_error_during_model_load_releases_state(
         **kwargs: object,
     ) -> object:
         assert model_name
+
         assert kwargs
 
         raise MemoryError(
@@ -349,21 +468,29 @@ def test_memory_error_during_model_load_releases_state(
 
     runtime = Qwen3VlEmbeddingRuntime(
         settings=ModelSettings(),
+        gpu_lease=gpu_lease,
     )
 
-    releases: list[bool] = []
+    releases: list[object | None] = []
 
-    def fake_release_sync() -> None:
-        runtime._model = None
+    original_release_sync = runtime._release_sync
 
+    def recording_release_sync(
+        *,
+        torch_module: object | None = None,
+    ) -> None:
         releases.append(
-            True,
+            torch_module,
+        )
+
+        original_release_sync(
+            torch_module=torch_module,
         )
 
     monkeypatch.setattr(
         runtime,
         "_release_sync",
-        fake_release_sync,
+        recording_release_sync,
     )
 
     with pytest.raises(
@@ -373,18 +500,24 @@ def test_memory_error_during_model_load_releases_state(
         runtime._ensure_model_sync()
 
     assert releases == [
-        True,
+        fake_torch,
     ]
 
     assert runtime._model is None
 
+    assert gpu_lease.acquired is False
+
+    assert gpu_lease.release_calls == 1
+
 
 def test_cuda_oom_during_inference_releases_model(
     monkeypatch: pytest.MonkeyPatch,
+    gpu_lease: FakeGpuLease,
 ) -> None:
     """CUDA OOM освобождает checkpoint перед retry."""
     runtime = Qwen3VlEmbeddingRuntime(
         settings=ModelSettings(),
+        gpu_lease=gpu_lease,
     )
 
     class FakeModel:
@@ -396,6 +529,7 @@ def test_cuda_oom_during_inference_releases_model(
             **kwargs: object,
         ) -> object:
             assert prepared
+
             assert kwargs
 
             raise RuntimeError(
@@ -406,7 +540,12 @@ def test_cuda_oom_during_inference_releases_model(
 
     releases: list[bool] = []
 
-    def fake_release_sync() -> None:
+    def fake_release_sync(
+        *,
+        torch_module: object | None = None,
+    ) -> None:
+        assert torch_module is None
+
         runtime._model = None
 
         releases.append(
@@ -443,12 +582,14 @@ def test_cuda_oom_during_inference_releases_model(
 @pytest.mark.asyncio
 async def test_failed_embedding_does_not_leak_semaphore(
     monkeypatch: pytest.MonkeyPatch,
+    gpu_lease: FakeGpuLease,
 ) -> None:
     """Ошибка одного request не блокирует следующий embedding."""
     runtime = Qwen3VlEmbeddingRuntime(
         settings=ModelSettings(
             max_concurrency=1,
         ),
+        gpu_lease=gpu_lease,
     )
 
     attempts = 0
@@ -504,12 +645,14 @@ async def test_failed_embedding_does_not_leak_semaphore(
 @pytest.mark.asyncio
 async def test_idle_watchdog_releases_loaded_model(
     monkeypatch: pytest.MonkeyPatch,
+    gpu_lease: FakeGpuLease,
 ) -> None:
     """Fallback автоматически освобождает idle checkpoint."""
     runtime = Qwen3VlEmbeddingRuntime(
         settings=ModelSettings(
             idle_release_seconds=0.01,
         ),
+        gpu_lease=gpu_lease,
     )
 
     runtime._model = object()
@@ -518,7 +661,12 @@ async def test_idle_watchdog_releases_loaded_model(
 
     released: list[bool] = []
 
-    def fake_release_sync() -> None:
+    def fake_release_sync(
+        *,
+        torch_module: object | None = None,
+    ) -> None:
+        assert torch_module is None
+
         runtime._model = None
 
         released.append(

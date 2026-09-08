@@ -10,10 +10,16 @@ from pydantic import (
     BaseModel,
     Field,
     SecretStr,
+    model_validator,
 )
 from pydantic_settings import (
     BaseSettings,
     SettingsConfigDict,
+)
+
+from pdrd_knowledge_service.domain.embedding_index import (
+    EmbeddingIdentity,
+    EmbeddingIndexPlan,
 )
 
 EnvironmentName = Literal[
@@ -26,7 +32,7 @@ EnvironmentName = Literal[
 
 
 class DatabaseSettings(BaseModel):
-    """Настройки project-specific PostgreSQL Knowledge Service."""
+    """Настройки PostgreSQL."""
 
     host: str = "postgres"
 
@@ -76,7 +82,7 @@ class DatabaseSettings(BaseModel):
 
 
 class BrokerSettings(BaseModel):
-    """Настройки RabbitMQ нормативной индексации."""
+    """Настройки RabbitMQ."""
 
     host: str = "rabbitmq"
 
@@ -107,9 +113,7 @@ class BrokerSettings(BaseModel):
     )
 
 
-class TechnicalAssignmentQueueSettings(
-    BaseModel,
-):
+class TechnicalAssignmentQueueSettings(BaseModel):
     """Отдельная RabbitMQ очередь ТЗ."""
 
     queue_name: str = "pdrd.knowledge.technical-assignment"
@@ -126,7 +130,7 @@ class TechnicalAssignmentQueueSettings(
 
 
 class OutboxSettings(BaseModel):
-    """Настройки Knowledge transactional outbox."""
+    """Настройки transactional outbox."""
 
     poll_interval_seconds: float = Field(
         default=1.0,
@@ -142,7 +146,7 @@ class OutboxSettings(BaseModel):
 
 
 class NormativeStorageSettings(BaseModel):
-    """Managed storage нормативов."""
+    """Managed storage N/U документов."""
 
     root_path: Path = Path(
         "/data/normative",
@@ -163,7 +167,7 @@ class NormativeStorageSettings(BaseModel):
 
 
 class NormativeIndexingSettings(BaseModel):
-    """Параметры text normative indexing."""
+    """Параметры managed catalog indexing."""
 
     chunk_size: int = Field(
         default=3500,
@@ -178,9 +182,9 @@ class NormativeIndexingSettings(BaseModel):
     )
 
     embed_batch_size: int = Field(
-        default=8,
+        default=64,
         ge=1,
-        le=100,
+        le=1000,
     )
 
     upsert_batch_size: int = Field(
@@ -190,10 +194,8 @@ class NormativeIndexingSettings(BaseModel):
     )
 
 
-class TechnicalAssignmentSettings(
-    BaseModel,
-):
-    """Параметры ingestion/indexing ТЗ."""
+class TechnicalAssignmentSettings(BaseModel):
+    """Параметры T ingestion/indexing."""
 
     storage_root_path: Path = Path(
         "/data/technical-assignments",
@@ -247,19 +249,11 @@ class TechnicalAssignmentSettings(
         le=100,
     )
 
-    ollama_models_to_release: tuple[
-        str,
-        ...,
-    ] = (
-        "qwen3-vl:8b-instruct",
-        "qwen3-embedding:4b",
-    )
-
     @property
     def max_upload_bytes(
         self,
     ) -> int:
-        """Возвращает T upload limit."""
+        """Возвращает upload limit."""
         return self.max_upload_mb * 1024 * 1024
 
 
@@ -276,35 +270,7 @@ class OfficeConversionSettings(BaseModel):
 
 
 class EmbeddingSettings(BaseModel):
-    """Настройки text embedding provider."""
-
-    base_url: str = "http://ollama:11434"
-
-    model: str = "qwen3-embedding:4b"
-
-    request_timeout_seconds: float = Field(
-        default=900.0,
-        gt=0,
-        le=3600,
-    )
-
-    connect_timeout_seconds: float = Field(
-        default=20.0,
-        gt=0,
-        le=300,
-    )
-
-    health_timeout_seconds: float = Field(
-        default=5.0,
-        gt=0,
-        le=60,
-    )
-
-
-class MultimodalEmbeddingSettings(
-    BaseModel,
-):
-    """Qwen3-VL-Embedding provider settings."""
+    """Unified embedding-service transport."""
 
     base_url: str = "http://pdrd-multimodal-embedding-service:8601"
 
@@ -315,6 +281,28 @@ class MultimodalEmbeddingSettings(
         ge=64,
         le=4096,
     )
+
+    request_timeout_seconds: float = Field(
+        default=1800.0,
+        gt=0,
+        le=7200,
+    )
+
+    connect_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        le=300,
+    )
+
+    health_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=120,
+    )
+
+
+class MultimodalEmbeddingSettings(EmbeddingSettings):
+    """Backward-compatible T settings той же unified model."""
 
     model_context_tokens: int = Field(
         default=32768,
@@ -346,35 +334,23 @@ class MultimodalEmbeddingSettings(
         le=8,
     )
 
-    request_timeout_seconds: float = Field(
-        default=1800.0,
-        gt=0,
-        le=7200,
-    )
-
-    connect_timeout_seconds: float = Field(
-        default=30.0,
-        gt=0,
-        le=300,
-    )
-
-    health_timeout_seconds: float = Field(
-        default=10.0,
-        gt=0,
-        le=120,
-    )
-
 
 class QdrantSettings(BaseModel):
-    """Настройки Qdrant."""
+    """Qdrant aliases и physical collection prefixes."""
 
     base_url: str = "http://qdrant:6333"
 
-    normative_collection: str = "dva_normative_v2"
+    normative_collection: str = "dva_catalog_active"
 
-    experience_collection: str = "dva_experience_v2"
+    experience_collection: str = "dva_experience_active"
 
-    multimodal_collection: str = "dva_multimodal_qwen3vl8b_v1"
+    multimodal_collection: str = "dva_technical_assignment_active"
+
+    catalog_collection_prefix: str = "dva_catalog"
+
+    experience_collection_prefix: str = "dva_experience"
+
+    technical_assignment_collection_prefix: str = "dva_technical_assignment"
 
     request_timeout_seconds: float = Field(
         default=90.0,
@@ -386,6 +362,14 @@ class QdrantSettings(BaseModel):
         default=5.0,
         gt=0,
         le=60,
+    )
+
+    legacy_collections: tuple[str, ...] = (
+        "dva_normative_v2",
+        "dva_experience_v2",
+        "dva_multimodal_qwen3vl2b_v1",
+        "dva_multimodal_qwen3vl8b_v1",
+        "dva_multimodal_v1",
     )
 
 
@@ -412,7 +396,7 @@ class SearchSettings(BaseModel):
 
 
 class ProjectContextSettings(BaseModel):
-    """Временный Project Context RAG."""
+    """Временный PZ Project Context."""
 
     chunk_size: int = Field(
         default=1800,
@@ -433,9 +417,9 @@ class ProjectContextSettings(BaseModel):
     )
 
     embed_batch_size: int = Field(
-        default=12,
+        default=64,
         ge=1,
-        le=100,
+        le=1000,
     )
 
     upsert_batch_size: int = Field(
@@ -448,7 +432,7 @@ class ProjectContextSettings(BaseModel):
 
 
 class Settings(BaseSettings):
-    """Настройки процесса Knowledge Service."""
+    """Настройки Knowledge Service."""
 
     model_config = SettingsConfigDict(
         env_file=(
@@ -459,6 +443,26 @@ class Settings(BaseSettings):
         env_nested_delimiter="__",
         case_sensitive=False,
         extra="ignore",
+        populate_by_name=True,
+    )
+
+    embedding_model: str = Field(
+        default="Qwen/Qwen3-VL-Embedding-8B",
+        validation_alias="PDRD_EMBEDDING_MODEL",
+    )
+
+    embedding_dimension: int = Field(
+        default=4096,
+        ge=64,
+        le=4096,
+        validation_alias="PDRD_EMBEDDING_DIMENSION",
+    )
+
+    embedding_schema_version: int = Field(
+        default=1,
+        ge=1,
+        le=1000,
+        validation_alias="PDRD_EMBEDDING_SCHEMA_VERSION",
     )
 
     service_name: str = "PDRD Knowledge Service"
@@ -502,7 +506,7 @@ class Settings(BaseSettings):
     )
 
     technical_assignment: TechnicalAssignmentSettings = Field(
-        default_factory=(TechnicalAssignmentSettings),
+        default_factory=TechnicalAssignmentSettings,
     )
 
     office_conversion: OfficeConversionSettings = Field(
@@ -514,7 +518,7 @@ class Settings(BaseSettings):
     )
 
     multimodal_embedding: MultimodalEmbeddingSettings = Field(
-        default_factory=(MultimodalEmbeddingSettings),
+        default_factory=MultimodalEmbeddingSettings,
     )
 
     qdrant: QdrantSettings = Field(
@@ -528,6 +532,56 @@ class Settings(BaseSettings):
     project_context: ProjectContextSettings = Field(
         default_factory=ProjectContextSettings,
     )
+
+    @model_validator(
+        mode="after",
+    )
+    def synchronize_embedding_identity(
+        self,
+    ) -> "Settings":
+        """Запрещает divergence text/T embedding models."""
+        identity_update = {
+            "model": self.embedding_model,
+            "output_dimension": (self.embedding_dimension),
+        }
+
+        self.embedding = self.embedding.model_copy(
+            update=identity_update,
+        )
+
+        self.multimodal_embedding = self.multimodal_embedding.model_copy(
+            update=identity_update,
+        )
+
+        return self
+
+    @property
+    def embedding_identity(
+        self,
+    ) -> EmbeddingIdentity:
+        """Возвращает immutable vector-space identity."""
+        return EmbeddingIdentity(
+            model=self.embedding_model,
+            dimension=self.embedding_dimension,
+            schema_version=(self.embedding_schema_version),
+        )
+
+    @property
+    def embedding_index_plan(
+        self,
+    ) -> EmbeddingIndexPlan:
+        """Возвращает alias/physical collection plan."""
+        return EmbeddingIndexPlan(
+            identity=self.embedding_identity,
+            catalog_alias=(self.qdrant.normative_collection),
+            technical_assignment_alias=(self.qdrant.multimodal_collection),
+            experience_alias=(self.qdrant.experience_collection),
+            catalog_prefix=(self.qdrant.catalog_collection_prefix),
+            technical_assignment_prefix=(
+                self.qdrant.technical_assignment_collection_prefix
+            ),
+            experience_prefix=(self.qdrant.experience_collection_prefix),
+        )
 
 
 @lru_cache

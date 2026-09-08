@@ -1,12 +1,13 @@
 # services/multimodal-embedding-service/src/pdrd_multimodal_embedding_service/runtime.py
 
-"""Lazy GPU runtime configured Qwen3-VL-Embedding checkpoint."""
+"""Lazy GPU runtime unified Qwen3-VL-Embedding checkpoint."""
 
 import asyncio
 import gc
 import importlib
 import logging
 import os
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 from io import BytesIO
@@ -14,6 +15,10 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
+from pdrd_multimodal_embedding_service.gpu_lease import (
+    CrossProcessFileGpuLease,
+    GpuLeaseTimeoutError,
+)
 from pdrd_multimodal_embedding_service.settings import (
     ModelSettings,
 )
@@ -25,28 +30,20 @@ LOGGER = logging.getLogger(
 _CGROUP_UNLIMITED_THRESHOLD = 1 << 60
 
 
-class MultimodalRuntimeError(
-    RuntimeError,
-):
+class MultimodalRuntimeError(RuntimeError):
     """Базовая ошибка GPU runtime."""
 
 
-class SystemRamAdmissionError(
-    MultimodalRuntimeError,
-):
-    """Системной RAM недостаточно для безопасной загрузки checkpoint."""
+class SystemRamAdmissionError(MultimodalRuntimeError):
+    """Системной RAM недостаточно для безопасного checkpoint."""
 
 
-class GpuAdmissionError(
-    MultimodalRuntimeError,
-):
-    """GPU сейчас не имеет безопасного объёма свободной VRAM."""
+class GpuAdmissionError(MultimodalRuntimeError):
+    """GPU не может безопасно принять checkpoint."""
 
 
-class MultimodalModelExecutionError(
-    MultimodalRuntimeError,
-):
-    """Ошибка фактического model inference."""
+class MultimodalModelExecutionError(MultimodalRuntimeError):
+    """Ошибка model inference."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +59,7 @@ class RuntimeEmbeddingInput:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeStatus:
-    """Состояние CUDA и lazy-loaded модели."""
+    """Состояние CUDA и lazy-loaded model."""
 
     model_loaded: bool
 
@@ -76,7 +73,7 @@ class RuntimeStatus:
 def _read_integer_file(
     path: Path,
 ) -> int | None:
-    """Best-effort читает неотрицательное целое из sysfs/cgroup."""
+    """Best-effort читает integer из sysfs/cgroup."""
     try:
         value = path.read_text(
             encoding="utf-8",
@@ -103,7 +100,7 @@ def _read_integer_file(
 
 
 def _linux_mem_available_bytes() -> int | None:
-    """Возвращает Linux MemAvailable из /proc/meminfo."""
+    """Возвращает Linux MemAvailable."""
     path = Path(
         "/proc/meminfo",
     )
@@ -146,7 +143,7 @@ def _linux_mem_available_bytes() -> int | None:
 
 
 def _sysconf_available_ram_bytes() -> int | None:
-    """Fallback определяет свободную RAM через POSIX sysconf."""
+    """Fallback свободной RAM через POSIX sysconf."""
     sysconf = getattr(
         os,
         "sysconf",
@@ -159,7 +156,7 @@ def _sysconf_available_ram_bytes() -> int | None:
         return None
 
     try:
-        available_pages = int(
+        pages = int(
             sysconf(
                 "SC_AVPHYS_PAGES",
             )
@@ -173,19 +170,19 @@ def _sysconf_available_ram_bytes() -> int | None:
 
     except (
         OSError,
-        ValueError,
         TypeError,
+        ValueError,
     ):
         return None
 
-    if available_pages <= 0 or page_size <= 0:
+    if pages <= 0 or page_size <= 0:
         return None
 
-    return available_pages * page_size
+    return pages * page_size
 
 
 def _cgroup_v2_available_ram_bytes() -> int | None:
-    """Возвращает доступную память cgroup v2 при configured limit."""
+    """Возвращает свободную RAM cgroup v2."""
     root = Path(
         "/sys/fs/cgroup",
     )
@@ -211,7 +208,7 @@ def _cgroup_v2_available_ram_bytes() -> int | None:
 
 
 def _cgroup_v1_available_ram_bytes() -> int | None:
-    """Возвращает доступную память legacy cgroup v1."""
+    """Возвращает свободную RAM legacy cgroup."""
     root = Path(
         "/sys/fs/cgroup/memory",
     )
@@ -237,7 +234,7 @@ def _cgroup_v1_available_ram_bytes() -> int | None:
 
 
 def _available_system_ram_bytes() -> int | None:
-    """Возвращает реально доступную RAM с учётом cgroup limit."""
+    """Возвращает minimum host/cgroup available RAM."""
     host_available = _linux_mem_available_bytes() or _sysconf_available_ram_bytes()
 
     cgroup_available = (
@@ -262,12 +259,13 @@ def _available_system_ram_bytes() -> int | None:
 
 
 class Qwen3VlEmbeddingRuntime:
-    """Управляет одним lazy-loaded GPU checkpoint."""
+    """Управляет одним lazy-loaded unified checkpoint."""
 
     def __init__(
         self,
         *,
         settings: ModelSettings,
+        gpu_lease: CrossProcessFileGpuLease | None = None,
     ) -> None:
         """Сохраняет bounded runtime settings."""
         self._settings = settings
@@ -282,6 +280,15 @@ class Qwen3VlEmbeddingRuntime:
 
         self._idle_release_task: asyncio.Task[None] | None = None
 
+        self._gpu_lease = (
+            gpu_lease
+            if gpu_lease is not None
+            else CrossProcessFileGpuLease(
+                path=settings.gpu_lease_path,
+                poll_seconds=(settings.gpu_lease_poll_seconds),
+            )
+        )
+
     async def embed(
         self,
         inputs: tuple[
@@ -289,7 +296,7 @@ class Qwen3VlEmbeddingRuntime:
             ...,
         ],
     ) -> list[list[float]]:
-        """Последовательно строит embeddings bounded batch."""
+        """Строит bounded embeddings."""
         if not inputs:
             return []
 
@@ -300,7 +307,7 @@ class Qwen3VlEmbeddingRuntime:
             > self._settings.max_batch_size
         ):
             raise MultimodalRuntimeError(
-                "Размер embedding batch превышает настроенный safety limit.",
+                "Размер embedding batch превышает safety limit.",
             )
 
         async with self._semaphore:
@@ -318,7 +325,7 @@ class Qwen3VlEmbeddingRuntime:
     async def release(
         self,
     ) -> None:
-        """Явно выгружает checkpoint и освобождает CUDA cache."""
+        """Явно выгружает checkpoint и освобождает global lease."""
         async with self._semaphore:
             await asyncio.to_thread(
                 self._release_sync,
@@ -331,7 +338,7 @@ class Qwen3VlEmbeddingRuntime:
     async def status(
         self,
     ) -> RuntimeStatus:
-        """Возвращает CUDA status без загрузки checkpoint."""
+        """Читает CUDA status без model load."""
         return await asyncio.to_thread(
             self._status_sync,
         )
@@ -339,7 +346,7 @@ class Qwen3VlEmbeddingRuntime:
     def _ensure_idle_release_watchdog(
         self,
     ) -> None:
-        """Запускает один watchdog automatic idle release."""
+        """Запускает один idle watchdog."""
         task = self._idle_release_task
 
         if task is not None and not task.done():
@@ -352,7 +359,7 @@ class Qwen3VlEmbeddingRuntime:
     def _cancel_idle_release_watchdog(
         self,
     ) -> None:
-        """Останавливает sleeping watchdog после explicit release."""
+        """Останавливает watchdog."""
         task = self._idle_release_task
 
         if task is None:
@@ -366,21 +373,21 @@ class Qwen3VlEmbeddingRuntime:
     async def _release_after_idle(
         self,
     ) -> None:
-        """Выгружает checkpoint после configured периода без запросов."""
+        """Освобождает checkpoint после idle timeout."""
         try:
             while True:
-                last_activity_at = self._last_activity_at
+                last_activity = self._last_activity_at
 
-                if last_activity_at is None:
+                if last_activity is None:
                     return
 
-                remaining_seconds = self._settings.idle_release_seconds - (
-                    monotonic() - last_activity_at
+                remaining = self._settings.idle_release_seconds - (
+                    monotonic() - last_activity
                 )
 
-                if remaining_seconds > 0:
+                if remaining > 0:
                     await asyncio.sleep(
-                        remaining_seconds,
+                        remaining,
                     )
 
                 async with self._semaphore:
@@ -389,14 +396,15 @@ class Qwen3VlEmbeddingRuntime:
 
                         return
 
-                    last_activity_at = self._last_activity_at
+                    last_activity = self._last_activity_at
 
-                    if last_activity_at is None:
+                    if last_activity is None:
                         return
 
-                    idle_seconds = monotonic() - last_activity_at
-
-                    if idle_seconds < self._settings.idle_release_seconds:
+                    if (
+                        monotonic() - last_activity
+                        < self._settings.idle_release_seconds
+                    ):
                         continue
 
                     await asyncio.to_thread(
@@ -421,7 +429,7 @@ class Qwen3VlEmbeddingRuntime:
             ...,
         ],
     ) -> list[list[float]]:
-        """Выполняет blocking SentenceTransformer inference."""
+        """Выполняет SentenceTransformer inference."""
         model = self._ensure_model_sync()
 
         prepared: list[object] = []
@@ -430,10 +438,7 @@ class Qwen3VlEmbeddingRuntime:
 
         try:
             for item in inputs:
-                payload: dict[
-                    str,
-                    object,
-                ] = {}
+                payload: dict[str, object] = {}
 
                 if item.text is not None and item.text.strip():
                     payload["text"] = item.text.strip()
@@ -474,10 +479,7 @@ class Qwen3VlEmbeddingRuntime:
                 else None
             )
 
-            encode_kwargs: dict[
-                str,
-                object,
-            ] = {
+            encode_kwargs: dict[str, object] = {
                 "batch_size": 1,
                 "convert_to_numpy": True,
                 "normalize_embeddings": True,
@@ -510,7 +512,7 @@ class Qwen3VlEmbeddingRuntime:
                     != self._settings.output_dimension
                 ):
                     raise MultimodalModelExecutionError(
-                        "Embedding dimension не соответствует настроенному размеру.",
+                        "Embedding dimension не соответствует configured dimension.",
                     )
 
                 result.append(
@@ -534,8 +536,7 @@ class Qwen3VlEmbeddingRuntime:
                 )
 
                 raise GpuAdmissionError(
-                    "CUDA OOM при multimodal embedding. "
-                    "Checkpoint выгружен для безопасного retry.",
+                    "CUDA OOM при embedding. Checkpoint и GPU lease освобождены.",
                 ) from error
 
             LOGGER.exception(
@@ -543,8 +544,7 @@ class Qwen3VlEmbeddingRuntime:
             )
 
             raise MultimodalModelExecutionError(
-                "Ошибка multimodal embedding inference: "
-                f"{type(error).__name__}: {error}",
+                f"Ошибка embedding inference: {type(error).__name__}: {error}",
             ) from error
 
         finally:
@@ -563,7 +563,7 @@ class Qwen3VlEmbeddingRuntime:
     def _require_system_ram_admission(
         self,
     ) -> int:
-        """Проверяет свободную RAM до checkpoint load."""
+        """Проверяет RAM до импорта CUDA/model dependencies."""
         available_ram_bytes = _available_system_ram_bytes()
 
         if available_ram_bytes is None:
@@ -573,8 +573,8 @@ class Qwen3VlEmbeddingRuntime:
             )
 
             raise SystemRamAdmissionError(
-                "Не удалось определить объём доступной системной RAM "
-                "для безопасной загрузки "
+                "Не удалось определить объём доступной "
+                "системной RAM для безопасной загрузки "
                 f"{self._settings.name}.",
             )
 
@@ -592,8 +592,9 @@ class Qwen3VlEmbeddingRuntime:
             )
 
             raise SystemRamAdmissionError(
-                "Недостаточно свободной системной RAM для "
-                f"безопасной загрузки {self._settings.name}: "
+                "Недостаточно свободной системной RAM "
+                "для безопасной загрузки "
+                f"{self._settings.name}: "
                 f"available={available_ram_bytes} bytes, "
                 f"required="
                 f"{self._settings.min_free_ram_bytes} bytes.",
@@ -601,87 +602,123 @@ class Qwen3VlEmbeddingRuntime:
 
         return available_ram_bytes
 
-    def _ensure_model_sync(
+    def _wait_for_vram_admission(
         self,
-    ) -> Any:
-        """Lazy-load checkpoint напрямую в GPU с RAM/VRAM admission."""
-        if self._model is not None:
-            return self._model
-
-        available_ram_bytes = self._require_system_ram_admission()
-
-        torch = importlib.import_module(
-            "torch",
-        )
-
+        *,
+        torch: Any,
+    ) -> tuple[
+        int,
+        int,
+    ]:
+        """Bounded-временем ждёт VRAM после global GPU lease."""
         if not torch.cuda.is_available():
             raise GpuAdmissionError(
-                "CUDA недоступна внутри multimodal embedding service.",
+                "CUDA недоступна.",
             )
 
-        free_vram, total_vram = torch.cuda.mem_get_info()
+        deadline = time.monotonic() + self._settings.admission_wait_timeout_seconds
 
-        free_vram_bytes = int(
-            free_vram,
-        )
+        last_free_vram: int | None = None
 
-        total_vram_bytes = int(
-            total_vram,
-        )
+        total_vram_bytes = 0
 
-        if free_vram_bytes < self._settings.min_free_vram_bytes:
-            LOGGER.warning(
-                (
-                    "qwen3_vl_model_admission_rejected "
-                    "model=%s "
-                    "free_vram_bytes=%s "
-                    "required_vram_bytes=%s"
-                ),
-                self._settings.name,
-                free_vram_bytes,
+        while True:
+            free_vram, total_vram = torch.cuda.mem_get_info()
+
+            last_free_vram = int(
+                free_vram,
+            )
+
+            total_vram_bytes = int(
+                total_vram,
+            )
+
+            if last_free_vram >= self._settings.min_free_vram_bytes:
+                return (
+                    last_free_vram,
+                    total_vram_bytes,
+                )
+
+            if time.monotonic() >= deadline:
+                raise GpuAdmissionError(
+                    "Истёк timeout ожидания VRAM: "
+                    f"free={last_free_vram}, "
+                    f"required="
+                    f"{self._settings.min_free_vram_bytes}.",
+                )
+
+            LOGGER.info(
+                ("embedding_vram_wait free_vram_bytes=%s required_vram_bytes=%s"),
+                last_free_vram,
                 self._settings.min_free_vram_bytes,
             )
 
-            raise GpuAdmissionError(
-                "Недостаточно свободной VRAM для безопасной "
-                f"загрузки {self._settings.name}: "
-                f"free={free_vram_bytes} bytes, "
-                f"required="
-                f"{self._settings.min_free_vram_bytes} bytes.",
+            time.sleep(
+                self._settings.admission_poll_seconds,
             )
 
-        sentence_transformers = importlib.import_module(
-            "sentence_transformers",
-        )
-
-        model_class = sentence_transformers.SentenceTransformer
-
-        model_dtype = getattr(
-            torch,
-            self._settings.dtype,
-        )
-
-        LOGGER.info(
-            (
-                "qwen3_vl_model_load_started "
-                "model=%s dtype=%s "
-                "available_ram_bytes=%s "
-                "required_ram_bytes=%s "
-                "free_vram_bytes=%s "
-                "total_vram_bytes=%s "
-                "required_vram_bytes=%s "
-                "device_map=cuda:0"
-            ),
-            self._settings.name,
-            self._settings.dtype,
-            available_ram_bytes,
-            self._settings.min_free_ram_bytes,
-            free_vram_bytes,
-            total_vram_bytes,
-            self._settings.min_free_vram_bytes,
-        )
+    def _ensure_model_sync(
+        self,
+    ) -> Any:
+        """Получает global lease, проверяет RAM/VRAM и загружает model."""
+        if self._model is not None:
+            return self._model
 
         try:
+            self._gpu_lease.acquire(
+                timeout_seconds=(self._settings.gpu_lease_timeout_seconds),
+            )
+
+        except GpuLeaseTimeoutError as error:
+            raise GpuAdmissionError(
+                "Не удалось получить global GPU lease.",
+            ) from error
+
+        torch: Any | None = None
+
+        try:
+            # Этот guard принципиально расположен
+            # ДО import torch/sentence_transformers.
+            available_ram_bytes = self._require_system_ram_admission()
+
+            torch = importlib.import_module(
+                "torch",
+            )
+
+            (
+                free_vram_bytes,
+                total_vram_bytes,
+            ) = self._wait_for_vram_admission(
+                torch=torch,
+            )
+
+            sentence_transformers = importlib.import_module(
+                "sentence_transformers",
+            )
+
+            model_class = sentence_transformers.SentenceTransformer
+
+            model_dtype = getattr(
+                torch,
+                self._settings.dtype,
+            )
+
+            LOGGER.info(
+                (
+                    "qwen3_vl_model_load_started "
+                    "model=%s dtype=%s "
+                    "available_ram_bytes=%s "
+                    "free_vram_bytes=%s "
+                    "total_vram_bytes=%s "
+                    "device_map=cuda:0"
+                ),
+                self._settings.name,
+                self._settings.dtype,
+                available_ram_bytes,
+                free_vram_bytes,
+                total_vram_bytes,
+            )
+
             model = model_class(
                 self._settings.name,
                 model_kwargs={
@@ -693,25 +730,36 @@ class Qwen3VlEmbeddingRuntime:
 
             model.max_seq_length = self._settings.max_input_tokens
 
-        except Exception as error:
-            self._release_sync()
+            self._model = model
 
-            LOGGER.exception(
-                ("qwen3_vl_model_load_failed model=%s error_type=%s"),
+            LOGGER.info(
+                "qwen3_vl_model_load_completed model=%s",
                 self._settings.name,
-                type(
-                    error,
-                ).__name__,
             )
+
+            return model
+
+        except Exception as error:
+            self._release_sync(
+                torch_module=torch,
+            )
+
+            if isinstance(
+                error,
+                (
+                    GpuAdmissionError,
+                    SystemRamAdmissionError,
+                    MultimodalModelExecutionError,
+                ),
+            ):
+                raise
 
             if isinstance(
                 error,
                 MemoryError,
             ):
                 raise SystemRamAdmissionError(
-                    "Системная RAM закончилась при загрузке "
-                    f"{self._settings.name}. "
-                    "Checkpoint выгружен для безопасного retry.",
+                    "Системная RAM закончилась при model load.",
                 ) from error
 
             lowered = str(
@@ -724,16 +772,14 @@ class Qwen3VlEmbeddingRuntime:
                 or "bad alloc" in lowered
             ):
                 raise SystemRamAdmissionError(
-                    "Ошибка выделения системной RAM при загрузке "
-                    f"{self._settings.name}. "
-                    "Checkpoint выгружен для безопасного retry.",
+                    "Не удалось выделить RAM при model load.",
                 ) from error
 
             if "out of memory" in lowered or (
                 "cuda" in lowered and "memory" in lowered
             ):
                 raise GpuAdmissionError(
-                    f"CUDA OOM при загрузке {self._settings.name}: {str(error)[:1000]}",
+                    "CUDA OOM при model load.",
                 ) from error
 
             raise MultimodalModelExecutionError(
@@ -742,52 +788,96 @@ class Qwen3VlEmbeddingRuntime:
                 f"{type(error).__name__}: {error}",
             ) from error
 
-        self._model = model
-
-        LOGGER.info(
-            ("qwen3_vl_model_load_completed model=%s device_map=cuda:0"),
-            self._settings.name,
-        )
-
-        return model
-
     def _release_sync(
         self,
+        *,
+        torch_module: Any | None = None,
     ) -> None:
-        """Удаляет model reference и очищает CUDA allocator."""
+        """Удаляет model, CUDA cache и global GPU lease."""
         model_was_loaded = self._model is not None
 
         self._model = None
 
-        gc.collect()
-
         try:
-            torch = importlib.import_module(
-                "torch",
+            gc.collect()
+
+            torch = torch_module
+
+            # Важный случай:
+            # admission мог упасть ещё до import torch.
+            # Тогда импортировать torch только ради cleanup нельзя.
+            if torch is None and not model_was_loaded:
+                return
+
+            if torch is None:
+                try:
+                    torch = importlib.import_module(
+                        "torch",
+                    )
+
+                except ModuleNotFoundError:
+                    return
+
+            cuda = getattr(
+                torch,
+                "cuda",
+                None,
             )
 
-        except ModuleNotFoundError:
-            return
+            if cuda is None:
+                return
 
-        if not torch.cuda.is_available():
-            return
-
-        torch.cuda.empty_cache()
-
-        with suppress(
-            RuntimeError,
-        ):
-            torch.cuda.ipc_collect()
-
-        if model_was_loaded:
-            LOGGER.info(
-                "qwen3_vl_model_released",
+            is_available = getattr(
+                cuda,
+                "is_available",
+                None,
             )
+
+            if (
+                not callable(
+                    is_available,
+                )
+                or not is_available()
+            ):
+                return
+
+            empty_cache = getattr(
+                cuda,
+                "empty_cache",
+                None,
+            )
+
+            if callable(
+                empty_cache,
+            ):
+                empty_cache()
+
+            ipc_collect = getattr(
+                cuda,
+                "ipc_collect",
+                None,
+            )
+
+            if callable(
+                ipc_collect,
+            ):
+                with suppress(
+                    RuntimeError,
+                ):
+                    ipc_collect()
+
+            if model_was_loaded:
+                LOGGER.info(
+                    "qwen3_vl_model_released",
+                )
+
+        finally:
+            self._gpu_lease.release()
 
     def _status_sync(
         self,
     ) -> RuntimeStatus:
-        """Читает CUDA memory status без checkpoint load."""
+        """Читает CUDA memory без checkpoint load."""
         try:
             torch = importlib.import_module(
                 "torch",

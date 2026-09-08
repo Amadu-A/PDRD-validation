@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/infrastructure/messaging/worker_runtime.py
 
-"""Runtime composition одного задания нормативной индексации."""
+"""Runtime composition одного задания N/U indexing."""
 
 from functools import partial
 from uuid import UUID
@@ -21,8 +21,8 @@ from pdrd_knowledge_service.infrastructure.database.engine import (
 from pdrd_knowledge_service.infrastructure.database.unit_of_work import (
     SqlAlchemyNormativeCatalogUnitOfWork,
 )
-from pdrd_knowledge_service.infrastructure.embedding.ollama import (
-    OllamaEmbeddingProvider,
+from pdrd_knowledge_service.infrastructure.embedding.text_http import (
+    HttpTextEmbeddingProvider,
 )
 from pdrd_knowledge_service.infrastructure.office.libreoffice import (
     LibreOfficeNormativeOfficeToPdfConverter,
@@ -42,7 +42,7 @@ async def execute_normative_indexing(
     *,
     document_id: UUID,
 ) -> NormativeDocument:
-    """Собирает adapters и индексирует один managed document."""
+    """Индексирует managed N/U document unified model."""
     settings = get_settings()
 
     engine = build_async_engine(
@@ -58,41 +58,36 @@ async def execute_normative_indexing(
         session_factory,
     )
 
-    storage = LocalFilesystemNormativeDocumentStorage(
-        root_path=settings.storage.root_path,
-    )
-
-    embedding_provider = OllamaEmbeddingProvider(
+    embedding_provider = HttpTextEmbeddingProvider(
         base_url=settings.embedding.base_url,
-        model=settings.embedding.model,
         request_timeout_seconds=(settings.embedding.request_timeout_seconds),
         connect_timeout_seconds=(settings.embedding.connect_timeout_seconds),
         health_timeout_seconds=(settings.embedding.health_timeout_seconds),
     )
 
-    vector_store = QdrantVectorStore(
-        base_url=settings.qdrant.base_url,
-        request_timeout_seconds=(settings.qdrant.request_timeout_seconds),
-        health_timeout_seconds=(settings.qdrant.health_timeout_seconds),
-    )
-
-    office_converter = LibreOfficeNormativeOfficeToPdfConverter(
-        executable=(settings.office_conversion.executable),
-        timeout_seconds=(settings.office_conversion.timeout_seconds),
-    )
-
     use_case = IndexNormativeDocument(
         unit_of_work_factory=unit_of_work_factory,
-        storage=storage,
+        storage=LocalFilesystemNormativeDocumentStorage(
+            root_path=settings.storage.root_path,
+        ),
         pdf_extractor=PyMuPdfNormativePdfExtractor(),
         embedding_provider=embedding_provider,
-        vector_store=vector_store,
+        vector_store=QdrantVectorStore(
+            base_url=settings.qdrant.base_url,
+            request_timeout_seconds=(settings.qdrant.request_timeout_seconds),
+            health_timeout_seconds=(settings.qdrant.health_timeout_seconds),
+        ),
         collection=settings.qdrant.normative_collection,
         chunk_size=settings.indexing.chunk_size,
         chunk_overlap=settings.indexing.chunk_overlap,
-        embed_batch_size=settings.indexing.embed_batch_size,
-        upsert_batch_size=settings.indexing.upsert_batch_size,
-        office_converter=office_converter,
+        embed_batch_size=(settings.indexing.embed_batch_size),
+        upsert_batch_size=(settings.indexing.upsert_batch_size),
+        office_converter=(
+            LibreOfficeNormativeOfficeToPdfConverter(
+                executable=(settings.office_conversion.executable),
+                timeout_seconds=(settings.office_conversion.timeout_seconds),
+            )
+        ),
     )
 
     try:

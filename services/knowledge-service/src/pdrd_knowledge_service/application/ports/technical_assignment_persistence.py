@@ -47,6 +47,12 @@ class TechnicalAssignmentRepository(
         """Возвращает ТЗ с PostgreSQL row lock."""
         ...
 
+    async def list_all(
+        self,
+    ) -> list[TechnicalAssignment]:
+        """Возвращает все persisted технические задания."""
+        ...
+
     async def update(
         self,
         assignment: TechnicalAssignment,

@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/infrastructure/embedding/multimodal_http.py
 
-"""HTTP adapter dedicated multimodal embedding service."""
+"""HTTP adapter dedicated unified embedding service."""
 
 import base64
 from typing import Any
@@ -15,7 +15,7 @@ from pdrd_knowledge_service.application.ports.multimodal_embedding import (
 
 
 class HttpMultimodalEmbeddingProvider:
-    """Вызывает internal Qwen3-VL-Embedding service."""
+    """Вызывает unified Qwen3-VL-Embedding service."""
 
     def __init__(
         self,
@@ -43,7 +43,7 @@ class HttpMultimodalEmbeddingProvider:
             ...,
         ],
     ) -> list[list[float]]:
-        """Строит embeddings последовательными bounded HTTP-запросами."""
+        """Сериализует inputs в service batch-size=1."""
         if not inputs:
             return []
 
@@ -76,7 +76,7 @@ class HttpMultimodalEmbeddingProvider:
 
         except httpx.HTTPError as error:
             raise MultimodalEmbeddingTemporaryError(
-                f"Multimodal embedding service временно недоступен: {error}",
+                f"Unified embedding service временно недоступен: {error}",
             ) from error
 
         return result
@@ -84,11 +84,8 @@ class HttpMultimodalEmbeddingProvider:
     @staticmethod
     def _payload_input(
         item: MultimodalEmbeddingInput,
-    ) -> dict[
-        str,
-        object,
-    ]:
-        """Преобразует один domain input в bounded HTTP payload."""
+    ) -> dict[str, object]:
+        """Строит one-item HTTP payload."""
         return {
             "text": item.text,
             "image_base64": (
@@ -107,7 +104,7 @@ class HttpMultimodalEmbeddingProvider:
     def _parse_single_embedding(
         response: httpx.Response,
     ) -> list[float]:
-        """Проверяет ответ одного bounded embedding request."""
+        """Проверяет one-item response."""
         if (
             response.status_code
             in {
@@ -117,7 +114,7 @@ class HttpMultimodalEmbeddingProvider:
             or response.status_code >= 500
         ):
             raise MultimodalEmbeddingTemporaryError(
-                "Multimodal embedding service временно "
+                "Unified embedding service временно "
                 "не может выполнить запрос: "
                 f"{response.status_code}: "
                 f"{response.text[:1000]}",
@@ -125,7 +122,7 @@ class HttpMultimodalEmbeddingProvider:
 
         if response.status_code >= 400:
             raise MultimodalEmbeddingProviderError(
-                "Multimodal embedding service отклонил "
+                "Unified embedding service отклонил "
                 f"запрос: {response.status_code}: "
                 f"{response.text[:1000]}",
             )
@@ -135,7 +132,7 @@ class HttpMultimodalEmbeddingProvider:
 
         except ValueError as error:
             raise MultimodalEmbeddingProviderError(
-                "Multimodal service вернул некорректный JSON.",
+                "Embedding service вернул некорректный JSON.",
             ) from error
 
         if not isinstance(
@@ -143,29 +140,25 @@ class HttpMultimodalEmbeddingProvider:
             dict,
         ):
             raise MultimodalEmbeddingProviderError(
-                "Multimodal service вернул некорректный payload.",
+                "Embedding service вернул invalid payload.",
             )
 
         embeddings = payload.get(
             "embeddings",
         )
 
-        if not isinstance(
-            embeddings,
-            list,
-        ):
-            raise MultimodalEmbeddingProviderError(
-                "Multimodal service вернул некорректный embeddings payload.",
-            )
-
         if (
-            len(
+            not isinstance(
+                embeddings,
+                list,
+            )
+            or len(
                 embeddings,
             )
             != 1
         ):
             raise MultimodalEmbeddingProviderError(
-                "Bounded multimodal request должен вернуть ровно один embedding.",
+                "One-item request должен вернуть ровно один embedding.",
             )
 
         vector = embeddings[0]
@@ -178,7 +171,7 @@ class HttpMultimodalEmbeddingProvider:
             or not vector
         ):
             raise MultimodalEmbeddingProviderError(
-                "Multimodal embedding пуст.",
+                "Embedding пуст.",
             )
 
         try:
@@ -194,16 +187,19 @@ class HttpMultimodalEmbeddingProvider:
             ValueError,
         ) as error:
             raise MultimodalEmbeddingProviderError(
-                "Multimodal embedding содержит нечисловые значения.",
+                "Embedding содержит нечисловые значения.",
             ) from error
 
     async def release(
         self,
     ) -> None:
-        """Явно выгружает checkpoint."""
+        """Выгружает checkpoint с normal request timeout."""
         try:
             async with httpx.AsyncClient(
-                timeout=self._health_timeout_seconds,
+                timeout=httpx.Timeout(
+                    self._request_timeout_seconds,
+                    connect=self._connect_timeout_seconds,
+                ),
             ) as client:
                 response = await client.post(
                     (f"{self._base_url}/internal/v1/release"),
@@ -213,7 +209,7 @@ class HttpMultimodalEmbeddingProvider:
 
         except httpx.HTTPError as error:
             raise MultimodalEmbeddingTemporaryError(
-                "Не удалось выгрузить multimodal checkpoint.",
+                "Не удалось выгрузить unified embedding checkpoint.",
             ) from error
 
     async def is_ready(

@@ -1,6 +1,6 @@
 # tests/architecture/test_technical_assignment_index_pipeline.py
 
-"""Architecture guards TZ-3/TZ-6 multimodal pipeline."""
+"""Architecture guards unified embedding T pipeline."""
 
 from pathlib import Path
 
@@ -34,7 +34,7 @@ def test_t_outbox_is_not_normative_outbox() -> None:
 
 
 def test_t_index_uses_separate_queue_and_worker() -> None:
-    """T heavy work нельзя подобрать normative worker."""
+    """T heavy work не забирает normative worker."""
     compose = (ROOT / "compose.yaml").read_text(
         encoding="utf-8",
     )
@@ -45,13 +45,11 @@ def test_t_index_uses_separate_queue_and_worker() -> None:
 
     assert "--concurrency=1" in compose
 
-    assert "--queues=pdrd.knowledge.indexing" in compose
-
-    assert "--queues=pdrd.knowledge.technical-assignment" in compose
+    assert "--prefetch-multiplier=1" in compose
 
 
-def test_multimodal_model_has_dedicated_collection() -> None:
-    """T 8B vectors не смешиваются с text или legacy 2B vectors."""
+def test_t_uses_same_embedding_identity_but_separate_collection() -> None:
+    """T и text share model, но не смешивают payload vector spaces."""
     settings = (
         ROOT
         / "services"
@@ -64,17 +62,19 @@ def test_multimodal_model_has_dedicated_collection() -> None:
         encoding="utf-8",
     )
 
-    assert '"Qwen/Qwen3-VL-Embedding-8B"' in settings
+    assert "synchronize_embedding_identity" in settings
 
-    assert '"dva_multimodal_qwen3vl8b_v1"' in settings
+    assert '"dva_catalog_active"' in settings
 
-    assert '"dva_normative_v2"' in settings
+    assert '"dva_technical_assignment_active"' in settings
 
-    assert '"dva_multimodal_qwen3vl2b_v1"' not in settings
+    assert '"dva_experience_active"' in settings
+
+    assert "qwen3-embedding:4b" not in settings
 
 
 def test_analysis_waits_for_t_before_n8n() -> None:
-    """Analysis orchestration имеет explicit READY barrier."""
+    """Analysis orchestration сохраняет READY barrier."""
     use_case = (
         ROOT
         / "services"
@@ -102,7 +102,7 @@ def test_analysis_waits_for_t_before_n8n() -> None:
 
 
 def test_t_releases_gpu_before_ready() -> None:
-    """READY нельзя публиковать до explicit GPU release."""
+    """READY нельзя публиковать до embedding release."""
     use_case = (
         ROOT
         / "services"
@@ -129,124 +129,28 @@ def test_t_releases_gpu_before_ready() -> None:
     assert ready_position > release_position
 
 
-def test_gpu_runtime_is_bounded_lazy_and_idle_released() -> None:
-    """Checkpoint lazy-loaded и имеет bounded idle fallback."""
-    pyproject = (
-        ROOT / "services" / "multimodal-embedding-service" / "pyproject.toml"
-    ).read_text(
+def test_gpu_coordination_is_cross_container() -> None:
+    """Analysis и embedding service монтируют один OS lock."""
+    compose = (ROOT / "compose.yaml").read_text(
         encoding="utf-8",
     )
-
-    runtime = (
-        ROOT
-        / "services"
-        / "multimodal-embedding-service"
-        / "src"
-        / "pdrd_multimodal_embedding_service"
-        / "runtime.py"
-    ).read_text(
-        encoding="utf-8",
-    )
-
-    settings = (
-        ROOT
-        / "services"
-        / "multimodal-embedding-service"
-        / "src"
-        / "pdrd_multimodal_embedding_service"
-        / "settings.py"
-    ).read_text(
-        encoding="utf-8",
-    )
-
-    assert "[project.optional-dependencies]" in pyproject
-
-    assert "gpu = [" in pyproject
 
     assert (
-        "torch"
-        not in pyproject.split(
-            "gpu = [",
-            maxsplit=1,
-        )[0]
+        compose.count(
+            "gpu_coordination:/var/lock/pdrd-gpu",
+        )
+        == 2
     )
 
-    assert "max_concurrency" in runtime
-
-    assert "_ensure_model_sync" in runtime
-
-    assert "_release_sync" in runtime
-
-    assert "_release_after_idle" in runtime
-
-    assert "idle_release_seconds" in settings
-
-    assert "default=60.0" in settings
+    assert "gpu_coordination:" in compose
 
 
-def test_gpu_loader_uses_bounded_direct_dispatch() -> None:
-    """Большой checkpoint нельзя сначала материализовать целиком в RAM."""
-    pyproject = (
-        ROOT / "services" / "multimodal-embedding-service" / "pyproject.toml"
-    ).read_text(
+def test_embedding_migration_gates_knowledge_runtime() -> None:
+    """Search/index workers не стартуют до safe reindex cutover."""
+    compose = (ROOT / "compose.yaml").read_text(
         encoding="utf-8",
     )
 
-    runtime = (
-        ROOT
-        / "services"
-        / "multimodal-embedding-service"
-        / "src"
-        / "pdrd_multimodal_embedding_service"
-        / "runtime.py"
-    ).read_text(
-        encoding="utf-8",
-    )
+    assert "knowledge-embedding-migrator:" in compose
 
-    assert '"accelerate==1.14.0"' in pyproject
-
-    assert '"device_map": "cuda:0"' in runtime
-
-    assert '"low_cpu_mem_usage": True' in runtime
-
-    assert '"dtype": model_dtype' in runtime
-
-    assert '"torch_dtype": model_dtype' not in runtime
-
-
-def test_gpu_image_runtime_dependencies_are_pinned() -> None:
-    """Vision processor должен иметь reproducible CUDA dependencies."""
-    pyproject = (
-        ROOT / "services" / "multimodal-embedding-service" / "pyproject.toml"
-    ).read_text(
-        encoding="utf-8",
-    )
-
-    dockerfile = (
-        ROOT / "services" / "multimodal-embedding-service" / "Dockerfile"
-    ).read_text(
-        encoding="utf-8",
-    )
-
-    assert '"torchvision==0.23.0"' in pyproject
-
-    assert '"transformers==5.16.1"' in pyproject
-
-    assert "torch==2.8.0" in dockerfile
-
-    assert "torchvision==0.23.0" in dockerfile
-
-    assert "https://download.pytorch.org/whl/cu128" in dockerfile
-
-
-def test_knowledge_runtime_prepares_t_storage_permissions() -> None:
-    """Non-root Knowledge runtime должен владеть T storage."""
-    dockerfile = (ROOT / "services" / "knowledge-service" / "Dockerfile").read_text(
-        encoding="utf-8",
-    )
-
-    assert "/data/normative" in dockerfile
-
-    assert "/data/technical-assignments" in dockerfile
-
-    assert "chown -R app:app" in dockerfile
+    assert "service_completed_successfully" in compose

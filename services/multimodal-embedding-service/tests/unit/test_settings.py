@@ -4,6 +4,7 @@
 
 from pdrd_multimodal_embedding_service.settings import (
     ModelSettings,
+    Settings,
 )
 
 
@@ -47,3 +48,19 @@ def test_memory_thresholds_are_exposed_in_bytes() -> None:
     assert settings.min_free_ram_bytes == 20 * 1024**3
 
     assert settings.min_free_vram_bytes == 18 * 1024**3
+
+
+def test_shared_embedding_identity_can_be_overridden_by_field_name() -> None:
+    """Constructor override работает вместе с canonical env aliases."""
+    settings = Settings(
+        embedding_model="Qwen/Test-Embedding",
+        embedding_dimension=3072,
+    )
+
+    assert settings.embedding_model == "Qwen/Test-Embedding"
+
+    assert settings.embedding_dimension == 3072
+
+    assert settings.model.name == "Qwen/Test-Embedding"
+
+    assert settings.model.output_dimension == 3072
