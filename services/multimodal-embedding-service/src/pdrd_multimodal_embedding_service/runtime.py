@@ -1,14 +1,16 @@
 # services/multimodal-embedding-service/src/pdrd_multimodal_embedding_service/runtime.py
 
-"""Lazy GPU runtime Qwen3-VL-Embedding-8B."""
+"""Lazy GPU runtime configured Qwen3-VL-Embedding checkpoint."""
 
 import asyncio
 import gc
 import importlib
 import logging
+import os
 from contextlib import suppress
 from dataclasses import dataclass
 from io import BytesIO
+from pathlib import Path
 from time import monotonic
 from typing import Any
 
@@ -20,11 +22,19 @@ LOGGER = logging.getLogger(
     __name__,
 )
 
+_CGROUP_UNLIMITED_THRESHOLD = 1 << 60
+
 
 class MultimodalRuntimeError(
     RuntimeError,
 ):
     """Базовая ошибка GPU runtime."""
+
+
+class SystemRamAdmissionError(
+    MultimodalRuntimeError,
+):
+    """Системной RAM недостаточно для безопасной загрузки checkpoint."""
 
 
 class GpuAdmissionError(
@@ -61,6 +71,194 @@ class RuntimeStatus:
     free_vram_bytes: int | None
 
     total_vram_bytes: int | None
+
+
+def _read_integer_file(
+    path: Path,
+) -> int | None:
+    """Best-effort читает неотрицательное целое из sysfs/cgroup."""
+    try:
+        value = path.read_text(
+            encoding="utf-8",
+        ).strip()
+
+    except OSError:
+        return None
+
+    if not value or value == "max":
+        return None
+
+    try:
+        parsed = int(
+            value,
+        )
+
+    except ValueError:
+        return None
+
+    if parsed < 0:
+        return None
+
+    return parsed
+
+
+def _linux_mem_available_bytes() -> int | None:
+    """Возвращает Linux MemAvailable из /proc/meminfo."""
+    path = Path(
+        "/proc/meminfo",
+    )
+
+    try:
+        content = path.read_text(
+            encoding="utf-8",
+        )
+
+    except OSError:
+        return None
+
+    for line in content.splitlines():
+        if not line.startswith(
+            "MemAvailable:",
+        ):
+            continue
+
+        parts = line.split()
+
+        if (
+            len(
+                parts,
+            )
+            < 2
+        ):
+            return None
+
+        try:
+            available_kib = int(
+                parts[1],
+            )
+
+        except ValueError:
+            return None
+
+        return available_kib * 1024
+
+    return None
+
+
+def _sysconf_available_ram_bytes() -> int | None:
+    """Fallback определяет свободную RAM через POSIX sysconf."""
+    sysconf = getattr(
+        os,
+        "sysconf",
+        None,
+    )
+
+    if not callable(
+        sysconf,
+    ):
+        return None
+
+    try:
+        available_pages = int(
+            sysconf(
+                "SC_AVPHYS_PAGES",
+            )
+        )
+
+        page_size = int(
+            sysconf(
+                "SC_PAGE_SIZE",
+            )
+        )
+
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+    ):
+        return None
+
+    if available_pages <= 0 or page_size <= 0:
+        return None
+
+    return available_pages * page_size
+
+
+def _cgroup_v2_available_ram_bytes() -> int | None:
+    """Возвращает доступную память cgroup v2 при configured limit."""
+    root = Path(
+        "/sys/fs/cgroup",
+    )
+
+    limit = _read_integer_file(
+        root / "memory.max",
+    )
+
+    current = _read_integer_file(
+        root / "memory.current",
+    )
+
+    if limit is None or current is None:
+        return None
+
+    if limit >= _CGROUP_UNLIMITED_THRESHOLD:
+        return None
+
+    return max(
+        limit - current,
+        0,
+    )
+
+
+def _cgroup_v1_available_ram_bytes() -> int | None:
+    """Возвращает доступную память legacy cgroup v1."""
+    root = Path(
+        "/sys/fs/cgroup/memory",
+    )
+
+    limit = _read_integer_file(
+        root / "memory.limit_in_bytes",
+    )
+
+    current = _read_integer_file(
+        root / "memory.usage_in_bytes",
+    )
+
+    if limit is None or current is None:
+        return None
+
+    if limit >= _CGROUP_UNLIMITED_THRESHOLD:
+        return None
+
+    return max(
+        limit - current,
+        0,
+    )
+
+
+def _available_system_ram_bytes() -> int | None:
+    """Возвращает реально доступную RAM с учётом cgroup limit."""
+    host_available = _linux_mem_available_bytes() or _sysconf_available_ram_bytes()
+
+    cgroup_available = (
+        _cgroup_v2_available_ram_bytes() or _cgroup_v1_available_ram_bytes()
+    )
+
+    candidates = [
+        value
+        for value in (
+            host_available,
+            cgroup_available,
+        )
+        if value is not None
+    ]
+
+    if not candidates:
+        return None
+
+    return min(
+        candidates,
+    )
 
 
 class Qwen3VlEmbeddingRuntime:
@@ -345,7 +543,8 @@ class Qwen3VlEmbeddingRuntime:
             )
 
             raise MultimodalModelExecutionError(
-                f"Ошибка Qwen3-VL-Embedding inference: {type(error).__name__}: {error}",
+                "Ошибка multimodal embedding inference: "
+                f"{type(error).__name__}: {error}",
             ) from error
 
         finally:
@@ -361,12 +560,55 @@ class Qwen3VlEmbeddingRuntime:
                 ):
                     close()
 
+    def _require_system_ram_admission(
+        self,
+    ) -> int:
+        """Проверяет свободную RAM до checkpoint load."""
+        available_ram_bytes = _available_system_ram_bytes()
+
+        if available_ram_bytes is None:
+            LOGGER.error(
+                "qwen3_vl_ram_admission_unknown model=%s",
+                self._settings.name,
+            )
+
+            raise SystemRamAdmissionError(
+                "Не удалось определить объём доступной системной RAM "
+                "для безопасной загрузки "
+                f"{self._settings.name}.",
+            )
+
+        if available_ram_bytes < self._settings.min_free_ram_bytes:
+            LOGGER.warning(
+                (
+                    "qwen3_vl_ram_admission_rejected "
+                    "model=%s "
+                    "available_ram_bytes=%s "
+                    "required_ram_bytes=%s"
+                ),
+                self._settings.name,
+                available_ram_bytes,
+                self._settings.min_free_ram_bytes,
+            )
+
+            raise SystemRamAdmissionError(
+                "Недостаточно свободной системной RAM для "
+                f"безопасной загрузки {self._settings.name}: "
+                f"available={available_ram_bytes} bytes, "
+                f"required="
+                f"{self._settings.min_free_ram_bytes} bytes.",
+            )
+
+        return available_ram_bytes
+
     def _ensure_model_sync(
         self,
     ) -> Any:
-        """Lazy-load checkpoint напрямую в GPU с bounded CPU RAM."""
+        """Lazy-load checkpoint напрямую в GPU с RAM/VRAM admission."""
         if self._model is not None:
             return self._model
+
+        available_ram_bytes = self._require_system_ram_admission()
 
         torch = importlib.import_module(
             "torch",
@@ -391,16 +633,18 @@ class Qwen3VlEmbeddingRuntime:
             LOGGER.warning(
                 (
                     "qwen3_vl_model_admission_rejected "
+                    "model=%s "
                     "free_vram_bytes=%s "
                     "required_vram_bytes=%s"
                 ),
+                self._settings.name,
                 free_vram_bytes,
                 self._settings.min_free_vram_bytes,
             )
 
             raise GpuAdmissionError(
                 "Недостаточно свободной VRAM для безопасной "
-                "загрузки Qwen3-VL-Embedding-8B: "
+                f"загрузки {self._settings.name}: "
                 f"free={free_vram_bytes} bytes, "
                 f"required="
                 f"{self._settings.min_free_vram_bytes} bytes.",
@@ -421,14 +665,20 @@ class Qwen3VlEmbeddingRuntime:
             (
                 "qwen3_vl_model_load_started "
                 "model=%s dtype=%s "
+                "available_ram_bytes=%s "
+                "required_ram_bytes=%s "
                 "free_vram_bytes=%s "
                 "total_vram_bytes=%s "
+                "required_vram_bytes=%s "
                 "device_map=cuda:0"
             ),
             self._settings.name,
             self._settings.dtype,
+            available_ram_bytes,
+            self._settings.min_free_ram_bytes,
             free_vram_bytes,
             total_vram_bytes,
+            self._settings.min_free_vram_bytes,
         )
 
         try:
@@ -458,24 +708,37 @@ class Qwen3VlEmbeddingRuntime:
                 error,
                 MemoryError,
             ):
-                raise MultimodalModelExecutionError(
-                    "Недостаточно CPU RAM при загрузке Qwen3-VL-Embedding-8B.",
+                raise SystemRamAdmissionError(
+                    "Системная RAM закончилась при загрузке "
+                    f"{self._settings.name}. "
+                    "Checkpoint выгружен для безопасного retry.",
                 ) from error
 
             lowered = str(
                 error,
             ).lower()
 
+            if (
+                "cannot allocate memory" in lowered
+                or "bad_alloc" in lowered
+                or "bad alloc" in lowered
+            ):
+                raise SystemRamAdmissionError(
+                    "Ошибка выделения системной RAM при загрузке "
+                    f"{self._settings.name}. "
+                    "Checkpoint выгружен для безопасного retry.",
+                ) from error
+
             if "out of memory" in lowered or (
                 "cuda" in lowered and "memory" in lowered
             ):
                 raise GpuAdmissionError(
-                    f"CUDA OOM при загрузке Qwen3-VL-Embedding-8B: {str(error)[:1000]}",
+                    f"CUDA OOM при загрузке {self._settings.name}: {str(error)[:1000]}",
                 ) from error
 
             raise MultimodalModelExecutionError(
                 "Не удалось загрузить "
-                "Qwen3-VL-Embedding-8B: "
+                f"{self._settings.name}: "
                 f"{type(error).__name__}: {error}",
             ) from error
 

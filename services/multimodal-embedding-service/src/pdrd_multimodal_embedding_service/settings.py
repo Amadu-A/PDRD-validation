@@ -29,7 +29,7 @@ TorchDtype = Literal[
 
 
 class ModelSettings(BaseModel):
-    """Настройки Qwen3-VL-Embedding и GPU safety envelope."""
+    """Настройки Qwen3-VL-Embedding и memory safety envelope."""
 
     name: str = "Qwen/Qwen3-VL-Embedding-8B"
 
@@ -75,6 +75,12 @@ class ModelSettings(BaseModel):
         le=8,
     )
 
+    min_free_ram_gib: float = Field(
+        default=20.0,
+        ge=1.0,
+        le=1024.0,
+    )
+
     min_free_vram_gib: float = Field(
         default=18.0,
         ge=1.0,
@@ -90,10 +96,17 @@ class ModelSettings(BaseModel):
     dtype: TorchDtype = "bfloat16"
 
     @property
+    def min_free_ram_bytes(
+        self,
+    ) -> int:
+        """Возвращает RAM admission threshold в bytes."""
+        return int(self.min_free_ram_gib * 1024 * 1024 * 1024)
+
+    @property
     def min_free_vram_bytes(
         self,
     ) -> int:
-        """Возвращает admission threshold в bytes."""
+        """Возвращает VRAM admission threshold в bytes."""
         return int(self.min_free_vram_gib * 1024 * 1024 * 1024)
 
 

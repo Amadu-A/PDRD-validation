@@ -11,12 +11,16 @@ from pdrd_multimodal_embedding_service import (
     runtime as runtime_module,
 )
 from pdrd_multimodal_embedding_service.runtime import (
+    GpuAdmissionError,
     Qwen3VlEmbeddingRuntime,
     RuntimeEmbeddingInput,
+    SystemRamAdmissionError,
 )
 from pdrd_multimodal_embedding_service.settings import (
     ModelSettings,
 )
+
+GIB = 1024**3
 
 
 async def test_empty_embedding_batch_does_not_load_model() -> None:
@@ -47,6 +51,136 @@ def test_runtime_input_keeps_mixed_modalities() -> None:
     assert item.instruction is not None
 
 
+def test_model_loader_rejects_low_system_ram_before_imports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Checkpoint не начинает загрузку при недостатке системной RAM."""
+    imported_modules: list[str] = []
+
+    monkeypatch.setattr(
+        runtime_module,
+        "_available_system_ram_bytes",
+        lambda: 10 * GIB,
+    )
+
+    def fake_import(
+        module_name: str,
+    ) -> object:
+        imported_modules.append(
+            module_name,
+        )
+
+        raise AssertionError(
+            "Model dependencies не должны импортироваться после RAM admission reject.",
+        )
+
+    monkeypatch.setattr(
+        runtime_module.importlib,
+        "import_module",
+        fake_import,
+    )
+
+    runtime = Qwen3VlEmbeddingRuntime(
+        settings=ModelSettings(
+            min_free_ram_gib=20,
+        ),
+    )
+
+    with pytest.raises(
+        SystemRamAdmissionError,
+        match="системной RAM",
+    ):
+        runtime._ensure_model_sync()
+
+    assert imported_modules == []
+
+    assert runtime._model is None
+
+
+def test_model_loader_rejects_unknown_system_ram(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Неизвестный RAM budget трактуется как unsafe admission."""
+    monkeypatch.setattr(
+        runtime_module,
+        "_available_system_ram_bytes",
+        lambda: None,
+    )
+
+    runtime = Qwen3VlEmbeddingRuntime(
+        settings=ModelSettings(),
+    )
+
+    with pytest.raises(
+        SystemRamAdmissionError,
+        match="Не удалось определить",
+    ):
+        runtime._ensure_model_sync()
+
+    assert runtime._model is None
+
+
+def test_model_loader_rejects_low_vram_after_ram_admission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Достаточная RAM не отменяет отдельный VRAM admission."""
+    monkeypatch.setattr(
+        runtime_module,
+        "_available_system_ram_bytes",
+        lambda: 64 * GIB,
+    )
+
+    fake_cuda = SimpleNamespace(
+        is_available=lambda: True,
+        mem_get_info=lambda: (
+            10 * GIB,
+            24 * GIB,
+        ),
+    )
+
+    fake_torch = SimpleNamespace(
+        cuda=fake_cuda,
+    )
+
+    original_import = runtime_module.importlib.import_module
+
+    def fake_import(
+        module_name: str,
+    ) -> object:
+        if module_name == "torch":
+            return fake_torch
+
+        if module_name == "sentence_transformers":
+            raise AssertionError(
+                "SentenceTransformer не должен импортироваться "
+                "после VRAM admission reject.",
+            )
+
+        return original_import(
+            module_name,
+        )
+
+    monkeypatch.setattr(
+        runtime_module.importlib,
+        "import_module",
+        fake_import,
+    )
+
+    runtime = Qwen3VlEmbeddingRuntime(
+        settings=ModelSettings(
+            min_free_vram_gib=18,
+        ),
+    )
+
+    with pytest.raises(
+        GpuAdmissionError,
+        match="VRAM",
+    ):
+        runtime._ensure_model_sync()
+
+    assert runtime._model is None
+
+
 def test_model_loader_uses_direct_low_cpu_gpu_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -58,11 +192,17 @@ def test_model_loader_uses_direct_low_cpu_gpu_dispatch(
 
     model_dtype = object()
 
+    monkeypatch.setattr(
+        runtime_module,
+        "_available_system_ram_bytes",
+        lambda: 64 * GIB,
+    )
+
     fake_cuda = SimpleNamespace(
         is_available=lambda: True,
         mem_get_info=lambda: (
-            24 * 1024 * 1024 * 1024,
-            24 * 1024 * 1024 * 1024,
+            24 * GIB,
+            24 * GIB,
         ),
         empty_cache=lambda: None,
         ipc_collect=lambda: None,
@@ -89,7 +229,7 @@ def test_model_loader_uses_direct_low_cpu_gpu_dispatch(
         return FakeModel()
 
     fake_sentence_transformers = SimpleNamespace(
-        SentenceTransformer=fake_sentence_transformer,
+        SentenceTransformer=(fake_sentence_transformer),
     )
 
     original_import = runtime_module.importlib.import_module
@@ -119,7 +259,7 @@ def test_model_loader_uses_direct_low_cpu_gpu_dispatch(
 
     model = runtime._ensure_model_sync()
 
-    assert captured["model_name"] == ("Qwen/Qwen3-VL-Embedding-8B")
+    assert captured["model_name"] == "Qwen/Qwen3-VL-Embedding-8B"
 
     kwargs = captured["kwargs"]
 
@@ -146,6 +286,219 @@ def test_model_loader_uses_direct_low_cpu_gpu_dispatch(
     assert "torch_dtype" not in model_kwargs
 
     assert model.max_seq_length == 8192
+
+
+def test_memory_error_during_model_load_releases_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MemoryError не оставляет частично загруженный checkpoint."""
+    monkeypatch.setattr(
+        runtime_module,
+        "_available_system_ram_bytes",
+        lambda: 64 * GIB,
+    )
+
+    fake_cuda = SimpleNamespace(
+        is_available=lambda: True,
+        mem_get_info=lambda: (
+            24 * GIB,
+            24 * GIB,
+        ),
+    )
+
+    fake_torch = SimpleNamespace(
+        cuda=fake_cuda,
+        bfloat16=object(),
+    )
+
+    def failing_model(
+        model_name: str,
+        **kwargs: object,
+    ) -> object:
+        assert model_name
+        assert kwargs
+
+        raise MemoryError(
+            "simulated checkpoint RAM exhaustion",
+        )
+
+    fake_sentence_transformers = SimpleNamespace(
+        SentenceTransformer=failing_model,
+    )
+
+    original_import = runtime_module.importlib.import_module
+
+    def fake_import(
+        module_name: str,
+    ) -> object:
+        if module_name == "torch":
+            return fake_torch
+
+        if module_name == "sentence_transformers":
+            return fake_sentence_transformers
+
+        return original_import(
+            module_name,
+        )
+
+    monkeypatch.setattr(
+        runtime_module.importlib,
+        "import_module",
+        fake_import,
+    )
+
+    runtime = Qwen3VlEmbeddingRuntime(
+        settings=ModelSettings(),
+    )
+
+    releases: list[bool] = []
+
+    def fake_release_sync() -> None:
+        runtime._model = None
+
+        releases.append(
+            True,
+        )
+
+    monkeypatch.setattr(
+        runtime,
+        "_release_sync",
+        fake_release_sync,
+    )
+
+    with pytest.raises(
+        SystemRamAdmissionError,
+        match="закончилась",
+    ):
+        runtime._ensure_model_sync()
+
+    assert releases == [
+        True,
+    ]
+
+    assert runtime._model is None
+
+
+def test_cuda_oom_during_inference_releases_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CUDA OOM освобождает checkpoint перед retry."""
+    runtime = Qwen3VlEmbeddingRuntime(
+        settings=ModelSettings(),
+    )
+
+    class FakeModel:
+        """Model, падающая CUDA OOM на encode."""
+
+        def encode(
+            self,
+            prepared: object,
+            **kwargs: object,
+        ) -> object:
+            assert prepared
+            assert kwargs
+
+            raise RuntimeError(
+                "CUDA out of memory",
+            )
+
+    runtime._model = FakeModel()
+
+    releases: list[bool] = []
+
+    def fake_release_sync() -> None:
+        runtime._model = None
+
+        releases.append(
+            True,
+        )
+
+    monkeypatch.setattr(
+        runtime,
+        "_release_sync",
+        fake_release_sync,
+    )
+
+    with pytest.raises(
+        GpuAdmissionError,
+        match="CUDA OOM",
+    ):
+        runtime._embed_sync(
+            (
+                RuntimeEmbeddingInput(
+                    text="test",
+                    image_bytes=None,
+                    instruction=None,
+                ),
+            )
+        )
+
+    assert releases == [
+        True,
+    ]
+
+    assert runtime._model is None
+
+
+@pytest.mark.asyncio
+async def test_failed_embedding_does_not_leak_semaphore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ошибка одного request не блокирует следующий embedding."""
+    runtime = Qwen3VlEmbeddingRuntime(
+        settings=ModelSettings(
+            max_concurrency=1,
+        ),
+    )
+
+    attempts = 0
+
+    def fake_embed_sync(
+        inputs: tuple[
+            RuntimeEmbeddingInput,
+            ...,
+        ],
+    ) -> list[list[float]]:
+        nonlocal attempts
+
+        assert inputs
+
+        attempts += 1
+
+        if attempts == 1:
+            raise GpuAdmissionError(
+                "temporary admission error",
+            )
+
+        return [[0.0] * 4096]
+
+    monkeypatch.setattr(
+        runtime,
+        "_embed_sync",
+        fake_embed_sync,
+    )
+
+    item = RuntimeEmbeddingInput(
+        text="test",
+        image_bytes=None,
+        instruction=None,
+    )
+
+    with pytest.raises(
+        GpuAdmissionError,
+    ):
+        await runtime.embed((item,))
+
+    result = await asyncio.wait_for(
+        runtime.embed((item,)),
+        timeout=1,
+    )
+
+    runtime._cancel_idle_release_watchdog()
+
+    assert attempts == 2
+
+    assert len(result[0]) == 4096
 
 
 @pytest.mark.asyncio

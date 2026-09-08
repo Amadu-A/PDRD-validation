@@ -50,7 +50,7 @@ def test_source_semantics_fix_n_t_u_e_contract() -> None:
 
 
 def test_text_and_multimodal_embeddings_remain_separate() -> None:
-    """Новая VL-модель не заменяет существующий text embedding."""
+    """VL 8B не заменяет text embedding и использует свой vector space."""
     content = SETTINGS.read_text(
         encoding="utf-8",
     )
@@ -59,7 +59,7 @@ def test_text_and_multimodal_embeddings_remain_separate() -> None:
         'model: str = "qwen3-embedding:4b"',
         '"Qwen/Qwen3-VL-Embedding-8B"',
         '"dva_normative_v2"',
-        '"dva_multimodal_v1"',
+        '"dva_multimodal_qwen3vl8b_v1"',
     )
 
     missing = [marker for marker in required if marker not in content]
@@ -67,6 +67,8 @@ def test_text_and_multimodal_embeddings_remain_separate() -> None:
     assert not missing, "\n".join(
         missing,
     )
+
+    assert '"dva_multimodal_qwen3vl2b_v1"' not in content
 
 
 def test_multimodal_boundary_accepts_text_and_images() -> None:
@@ -113,4 +115,9 @@ def test_multimodal_runtime_has_conservative_safety_limits() -> None:
         missing,
     )
 
-    assert content.count("default=1,") >= 3
+    assert (
+        content.count(
+            "default=1,",
+        )
+        >= 3
+    )

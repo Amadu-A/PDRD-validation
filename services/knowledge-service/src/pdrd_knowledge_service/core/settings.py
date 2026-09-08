@@ -374,7 +374,7 @@ class QdrantSettings(BaseModel):
 
     experience_collection: str = "dva_experience_v2"
 
-    multimodal_collection: str = "dva_multimodal_v1"
+    multimodal_collection: str = "dva_multimodal_qwen3vl8b_v1"
 
     request_timeout_seconds: float = Field(
         default=90.0,

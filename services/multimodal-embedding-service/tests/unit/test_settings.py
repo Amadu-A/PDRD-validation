@@ -30,6 +30,20 @@ def test_default_runtime_is_memory_bounded() -> None:
 
     assert settings.max_concurrency == 1
 
+    assert settings.min_free_ram_gib == 20.0
+
     assert settings.min_free_vram_gib == 18.0
 
     assert settings.idle_release_seconds == 60.0
+
+
+def test_memory_thresholds_are_exposed_in_bytes() -> None:
+    """GiB thresholds переводятся без decimal/binary путаницы."""
+    settings = ModelSettings(
+        min_free_ram_gib=20,
+        min_free_vram_gib=18,
+    )
+
+    assert settings.min_free_ram_bytes == 20 * 1024**3
+
+    assert settings.min_free_vram_bytes == 18 * 1024**3

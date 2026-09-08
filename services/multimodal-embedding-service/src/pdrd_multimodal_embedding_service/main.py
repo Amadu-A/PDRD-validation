@@ -17,6 +17,7 @@ from pdrd_multimodal_embedding_service.runtime import (
     MultimodalRuntimeError,
     Qwen3VlEmbeddingRuntime,
     RuntimeEmbeddingInput,
+    SystemRamAdmissionError,
 )
 from pdrd_multimodal_embedding_service.schemas import (
     EmbeddingRequest,
@@ -182,7 +183,10 @@ def create_app(
                 runtime_inputs,
             )
 
-        except GpuAdmissionError as error:
+        except (
+            SystemRamAdmissionError,
+            GpuAdmissionError,
+        ) as error:
             raise HTTPException(
                 status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
                 detail=str(

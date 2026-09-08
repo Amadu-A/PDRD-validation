@@ -38,17 +38,19 @@ def test_technical_assignment_queue_uses_single_prefetch() -> None:
     assert settings.routing_key == "technical_assignment.index"
 
 
-def test_technical_assignment_has_separate_multimodal_collection() -> None:
-    """T-index не смешивается с существующим N/U text space."""
+def test_technical_assignment_has_separate_8b_collection() -> None:
+    """T-index 8B не смешивается с 2B и N/U vector spaces."""
     qdrant = QdrantSettings()
 
     technical_assignment = TechnicalAssignmentSettings()
 
     assert qdrant.normative_collection == "dva_normative_v2"
 
-    assert qdrant.multimodal_collection == "dva_multimodal_v1"
+    assert qdrant.multimodal_collection == "dva_multimodal_qwen3vl8b_v1"
 
     assert qdrant.multimodal_collection != qdrant.normative_collection
+
+    assert qdrant.multimodal_collection != "dva_multimodal_qwen3vl2b_v1"
 
     assert technical_assignment.max_pages == 300
 

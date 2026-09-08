@@ -1,6 +1,6 @@
 # tests/architecture/test_technical_assignment_index_pipeline.py
 
-"""Architecture guards TZ-3 multimodal pipeline."""
+"""Architecture guards TZ-3/TZ-6 multimodal pipeline."""
 
 from pathlib import Path
 
@@ -51,7 +51,7 @@ def test_t_index_uses_separate_queue_and_worker() -> None:
 
 
 def test_multimodal_model_has_dedicated_collection() -> None:
-    """T vectors не смешиваются с qwen3-embedding vectors."""
+    """T 8B vectors не смешиваются с text или legacy 2B vectors."""
     settings = (
         ROOT
         / "services"
@@ -66,9 +66,11 @@ def test_multimodal_model_has_dedicated_collection() -> None:
 
     assert '"Qwen/Qwen3-VL-Embedding-8B"' in settings
 
-    assert '"dva_multimodal_v1"' in settings
+    assert '"dva_multimodal_qwen3vl8b_v1"' in settings
 
     assert '"dva_normative_v2"' in settings
+
+    assert '"dva_multimodal_qwen3vl2b_v1"' not in settings
 
 
 def test_analysis_waits_for_t_before_n8n() -> None:
@@ -86,7 +88,9 @@ def test_analysis_waits_for_t_before_n8n() -> None:
         encoding="utf-8",
     )
 
-    wait_position = use_case.find("_ensure_technical_assignment_ready(")
+    wait_position = use_case.find(
+        "_ensure_technical_assignment_ready(",
+    )
 
     orchestrator_position = use_case.find(
         "self.orchestrator.execute(",
@@ -112,9 +116,13 @@ def test_t_releases_gpu_before_ready() -> None:
         encoding="utf-8",
     )
 
-    release_position = use_case.find("await self.embedding_provider.release()")
+    release_position = use_case.find(
+        "await self.embedding_provider.release()",
+    )
 
-    ready_position = use_case.find("return await self._mark_ready(")
+    ready_position = use_case.find(
+        "return await self._mark_ready(",
+    )
 
     assert release_position >= 0
 
