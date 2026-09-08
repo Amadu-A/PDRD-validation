@@ -8,13 +8,13 @@
         "responseMode": "lastNode",
         "options": {}
       },
-      "id": "10000000-0000-4000-8000-000000000001",
+      "id": "db9de01f-6e4d-43b8-91d0-877e49989f5f",
       "name": "POST /analysis/v2/pdf",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -2000,
-        0
+        -1840,
+        800
       ],
       "webhookId": "10000000-0000-4000-8000-000000000002"
     },
@@ -53,13 +53,13 @@
           "timeout": 1800000
         }
       },
-      "id": "10000000-0000-4000-8000-000000000003",
+      "id": "802b5be6-8df0-4ae0-a848-02276336b99a",
       "name": "Document Extract PDF",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1780,
-        0
+        -1616,
+        800
       ]
     },
     {
@@ -74,13 +74,13 @@
           "timeout": 1800000
         }
       },
-      "id": "10000000-0000-4000-8000-000000000004",
+      "id": "d5b2aa6e-09c6-4d35-8e93-590b736817d5",
       "name": "Validate Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1560,
-        0
+        -1392,
+        800
       ]
     },
     {
@@ -95,26 +95,26 @@
           "timeout": 900000
         }
       },
-      "id": "10000000-0000-4000-8000-000000000005",
+      "id": "7a290486-35e9-429b-9a59-49155f826bfa",
       "name": "Create Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1340,
-        0
+        -1168,
+        800
       ]
     },
     {
       "parameters": {
         "jsCode": "const document = $('Document Extract PDF').first().json;\nconst validation = $('Validate Project Context').first().json;\nconst context = $input.first().json;\nconst pages = Array.isArray(document.pages) ? document.pages : [];\n\nreturn pages.map((page) => ({\n  json: {\n    document: {\n      file_name: document.file_name ?? 'document.pdf',\n      total_pages: document.total_pages ?? pages.length,\n      selected_pages: document.selected_pages ?? pages.map((item) => item.page_number),\n    },\n    project_context: {\n      context_id: context.context_id,\n      enabled: context.enabled ?? false,\n      start_page: document.explanatory_note_context?.start_page ?? null,\n      end_page: document.explanatory_note_context?.end_page ?? null,\n      pages_count: context.pages_count ?? 0,\n      indexed_chunks: context.chunks_count ?? 0,\n      vector_size: context.vector_size ?? 0,\n      validation,\n    },\n    page,\n  },\n}));"
       },
-      "id": "10000000-0000-4000-8000-000000000006",
+      "id": "19c6a327-80d6-4404-980c-46de2000847b",
       "name": "Expand PDF Pages",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1120,
-        0
+        -960,
+        800
       ]
     },
     {
@@ -129,13 +129,13 @@
           "timeout": 1800000
         }
       },
-      "id": "10000000-0000-4000-8000-000000000007",
+      "id": "396791ba-1c47-4c90-96f9-68e396d0672f",
       "name": "Understand Page",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -900,
-        0
+        -736,
+        800
       ]
     },
     {
@@ -150,13 +150,13 @@
           "timeout": 1800000
         }
       },
-      "id": "10000000-0000-4000-8000-000000000008",
+      "id": "12085b4a-1aee-40f3-b3e5-9f23658d3e20",
       "name": "Build Project Context Query",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -680,
-        0
+        -512,
+        800
       ]
     },
     {
@@ -171,13 +171,13 @@
           "timeout": 900000
         }
       },
-      "id": "10000000-0000-4000-8000-000000000009",
+      "id": "f6601cbd-e9d9-4a0a-85e8-329f32d292c6",
       "name": "Search Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -460,
-        0
+        -288,
+        800
       ]
     },
     {
@@ -192,13 +192,13 @@
           "timeout": 1800000
         }
       },
-      "id": "10000000-0000-4000-8000-000000000010",
+      "id": "01d68745-1412-4a41-b31e-dfade6056fef",
       "name": "Augment Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -240,
-        0
+        -80,
+        800
       ]
     },
     {
@@ -213,34 +213,13 @@
           "timeout": 1800000
         }
       },
-      "id": "10000000-0000-4000-8000-000000000011",
+      "id": "8809df58-5c8e-4675-91ff-81e7f960c79b",
       "name": "Build Normative Queries",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -20,
-        0
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://pdrd-knowledge-service:8401/internal/v1/search/normative",
-        "sendBody": true,
-        "contentType": "raw",
-        "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ queries: $json.queries ?? [], ...($('POST /analysis/v2/pdf').first().json.body?.normative_section_id ? { section_id: $('POST /analysis/v2/pdf').first().json.body.normative_section_id, document_ids: JSON.parse($('POST /analysis/v2/pdf').first().json.body?.normative_document_ids ?? '[]') } : {}) }) }}",
-        "options": {
-          "timeout": 900000
-        }
-      },
-      "id": "10000000-0000-4000-8000-000000000012",
-      "name": "Search Normative",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        200,
-        0
+        160,
+        800
       ]
     },
     {
@@ -255,13 +234,13 @@
           "timeout": 900000
         }
       },
-      "id": "10000000-0000-4000-8000-000000000023",
+      "id": "34a3a66e-7da0-4554-a808-108558452258",
       "name": "Search User Packages",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        420,
-        0
+        816,
+        800
       ]
     },
     {
@@ -271,18 +250,18 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_number: $('Expand PDF Pages').item.json.page.page_number, extracted_text: $('Augment Project Context').item.json.analysis_text, page_facts: $('Understand Page').item.json.facts, normative_sources: $('Search Normative').item.json.sources ?? [], user_package_sources: $json.sources ?? [], image_base64: $('Expand PDF Pages').item.json.page.image_base64, normative_system_prompt: $('POST /analysis/v2/pdf').first().json.body?.normative_system_prompt ?? null }) }}",
+        "body": "={{\n  JSON.stringify({\n    page_number:\n      $('Expand PDF Pages').item.json.page.page_number,\n\n    extracted_text:\n      $('Augment Project Context').item.json.analysis_text,\n\n    page_facts:\n      $('Understand Page').item.json.facts,\n\n    normative_sources:\n      $('Normalize Requirement Search').item.json.normative_sources ?? [],\n\n    technical_assignment_sources:\n      $('Normalize Requirement Search').item.json\n        .technical_assignment_sources ?? [],\n\n    conflict_candidates:\n      $('Normalize Requirement Search').item.json\n        .conflict_candidates ?? [],\n\n    user_package_sources:\n      $json.sources ?? [],\n\n    image_base64:\n      $('Expand PDF Pages').item.json.page.image_base64,\n\n    normative_system_prompt:\n      $('POST /analysis/v2/pdf').first().json.body\n        ?.normative_system_prompt ?? null,\n  })\n}}",
         "options": {
           "timeout": 1800000
         }
       },
-      "id": "10000000-0000-4000-8000-000000000013",
+      "id": "4abeef13-13e8-481e-b3d4-6cf9a536fdf1",
       "name": "Check Norms",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        640,
-        0
+        1040,
+        800
       ]
     },
     {
@@ -290,13 +269,13 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\n\nreturn {\n  json: {\n    findings,\n    experience_queries: findings\n      .map((finding) => String(finding.experience_query ?? '').trim())\n      .filter((query) => query.length > 0),\n  },\n};"
       },
-      "id": "10000000-0000-4000-8000-000000000014",
+      "id": "fe7eb96a-ec92-44cc-b599-df45f71915fe",
       "name": "Prepare Experience Queries",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        860,
-        0
+        1264,
+        800
       ]
     },
     {
@@ -311,13 +290,13 @@
           "timeout": 900000
         }
       },
-      "id": "10000000-0000-4000-8000-000000000015",
+      "id": "48da745e-e44c-4790-afda-aa4094aa99cf",
       "name": "Search Experience",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1080,
-        0
+        1472,
+        800
       ]
     },
     {
@@ -325,13 +304,13 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const prepared = $('Prepare Experience Queries').item.json;\nconst findings = Array.isArray(prepared.findings) ? prepared.findings : [];\nconst results = Array.isArray($json.results) ? $json.results : [];\nconst experienceByFinding = {};\n\nfor (let index = 0; index < findings.length; index += 1) {\n  const finding = findings[index];\n  const result = results[index] ?? {};\n  experienceByFinding[finding.finding_id] = Array.isArray(result.sources) ? result.sources : [];\n}\n\nreturn { json: { findings, experience_by_finding: experienceByFinding } };"
       },
-      "id": "10000000-0000-4000-8000-000000000016",
+      "id": "c344d2a5-ecc8-4379-8c02-57b26155a875",
       "name": "Build Experience Map",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1300,
-        0
+        1696,
+        800
       ]
     },
     {
@@ -346,40 +325,40 @@
           "timeout": 1800000
         }
       },
-      "id": "10000000-0000-4000-8000-000000000017",
+      "id": "6d35b3ed-a71d-4d80-bb2f-41f830120da9",
       "name": "Finalize Findings",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1520,
-        0
+        1920,
+        800
       ]
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const expanded = $('Expand PDF Pages').item.json;\nconst understanding = $('Understand Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst normative = $('Search Normative').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\n\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nreturn {\n  json: {\n    document: expanded.document,\n    project_context: expanded.project_context,\n    page_number: expanded.page.page_number,\n    heuristic_page_type: expanded.page.page_type,\n    width_points: expanded.page.width_points,\n    height_points: expanded.page.height_points,\n    extracted_text: expanded.page.text,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: normative.sources ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    normative_check: { summary: check.summary ?? '', findings: check.findings ?? [], metrics: check.metrics ?? {} },\n    findings,\n  },\n};"
+        "jsCode": "const expanded = $('Expand PDF Pages').item.json;\nconst understanding = $('Understand Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst normative = $('Search Requirements').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\n\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nreturn {\n  json: {\n    document: expanded.document,\n    project_context: expanded.project_context,\n    page_number: expanded.page.page_number,\n    heuristic_page_type: expanded.page.page_type,\n    width_points: expanded.page.width_points,\n    height_points: expanded.page.height_points,\n    extracted_text: expanded.page.text,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: normative.sources ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    normative_check: { summary: check.summary ?? '', findings: check.findings ?? [], metrics: check.metrics ?? {} },\n    findings,\n  },\n};"
       },
-      "id": "10000000-0000-4000-8000-000000000018",
+      "id": "57a66ecb-aeff-449d-9240-38dbd0dcb7f4",
       "name": "Build Page Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1740,
-        0
+        2144,
+        800
       ]
     },
     {
       "parameters": {
         "jsCode": "const pageItems = $input.all().map((item) => item.json);\npageItems.sort((left, right) => left.page_number - right.page_number);\nconst document = pageItems[0]?.document ?? { file_name: 'document.pdf', total_pages: 0, selected_pages: [] };\nconst context = pageItems[0]?.project_context ?? { enabled: false };\nconst pages = pageItems.map(({ document: _document, project_context: _context, ...page }) => page);\nconst findings = pages.flatMap((page) => Array.isArray(page.findings) ? page.findings : []);\n\nreturn [{\n  json: {\n    status: 'completed',\n    source_mode: 'pdf_only',\n    file_name: document.file_name,\n    pdf_file_name: document.file_name,\n    total_pages: document.total_pages,\n    selected_pages: document.selected_pages,\n    analyzed_pages: pages.length,\n    findings_count: findings.length,\n    summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранным листам не найдены.',\n    findings,\n    pages,\n    explanatory_note_context: context,\n    pipeline: ['document_extract','explanatory_note_validation','temporary_project_context_index','page_understanding','project_context_retrieval','normative_queries','normative_search','user_package_search','normative_check','experience_search','finalization','project_context_cleanup'],\n    limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n  },\n}];"
       },
-      "id": "10000000-0000-4000-8000-000000000019",
+      "id": "c1b7af80-0faa-4369-aa77-78ef1990636f",
       "name": "Aggregate PDF Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1960,
-        0
+        2352,
+        800
       ]
     },
     {
@@ -390,13 +369,13 @@
           "timeout": 90000
         }
       },
-      "id": "10000000-0000-4000-8000-000000000020",
+      "id": "6cebd6c5-1eb9-4de6-a3ce-92a8f99bc921",
       "name": "Cleanup Project Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2180,
-        0
+        2576,
+        800
       ],
       "onError": "continueRegularOutput"
     },
@@ -404,14 +383,49 @@
       "parameters": {
         "jsCode": "return [{ json: $('Aggregate PDF Result').first().json }];"
       },
-      "id": "10000000-0000-4000-8000-000000000021",
+      "id": "3839c35d-abc3-4102-beb7-d143279f7987",
       "name": "Return PDF Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2400,
-        0
+        2800,
+        800
       ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{\n  $('POST /analysis/v2/pdf').first().json.body?.technical_assignment_id\n    ? 'http://pdrd-knowledge-service:8401/internal/v1/search/technical-assignment-guided'\n    : 'http://pdrd-knowledge-service:8401/internal/v1/search/normative'\n}}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{\n  JSON.stringify(\n    $('POST /analysis/v2/pdf').first().json.body?.technical_assignment_id\n      ? {\n          queries: $json.queries ?? [],\n          technical_assignment_id:\n            $('POST /analysis/v2/pdf').first().json.body.technical_assignment_id,\n          section_id:\n            $('POST /analysis/v2/pdf').first().json.body.normative_section_id,\n          normative_document_ids: JSON.parse(\n            $('POST /analysis/v2/pdf').first().json.body?.normative_document_ids\n              ?? '[]'\n          ),\n        }\n      : {\n          queries: $json.queries ?? [],\n          ...(\n            $('POST /analysis/v2/pdf').first().json.body?.normative_section_id\n              ? {\n                  section_id:\n                    $('POST /analysis/v2/pdf').first().json.body.normative_section_id,\n                  document_ids: JSON.parse(\n                    $('POST /analysis/v2/pdf').first().json.body?.normative_document_ids\n                      ?? '[]'\n                  ),\n                }\n              : {}\n          ),\n        }\n  )\n}}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "5c50f897-6383-4e52-a29b-e2b471e626b0",
+      "name": "Search Requirements",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        368,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const result = $json ?? {};\n\nconst guided = (\n  Array.isArray(result.technical_assignment_sources)\n  || Array.isArray(result.normative_sources)\n  || Array.isArray(result.conflict_candidates)\n);\n\nreturn {\n  json: {\n    normative_sources: guided\n      ? (\n          Array.isArray(result.normative_sources)\n            ? result.normative_sources\n            : []\n        )\n      : (\n          Array.isArray(result.sources)\n            ? result.sources\n            : []\n        ),\n\n    technical_assignment_sources: guided\n      && Array.isArray(result.technical_assignment_sources)\n        ? result.technical_assignment_sources\n        : [],\n\n    conflict_candidates: guided\n      && Array.isArray(result.conflict_candidates)\n        ? result.conflict_candidates\n        : [],\n\n    diagnostics: guided\n      && Array.isArray(result.diagnostics)\n        ? result.diagnostics\n        : [],\n\n    reference_resolutions: guided\n      && Array.isArray(result.reference_resolutions)\n        ? result.reference_resolutions\n        : [],\n\n    targeted_normative_sources: guided\n      && Array.isArray(result.targeted_normative_sources)\n        ? result.targeted_normative_sources\n        : [],\n\n    general_normative_sources: guided\n      && Array.isArray(result.general_normative_sources)\n        ? result.general_normative_sources\n        : [],\n\n    technical_assignment_embedding_model: guided\n      ? String(result.technical_assignment_embedding_model ?? '')\n      : '',\n\n    normative_embedding_model: guided\n      ? String(result.normative_embedding_model ?? '')\n      : String(result.embedding_model ?? ''),\n\n    technical_assignment_enabled: guided,\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        800
+      ],
+      "id": "10c3b188-c8ab-47bd-8220-20bbecacc156",
+      "name": "Normalize Requirement Search"
     }
   ],
   "pinData": {},
@@ -519,18 +533,7 @@
       "main": [
         [
           {
-            "node": "Search Normative",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Search Normative": {
-      "main": [
-        [
-          {
-            "node": "Search User Packages",
+            "node": "Search Requirements",
             "type": "main",
             "index": 0
           }
@@ -635,15 +638,41 @@
           }
         ]
       ]
+    },
+    "Search Requirements": {
+      "main": [
+        [
+          {
+            "node": "Normalize Requirement Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Requirement Search": {
+      "main": [
+        [
+          {
+            "node": "Search User Packages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate"
   },
-  "versionId": "10000000-0000-4000-8000-000000000022",
+  "versionId": "369f4991-79a8-4c57-b8d4-a5029cefe8ad",
   "meta": {
-    "templateCredsSetupCompleted": true
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6b859c42b12850c66afe9a08351bc3b3663ed09a1e3306fbf9dc27521c1cad83"
   },
+  "nodeGroups": [],
+  "id": "rvVthnH4N6Qp8iIn",
   "tags": []
 }
