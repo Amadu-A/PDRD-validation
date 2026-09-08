@@ -141,7 +141,7 @@ def _technical_assignment_source_payload(
         source_id=source.source_id,
         point_id=source.point_id,
         score=source.score,
-        technical_assignment_id=(source.technical_assignment_id),
+        technical_assignment_id=source.technical_assignment_id,
         analysis_document_id=source.analysis_document_id,
         section_id=source.section_id,
         source_sha256=source.source_sha256,
@@ -207,7 +207,7 @@ def _finding_draft_payload(
         status=finding.status,
         comment=finding.comment,
         evidence=finding.evidence,
-        recommendation_draft=(finding.recommendation_draft),
+        recommendation_draft=finding.recommendation_draft,
         confidence=finding.confidence,
         normative_source_ids=list(
             finding.normative_source_ids,
@@ -369,7 +369,7 @@ async def understand_page(
 
     except VisionModelError as error:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(
                 error,
             ),
@@ -439,7 +439,7 @@ async def check_norms(
         ) = await container.check_page_against_norms.execute(
             page_number=request.page_number,
             extracted_text=request.extracted_text,
-            page_facts=(request.page_facts.to_domain()),
+            page_facts=request.page_facts.to_domain(),
             normative_sources=tuple(
                 source.to_domain() for source in request.normative_sources
             ),
@@ -458,7 +458,7 @@ async def check_norms(
 
     except VisionModelError as error:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(
                 error,
             ),
@@ -489,7 +489,7 @@ async def finalize_findings(
         ),
     ],
 ) -> FinalizeResponse:
-    """Финализирует findings с non-destructive N enrichment."""
+    """Финализирует findings с finding-local N enrichment."""
     (
         summary,
         findings,
@@ -503,6 +503,10 @@ async def finalize_findings(
         normative_candidates=tuple(
             source.to_domain() for source in request.normative_candidates
         ),
+        normative_candidates_by_finding={
+            finding_id: tuple(source.to_domain() for source in sources)
+            for finding_id, sources in request.normative_candidates_by_finding.items()
+        },
     )
 
     return FinalizeResponse(

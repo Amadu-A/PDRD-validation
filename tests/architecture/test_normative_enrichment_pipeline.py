@@ -15,7 +15,7 @@ PROJECT_ROOT = (
 
 WORKFLOW_PATH = PROJECT_ROOT / "n8n" / "workflows" / "analysis-v2-pdf.json"
 
-SCHEMA_PATH = (
+ANALYSIS_SCHEMA_PATH = (
     PROJECT_ROOT
     / "services"
     / "analysis-service"
@@ -26,7 +26,7 @@ SCHEMA_PATH = (
     / "schemas.py"
 )
 
-ROUTES_PATH = (
+ANALYSIS_ROUTES_PATH = (
     PROJECT_ROOT
     / "services"
     / "analysis-service"
@@ -35,6 +35,30 @@ ROUTES_PATH = (
     / "transport"
     / "http"
     / "routes.py"
+)
+
+KNOWLEDGE_SEARCH_SCHEMA_PATH = (
+    PROJECT_ROOT
+    / "services"
+    / "knowledge-service"
+    / "src"
+    / "pdrd_knowledge_service"
+    / "transport"
+    / "http"
+    / "schemas"
+    / "search.py"
+)
+
+KNOWLEDGE_SEARCH_ROUTER_PATH = (
+    PROJECT_ROOT
+    / "services"
+    / "knowledge-service"
+    / "src"
+    / "pdrd_knowledge_service"
+    / "transport"
+    / "http"
+    / "routers"
+    / "search.py"
 )
 
 
@@ -118,8 +142,8 @@ def _next_node(
     return node
 
 
-def test_pdf_workflow_has_non_destructive_normative_enrichment() -> None:
-    """PDF pipeline ищет N повторно после появления findings."""
+def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
+    """PDF pipeline не смешивает N candidates разных findings."""
     workflow = _load_workflow()
 
     nodes = _nodes_by_name(
@@ -164,6 +188,10 @@ def test_pdf_workflow_has_non_destructive_normative_enrichment() -> None:
 
     assert "finding.experience_query" in prepare_code
 
+    assert "normative_query_items" in prepare_code
+
+    assert "finding_id" in prepare_code
+
     assert ".slice(0, 10)" in prepare_code
 
     search_parameters = nodes["Search Finding Norms"]["parameters"]
@@ -174,7 +202,7 @@ def test_pdf_workflow_has_non_destructive_normative_enrichment() -> None:
     )
 
     assert search_parameters["url"] == (
-        "http://pdrd-knowledge-service:8401/internal/v1/search/normative"
+        "http://pdrd-knowledge-service:8401/internal/v1/search/normative-grouped"
     )
 
     search_body = str(search_parameters["body"])
@@ -192,10 +220,12 @@ def test_pdf_workflow_has_non_destructive_normative_enrichment() -> None:
 
     prepare_experience_code = str(prepare_experience_parameters["jsCode"])
 
-    assert "normative_candidates" in prepare_experience_code
+    assert "normative_candidates_by_finding" in prepare_experience_code
 
-    # Enrichment IDs не сталкиваются с primary N1/N2.
-    assert "NQ${index + 1}" in prepare_experience_code
+    assert "normative_query_items" in prepare_experience_code
+
+    # Candidate ID содержит и query group, и position внутри group.
+    assert "NQ${index + 1}_${sourceIndex + 1}" in prepare_experience_code
 
     build_map_parameters = nodes["Build Experience Map"]["parameters"]
 
@@ -206,7 +236,7 @@ def test_pdf_workflow_has_non_destructive_normative_enrichment() -> None:
 
     build_map_code = str(build_map_parameters["jsCode"])
 
-    assert "normative_candidates" in build_map_code
+    assert "normative_candidates_by_finding" in build_map_code
 
     finalize_parameters = nodes["Finalize Findings"]["parameters"]
 
@@ -217,7 +247,9 @@ def test_pdf_workflow_has_non_destructive_normative_enrichment() -> None:
 
     finalize_body = str(finalize_parameters["body"])
 
-    assert "normative_candidates" in finalize_body
+    assert "normative_candidates_by_finding" in finalize_body
+
+    assert "$json.normative_candidates ?? []" not in finalize_body
 
     page_parameters = nodes["Build Page Result"]["parameters"]
 
@@ -232,6 +264,8 @@ def test_pdf_workflow_has_non_destructive_normative_enrichment() -> None:
 
     assert "normative_enrichment" in page_code
 
+    assert "findings_with_candidates" in page_code
+
     aggregate_parameters = nodes["Aggregate PDF Result"]["parameters"]
 
     assert isinstance(
@@ -244,20 +278,43 @@ def test_pdf_workflow_has_non_destructive_normative_enrichment() -> None:
     assert "finding_normative_search" in aggregate_code
 
 
-def test_finalize_transport_passes_normative_candidates() -> None:
-    """HTTP transport проводит N candidates до application use case."""
-    schema_text = SCHEMA_PATH.read_text(
+def test_analysis_transport_passes_candidate_map() -> None:
+    """Analysis HTTP transport проводит candidate map без flattening."""
+    schema_text = ANALYSIS_SCHEMA_PATH.read_text(
         encoding="utf-8",
     )
 
-    routes_text = ROUTES_PATH.read_text(
+    routes_text = ANALYSIS_ROUTES_PATH.read_text(
         encoding="utf-8",
     )
 
-    assert "normative_candidates: list[" in schema_text
+    assert "normative_candidates_by_finding: dict[" in schema_text
 
     assert "NormativeSourcePayload" in schema_text
 
-    assert "normative_candidates=tuple(" in routes_text
+    assert "normative_candidates_by_finding={" in routes_text
 
-    assert "request.normative_candidates" in routes_text
+    assert "request.normative_candidates_by_finding.items()" in routes_text
+
+
+def test_knowledge_service_has_grouped_normative_contract() -> None:
+    """Knowledge Service возвращает отдельный result на каждый query."""
+    schema_text = KNOWLEDGE_SEARCH_SCHEMA_PATH.read_text(
+        encoding="utf-8",
+    )
+
+    router_text = KNOWLEDGE_SEARCH_ROUTER_PATH.read_text(
+        encoding="utf-8",
+    )
+
+    assert "class NormativeGroupedSearchItemResponse" in schema_text
+
+    assert "class NormativeGroupedSearchResponse" in schema_text
+
+    assert '"/normative-grouped"' in router_text
+
+    assert "for query in request.queries" in router_text
+
+    assert "container.search_normative.execute(" in router_text
+
+    assert "NormativeGroupedSearchItemResponse(" in router_text

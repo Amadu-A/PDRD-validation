@@ -462,8 +462,17 @@ class FinalizeRequest(BaseModel):
         list[ExperienceSourcePayload],
     ]
 
+    # Legacy single-finding contract оставляем для безопасного
+    # завершения возможных старых in-flight execution.
     normative_candidates: list[NormativeSourcePayload] = Field(
         default_factory=list,
+    )
+
+    normative_candidates_by_finding: dict[
+        str,
+        list[NormativeSourcePayload],
+    ] = Field(
+        default_factory=dict,
     )
 
 

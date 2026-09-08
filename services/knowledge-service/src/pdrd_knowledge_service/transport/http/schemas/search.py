@@ -263,6 +263,30 @@ class NormativeSearchResponse(BaseModel):
     embedding_model: str
 
 
+class NormativeGroupedSearchItemResponse(BaseModel):
+    """Нормативный retrieval для одного исходного query."""
+
+    model_config = ConfigDict(
+        frozen=True,
+    )
+
+    query: str
+
+    sources: list[NormativeSourceResponse]
+
+    embedding_model: str
+
+
+class NormativeGroupedSearchResponse(BaseModel):
+    """Нормативный retrieval без смешивания результатов разных queries."""
+
+    model_config = ConfigDict(
+        frozen=True,
+    )
+
+    results: list[NormativeGroupedSearchItemResponse]
+
+
 class UserPackageSearchResponse(BaseModel):
     """Ответ retrieval пользовательских документов."""
 

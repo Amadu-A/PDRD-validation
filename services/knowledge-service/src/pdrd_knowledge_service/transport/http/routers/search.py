@@ -48,6 +48,8 @@ from pdrd_knowledge_service.transport.http.schemas.search import (
     ExperienceSearchRequest,
     ExperienceSearchResponse,
     ExperienceSourceResponse,
+    NormativeGroupedSearchItemResponse,
+    NormativeGroupedSearchResponse,
     NormativeReferenceResolutionResponse,
     NormativeSearchRequest,
     NormativeSearchResponse,
@@ -82,7 +84,7 @@ def _translate_managed_search_error(
         ),
     ):
         return HTTPException(
-            status_code=(status.HTTP_404_NOT_FOUND),
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(
                 error,
             ),
@@ -96,7 +98,7 @@ def _translate_managed_search_error(
         ),
     ):
         return HTTPException(
-            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(
                 error,
             ),
@@ -110,14 +112,14 @@ def _translate_managed_search_error(
         ),
     ):
         return HTTPException(
-            status_code=(status.HTTP_409_CONFLICT),
+            status_code=status.HTTP_409_CONFLICT,
             detail=str(
                 error,
             ),
         )
 
     return HTTPException(
-        status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail=str(
             error,
         ),
@@ -191,6 +193,66 @@ async def search_normative(
 
 
 @router.post(
+    "/normative-grouped",
+    response_model=NormativeGroupedSearchResponse,
+)
+async def search_normative_grouped(
+    request: NormativeSearchRequest,
+    container: Annotated[
+        ApplicationContainer,
+        Depends(
+            get_container,
+        ),
+    ],
+) -> NormativeGroupedSearchResponse:
+    """Ищет N отдельно для каждого query без объединения source groups."""
+    results: list[NormativeGroupedSearchItemResponse] = []
+
+    try:
+        for query in request.queries:
+            normalized_query = query.strip()
+
+            if not normalized_query:
+                continue
+
+            result = await container.search_normative.execute(
+                [
+                    normalized_query,
+                ],
+                section_id=request.section_id,
+                document_ids=request.document_ids,
+            )
+
+            results.append(
+                NormativeGroupedSearchItemResponse(
+                    query=normalized_query,
+                    sources=[
+                        _normative_source_response(
+                            source,
+                        )
+                        for source in result.sources
+                    ],
+                    embedding_model=result.embedding_model,
+                )
+            )
+
+    except (
+        NormativeSectionNotFoundError,
+        NormativeSearchScopeError,
+        NormativeSearchScopeConflictError,
+        EmbeddingProviderError,
+        VectorStoreError,
+    ) as error:
+        raise _translate_managed_search_error(
+            error,
+        ) from error
+
+    return NormativeGroupedSearchResponse(
+        results=results,
+    )
+
+
+@router.post(
     "/user-packages",
     response_model=UserPackageSearchResponse,
 )
@@ -234,7 +296,7 @@ async def search_user_packages(
                 document_id=source.document_id,
                 section_id=source.section_id,
                 category_id=source.category_id,
-                source_sha256=(source.source_sha256),
+                source_sha256=source.source_sha256,
                 source_file=source.source_file,
                 source_path=source.source_path,
                 page=source.page,
@@ -249,7 +311,7 @@ async def search_user_packages(
 
 @router.post(
     "/technical-assignment-guided",
-    response_model=(TechnicalAssignmentGuidedSearchResponse),
+    response_model=TechnicalAssignmentGuidedSearchResponse,
 )
 async def search_technical_assignment_guided(
     request: TechnicalAssignmentGuidedSearchRequest,
@@ -265,16 +327,16 @@ async def search_technical_assignment_guided(
 
     if use_case is None:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
-            detail=("T-guided retrieval не настроен."),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="T-guided retrieval не настроен.",
         )
 
     try:
         result = await use_case.execute(
             request.queries,
-            technical_assignment_id=(request.technical_assignment_id),
+            technical_assignment_id=request.technical_assignment_id,
             section_id=request.section_id,
-            normative_document_ids=(request.normative_document_ids),
+            normative_document_ids=request.normative_document_ids,
         )
 
     except (
@@ -301,10 +363,10 @@ async def search_technical_assignment_guided(
                 source_id=source.source_id,
                 point_id=source.point_id,
                 score=source.score,
-                technical_assignment_id=(source.technical_assignment_id),
-                analysis_document_id=(source.analysis_document_id),
+                technical_assignment_id=source.technical_assignment_id,
+                analysis_document_id=source.analysis_document_id,
                 section_id=source.section_id,
-                source_sha256=(source.source_sha256),
+                source_sha256=source.source_sha256,
                 source_file=source.source_file,
                 page=source.page,
                 text=source.text,
@@ -312,12 +374,12 @@ async def search_technical_assignment_guided(
                     source.normative_refs,
                 ),
             )
-            for source in (result.technical_assignment_sources)
+            for source in result.technical_assignment_sources
         ],
         reference_resolutions=[
             NormativeReferenceResolutionResponse(
                 reference=resolution.reference,
-                normalized_reference=(resolution.normalized_reference),
+                normalized_reference=resolution.normalized_reference,
                 status=resolution.status.value,
                 document_ids=list(
                     resolution.document_ids,
@@ -326,25 +388,25 @@ async def search_technical_assignment_guided(
                     resolution.source_files,
                 ),
             )
-            for resolution in (result.reference_resolutions)
+            for resolution in result.reference_resolutions
         ],
         targeted_normative_sources=[
             _normative_source_response(
                 source,
             )
-            for source in (result.targeted_normative_sources)
+            for source in result.targeted_normative_sources
         ],
         general_normative_sources=[
             _normative_source_response(
                 source,
             )
-            for source in (result.general_normative_sources)
+            for source in result.general_normative_sources
         ],
         normative_sources=[
             _normative_source_response(
                 source,
             )
-            for source in (result.normative_sources)
+            for source in result.normative_sources
         ],
         diagnostics=[
             RetrievalDiagnosticResponse(
@@ -365,12 +427,12 @@ async def search_technical_assignment_guided(
                 ),
                 reason=candidate.reason,
             )
-            for candidate in (result.conflict_candidates)
+            for candidate in result.conflict_candidates
         ],
         technical_assignment_embedding_model=(
             result.technical_assignment_embedding_model
         ),
-        normative_embedding_model=(result.normative_embedding_model),
+        normative_embedding_model=result.normative_embedding_model,
     )
 
 
@@ -395,7 +457,7 @@ async def search_experience(
 
     except ValueError as error:
         raise HTTPException(
-            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(
                 error,
             ),
@@ -406,7 +468,7 @@ async def search_experience(
         VectorStoreError,
     ) as error:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(
                 error,
             ),
@@ -425,15 +487,15 @@ async def search_experience(
                         issue_id=source.issue_id,
                         issue_text=source.issue_text,
                         status=source.status,
-                        verified_fixed=(source.verified_fixed),
-                        before_page=(source.before_page),
-                        after_page=(source.after_page),
-                        before_context=(source.before_context),
-                        after_context=(source.after_context),
+                        verified_fixed=source.verified_fixed,
+                        before_page=source.before_page,
+                        after_page=source.after_page,
+                        before_context=source.before_context,
+                        after_context=source.after_context,
                     )
                     for source in result.sources
                 ],
-                embedding_model=(result.embedding_model),
+                embedding_model=result.embedding_model,
             )
             for result in results
         ]
