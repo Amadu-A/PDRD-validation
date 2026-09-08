@@ -3,6 +3,7 @@
 """HTTP adapter dedicated multimodal embedding service."""
 
 import base64
+from typing import Any
 
 import httpx
 
@@ -42,50 +43,71 @@ class HttpMultimodalEmbeddingProvider:
             ...,
         ],
     ) -> list[list[float]]:
-        """Строит embeddings через internal HTTP API."""
-        payload_inputs: list[
-            dict[
-                str,
-                object,
-            ]
-        ] = []
+        """Строит embeddings последовательными bounded HTTP-запросами."""
+        if not inputs:
+            return []
 
-        for item in inputs:
-            payload_inputs.append(
-                {
-                    "text": item.text,
-                    "image_base64": (
-                        base64.b64encode(
-                            item.image_bytes,
-                        ).decode(
-                            "ascii",
-                        )
-                        if item.image_bytes is not None
-                        else None
-                    ),
-                    "instruction": item.instruction,
-                }
-            )
+        result: list[list[float]] = []
 
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(
                     self._request_timeout_seconds,
-                    connect=(self._connect_timeout_seconds),
+                    connect=self._connect_timeout_seconds,
                 ),
             ) as client:
-                response = await client.post(
-                    (f"{self._base_url}/internal/v1/embeddings"),
-                    json={
-                        "inputs": payload_inputs,
-                    },
-                )
+                for item in inputs:
+                    response = await client.post(
+                        (f"{self._base_url}/internal/v1/embeddings"),
+                        json={
+                            "inputs": [
+                                self._payload_input(
+                                    item,
+                                )
+                            ],
+                        },
+                    )
+
+                    result.append(
+                        self._parse_single_embedding(
+                            response,
+                        )
+                    )
 
         except httpx.HTTPError as error:
             raise MultimodalEmbeddingTemporaryError(
                 f"Multimodal embedding service временно недоступен: {error}",
             ) from error
 
+        return result
+
+    @staticmethod
+    def _payload_input(
+        item: MultimodalEmbeddingInput,
+    ) -> dict[
+        str,
+        object,
+    ]:
+        """Преобразует один domain input в bounded HTTP payload."""
+        return {
+            "text": item.text,
+            "image_base64": (
+                base64.b64encode(
+                    item.image_bytes,
+                ).decode(
+                    "ascii",
+                )
+                if item.image_bytes is not None
+                else None
+            ),
+            "instruction": item.instruction,
+        }
+
+    @staticmethod
+    def _parse_single_embedding(
+        response: httpx.Response,
+    ) -> list[float]:
+        """Проверяет ответ одного bounded embedding request."""
         if (
             response.status_code
             in {
@@ -101,17 +123,28 @@ class HttpMultimodalEmbeddingProvider:
                 f"{response.text[:1000]}",
             )
 
-        try:
-            response.raise_for_status()
-
-        except httpx.HTTPStatusError as error:
+        if response.status_code >= 400:
             raise MultimodalEmbeddingProviderError(
                 "Multimodal embedding service отклонил "
                 f"запрос: {response.status_code}: "
                 f"{response.text[:1000]}",
+            )
+
+        try:
+            payload: Any = response.json()
+
+        except ValueError as error:
+            raise MultimodalEmbeddingProviderError(
+                "Multimodal service вернул некорректный JSON.",
             ) from error
 
-        payload = response.json()
+        if not isinstance(
+            payload,
+            dict,
+        ):
+            raise MultimodalEmbeddingProviderError(
+                "Multimodal service вернул некорректный payload.",
+            )
 
         embeddings = payload.get(
             "embeddings",
@@ -125,48 +158,44 @@ class HttpMultimodalEmbeddingProvider:
                 "Multimodal service вернул некорректный embeddings payload.",
             )
 
-        if len(
-            embeddings,
-        ) != len(
-            inputs,
+        if (
+            len(
+                embeddings,
+            )
+            != 1
         ):
             raise MultimodalEmbeddingProviderError(
-                "Количество multimodal embeddings не совпало с batch.",
+                "Bounded multimodal request должен вернуть ровно один embedding.",
             )
 
-        result: list[list[float]] = []
+        vector = embeddings[0]
 
-        for vector in embeddings:
-            if (
-                not isinstance(
-                    vector,
-                    list,
+        if (
+            not isinstance(
+                vector,
+                list,
+            )
+            or not vector
+        ):
+            raise MultimodalEmbeddingProviderError(
+                "Multimodal embedding пуст.",
+            )
+
+        try:
+            return [
+                float(
+                    value,
                 )
-                or not vector
-            ):
-                raise MultimodalEmbeddingProviderError(
-                    "Multimodal embedding пуст.",
-                )
+                for value in vector
+            ]
 
-            try:
-                result.append(
-                    [
-                        float(
-                            value,
-                        )
-                        for value in vector
-                    ]
-                )
-
-            except (
-                TypeError,
-                ValueError,
-            ) as error:
-                raise MultimodalEmbeddingProviderError(
-                    "Multimodal embedding содержит нечисловые значения.",
-                ) from error
-
-        return result
+        except (
+            TypeError,
+            ValueError,
+        ) as error:
+            raise MultimodalEmbeddingProviderError(
+                "Multimodal embedding содержит нечисловые значения.",
+            ) from error
 
     async def release(
         self,
