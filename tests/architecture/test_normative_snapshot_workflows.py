@@ -31,6 +31,18 @@ WORKFLOW_CASES = (
 )
 
 
+def _requirement_search_node(
+    nodes: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    """Возвращает текущий requirement retrieval node."""
+    if "Search Requirements" in nodes:
+        return nodes["Search Requirements"]
+
+    assert "Search Normative" in nodes
+
+    return nodes["Search Normative"]
+
+
 @pytest.mark.parametrize(
     (
         "file_name",
@@ -55,12 +67,39 @@ def test_normative_snapshot_reaches_search_and_check_nodes(
 
     assert webhook_name in nodes
 
-    search_body = nodes["Search Normative"]["parameters"]["body"]
+    search = _requirement_search_node(
+        nodes,
+    )
 
-    check_body = nodes["Check Norms"]["parameters"]["body"]
+    parameters = search["parameters"]
+
+    assert isinstance(
+        parameters,
+        dict,
+    )
+
+    search_body = str(
+        parameters["body"],
+    )
+
+    check_parameters = nodes["Check Norms"]["parameters"]
+
+    assert isinstance(
+        check_parameters,
+        dict,
+    )
+
+    check_body = str(
+        check_parameters["body"],
+    )
 
     assert "normative_section_id" in search_body
 
     assert "normative_document_ids" in search_body
 
     assert "normative_system_prompt" in check_body
+
+    if "Search Requirements" in nodes:
+        assert "technical_assignment_id" in search_body
+
+        assert "Normalize Requirement Search" in nodes

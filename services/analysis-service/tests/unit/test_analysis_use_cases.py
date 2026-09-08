@@ -239,6 +239,8 @@ async def test_normative_check_filters_compliance() -> None:
                         "normative_source_ids": [
                             "N1",
                         ],
+                        "technical_assignment_source_ids": [],
+                        "user_package_source_ids": [],
                     },
                     {
                         "category": "normative_control",
@@ -251,6 +253,8 @@ async def test_normative_check_filters_compliance() -> None:
                         "normative_source_ids": [
                             "N1",
                         ],
+                        "technical_assignment_source_ids": [],
+                        "user_package_source_ids": [],
                     },
                 ],
             }
@@ -283,15 +287,148 @@ async def test_normative_check_filters_compliance() -> None:
 
     assert findings[0].normative_source_ids == ("N1",)
 
+    assert findings[0].status == "confirmed"
+
     assert "PUE.pdf" in findings[0].basis
 
     assert "Категория:" in findings[0].experience_query
 
 
-async def test_normative_check_without_sources_skips_vlm() -> None:
-    """Проверяет fast path без нормативных sources."""
+async def test_engineering_check_without_sources_calls_vlm_and_keeps_finding() -> None:
+    """Source-less инженерное замечание не теряется."""
     model = FakeVisionModel(
-        [],
+        [
+            {
+                "summary": "Обнаружено внутреннее противоречие.",
+                "violations": [
+                    {
+                        "category": "scheme_logic",
+                        "severity": "warning",
+                        "status": "confirmed",
+                        "comment": (
+                            "Один аппарат имеет несогласованные характеристики."
+                        ),
+                        "evidence": (
+                            "В схеме и перечне элементов "
+                            "для одного обозначения указаны "
+                            "разные характеристики."
+                        ),
+                        "recommendation_draft": (
+                            "Согласовать характеристику аппарата во всех частях листа."
+                        ),
+                        "confidence": 0.91,
+                        "normative_source_ids": [],
+                        "technical_assignment_source_ids": [],
+                        "user_package_source_ids": [],
+                    }
+                ],
+            }
+        ]
+    )
+
+    use_case = CheckPageAgainstNorms(
+        vision_model=model,
+        num_predict=2600,
+        max_issues=10,
+        normative_text_limit=700,
+    )
+
+    summary, findings, result_metrics = await use_case.execute(
+        page_number=1,
+        extracted_text="Схема и перечень элементов.",
+        page_facts=page_facts(),
+        normative_sources=(),
+        image_bytes=b"png",
+    )
+
+    assert model.call_count == 1
+
+    assert result_metrics.done_reason == "stop"
+
+    assert "противоречие" in summary.lower()
+
+    assert len(findings) == 1
+
+    result = findings[0]
+
+    assert result.category == "scheme_logic"
+
+    # Source-less finding не должен становиться
+    # автоматически подтверждённым нарушением.
+    assert result.status == "needs_review"
+
+    assert result.normative_source_ids == ()
+
+    assert result.technical_assignment_source_ids == ()
+
+    assert result.user_package_source_ids == ()
+
+    assert result.basis == ""
+
+    assert result.basis_sources == ()
+
+
+async def test_source_less_reserved_category_is_normalized_to_other() -> None:
+    """Source-less finding не маскируется под нормативное нарушение."""
+    model = FakeVisionModel(
+        [
+            {
+                "summary": "Нужна инженерная проверка.",
+                "violations": [
+                    {
+                        "category": "normative_control",
+                        "severity": "warning",
+                        "status": "confirmed",
+                        "comment": ("На листе обнаружено внутреннее противоречие."),
+                        "evidence": (
+                            "Одно обозначение используется для разных характеристик."
+                        ),
+                        "recommendation_draft": ("Уточнить и согласовать обозначение."),
+                        "confidence": 0.8,
+                        "normative_source_ids": [],
+                        "technical_assignment_source_ids": [],
+                        "user_package_source_ids": [],
+                    }
+                ],
+            }
+        ]
+    )
+
+    use_case = CheckPageAgainstNorms(
+        vision_model=model,
+        num_predict=2600,
+        max_issues=10,
+        normative_text_limit=700,
+    )
+
+    _, findings, _ = await use_case.execute(
+        page_number=2,
+        extracted_text="test",
+        page_facts=page_facts(),
+        normative_sources=(),
+        image_bytes=b"png",
+    )
+
+    assert len(findings) == 1
+
+    result = findings[0]
+
+    assert result.category == "other"
+
+    assert result.status == "needs_review"
+
+    assert result.normative_source_ids == ()
+
+
+async def test_engineering_check_without_sources_can_return_no_findings() -> None:
+    """Пустой результат допустим, но VLM всё равно выполняется."""
+    model = FakeVisionModel(
+        [
+            {
+                "summary": "Конкретных проблем не обнаружено.",
+                "violations": [],
+            }
+        ]
     )
 
     use_case = CheckPageAgainstNorms(
@@ -309,12 +446,13 @@ async def test_normative_check_without_sources_skips_vlm() -> None:
         image_bytes=b"png",
     )
 
+    assert model.call_count == 1
+
     assert findings == ()
-    assert "не найдены" in summary
 
-    assert result_metrics.done_reason == "no_normative_sources"
+    assert "не обнаружено" in summary
 
-    assert model.call_count == 0
+    assert result_metrics.done_reason == "stop"
 
 
 async def test_finalize_filters_low_score_experience() -> None:

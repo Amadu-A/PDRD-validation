@@ -1,6 +1,6 @@
 # services/analysis-service/src/pdrd_analysis_service/application/use_cases/normative.py
 
-"""Use cases retrieval preparation и проверки требований."""
+"""Use cases retrieval preparation и инженерной проверки листа."""
 
 from dataclasses import dataclass
 
@@ -22,7 +22,6 @@ from pdrd_analysis_service.application.use_cases.common import (
     finding_status,
     severity,
     string_tuple,
-    zero_metrics,
 )
 from pdrd_analysis_service.domain.analysis import (
     FindingDraft,
@@ -117,7 +116,7 @@ class BuildNormativeQueries:
 
 @dataclass(frozen=True, slots=True)
 class CheckPageAgainstNorms:
-    """Проверяет лист по N/T/U требованиям."""
+    """Выполняет инженерную и N/T/U проверку одного листа."""
 
     vision_model: StructuredVisionModel
 
@@ -157,7 +156,7 @@ class CheckPageAgainstNorms:
         ],
         GenerationMetrics,
     ]:
-        """Выполняет VLM-проверку по N/T/U evidence."""
+        """Проверяет сам лист и сопоставляет его с N/T/U evidence."""
         normative_source_ids = tuple(
             source.source_id for source in normative_sources if source.source_id
         )
@@ -171,19 +170,6 @@ class CheckPageAgainstNorms:
         user_package_source_ids = tuple(
             source.source_id for source in user_package_sources if source.source_id
         )
-
-        if (
-            not normative_source_ids
-            and not technical_assignment_source_ids
-            and not user_package_source_ids
-        ):
-            return (
-                "Источники требований для листа не найдены.",
-                (),
-                zero_metrics(
-                    "no_normative_sources",
-                ),
-            )
 
         result = await self.vision_model.generate_json(
             prompt=build_normative_check_prompt(
@@ -266,11 +252,22 @@ class CheckPageAgainstNorms:
                 if source_id in user_package_by_id
             )
 
-            if (
-                not selected_normative_sources
-                and not selected_technical_assignment_sources
-                and not selected_user_package_sources
-            ):
+            requested_any_source = bool(
+                requested_normative_ids
+                or requested_technical_assignment_ids
+                or requested_user_package_ids
+            )
+
+            selected_any_source = bool(
+                selected_normative_sources
+                or selected_technical_assignment_sources
+                or selected_user_package_sources
+            )
+
+            # Если модель запросила source-id, которого ей
+            # фактически не передавали, не превращаем такой
+            # hallucinated reference в source-less finding.
+            if requested_any_source and not selected_any_source:
                 continue
 
             comment = str(
@@ -312,6 +309,21 @@ class CheckPageAgainstNorms:
             ):
                 finding_category = "customer_requirements"
 
+            if not selected_any_source and finding_category in {
+                "normative_control",
+                "customer_requirements",
+            }:
+                finding_category = "other"
+
+            normalized_status = finding_status(
+                violation.get(
+                    "status",
+                )
+            )
+
+            if not selected_any_source:
+                normalized_status = "needs_review"
+
             findings.append(
                 FindingDraft(
                     finding_id=finding_id,
@@ -323,11 +335,7 @@ class CheckPageAgainstNorms:
                             "severity",
                         )
                     ),
-                    status=finding_status(
-                        violation.get(
-                            "status",
-                        )
-                    ),
+                    status=normalized_status,
                     comment=comment,
                     evidence=evidence,
                     recommendation_draft=recommendation_draft,

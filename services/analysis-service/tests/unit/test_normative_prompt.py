@@ -102,6 +102,41 @@ def test_none_prompt_uses_legacy_compatibility_fallback() -> None:
     assert LEGACY_SECTION_SYSTEM_PROMPT in prompt
 
 
+def test_prompt_supports_independent_engineering_findings_without_sources() -> None:
+    """Prompt требует инженерный анализ даже при пустых N/T/U."""
+    prompt = build_normative_check_prompt(
+        page_number=3,
+        extracted_text="Чистый исходный проект без замечаний проверяющего.",
+        page_facts=make_page_facts(),
+        normative_sources=(),
+        normative_text_limit=1000,
+        normative_system_prompt=None,
+    )
+
+    assert "даже в случае" in prompt
+
+    assert "если N/T/U SOURCES полностью пусты" in prompt
+
+    assert "Основной рабочий сценарий" in prompt
+
+    assert "БЕЗ заранее нанесённых" in prompt
+
+    assert "самостоятельно проверь инженерную" in prompt
+
+    assert "внутренние противоречия" in prompt
+
+    assert "несогласованную маркировку" in prompt
+
+    assert "логические противоречия схемы" in prompt
+
+    assert "status=needs_review" in prompt
+
+    # Не привязываемся к переносам строк внутри multiline prompt.
+    assert "Не подавляй конкретное engineering finding" in prompt
+
+    assert "только потому, что для него не найден N/T/U source." in prompt
+
+
 def test_managed_normative_source_payload_roundtrip() -> None:
     """Analysis HTTP boundary принимает новые Knowledge metadata."""
     payload = NormativeSourcePayload(
