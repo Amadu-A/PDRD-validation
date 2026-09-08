@@ -462,6 +462,10 @@ class FinalizeRequest(BaseModel):
         list[ExperienceSourcePayload],
     ]
 
+    normative_candidates: list[NormativeSourcePayload] = Field(
+        default_factory=list,
+    )
+
 
 class FinalFindingPayload(BaseModel):
     """Итоговое замечание."""

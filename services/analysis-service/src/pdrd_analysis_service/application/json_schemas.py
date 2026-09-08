@@ -212,6 +212,7 @@ def build_normative_check_schema(
 
 def build_finalization_schema(
     finding_ids: tuple[str, ...],
+    normative_source_ids: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Возвращает schema финализации одного batch."""
     return {
@@ -257,12 +258,16 @@ def build_finalization_schema(
                                 "type": "string",
                             },
                         },
+                        "normative_source_ids": _source_ids_schema(
+                            normative_source_ids,
+                        ),
                     },
                     "required": [
                         "finding_id",
                         "comment",
                         "recommendation",
                         "experience_source_ids",
+                        "normative_source_ids",
                     ],
                 },
             },
