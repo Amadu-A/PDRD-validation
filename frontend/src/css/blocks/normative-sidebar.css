@@ -83,6 +83,8 @@
 .normative-sidebar__block {
   display: grid;
 
+  min-width: 0;
+
   gap: var(--space-3);
 
   padding: var(--space-4);
@@ -146,6 +148,9 @@
   display: flex;
   align-items: center;
 
+  min-width: 0;
+  width: 100%;
+
   gap: var(--space-2);
 }
 
@@ -165,6 +170,8 @@
 }
 
 .normative-sidebar__file-picker-name {
+  flex: 1 1 0;
+
   min-width: 0;
 
   overflow: hidden;
@@ -537,6 +544,10 @@
 .normative-sidebar__status-badge {
   display: inline-flex;
 
+  flex: 0 0 auto;
+
+  max-width: 100%;
+
   padding: 2px 6px;
 
   border-radius: 999px;
@@ -546,6 +557,7 @@
   color: var(--color-text-secondary);
 
   font-size: 11px;
+  white-space: nowrap;
 }
 
 .normative-sidebar__status-badge[data-status="ready"] {
