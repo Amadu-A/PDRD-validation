@@ -9,14 +9,21 @@ import {
 } from "../../config.js";
 
 
+const TECHNICAL_ASSIGNMENT_FILE_PATTERN = (
+  /\.(?:pdf|doc|docx)$/i
+);
+
+
 export function createAnalysisForm({
   pdfInput,
   cadInput,
+  technicalAssignmentInput,
   pagesInput,
   pagesHint,
   useExplanatoryNoteInput,
   noteStartPageInput,
   noteEndPageInput,
+  getNormativeSelection = () => null,
 }) {
   function hasPdf() {
     return Boolean(
@@ -33,7 +40,10 @@ export function createAnalysisForm({
 
 
   function getMode() {
-    if (hasPdf() && hasCad()) {
+    if (
+      hasPdf()
+      && hasCad()
+    ) {
       return "pdf_cad";
     }
 
@@ -58,7 +68,9 @@ export function createAnalysisForm({
       && mode !== "empty"
     );
 
-    useExplanatoryNoteInput.disabled = !available;
+    useExplanatoryNoteInput.disabled = (
+      !available
+    );
 
     if (!available) {
       useExplanatoryNoteInput.checked = false;
@@ -70,9 +82,11 @@ export function createAnalysisForm({
     );
 
     noteStartPageInput.disabled = !enabled;
+
     noteEndPageInput.disabled = !enabled;
 
     noteStartPageInput.required = enabled;
+
     noteEndPageInput.required = enabled;
   }
 
@@ -84,7 +98,9 @@ export function createAnalysisForm({
 
     if (mode === "cad_only") {
       pagesInput.value = "";
+
       pagesInput.disabled = true;
+
       pagesInput.required = false;
 
       pagesInput.placeholder = (
@@ -97,6 +113,7 @@ export function createAnalysisForm({
 
     } else if (mode === "pdf_cad") {
       pagesInput.disabled = false;
+
       pagesInput.required = true;
 
       pagesInput.placeholder = (
@@ -110,6 +127,7 @@ export function createAnalysisForm({
 
     } else {
       pagesInput.disabled = false;
+
       pagesInput.required = false;
 
       pagesInput.placeholder = (
@@ -133,7 +151,9 @@ export function createAnalysisForm({
       return true;
     }
 
-    const value = pagesInput.value.trim();
+    const value = (
+      pagesInput.value.trim()
+    );
 
     if (/^[1-9]\d*$/.test(value)) {
       return true;
@@ -167,7 +187,9 @@ export function createAnalysisForm({
     );
 
     if (
-      !Number.isInteger(start)
+      !Number.isInteger(
+        start,
+      )
       || start < 1
     ) {
       noteStartPageInput.setCustomValidity(
@@ -181,7 +203,9 @@ export function createAnalysisForm({
     }
 
     if (
-      !Number.isInteger(end)
+      !Number.isInteger(
+        end,
+      )
       || end < 1
     ) {
       noteEndPageInput.setCustomValidity(
@@ -209,38 +233,163 @@ export function createAnalysisForm({
   }
 
 
-  function validate() {
-    const mode = getMode();
+  function validateTechnicalAssignment() {
+    const file = (
+      technicalAssignmentInput.files[0]
+    );
 
-    pagesInput.setCustomValidity("");
-    noteStartPageInput.setCustomValidity("");
-    noteEndPageInput.setCustomValidity("");
-
-    if (mode === "empty") {
+    if (!file) {
       return {
-        valid: false,
-        message: "Загрузите PDF и/или DWG/DXF.",
-      };
-    }
+        valid: true,
 
-    if (!validatePdfCadPage(mode)) {
-      return {
-        valid: false,
         message: null,
       };
     }
 
-    if (!validateExplanatoryNote()) {
+    if (
+      !TECHNICAL_ASSIGNMENT_FILE_PATTERN.test(
+        file.name,
+      )
+    ) {
       return {
         valid: false,
-        message: null,
+
+        message: (
+          "ТЗ поддерживает только PDF, DOC или DOCX."
+        ),
+      };
+    }
+
+    const selection = (
+      getNormativeSelection()
+    );
+
+    if (!selection) {
+      return {
+        valid: false,
+
+        message: (
+          "Для использования ТЗ выберите "
+          + "нормативный раздел."
+        ),
       };
     }
 
     return {
       valid: true,
+
       message: null,
     };
+  }
+
+
+  function validate() {
+    const mode = getMode();
+
+    pagesInput.setCustomValidity("");
+
+    noteStartPageInput.setCustomValidity("");
+
+    noteEndPageInput.setCustomValidity("");
+
+    if (mode === "empty") {
+      return {
+        valid: false,
+
+        message: (
+          "Загрузите PDF и/или DWG/DXF."
+        ),
+      };
+    }
+
+    if (
+      !validatePdfCadPage(
+        mode,
+      )
+    ) {
+      return {
+        valid: false,
+
+        message: null,
+      };
+    }
+
+    if (
+      !validateExplanatoryNote()
+    ) {
+      return {
+        valid: false,
+
+        message: null,
+      };
+    }
+
+    const technicalAssignmentValidation = (
+      validateTechnicalAssignment()
+    );
+
+    if (
+      !technicalAssignmentValidation.valid
+    ) {
+      return technicalAssignmentValidation;
+    }
+
+    return {
+      valid: true,
+
+      message: null,
+    };
+  }
+
+
+  function appendNormativeSelection(
+    body,
+  ) {
+    const selection = (
+      getNormativeSelection()
+    );
+
+    if (!selection) {
+      return;
+    }
+
+    body.append(
+      "normative_section_id",
+      selection.sectionId,
+    );
+
+    body.append(
+      "normative_document_ids",
+      JSON.stringify(
+        selection.documentIds,
+      ),
+    );
+
+    body.append(
+      "user_package_document_ids",
+      JSON.stringify(
+        selection.userPackageDocumentIds
+        ?? [],
+      ),
+    );
+
+    body.append(
+      "normative_prompt_override_enabled",
+      (
+        selection.promptOverrideEnabled
+          ? "true"
+          : "false"
+      ),
+    );
+
+    if (
+      selection.promptOverrideEnabled
+    ) {
+      body.append(
+        "normative_prompt_override",
+        selection.promptOverride ?? "",
+      );
+    }
   }
 
 
@@ -248,7 +397,12 @@ export function createAnalysisForm({
     const body = new FormData();
 
     const pdf = pdfInput.files[0];
+
     const cad = cadInput.files[0];
+
+    const technicalAssignment = (
+      technicalAssignmentInput.files[0]
+    );
 
     if (pdf) {
       body.append(
@@ -261,6 +415,13 @@ export function createAnalysisForm({
       body.append(
         "cad",
         cad,
+      );
+    }
+
+    if (technicalAssignment) {
+      body.append(
+        "technical_assignment",
+        technicalAssignment,
       );
     }
 
@@ -293,6 +454,10 @@ export function createAnalysisForm({
         noteEndPageInput.value.trim(),
       );
     }
+
+    appendNormativeSelection(
+      body,
+    );
 
     return body;
   }

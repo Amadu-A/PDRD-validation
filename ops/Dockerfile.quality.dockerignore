@@ -1,0 +1,22 @@
+# ops/Dockerfile.quality.dockerignore
+# Отдельный build context для полного server-side quality gate.
+
+.git/
+.env
+
+.idea/
+.vscode/
+
+.venv/
+.venv-dev/
+
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+
+# Нормативные PDF и другие runtime data не нужны для статических/unit tests.
+data/
+
+# Удалённый legacy service не должен попадать в quality image.
+services/pdf-service/

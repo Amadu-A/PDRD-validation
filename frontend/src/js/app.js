@@ -1,7 +1,7 @@
 // frontend/src/js/app.js
 
 /**
- * Composition root браузерного приложения.
+ * Composition root браузерного приложения PDRD Validation.
  */
 
 import {
@@ -13,190 +13,214 @@ import {
 } from "./components/result.js";
 
 import {
-  getAnalysisResult,
-  submitAnalysis,
-} from "./features/analysis/api.js";
+  requireElement,
+} from "./dom.js";
+
+import {
+  createAnalysisController,
+} from "./features/analysis/controller.js";
 
 import {
   createAnalysisForm,
 } from "./features/analysis/form.js";
 
 import {
-  statusLabel,
-} from "./features/analysis/labels.js";
+  createNormativeCatalog,
+} from "./features/normative/catalog.js";
 
 import {
-  waitForAnalysis,
-} from "./features/analysis/polling.js";
+  createNormativePromptEditor,
+} from "./features/normative/prompt.js";
 
 import {
-  renderAnalysisReport,
-} from "./features/analysis/report.js";
+  createUserPackageCatalog,
+} from "./features/normative/user_packages.js";
+
+import {
+  createTechnicalAssignmentFilePicker,
+} from "./features/technical_assignment/file.js";
 
 
-const analysisFormElement = document.getElementById(
-  "analysisForm",
+const analysisFormElement = requireElement(
+  "[data-analysis-form]",
 );
 
-const submitButton = document.getElementById(
-  "submitButton",
+const submitButton = requireElement(
+  "[data-submit-button]",
+);
+
+const normativeRoot = requireElement(
+  "[data-normative-sidebar]",
+);
+
+
+const technicalAssignmentFilePicker = (
+  createTechnicalAssignmentFilePicker(
+    normativeRoot,
+  )
+);
+
+technicalAssignmentFilePicker.bind();
+
+
+const promptEditor = createNormativePromptEditor(
+  normativeRoot,
+);
+
+
+const userPackageCatalog = createUserPackageCatalog(
+  normativeRoot,
+);
+
+userPackageCatalog.start();
+
+
+const normativeCatalog = createNormativeCatalog(
+  normativeRoot,
+  {
+    onSectionChange: async (
+      sectionId,
+    ) => {
+      await Promise.all(
+        [
+          promptEditor.setSection(
+            sectionId,
+          ),
+
+          userPackageCatalog.setSection(
+            sectionId,
+          ),
+        ],
+      );
+    },
+  },
 );
 
 
 const modal = createModal({
-  modalElement: document.getElementById(
-    "modal",
+  modalElement: requireElement(
+    "[data-analysis-modal]",
   ),
-  textElement: document.getElementById(
-    "modalText",
+
+  textElement: requireElement(
+    "[data-analysis-modal-text]",
   ),
+
   submitButton,
+
+  jobElement: requireElement(
+    "[data-analysis-modal-job]",
+  ),
+
+  jobIdElement: requireElement(
+    "[data-analysis-modal-job-id]",
+  ),
+
+  copyButton: requireElement(
+    "[data-analysis-modal-copy]",
+  ),
+
+  copyStatusElement: requireElement(
+    "[data-analysis-modal-copy-status]",
+  ),
 });
 
 
 const resultView = createResultView(
-  document.getElementById(
-    "result",
+  requireElement(
+    "[data-analysis-result]",
   ),
 );
 
 
+function getNormativeSelection() {
+  const selection = (
+    normativeCatalog.getSelection()
+  );
+
+  if (!selection) {
+    return null;
+  }
+
+  const packageSelection = (
+    userPackageCatalog.getSelection()
+  );
+
+  const packageDocumentIds = (
+    packageSelection
+    && (
+      packageSelection.sectionId
+      === selection.sectionId
+    )
+      ? packageSelection.documentIds
+      : []
+  );
+
+  const prompt = promptEditor.getOverride(
+    selection.sectionId,
+  );
+
+  return {
+    ...selection,
+
+    userPackageDocumentIds: (
+      packageDocumentIds
+    ),
+
+    ...prompt,
+  };
+}
+
+
 const analysisForm = createAnalysisForm({
-  pdfInput: document.getElementById(
-    "pdfFile",
+  pdfInput: requireElement(
+    "[data-pdf-input]",
   ),
 
-  cadInput: document.getElementById(
-    "cadFile",
+  cadInput: requireElement(
+    "[data-cad-input]",
   ),
 
-  pagesInput: document.getElementById(
-    "pages",
+  technicalAssignmentInput: (
+    technicalAssignmentFilePicker.input
   ),
 
-  pagesHint: document.getElementById(
-    "pagesHint",
+  pagesInput: requireElement(
+    "[data-pages-input]",
   ),
 
-  useExplanatoryNoteInput: document.getElementById(
-    "useExplanatoryNote",
+  pagesHint: requireElement(
+    "[data-pages-hint]",
   ),
 
-  noteStartPageInput: document.getElementById(
-    "noteStartPage",
+  useExplanatoryNoteInput: requireElement(
+    "[data-explanatory-note-input]",
   ),
 
-  noteEndPageInput: document.getElementById(
-    "noteEndPage",
+  noteStartPageInput: requireElement(
+    "[data-note-start-input]",
   ),
+
+  noteEndPageInput: requireElement(
+    "[data-note-end-input]",
+  ),
+
+  getNormativeSelection,
 });
 
 
-function renderProgress(
-  jobId,
-  payload,
-  elapsedSeconds,
-) {
-  const status = statusLabel(
-    payload.status,
-  );
-
-  modal.show(
-    `${status}. Прошло ${elapsedSeconds} сек.`,
-  );
-
-  resultView.show(
-    `Задание: ${jobId}\n`
-    + `Статус: ${status}\n`
-    + `Попытка worker: ${payload.attempt_count ?? 0}\n`
-    + `Прошло: ${elapsedSeconds} сек.`,
-  );
-}
-
-
-async function handleAnalysisSubmit(
-  event,
-) {
-  event.preventDefault();
-
-  const validation = analysisForm.validate();
-
-  if (!validation.valid) {
-    if (validation.message) {
-      resultView.show(
-        validation.message,
-      );
-    }
-
-    return;
-  }
-
-  modal.show(
-    "Документы загружаются в API Gateway…",
-  );
-
-  resultView.show(
-    "Отправляем документы в API Gateway…",
-  );
-
-  try {
-    const accepted = await submitAnalysis(
-      analysisForm.toFormData(),
-    );
-
-    const jobId = accepted.job_id;
-
-    if (!jobId) {
-      throw new Error(
-        "API Gateway не вернул job_id.",
-      );
-    }
-
-    resultView.show(
-      `Задание создано: ${jobId}\n`
-      + `Статус: ${statusLabel(accepted.status)}`,
-    );
-
-    await waitForAnalysis(
-      jobId,
-      {
-        onProgress: ({
-          payload,
-          elapsedSeconds,
-        }) => {
-          renderProgress(
-            jobId,
-            payload,
-            elapsedSeconds,
-          );
-        },
-      },
-    );
-
-    modal.show(
-      "Анализ завершён. Загружаем результат…",
-    );
-
-    const payload = await getAnalysisResult(
-      jobId,
-    );
-
-    resultView.show(
-      renderAnalysisReport(payload),
-    );
-
-  } catch (error) {
-    resultView.showError(error);
-
-  } finally {
-    modal.hide();
-  }
-}
+const analysisController = createAnalysisController({
+  analysisForm,
+  modal,
+  resultView,
+});
 
 
 analysisForm.bind();
 
 analysisFormElement.addEventListener(
   "submit",
-  handleAnalysisSubmit,
+  analysisController.submit,
 );
+
+void normativeCatalog.start();

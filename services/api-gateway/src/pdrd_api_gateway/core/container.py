@@ -10,6 +10,9 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
+from pdrd_api_gateway.application.ports.technical_assignment_content import (
+    TechnicalAssignmentContentReader,
+)
 from pdrd_api_gateway.application.use_cases.check_readiness import (
     CheckReadiness,
 )
@@ -21,6 +24,15 @@ from pdrd_api_gateway.application.use_cases.get_analysis_job import (
 )
 from pdrd_api_gateway.application.use_cases.get_analysis_result import (
     GetAnalysisResult,
+)
+from pdrd_api_gateway.application.use_cases.manage_normative_catalog import (
+    NormativeCatalogFacade,
+)
+from pdrd_api_gateway.application.use_cases.manage_user_packages import (
+    UserPackageCatalogFacade,
+)
+from pdrd_api_gateway.application.use_cases.resolve_normative_snapshot import (
+    ResolveNormativeSnapshot,
 )
 from pdrd_api_gateway.application.use_cases.submit_analysis import (
     SubmitAnalysis,
@@ -38,6 +50,18 @@ from pdrd_api_gateway.infrastructure.database.health import (
 )
 from pdrd_api_gateway.infrastructure.database.unit_of_work import (
     SqlAlchemyUnitOfWork,
+)
+from pdrd_api_gateway.infrastructure.knowledge.normative_catalog import (
+    HttpNormativeCatalogReader,
+)
+from pdrd_api_gateway.infrastructure.knowledge.normative_catalog_management import (
+    HttpNormativeCatalogManager,
+)
+from pdrd_api_gateway.infrastructure.knowledge.technical_assignment_content import (
+    HttpTechnicalAssignmentContentReader,
+)
+from pdrd_api_gateway.infrastructure.knowledge.user_package_catalog import (
+    HttpUserPackageCatalogManager,
 )
 from pdrd_api_gateway.infrastructure.messaging.broker import (
     RabbitMqReadinessProbe,
@@ -58,15 +82,28 @@ class ApplicationContainer:
     """Хранит runtime dependencies API Gateway."""
 
     settings: Settings
+
     check_readiness: CheckReadiness
+
     shutdown_callback: ShutdownCallback
 
     create_analysis_job: CreateAnalysisJob | None = None
+
     get_analysis_job: GetAnalysisJob | None = None
+
     get_analysis_result: GetAnalysisResult | None = None
+
     submit_analysis: SubmitAnalysis | None = None
 
-    async def close(self) -> None:
+    normative_catalog: NormativeCatalogFacade | None = None
+
+    user_package_catalog: UserPackageCatalogFacade | None = None
+
+    technical_assignment_content_reader: TechnicalAssignmentContentReader | None = None
+
+    async def close(
+        self,
+    ) -> None:
         """Корректно освобождает infrastructure resources."""
         await self.shutdown_callback()
 
@@ -90,7 +127,7 @@ def build_container() -> ApplicationContainer:
 
     database_readiness = DatabaseReadinessProbe(
         engine=engine,
-        timeout_seconds=(settings.database.health_timeout_seconds),
+        timeout_seconds=settings.database.health_timeout_seconds,
     )
 
     broker_url = build_broker_url(
@@ -99,8 +136,8 @@ def build_container() -> ApplicationContainer:
 
     broker_readiness = RabbitMqReadinessProbe(
         broker_url=broker_url,
-        connect_timeout_seconds=(settings.broker.connect_timeout_seconds),
-        health_timeout_seconds=(settings.broker.health_timeout_seconds),
+        connect_timeout_seconds=settings.broker.connect_timeout_seconds,
+        health_timeout_seconds=settings.broker.health_timeout_seconds,
     )
 
     check_readiness = CheckReadiness(
@@ -122,9 +159,39 @@ def build_container() -> ApplicationContainer:
         ),
     )
 
+    normative_catalog_reader = HttpNormativeCatalogReader(
+        settings=settings.knowledge_service,
+    )
+
+    normative_catalog_manager = HttpNormativeCatalogManager(
+        settings=settings.knowledge_service,
+    )
+
+    normative_catalog = NormativeCatalogFacade(
+        manager=normative_catalog_manager,
+    )
+
+    user_package_catalog_manager = HttpUserPackageCatalogManager(
+        settings=settings.knowledge_service,
+    )
+
+    user_package_catalog = UserPackageCatalogFacade(
+        manager=user_package_catalog_manager,
+    )
+
+    technical_assignment_content_reader = HttpTechnicalAssignmentContentReader(
+        settings=settings.knowledge_service,
+    )
+
+    resolve_normative_snapshot = ResolveNormativeSnapshot(
+        catalog_reader=normative_catalog_reader,
+        user_package_reader=user_package_catalog_manager,
+    )
+
     submit_analysis = SubmitAnalysis(
         artifact_store=artifact_store,
         create_analysis_job=create_analysis_job,
+        resolve_normative_snapshot=resolve_normative_snapshot,
     )
 
     get_analysis_result = GetAnalysisResult(
@@ -143,4 +210,7 @@ def build_container() -> ApplicationContainer:
         get_analysis_job=get_analysis_job,
         get_analysis_result=get_analysis_result,
         submit_analysis=submit_analysis,
+        normative_catalog=normative_catalog,
+        user_package_catalog=user_package_catalog,
+        technical_assignment_content_reader=(technical_assignment_content_reader),
     )

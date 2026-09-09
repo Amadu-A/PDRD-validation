@@ -9,7 +9,18 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install \
+        --yes \
+        --no-install-recommends \
+        libreoffice-writer \
+        fonts-dejavu-core \
+        fonts-liberation2 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml /app/pyproject.toml
+COPY alembic.ini /app/alembic.ini
+COPY alembic /app/alembic
 COPY src /app/src
 
 RUN pip install \
@@ -33,7 +44,15 @@ FROM base AS runtime
 RUN useradd \
     --create-home \
     --uid 1000 \
-    app
+    app \
+    && mkdir -p \
+        /data/normative \
+        /data/technical-assignments \
+    && chown -R app:app \
+        /data/normative \
+        /data/technical-assignments
+
+ENV HOME=/home/app
 
 USER app
 

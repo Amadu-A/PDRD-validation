@@ -2,6 +2,7 @@
 
 """HTTP adapter запуска PDRD workflow через n8n."""
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -36,8 +37,11 @@ class N8nAnalysisOrchestrator:
         self,
         *,
         artifacts: AnalysisRequestArtifacts,
-    ) -> dict[str, Any]:
-        """Передаёт исходные файлы в нужный n8n webhook."""
+    ) -> dict[
+        str,
+        Any,
+    ]:
+        """Передаёт исходные файлы и immutable snapshot в n8n."""
         submission = artifacts.submission
 
         endpoint = self._resolve_endpoint(
@@ -48,7 +52,91 @@ class N8nAnalysisOrchestrator:
             artifacts,
         )
 
-        data: dict[str, str] = {
+        data = self._build_data(
+            artifacts,
+        )
+
+        url = (
+            self._settings.base_url.rstrip(
+                "/",
+            )
+            + endpoint
+        )
+
+        timeout = httpx.Timeout(
+            timeout=self._settings.request_timeout_seconds,
+            connect=self._settings.connect_timeout_seconds,
+        )
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=timeout,
+            ) as client:
+                response = await client.post(
+                    url,
+                    files=files,
+                    data=data,
+                )
+
+                response.raise_for_status()
+
+        except httpx.HTTPStatusError as error:
+            response_text = error.response.text[:1000]
+
+            raise AnalysisOrchestrationError(
+                "n8n workflow завершился HTTP ошибкой: "
+                f"{error.response.status_code}. "
+                f"Ответ: {response_text}",
+            ) from error
+
+        except httpx.HTTPError as error:
+            raise AnalysisOrchestrationError(
+                "Не удалось выполнить HTTP-запрос к n8n: "
+                f"{type(error).__name__}: {error}",
+            ) from error
+
+        try:
+            payload = response.json()
+
+        except ValueError as error:
+            raise AnalysisOrchestrationError(
+                "n8n вернул невалидный JSON.",
+            ) from error
+
+        if not isinstance(
+            payload,
+            dict,
+        ):
+            raise AnalysisOrchestrationError(
+                "n8n должен вернуть JSON object.",
+            )
+
+        if (
+            payload.get(
+                "status",
+            )
+            != "completed"
+        ):
+            raise AnalysisOrchestrationError(
+                "n8n workflow не подтвердил успешное завершение анализа.",
+            )
+
+        return payload
+
+    @staticmethod
+    def _build_data(
+        artifacts: AnalysisRequestArtifacts,
+    ) -> dict[
+        str,
+        str,
+    ]:
+        """Формирует multipart form fields для orchestration."""
+        submission = artifacts.submission
+
+        data: dict[
+            str,
+            str,
+        ] = {
             "document_id": str(
                 submission.document_id,
             ),
@@ -74,62 +162,49 @@ class N8nAnalysisOrchestrator:
                 submission.note_end_page,
             )
 
-        url = self._settings.base_url.rstrip("/") + endpoint
+        snapshot = artifacts.normative_snapshot
 
-        timeout = httpx.Timeout(
-            timeout=(self._settings.request_timeout_seconds),
-            connect=(self._settings.connect_timeout_seconds),
-        )
+        if snapshot is not None:
+            data["normative_section_id"] = str(
+                snapshot.section_id,
+            )
 
-        try:
-            async with httpx.AsyncClient(
-                timeout=timeout,
-            ) as client:
-                response = await client.post(
-                    url,
-                    files=files,
-                    data=data,
+            data["normative_document_ids"] = json.dumps(
+                [
+                    str(
+                        document_id,
+                    )
+                    for document_id in snapshot.document_ids
+                ],
+                ensure_ascii=False,
+                separators=(
+                    ",",
+                    ":",
+                ),
+            )
+
+            data["user_package_document_ids"] = json.dumps(
+                [
+                    str(
+                        document_id,
+                    )
+                    for document_id in snapshot.user_package_document_ids
+                ],
+                ensure_ascii=False,
+                separators=(
+                    ",",
+                    ":",
+                ),
+            )
+
+            data["normative_system_prompt"] = snapshot.system_prompt
+
+            if snapshot.technical_assignment is not None:
+                data["technical_assignment_id"] = str(
+                    snapshot.technical_assignment.technical_assignment_id,
                 )
 
-                response.raise_for_status()
-
-        except httpx.HTTPStatusError as error:
-            response_text = error.response.text[:1000]
-
-            raise AnalysisOrchestrationError(
-                "n8n workflow завершился HTTP ошибкой: "
-                f"{error.response.status_code}. "
-                f"Ответ: {response_text}"
-            ) from error
-
-        except httpx.HTTPError as error:
-            raise AnalysisOrchestrationError(
-                "Не удалось выполнить HTTP-запрос к n8n: "
-                f"{type(error).__name__}: {error}"
-            ) from error
-
-        try:
-            payload = response.json()
-
-        except ValueError as error:
-            raise AnalysisOrchestrationError(
-                "n8n вернул невалидный JSON.",
-            ) from error
-
-        if not isinstance(
-            payload,
-            dict,
-        ):
-            raise AnalysisOrchestrationError(
-                "n8n должен вернуть JSON object.",
-            )
-
-        if payload.get("status") != "completed":
-            raise AnalysisOrchestrationError(
-                "n8n workflow не подтвердил успешное завершение анализа.",
-            )
-
-        return payload
+        return data
 
     def _resolve_endpoint(
         self,

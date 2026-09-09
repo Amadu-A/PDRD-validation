@@ -15,6 +15,9 @@ from pdrd_analysis_service.domain.analysis import (
     FindingDraft,
     NormativeSource,
     PageFacts,
+    TechnicalAssignmentConflictCandidate,
+    TechnicalAssignmentSource,
+    UserPackageSource,
 )
 
 
@@ -35,7 +38,9 @@ class PageFactsPayload(BaseModel):
 
     normative_queries: list[str]
 
-    def to_domain(self) -> PageFacts:
+    def to_domain(
+        self,
+    ) -> PageFacts:
         """Преобразует payload в Domain."""
         return PageFacts(
             discipline=self.discipline,
@@ -67,6 +72,11 @@ class NormativeSourcePayload(BaseModel):
     point_id: str = ""
     score: float
 
+    document_id: str | None = None
+    section_id: str | None = None
+    category_id: str | None = None
+    source_sha256: str | None = None
+
     source_file: str | None = None
     source_path: str | None = None
 
@@ -88,6 +98,128 @@ class NormativeSourcePayload(BaseModel):
             page=self.page,
             chunk_index=self.chunk_index,
             text=self.text,
+            document_id=self.document_id,
+            section_id=self.section_id,
+            category_id=self.category_id,
+            source_sha256=self.source_sha256,
+        )
+
+
+class TechnicalAssignmentSourcePayload(BaseModel):
+    """T-source от Knowledge Service."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    source_id: str
+    point_id: str = ""
+    score: float
+
+    technical_assignment_id: str | None = None
+    analysis_document_id: str | None = None
+    section_id: str | None = None
+
+    source_sha256: str | None = None
+    source_file: str | None = None
+
+    page: int | str | None = None
+    text: str
+
+    normative_refs: list[str] = Field(
+        default_factory=list,
+    )
+
+    def to_domain(
+        self,
+    ) -> TechnicalAssignmentSource:
+        """Преобразует T-source в Domain."""
+        return TechnicalAssignmentSource(
+            source_id=self.source_id,
+            point_id=self.point_id,
+            score=self.score,
+            technical_assignment_id=self.technical_assignment_id,
+            analysis_document_id=self.analysis_document_id,
+            section_id=self.section_id,
+            source_sha256=self.source_sha256,
+            source_file=self.source_file,
+            page=self.page,
+            text=self.text,
+            normative_refs=tuple(
+                self.normative_refs,
+            ),
+        )
+
+
+class TechnicalAssignmentConflictCandidatePayload(
+    BaseModel,
+):
+    """T/N candidate для semantic validation."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    technical_assignment_source_id: str
+
+    normative_source_ids: list[str]
+
+    reason: str
+
+    def to_domain(
+        self,
+    ) -> TechnicalAssignmentConflictCandidate:
+        """Преобразует candidate в Domain."""
+        return TechnicalAssignmentConflictCandidate(
+            technical_assignment_source_id=(self.technical_assignment_source_id),
+            normative_source_ids=tuple(
+                self.normative_source_ids,
+            ),
+            reason=self.reason,
+        )
+
+
+class UserPackageSourcePayload(BaseModel):
+    """User-package source от Knowledge Service."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    source_id: str
+    point_id: str = ""
+    score: float
+
+    document_id: str | None = None
+    section_id: str | None = None
+    category_id: str | None = None
+    source_sha256: str | None = None
+
+    source_file: str | None = None
+    source_path: str | None = None
+
+    page: int | str | None = None
+    chunk_index: int | str | None = None
+
+    text: str
+
+    def to_domain(
+        self,
+    ) -> UserPackageSource:
+        """Преобразует package source в Domain."""
+        return UserPackageSource(
+            source_id=self.source_id,
+            point_id=self.point_id,
+            score=self.score,
+            source_file=self.source_file,
+            source_path=self.source_path,
+            page=self.page,
+            chunk_index=self.chunk_index,
+            text=self.text,
+            document_id=self.document_id,
+            section_id=self.section_id,
+            category_id=self.category_id,
+            source_sha256=self.source_sha256,
         )
 
 
@@ -127,16 +259,16 @@ class ExperienceSourcePayload(BaseModel):
             issue_id=self.issue_id,
             issue_text=self.issue_text,
             status=self.status,
-            verified_fixed=(self.verified_fixed),
+            verified_fixed=self.verified_fixed,
             before_page=self.before_page,
             after_page=self.after_page,
-            before_context=(self.before_context),
-            after_context=(self.after_context),
+            before_context=self.before_context,
+            after_context=self.after_context,
         )
 
 
 class FindingDraftPayload(BaseModel):
-    """Finding между normative и experience stages."""
+    """Finding между requirement-check и experience stages."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -158,11 +290,26 @@ class FindingDraftPayload(BaseModel):
     confidence: float
 
     normative_source_ids: list[str]
-
     basis: str
     basis_sources: list[NormativeSourcePayload]
 
     experience_query: str
+
+    technical_assignment_source_ids: list[str] = Field(
+        default_factory=list,
+    )
+
+    technical_assignment_basis_sources: list[TechnicalAssignmentSourcePayload] = Field(
+        default_factory=list,
+    )
+
+    user_package_source_ids: list[str] = Field(
+        default_factory=list,
+    )
+
+    user_package_basis_sources: list[UserPackageSourcePayload] = Field(
+        default_factory=list,
+    )
 
     def to_domain(
         self,
@@ -177,14 +324,26 @@ class FindingDraftPayload(BaseModel):
             status=self.status,  # type: ignore[arg-type]
             comment=self.comment,
             evidence=self.evidence,
-            recommendation_draft=(self.recommendation_draft),
+            recommendation_draft=self.recommendation_draft,
             confidence=self.confidence,
             normative_source_ids=tuple(
                 self.normative_source_ids,
             ),
             basis=self.basis,
-            basis_sources=tuple(source.to_domain() for source in (self.basis_sources)),
-            experience_query=(self.experience_query),
+            basis_sources=tuple(source.to_domain() for source in self.basis_sources),
+            experience_query=self.experience_query,
+            technical_assignment_source_ids=tuple(
+                self.technical_assignment_source_ids,
+            ),
+            technical_assignment_basis_sources=tuple(
+                source.to_domain() for source in self.technical_assignment_basis_sources
+            ),
+            user_package_source_ids=tuple(
+                self.user_package_source_ids,
+            ),
+            user_package_basis_sources=tuple(
+                source.to_domain() for source in self.user_package_basis_sources
+            ),
         )
 
 
@@ -200,7 +359,6 @@ class UnderstandPageRequest(BaseModel):
     )
 
     heuristic_page_type: str
-
     extracted_text: str
 
     image_base64: str = Field(
@@ -212,7 +370,11 @@ class UnderstandPageResponse(BaseModel):
     """Ответ page understanding."""
 
     facts: PageFactsPayload
-    metrics: dict[str, Any]
+
+    metrics: dict[
+        str,
+        Any,
+    ]
 
 
 class NormativeQueriesRequest(BaseModel):
@@ -226,17 +388,19 @@ class NormativeQueriesRequest(BaseModel):
 
     extracted_text: str
 
-    project_context_texts: list[str] = []
+    project_context_texts: list[str] = Field(
+        default_factory=list,
+    )
 
 
 class NormativeQueriesResponse(BaseModel):
-    """Список нормативных retrieval queries."""
+    """Список normative/user retrieval queries."""
 
     queries: list[str]
 
 
 class CheckNormsRequest(BaseModel):
-    """Запрос нормативной проверки."""
+    """Запрос проверки N/T/U требований."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -252,19 +416,36 @@ class CheckNormsRequest(BaseModel):
 
     normative_sources: list[NormativeSourcePayload]
 
+    technical_assignment_sources: list[TechnicalAssignmentSourcePayload] = Field(
+        default_factory=list,
+    )
+
+    conflict_candidates: list[TechnicalAssignmentConflictCandidatePayload] = Field(
+        default_factory=list,
+    )
+
+    user_package_sources: list[UserPackageSourcePayload] = Field(
+        default_factory=list,
+    )
+
     image_base64: str = Field(
         min_length=1,
     )
 
+    normative_system_prompt: str | None = None
+
 
 class CheckNormsResponse(BaseModel):
-    """Ответ normative check."""
+    """Ответ requirement check."""
 
     summary: str
 
     findings: list[FindingDraftPayload]
 
-    metrics: dict[str, Any]
+    metrics: dict[
+        str,
+        Any,
+    ]
 
 
 class FinalizeRequest(BaseModel):
@@ -280,6 +461,19 @@ class FinalizeRequest(BaseModel):
         str,
         list[ExperienceSourcePayload],
     ]
+
+    # Legacy single-finding contract оставляем для безопасного
+    # завершения возможных старых in-flight execution.
+    normative_candidates: list[NormativeSourcePayload] = Field(
+        default_factory=list,
+    )
+
+    normative_candidates_by_finding: dict[
+        str,
+        list[NormativeSourcePayload],
+    ] = Field(
+        default_factory=dict,
+    )
 
 
 class FinalFindingPayload(BaseModel):
@@ -306,15 +500,26 @@ class FinalFindingPayload(BaseModel):
 
     experience_sources: list[ExperienceSourcePayload]
 
+    technical_assignment_basis_sources: list[TechnicalAssignmentSourcePayload] = Field(
+        default_factory=list,
+    )
+
+    user_package_basis_sources: list[UserPackageSourcePayload] = Field(
+        default_factory=list,
+    )
+
 
 class FinalizeResponse(BaseModel):
-    """Ответ финализации."""
+    """Ответ финализации findings."""
 
     summary: str
 
     findings: list[FinalFindingPayload]
 
-    metrics: dict[str, Any]
+    metrics: dict[
+        str,
+        Any,
+    ]
 
 
 class LiveHealthResponse(BaseModel):
@@ -332,4 +537,7 @@ class ReadyHealthResponse(BaseModel):
     service: str
     version: str
 
-    dependencies: dict[str, bool]
+    dependencies: dict[
+        str,
+        bool,
+    ]

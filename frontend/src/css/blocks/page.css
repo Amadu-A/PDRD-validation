@@ -1,0 +1,36 @@
+/* frontend/src/css/blocks/page.css */
+
+/*
+ * BEM-блок основной страницы приложения.
+ */
+
+.page {
+  min-width: 320px;
+}
+
+.page__content {
+  display: grid;
+
+  grid-template-columns:
+    minmax(300px, var(--sidebar-width))
+    minmax(0, 1fr);
+
+  gap: var(--space-9);
+
+  width: min(
+    var(--page-max-width),
+    calc(100% - 32px)
+  );
+
+  margin: var(--space-page) auto;
+}
+
+.page__main {
+  min-width: 0;
+}
+
+@media (max-width: 980px) {
+  .page__content {
+    grid-template-columns: 1fr;
+  }
+}

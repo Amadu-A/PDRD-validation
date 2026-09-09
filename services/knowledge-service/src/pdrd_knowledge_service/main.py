@@ -11,18 +11,30 @@ from pdrd_knowledge_service.core.container import (
 from pdrd_knowledge_service.transport.http.routers.health import (
     router as health_router,
 )
+from pdrd_knowledge_service.transport.http.routers.normative_categories import (
+    router as normative_categories_router,
+)
+from pdrd_knowledge_service.transport.http.routers.normative_documents import (
+    router as normative_documents_router,
+)
+from pdrd_knowledge_service.transport.http.routers.normative_sections import (
+    router as normative_sections_router,
+)
 from pdrd_knowledge_service.transport.http.routers.project_context import (
     router as project_context_router,
 )
 from pdrd_knowledge_service.transport.http.routers.search import (
     router as search_router,
 )
+from pdrd_knowledge_service.transport.http.routers.technical_assignments import (
+    router as technical_assignments_router,
+)
 
 
 def create_app(
     container: ApplicationContainer | None = None,
 ) -> FastAPI:
-    """Создаёт настроенное FastAPI-приложение."""
+    """Создаёт configured FastAPI application."""
     application_container = container if container is not None else build_container()
 
     settings = application_container.settings
@@ -47,6 +59,22 @@ def create_app(
 
     application.include_router(
         project_context_router,
+    )
+
+    application.include_router(
+        normative_sections_router,
+    )
+
+    application.include_router(
+        normative_categories_router,
+    )
+
+    application.include_router(
+        normative_documents_router,
+    )
+
+    application.include_router(
+        technical_assignments_router,
     )
 
     return application

@@ -12,12 +12,31 @@ from pdrd_knowledge_service.application.use_cases.health import (
 from pdrd_knowledge_service.application.use_cases.normative import (
     SearchNormative,
 )
+from pdrd_knowledge_service.application.use_cases.user_packages import (
+    SearchUserPackages,
+)
 from pdrd_knowledge_service.core.container import (
     ApplicationContainer,
 )
-from pdrd_knowledge_service.core.settings import Settings
-from pdrd_knowledge_service.domain.search import VectorPoint
-from pdrd_knowledge_service.main import create_app
+from pdrd_knowledge_service.core.settings import (
+    Settings,
+)
+from pdrd_knowledge_service.domain.search import (
+    VectorPoint,
+)
+from pdrd_knowledge_service.main import (
+    create_app,
+)
+
+
+class FakeDatabaseReadinessProbe:
+    """Fake PostgreSQL readiness probe HTTP tests."""
+
+    async def is_ready(
+        self,
+    ) -> bool:
+        """Возвращает готовую database schema."""
+        return True
 
 
 class FakeEmbeddingProvider:
@@ -25,7 +44,10 @@ class FakeEmbeddingProvider:
 
     async def embed(
         self,
-        texts: tuple[str, ...],
+        texts: tuple[
+            str,
+            ...,
+        ],
         *,
         instruction: str,
     ) -> list[list[float]]:
@@ -34,15 +56,22 @@ class FakeEmbeddingProvider:
 
         return [
             [
-                float(index),
+                float(
+                    index,
+                ),
             ]
             for index in range(
                 1,
-                len(texts) + 1,
+                len(
+                    texts,
+                )
+                + 1,
             )
         ]
 
-    async def is_ready(self) -> bool:
+    async def is_ready(
+        self,
+    ) -> bool:
         """Возвращает готовую embedding model."""
         return True
 
@@ -71,7 +100,7 @@ class FakeVectorStore:
                         "source_path": "/norms/СП-test.pdf",
                         "page": 12,
                         "chunk_index": 3,
-                        "text": "Тестовое нормативное требование.",
+                        "text": ("Тестовое нормативное требование."),
                     },
                 )
             ]
@@ -91,7 +120,9 @@ class FakeVectorStore:
             )
         ]
 
-    async def is_ready(self) -> bool:
+    async def is_ready(
+        self,
+    ) -> bool:
         """Возвращает готовый Qdrant."""
         return True
 
@@ -107,7 +138,7 @@ class FakeVectorStore:
 
 
 def build_client() -> TestClient:
-    """Создаёт TestClient без реальных Ollama/Qdrant."""
+    """Создаёт TestClient без реальных infrastructure dependencies."""
     settings = Settings(
         _env_file=None,
         service_name="PDRD Knowledge Service Test",
@@ -115,20 +146,29 @@ def build_client() -> TestClient:
         environment="test",
     )
 
+    database_probe = FakeDatabaseReadinessProbe()
+
     embedding_provider = FakeEmbeddingProvider()
 
     vector_store = FakeVectorStore()
 
+    search_normative = SearchNormative(
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+        collection="normative-test",
+        embedding_model="embedding-test",
+        top_k=4,
+        max_sources=12,
+    )
+
+    search_user_packages = SearchUserPackages(
+        managed_search=search_normative,
+    )
+
     container = ApplicationContainer(
         settings=settings,
-        search_normative=SearchNormative(
-            embedding_provider=embedding_provider,
-            vector_store=vector_store,
-            collection="normative-test",
-            embedding_model="embedding-test",
-            top_k=4,
-            max_sources=12,
-        ),
+        search_normative=search_normative,
+        search_user_packages=search_user_packages,
         search_experience=SearchExperience(
             embedding_provider=embedding_provider,
             vector_store=vector_store,
@@ -137,6 +177,7 @@ def build_client() -> TestClient:
             top_k=3,
         ),
         check_readiness=CheckReadiness(
+            database_probe=database_probe,
             embedding_provider=embedding_provider,
             vector_store=vector_store,
             normative_collection="normative-test",
@@ -177,6 +218,7 @@ def test_health_endpoints() -> None:
         "service": "PDRD Knowledge Service Test",
         "version": "0.1.0-test",
         "dependencies": {
+            "database": True,
             "embedding_model": True,
             "qdrant": True,
             "normative_collection": True,
@@ -216,6 +258,31 @@ def test_normative_search_endpoint() -> None:
     assert source["page"] == 12
 
 
+def test_user_package_search_without_scope_returns_empty_sources() -> None:
+    """Проверяет HTTP contract package retrieval без selected packages."""
+    with build_client() as client:
+        response = client.post(
+            "/internal/v1/search/user-packages",
+            json={
+                "queries": [
+                    "требования заказчика",
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["queries"] == [
+        "требования заказчика",
+    ]
+
+    assert payload["sources"] == []
+
+    assert payload["embedding_model"] == "embedding-test"
+
+
 def test_experience_search_endpoint() -> None:
     """Проверяет HTTP contract Базы Опыта."""
     with build_client() as client:
@@ -234,7 +301,7 @@ def test_experience_search_endpoint() -> None:
 
     result = payload["results"][0]
 
-    assert result["query"] == "нет защитного заземления"
+    assert result["query"] == ("нет защитного заземления")
 
     source = result["sources"][0]
 

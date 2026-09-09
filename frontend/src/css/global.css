@@ -1,6 +1,12 @@
 /* frontend/src/css/global.css */
 
-/* Базовые правила документа и глобальные utility-классы. */
+/*
+ * Минимальные глобальные правила браузерного приложения.
+ *
+ * Файл содержит только reset, базовую типографику и общие state-классы.
+ * Визуальное оформление конкретных компонентов находится в BEM-модулях
+ * каталога blocks.
+ */
 
 *,
 *::before,
@@ -13,37 +19,32 @@ html {
 }
 
 body {
-  min-height: 100%;
+  min-height: 100vh;
   margin: 0;
-
-  font-family: var(--font-family-base);
-  font-size: var(--font-size-base);
 
   color: var(--color-text-primary);
   background: var(--color-background);
+
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-normal);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }
 
 h1,
 h2,
-h3,
-p {
+p,
+pre,
+fieldset {
   margin-top: 0;
 }
 
-button,
-input {
-  font: inherit;
-}
-
-.hidden {
+.is-hidden {
   display: none !important;
-}
-
-.muted {
-  color: var(--color-text-secondary);
-  font-weight: var(--font-weight-normal);
-}
-
-.required {
-  color: var(--color-danger);
 }

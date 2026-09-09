@@ -1,0 +1,33 @@
+/* frontend/src/css/blocks/analysis-panel.css */
+
+/*
+ * BEM-блок смысловой панели интерфейса анализа.
+ *
+ * Используется для формы запуска и текущего результата. Панель отвечает
+ * только за собственный контейнер и заголовочную часть, не стилизуя
+ * внутренние controls других блоков.
+ */
+
+.analysis-panel {
+  margin-bottom: var(--space-8);
+  padding: var(--space-9);
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+
+  background: var(--color-surface);
+}
+
+.analysis-panel--result {
+  margin-bottom: 0;
+}
+
+.analysis-panel__title {
+  margin-bottom: var(--space-5);
+}
+
+.analysis-panel__description {
+  margin-bottom: var(--space-8);
+
+  color: var(--color-text-secondary);
+}

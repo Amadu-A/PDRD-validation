@@ -21,7 +21,17 @@
   --color-border: #dddddd;
   --color-border-control: #bbbbbb;
 
+  --color-accent: #2457a7;
+  --color-accent-soft: #eef4ff;
+
+  --color-success: #26713c;
+  --color-success-soft: #edf8f0;
+
+  --color-warning: #875f00;
+  --color-warning-soft: #fff8df;
+
   --color-danger: #aa0000;
+  --color-danger-soft: #fff0f0;
 
   --color-overlay: rgb(0 0 0 / 50%);
 
@@ -37,7 +47,8 @@
   --font-weight-semibold: 600;
 
   /* Layout */
-  --page-max-width: 900px;
+  --page-max-width: 1440px;
+  --sidebar-width: 390px;
 
   /* Spacing */
   --space-1: 4px;

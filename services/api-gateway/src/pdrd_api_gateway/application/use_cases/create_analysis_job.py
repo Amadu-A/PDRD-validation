@@ -8,8 +8,15 @@ from uuid import UUID
 from pdrd_api_gateway.application.ports.persistence import (
     UnitOfWorkFactory,
 )
-from pdrd_api_gateway.domain.analysis_job import AnalysisJob
-from pdrd_api_gateway.domain.outbox import OutboxMessage
+from pdrd_api_gateway.domain.analysis_job import (
+    AnalysisJob,
+)
+from pdrd_api_gateway.domain.normative_snapshot import (
+    NormativeAnalysisSnapshot,
+)
+from pdrd_api_gateway.domain.outbox import (
+    OutboxMessage,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,10 +29,12 @@ class CreateAnalysisJob:
         self,
         *,
         document_id: UUID,
+        normative_snapshot: NormativeAnalysisSnapshot | None = None,
     ) -> AnalysisJob:
         """Создаёт задание и сообщение для дальнейшей публикации."""
         job = AnalysisJob.create(
             document_id=document_id,
+            normative_snapshot=normative_snapshot,
         )
 
         message = OutboxMessage.analysis_requested(

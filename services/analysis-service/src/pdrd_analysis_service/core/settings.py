@@ -3,6 +3,7 @@
 """Pydantic Settings Analysis Service."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -46,7 +47,7 @@ class VisionSettings(BaseModel):
     )
 
     num_ctx: int = Field(
-        default=16384,
+        default=32768,
         ge=1024,
         le=131072,
     )
@@ -57,12 +58,65 @@ class VisionSettings(BaseModel):
         le=5,
     )
 
-    keep_alive: str = "1m"
+    keep_alive: str = "0s"
 
     max_retry_num_predict: int = Field(
         default=6000,
         ge=1,
         le=20000,
+    )
+
+    min_free_vram_gib: float = Field(
+        default=12.0,
+        gt=0,
+        le=128,
+    )
+
+    unload_timeout_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        le=600,
+    )
+
+    unload_poll_seconds: float = Field(
+        default=0.5,
+        gt=0,
+        le=10,
+    )
+
+    @property
+    def min_free_vram_bytes(
+        self,
+    ) -> int:
+        """Возвращает VRAM threshold в bytes."""
+        return int(self.min_free_vram_gib * 1024**3)
+
+
+class GpuSettings(BaseModel):
+    """Global GPU coordination settings."""
+
+    lock_path: Path = Path(
+        "/var/lock/pdrd-gpu/gpu.lock",
+    )
+
+    lease_timeout_seconds: float = Field(
+        default=1800.0,
+        gt=0,
+        le=7200,
+    )
+
+    admission_poll_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        le=30,
+    )
+
+    status_base_url: str = "http://pdrd-multimodal-embedding-service:8601"
+
+    status_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=120,
     )
 
 
@@ -204,12 +258,16 @@ class Settings(BaseSettings):
         default_factory=VisionSettings,
     )
 
+    gpu: GpuSettings = Field(
+        default_factory=GpuSettings,
+    )
+
     pipeline: PipelineSettings = Field(
         default_factory=PipelineSettings,
     )
 
     project_context: ProjectContextSettings = Field(
-        default_factory=(ProjectContextSettings),
+        default_factory=ProjectContextSettings,
     )
 
 

@@ -1,0 +1,146 @@
+/* frontend/src/css/blocks/analysis-modal.css */
+
+/*
+ * BEM-блок модального состояния длительного анализа.
+ */
+
+.analysis-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--modal-z-index);
+
+  display: grid;
+  place-items: center;
+
+  padding: var(--space-6);
+
+  background: var(--color-overlay);
+}
+
+.analysis-modal__dialog {
+  width: min(
+    var(--modal-max-width),
+    100%
+  );
+
+  padding: var(--space-10);
+
+  border-radius: var(--radius-card);
+
+  background: var(--color-surface);
+
+  text-align: center;
+}
+
+.analysis-modal__spinner {
+  width: var(--spinner-size);
+  height: var(--spinner-size);
+
+  margin: 0 auto var(--space-7);
+
+  border:
+    var(--spinner-border-width)
+    solid
+    var(--color-spinner-track);
+
+  border-top-color: var(--color-spinner-active);
+  border-radius: 50%;
+
+  animation:
+    analysis-modal-rotation
+    var(--spinner-duration)
+    linear
+    infinite;
+}
+
+.analysis-modal__title {
+  margin-bottom: var(--space-4);
+}
+
+.analysis-modal__text {
+  margin-bottom: var(--space-4);
+}
+
+.analysis-modal__job {
+  display: grid;
+
+  grid-template-columns:
+    auto
+    minmax(0, 1fr)
+    auto;
+
+  align-items: center;
+
+  gap: var(--space-2);
+
+  margin-bottom: var(--space-4);
+
+  padding: var(--space-3);
+
+  background: var(--color-surface-muted);
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+
+  text-align: left;
+}
+
+.analysis-modal__job[hidden] {
+  display: none;
+}
+
+.analysis-modal__job-label {
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.analysis-modal__job-id {
+  overflow: hidden;
+
+  font-size: 12px;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  user-select: all;
+}
+
+.analysis-modal__copy-button {
+  padding: 6px 8px;
+
+  background: var(--color-surface);
+
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+
+  cursor: pointer;
+}
+
+.analysis-modal__copy-button:hover {
+  border-color: var(--color-accent);
+
+  background: var(--color-accent-soft);
+}
+
+.analysis-modal__copy-status {
+  grid-column: 1 / -1;
+
+  min-height: 14px;
+
+  color: var(--color-success);
+
+  font-size: 11px;
+  text-align: right;
+}
+
+.analysis-modal__hint {
+  margin-bottom: 0;
+
+  color: var(--color-text-secondary);
+}
+
+@keyframes analysis-modal-rotation {
+  to {
+    transform: rotate(360deg);
+  }
+}

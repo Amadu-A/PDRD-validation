@@ -1,7 +1,8 @@
 # services/analysis-service/src/pdrd_analysis_service/application/use_cases/finalization.py
 
-"""Use case финализации нормативных findings."""
+"""Use case финализации findings."""
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,18 +17,212 @@ from pdrd_analysis_service.application.prompts import (
     build_finalization_prompt,
 )
 from pdrd_analysis_service.application.use_cases.common import (
+    build_basis,
     string_tuple,
 )
 from pdrd_analysis_service.domain.analysis import (
     ExperienceSource,
     FinalFinding,
     FindingDraft,
+    NormativeSource,
 )
+
+_NORMATIVE_REFERENCE_PATTERN = re.compile(
+    r"\b(?:ГОСТ|GOST|ПУЭ|PUE|СНиП|SNIP|СП)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _dedupe_normative_sources(
+    sources: tuple[
+        NormativeSource,
+        ...,
+    ],
+) -> tuple[
+    NormativeSource,
+    ...,
+]:
+    """Дедуплицирует N-sources, сохраняя исходный порядок."""
+    result: list[NormativeSource] = []
+
+    seen: set[
+        tuple[
+            str,
+            ...,
+        ]
+    ] = set()
+
+    for source in sources:
+        if source.point_id:
+            key = (
+                "point_id",
+                source.point_id,
+            )
+        else:
+            key = (
+                "fallback",
+                source.source_id,
+                str(
+                    source.document_id or "",
+                ),
+                str(
+                    source.page or "",
+                ),
+                str(
+                    source.chunk_index or "",
+                ),
+                source.text[:120],
+            )
+
+        if key in seen:
+            continue
+
+        seen.add(
+            key,
+        )
+
+        result.append(
+            source,
+        )
+
+    return tuple(
+        result,
+    )
+
+
+def _available_normative_sources(
+    *,
+    finding: FindingDraft,
+    normative_candidates: tuple[
+        NormativeSource,
+        ...,
+    ],
+) -> dict[
+    str,
+    NormativeSource,
+]:
+    """Строит разрешённый набор existing + finding-local N-sources."""
+    result: dict[
+        str,
+        NormativeSource,
+    ] = {}
+
+    for source in (
+        *finding.basis_sources,
+        *normative_candidates,
+    ):
+        if not source.source_id:
+            continue
+
+        result.setdefault(
+            source.source_id,
+            source,
+        )
+
+    return result
+
+
+def _fallback_recommendation(
+    finding: FindingDraft,
+) -> str:
+    """Возвращает безопасную исходную рекомендацию."""
+    recommendation = finding.recommendation_draft.strip()
+
+    if recommendation:
+        return recommendation
+
+    return (
+        "Проверить указанное несоответствие "
+        "и при необходимости скорректировать "
+        "проектное решение."
+    )
+
+
+def _safe_generated_text(
+    *,
+    generated: str,
+    fallback: str,
+    generic: str,
+) -> str:
+    """Не допускает неподтверждённые нормативные ссылки в свободный текст."""
+    normalized_generated = generated.strip()
+
+    if (
+        normalized_generated
+        and _NORMATIVE_REFERENCE_PATTERN.search(
+            normalized_generated,
+        )
+        is None
+    ):
+        return normalized_generated
+
+    normalized_fallback = fallback.strip()
+
+    if (
+        normalized_fallback
+        and _NORMATIVE_REFERENCE_PATTERN.search(
+            normalized_fallback,
+        )
+        is None
+    ):
+        return normalized_fallback
+
+    return generic
+
+
+def _candidate_groups(
+    *,
+    findings: tuple[
+        FindingDraft,
+        ...,
+    ],
+    normative_candidates_by_finding: dict[
+        str,
+        tuple[
+            NormativeSource,
+            ...,
+        ],
+    ],
+    legacy_candidates: tuple[
+        NormativeSource,
+        ...,
+    ],
+) -> dict[
+    str,
+    tuple[
+        NormativeSource,
+        ...,
+    ],
+]:
+    """Нормализует finding-local N candidates и legacy single-finding input."""
+    result = {
+        finding.finding_id: _dedupe_normative_sources(
+            normative_candidates_by_finding.get(
+                finding.finding_id,
+                (),
+            )
+        )
+        for finding in findings
+    }
+
+    if (
+        len(
+            findings,
+        )
+        == 1
+        and legacy_candidates
+        and not result[findings[0].finding_id]
+    ):
+        result[findings[0].finding_id] = _dedupe_normative_sources(
+            legacy_candidates,
+        )
+
+    return result
 
 
 @dataclass(frozen=True, slots=True)
 class FinalizeFindings:
-    """Финализирует нормативные findings небольшими batches."""
+    """Финализирует findings и non-destructive N enrichment."""
 
     vision_model: StructuredVisionModel
 
@@ -51,6 +246,18 @@ class FinalizeFindings:
                 ...,
             ],
         ],
+        normative_candidates: tuple[
+            NormativeSource,
+            ...,
+        ] = (),
+        normative_candidates_by_finding: dict[
+            str,
+            tuple[
+                NormativeSource,
+                ...,
+            ],
+        ]
+        | None = None,
     ) -> tuple[
         str,
         tuple[
@@ -59,15 +266,16 @@ class FinalizeFindings:
         ],
         dict[str, Any],
     ]:
-        """Оформляет findings и использует релевантный опыт."""
+        """Оформляет findings, не позволяя enrichment их удалить или смешать."""
         if not findings:
             return (
                 "",
                 (),
                 {
                     "attempt": 0,
-                    "done_reason": ("no_findings"),
-                    "batch_size": (self.batch_size),
+                    "done_reason": "no_findings",
+                    "batch_size": self.batch_size,
+                    "effective_batch_size": self.batch_size,
                     "fallback_count": 0,
                     "batches": [],
                 },
@@ -77,13 +285,36 @@ class FinalizeFindings:
             finding_id: tuple(
                 source
                 for source in sources
-                if (source.score >= self.experience_min_score)
+                if source.score >= self.experience_min_score
             )
-            for (
-                finding_id,
-                sources,
-            ) in experience_by_finding.items()
+            for finding_id, sources in experience_by_finding.items()
         }
+
+        raw_candidate_groups = (
+            normative_candidates_by_finding
+            if normative_candidates_by_finding is not None
+            else {}
+        )
+
+        isolated_enrichment = bool(
+            raw_candidate_groups,
+        )
+
+        normalized_candidate_groups = _candidate_groups(
+            findings=findings,
+            normative_candidates_by_finding=raw_candidate_groups,
+            legacy_candidates=normative_candidates,
+        )
+
+        legacy_candidates = (
+            ()
+            if isolated_enrichment
+            else _dedupe_normative_sources(
+                normative_candidates,
+            )
+        )
+
+        effective_batch_size = 1 if isolated_enrichment else self.batch_size
 
         final_items: list[FinalFinding] = []
 
@@ -96,28 +327,84 @@ class FinalizeFindings:
             len(
                 findings,
             ),
-            self.batch_size,
+            effective_batch_size,
         ):
-            batch = findings[start : start + self.batch_size]
+            batch = findings[start : start + effective_batch_size]
 
             finding_ids = tuple(finding.finding_id for finding in batch)
 
+            if isolated_enrichment:
+                batch_candidates = normalized_candidate_groups.get(
+                    batch[0].finding_id,
+                    (),
+                )
+            else:
+                batch_candidates = legacy_candidates
+
+            allowed_normative_ids: list[str] = []
+
+            seen_normative_ids: set[str] = set()
+
+            for finding in batch:
+                for source in (
+                    *finding.basis_sources,
+                    *batch_candidates,
+                ):
+                    source_id = source.source_id.strip()
+
+                    if not source_id or source_id in seen_normative_ids:
+                        continue
+
+                    seen_normative_ids.add(
+                        source_id,
+                    )
+
+                    allowed_normative_ids.append(
+                        source_id,
+                    )
+
             try:
+                prompt = build_finalization_prompt(
+                    findings=batch,
+                    experience_by_finding=eligible_experience,
+                    experience_context_limit=(self.experience_context_limit),
+                    normative_candidates=batch_candidates,
+                )
+
+                if isolated_enrichment:
+                    prompt += """
+
+ВАЖНО ДЛЯ FINDING-LOCAL ENRICHMENT:
+
+- NORMATIVE CANDIDATES относятся только
+  к текущему finding;
+
+- не используй N-source из другого finding;
+
+- названия и номера ГОСТ, СП, ПУЭ, СНиП
+  НЕ пиши в comment и recommendation;
+
+- подтверждённый норматив показывается пользователю
+  отдельно через выбранный normative_source_id,
+  basis и basis_sources;
+
+- comment описывает проблему,
+  recommendation описывает действие;
+
+- если подходящего N нет,
+  finding всё равно возвращается.
+""".rstrip()
+
                 generation = await self.vision_model.generate_json(
-                    prompt=(
-                        build_finalization_prompt(
-                            findings=batch,
-                            experience_by_finding=(eligible_experience),
-                            experience_context_limit=(self.experience_context_limit),
-                        )
+                    prompt=prompt,
+                    schema=build_finalization_schema(
+                        finding_ids,
+                        normative_source_ids=tuple(
+                            allowed_normative_ids,
+                        ),
                     ),
-                    schema=(
-                        build_finalization_schema(
-                            finding_ids,
-                        )
-                    ),
-                    num_predict=(self.num_predict),
-                    seed=(300 + start),
+                    num_predict=self.num_predict,
+                    seed=300 + start,
                     stage=(
                         "finalization:"
                         + ",".join(
@@ -134,17 +421,17 @@ class FinalizeFindings:
                             "",
                         )
                     ): item
-                    for item in (
-                        generation.payload.get(
-                            "findings",
-                            [],
-                        )
+                    for item in generation.payload.get(
+                        "findings",
+                        [],
                     )
                     if isinstance(
                         item,
                         dict,
                     )
                 }
+
+                batch_fallback_count = 0
 
                 for finding in batch:
                     item = returned.get(
@@ -159,8 +446,18 @@ class FinalizeFindings:
                         )
 
                         fallback_count += 1
+                        batch_fallback_count += 1
 
                         continue
+
+                    finding_candidates = (
+                        normalized_candidate_groups.get(
+                            finding.finding_id,
+                            (),
+                        )
+                        if isolated_enrichment
+                        else legacy_candidates
+                    )
 
                     final_items.append(
                         self._build_final(
@@ -172,6 +469,8 @@ class FinalizeFindings:
                                     (),
                                 )
                             ),
+                            normative_candidates=(finding_candidates),
+                            guard_normative_free_text=(isolated_enrichment),
                         )
                     )
 
@@ -180,7 +479,8 @@ class FinalizeFindings:
                         "finding_ids": list(
                             finding_ids,
                         ),
-                        "fallback": False,
+                        "fallback": (batch_fallback_count > 0),
+                        "fallback_count": (batch_fallback_count),
                         **generation.metrics.as_dict(),
                     }
                 )
@@ -203,14 +503,42 @@ class FinalizeFindings:
                             finding_ids,
                         ),
                         "fallback": True,
+                        "fallback_count": len(
+                            batch,
+                        ),
                         "error": str(
                             error,
                         )[:1200],
                     }
                 )
 
+        if isolated_enrichment:
+            normative_candidates_count = sum(
+                len(
+                    sources,
+                )
+                for sources in normalized_candidate_groups.values()
+            )
+
+            normative_candidate_groups_count = sum(
+                bool(
+                    sources,
+                )
+                for sources in normalized_candidate_groups.values()
+            )
+        else:
+            normative_candidates_count = len(
+                legacy_candidates,
+            )
+
+            normative_candidate_groups_count = int(
+                bool(
+                    legacy_candidates,
+                )
+            )
+
         return (
-            ("Замечания сформированы по результатам нормативной проверки."),
+            "Замечания сформированы по результатам инженерной проверки.",
             tuple(
                 final_items,
             ),
@@ -219,10 +547,14 @@ class FinalizeFindings:
                 "done_reason": (
                     "completed_with_fallback" if fallback_count else "stop"
                 ),
-                "batch_size": (self.batch_size),
-                "fallback_count": (fallback_count),
+                "batch_size": self.batch_size,
+                "effective_batch_size": effective_batch_size,
+                "fallback_count": fallback_count,
                 "experience_min_score": (self.experience_min_score),
-                "batches": (batch_metrics),
+                "isolated_normative_enrichment": (isolated_enrichment),
+                "normative_candidates_count": (normative_candidates_count),
+                "normative_candidate_groups_count": (normative_candidate_groups_count),
+                "batches": batch_metrics,
             },
         )
 
@@ -230,30 +562,29 @@ class FinalizeFindings:
     def _fallback(
         finding: FindingDraft,
     ) -> FinalFinding:
-        """Возвращает finding без stylistic VLM."""
-        recommendation = finding.recommendation_draft.strip()
-
-        if not recommendation:
-            recommendation = (
-                "Проверить указанное несоответствие "
-                "и скорректировать проектное решение "
-                "по приведённому нормативному основанию."
-            )
-
+        """Возвращает исходный finding без потери evidence."""
         return FinalFinding(
-            finding_id=(finding.finding_id),
+            finding_id=finding.finding_id,
             page=finding.page,
-            page_type=(finding.page_type),
-            category=(finding.category),
-            severity=(finding.severity),
-            status=(finding.status),
-            comment=(finding.comment),
-            evidence=(finding.evidence),
-            recommendation=(recommendation),
-            confidence=(finding.confidence),
-            basis=(finding.basis),
-            basis_sources=(finding.basis_sources),
+            page_type=finding.page_type,
+            category=finding.category,
+            severity=finding.severity,
+            status=finding.status,
+            comment=finding.comment,
+            evidence=finding.evidence,
+            recommendation=(
+                _fallback_recommendation(
+                    finding,
+                )
+            ),
+            confidence=finding.confidence,
+            basis=finding.basis,
+            basis_sources=finding.basis_sources,
             experience_sources=(),
+            technical_assignment_basis_sources=(
+                finding.technical_assignment_basis_sources
+            ),
+            user_package_basis_sources=(finding.user_package_basis_sources),
         )
 
     @staticmethod
@@ -265,11 +596,16 @@ class FinalizeFindings:
             ExperienceSource,
             ...,
         ],
+        normative_candidates: tuple[
+            NormativeSource,
+            ...,
+        ],
+        guard_normative_free_text: bool,
     ) -> FinalFinding:
-        """Собирает итоговый finding и проверяет E-id."""
+        """Собирает final finding и валидирует finding-local N/E IDs."""
         experience_by_id = {source.source_id: source for source in available_experience}
 
-        requested_ids = string_tuple(
+        requested_experience_ids = string_tuple(
             item.get(
                 "experience_source_ids",
             ),
@@ -278,9 +614,34 @@ class FinalizeFindings:
 
         selected_experience = tuple(
             experience_by_id[source_id]
-            for source_id in requested_ids
+            for source_id in requested_experience_ids
             if source_id in experience_by_id
         )
+
+        available_normative = _available_normative_sources(
+            finding=finding,
+            normative_candidates=normative_candidates,
+        )
+
+        if "normative_source_ids" in item:
+            requested_normative_ids = string_tuple(
+                item.get(
+                    "normative_source_ids",
+                ),
+                limit=3,
+            )
+
+            selected_normative = _dedupe_normative_sources(
+                tuple(
+                    available_normative[source_id]
+                    for source_id in requested_normative_ids
+                    if source_id in available_normative
+                )
+            )
+        else:
+            # Backward-compatible fallback для старых fake responses
+            # и возможного in-flight legacy ответа.
+            selected_normative = finding.basis_sources
 
         comment = str(
             item.get(
@@ -296,24 +657,71 @@ class FinalizeFindings:
             )
         ).strip()
 
-        if not comment:
-            comment = finding.comment
+        if guard_normative_free_text:
+            comment = _safe_generated_text(
+                generated=comment,
+                fallback=finding.comment,
+                generic=(
+                    "На листе выявлено несоответствие, требующее проверки инженером."
+                ),
+            )
 
-        if not recommendation:
-            recommendation = finding.recommendation_draft
+            recommendation = _safe_generated_text(
+                generated=recommendation,
+                fallback=_fallback_recommendation(
+                    finding,
+                ),
+                generic=(
+                    "Проверить указанное несоответствие "
+                    "и при необходимости скорректировать "
+                    "проектное решение."
+                ),
+            )
+        else:
+            if not comment:
+                comment = finding.comment
+
+            if not recommendation:
+                recommendation = _fallback_recommendation(
+                    finding,
+                )
+
+        finding_category = finding.category
+
+        normalized_status = finding.status
+
+        has_customer_basis = bool(
+            finding.technical_assignment_basis_sources
+            or finding.user_package_basis_sources
+        )
+
+        if not selected_normative:
+            if finding_category == "normative_control":
+                finding_category = (
+                    "customer_requirements" if has_customer_basis else "other"
+                )
+
+            if not has_customer_basis:
+                normalized_status = "needs_review"
 
         return FinalFinding(
-            finding_id=(finding.finding_id),
+            finding_id=finding.finding_id,
             page=finding.page,
-            page_type=(finding.page_type),
-            category=(finding.category),
-            severity=(finding.severity),
-            status=(finding.status),
+            page_type=finding.page_type,
+            category=finding_category,
+            severity=finding.severity,
+            status=normalized_status,
             comment=comment,
-            evidence=(finding.evidence),
-            recommendation=(recommendation),
-            confidence=(finding.confidence),
-            basis=(finding.basis),
-            basis_sources=(finding.basis_sources),
-            experience_sources=(selected_experience),
+            evidence=finding.evidence,
+            recommendation=recommendation,
+            confidence=finding.confidence,
+            basis=build_basis(
+                selected_normative,
+            ),
+            basis_sources=selected_normative,
+            experience_sources=selected_experience,
+            technical_assignment_basis_sources=(
+                finding.technical_assignment_basis_sources
+            ),
+            user_package_basis_sources=(finding.user_package_basis_sources),
         )

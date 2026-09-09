@@ -3,15 +3,23 @@
 """Application port хранения файлов и результатов анализа."""
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import (
+    Any,
+    Protocol,
+)
 from uuid import UUID
 
 from pdrd_api_gateway.domain.analysis_submission import (
     AnalysisSubmission,
 )
+from pdrd_api_gateway.domain.normative_snapshot import (
+    NormativeAnalysisSnapshot,
+)
 
 
-class AnalysisArtifactStorageError(RuntimeError):
+class AnalysisArtifactStorageError(
+    RuntimeError,
+):
     """Ошибка infrastructure-хранилища артефактов анализа."""
 
 
@@ -28,7 +36,10 @@ class AnalysisRequestArtifacts:
     submission: AnalysisSubmission
 
     pdf_content: bytes | None
+
     cad_content: bytes | None
+
+    normative_snapshot: NormativeAnalysisSnapshot | None = None
 
 
 class AnalysisArtifactStore(Protocol):
@@ -42,6 +53,23 @@ class AnalysisArtifactStore(Protocol):
         cad_content: bytes | None,
     ) -> None:
         """Сохраняет manifest и исходные пользовательские файлы."""
+        ...
+
+    async def save_technical_assignment(
+        self,
+        *,
+        document_id: UUID,
+        content: bytes,
+    ) -> None:
+        """Сохраняет исходный файл ТЗ рядом с analysis artifacts."""
+        ...
+
+    async def load_technical_assignment(
+        self,
+        *,
+        document_id: UUID,
+    ) -> bytes | None:
+        """Возвращает исходные bytes ТЗ, если файл был загружен."""
         ...
 
     async def load_request(
@@ -64,7 +92,10 @@ class AnalysisArtifactStore(Protocol):
         self,
         *,
         document_id: UUID,
-        result: dict[str, Any],
+        result: dict[
+            str,
+            Any,
+        ],
     ) -> None:
         """Сохраняет итоговый JSON анализа."""
         ...
@@ -73,6 +104,12 @@ class AnalysisArtifactStore(Protocol):
         self,
         *,
         document_id: UUID,
-    ) -> dict[str, Any] | None:
+    ) -> (
+        dict[
+            str,
+            Any,
+        ]
+        | None
+    ):
         """Возвращает итоговый JSON, если он уже сформирован."""
         ...

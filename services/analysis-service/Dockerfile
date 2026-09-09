@@ -33,7 +33,9 @@ FROM base AS runtime
 RUN useradd \
     --create-home \
     --uid 1000 \
-    app
+    app \
+    && mkdir -p /var/lock/pdrd-gpu \
+    && chown -R app:app /var/lock/pdrd-gpu
 
 USER app
 
