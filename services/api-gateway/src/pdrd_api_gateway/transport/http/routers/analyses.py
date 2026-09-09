@@ -68,7 +68,9 @@ from pdrd_api_gateway.transport.http.schemas.analyses import (
 
 router = APIRouter(
     prefix="/api/v1/analyses",
-    tags=["analyses"],
+    tags=[
+        "analyses",
+    ],
 )
 
 
@@ -225,7 +227,7 @@ def parse_normative_document_ids(
     """Разбирает normative_document_ids."""
     return _parse_document_ids(
         raw_value,
-        field_name="normative_document_ids",
+        field_name=("normative_document_ids"),
     )
 
 
@@ -241,12 +243,12 @@ def parse_user_package_document_ids(
     """Разбирает user_package_document_ids."""
     return _parse_document_ids(
         raw_value,
-        field_name="user_package_document_ids",
+        field_name=("user_package_document_ids"),
     )
 
 
 def build_technical_assignment_response(
-    snapshot: (NormativeAnalysisSnapshot | None),
+    snapshot: NormativeAnalysisSnapshot | None,
 ) -> TechnicalAssignmentSnapshotResponse | None:
     """Преобразует domain snapshot ТЗ в HTTP schema."""
     if snapshot is None or snapshot.technical_assignment is None:
@@ -325,16 +327,30 @@ async def create_analysis(
         str,
         Form(),
     ] = "",
+    technical_assignment_id: Annotated[
+        UUID | None,
+        Form(),
+    ] = None,
+    technical_assignment_analysis_document_id: Annotated[
+        UUID | None,
+        Form(),
+    ] = None,
 ) -> AnalysisAcceptedResponse:
     """Принимает документы и создаёт asynchronous analysis job."""
     max_upload_bytes = container.settings.storage.max_upload_bytes
 
-    pdf_content, pdf_file_name = await read_upload(
+    (
+        pdf_content,
+        pdf_file_name,
+    ) = await read_upload(
         upload=pdf,
         max_upload_bytes=max_upload_bytes,
     )
 
-    cad_content, cad_file_name = await read_upload(
+    (
+        cad_content,
+        cad_file_name,
+    ) = await read_upload(
         upload=cad,
         max_upload_bytes=max_upload_bytes,
     )
@@ -369,8 +385,8 @@ async def create_analysis(
         "cad_file_name": cad_file_name,
         "pages": pages,
         "use_explanatory_note": (use_explanatory_note),
-        "note_start_page": note_start_page,
-        "note_end_page": note_end_page,
+        "note_start_page": (note_start_page),
+        "note_end_page": (note_end_page),
         "normative_section_id": (normative_section_id),
         "normative_document_ids": (parsed_normative_document_ids),
         "user_package_document_ids": (parsed_user_package_document_ids),
@@ -383,6 +399,14 @@ async def create_analysis(
 
         execute_kwargs["technical_assignment_file_name"] = (
             technical_assignment_file_name
+        )
+
+    if technical_assignment_id is not None:
+        execute_kwargs["technical_assignment_id"] = technical_assignment_id
+
+    if technical_assignment_analysis_document_id is not None:
+        execute_kwargs["technical_assignment_analysis_document_id"] = (
+            technical_assignment_analysis_document_id
         )
 
     try:

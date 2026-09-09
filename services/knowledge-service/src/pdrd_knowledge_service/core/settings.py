@@ -249,6 +249,28 @@ class TechnicalAssignmentSettings(BaseModel):
         le=100,
     )
 
+    ocr_min_text_chars: int = Field(
+        default=80,
+        ge=0,
+        le=10_000,
+    )
+
+    ocr_executable: str = "tesseract"
+
+    ocr_language: str = "rus+eng"
+
+    ocr_page_segmentation_mode: int = Field(
+        default=3,
+        ge=1,
+        le=13,
+    )
+
+    ocr_timeout_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        le=600,
+    )
+
     @property
     def max_upload_bytes(
         self,
@@ -301,7 +323,9 @@ class EmbeddingSettings(BaseModel):
     )
 
 
-class MultimodalEmbeddingSettings(EmbeddingSettings):
+class MultimodalEmbeddingSettings(
+    EmbeddingSettings,
+):
     """Backward-compatible T settings той же unified model."""
 
     model_context_tokens: int = Field(
@@ -364,7 +388,10 @@ class QdrantSettings(BaseModel):
         le=60,
     )
 
-    legacy_collections: tuple[str, ...] = (
+    legacy_collections: tuple[
+        str,
+        ...,
+    ] = (
         "dva_normative_v2",
         "dva_experience_v2",
         "dva_multimodal_qwen3vl2b_v1",
@@ -455,14 +482,14 @@ class Settings(BaseSettings):
         default=4096,
         ge=64,
         le=4096,
-        validation_alias="PDRD_EMBEDDING_DIMENSION",
+        validation_alias=("PDRD_EMBEDDING_DIMENSION"),
     )
 
     embedding_schema_version: int = Field(
         default=1,
         ge=1,
         le=1000,
-        validation_alias="PDRD_EMBEDDING_SCHEMA_VERSION",
+        validation_alias=("PDRD_EMBEDDING_SCHEMA_VERSION"),
     )
 
     service_name: str = "PDRD Knowledge Service"
@@ -498,15 +525,15 @@ class Settings(BaseSettings):
     )
 
     storage: NormativeStorageSettings = Field(
-        default_factory=NormativeStorageSettings,
+        default_factory=(NormativeStorageSettings),
     )
 
     indexing: NormativeIndexingSettings = Field(
-        default_factory=NormativeIndexingSettings,
+        default_factory=(NormativeIndexingSettings),
     )
 
     technical_assignment: TechnicalAssignmentSettings = Field(
-        default_factory=TechnicalAssignmentSettings,
+        default_factory=(TechnicalAssignmentSettings),
     )
 
     office_conversion: OfficeConversionSettings = Field(
@@ -518,7 +545,7 @@ class Settings(BaseSettings):
     )
 
     multimodal_embedding: MultimodalEmbeddingSettings = Field(
-        default_factory=MultimodalEmbeddingSettings,
+        default_factory=(MultimodalEmbeddingSettings),
     )
 
     qdrant: QdrantSettings = Field(
@@ -562,7 +589,7 @@ class Settings(BaseSettings):
         """Возвращает immutable vector-space identity."""
         return EmbeddingIdentity(
             model=self.embedding_model,
-            dimension=self.embedding_dimension,
+            dimension=(self.embedding_dimension),
             schema_version=(self.embedding_schema_version),
         )
 

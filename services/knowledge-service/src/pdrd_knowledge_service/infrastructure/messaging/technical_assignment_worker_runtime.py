@@ -61,23 +61,37 @@ async def execute_technical_assignment_indexing(
     )
 
     multimodal = HttpMultimodalEmbeddingProvider(
-        base_url=settings.embedding.base_url,
+        base_url=(settings.embedding.base_url),
         request_timeout_seconds=(settings.embedding.request_timeout_seconds),
         connect_timeout_seconds=(settings.embedding.connect_timeout_seconds),
         health_timeout_seconds=(settings.embedding.health_timeout_seconds),
     )
 
+    technical_assignment_settings = settings.technical_assignment
+
     use_case = IndexTechnicalAssignment(
         unit_of_work_factory=unit_of_work_factory,
-        storage=LocalFilesystemNormativeDocumentStorage(
-            root_path=Path(
-                settings.technical_assignment.storage_root_path,
-            ),
+        storage=(
+            LocalFilesystemNormativeDocumentStorage(
+                root_path=Path(
+                    technical_assignment_settings.storage_root_path,
+                ),
+            )
         ),
-        pdf_processor=(PyMuPdfTechnicalAssignmentProcessor()),
+        pdf_processor=(
+            PyMuPdfTechnicalAssignmentProcessor(
+                ocr_min_text_chars=(technical_assignment_settings.ocr_min_text_chars),
+                ocr_executable=(technical_assignment_settings.ocr_executable),
+                ocr_language=(technical_assignment_settings.ocr_language),
+                ocr_page_segmentation_mode=(
+                    technical_assignment_settings.ocr_page_segmentation_mode
+                ),
+                ocr_timeout_seconds=(technical_assignment_settings.ocr_timeout_seconds),
+            )
+        ),
         embedding_provider=multimodal,
         vector_store=QdrantVectorStore(
-            base_url=settings.qdrant.base_url,
+            base_url=(settings.qdrant.base_url),
             request_timeout_seconds=(settings.qdrant.request_timeout_seconds),
             health_timeout_seconds=(settings.qdrant.health_timeout_seconds),
         ),
@@ -87,12 +101,12 @@ async def execute_technical_assignment_indexing(
                 timeout_seconds=(settings.office_conversion.timeout_seconds),
             )
         ),
-        collection=settings.qdrant.multimodal_collection,
-        output_dimension=settings.embedding_dimension,
-        max_pages=settings.technical_assignment.max_pages,
-        render_dpi=settings.technical_assignment.render_dpi,
+        collection=(settings.qdrant.multimodal_collection),
+        output_dimension=(settings.embedding_dimension),
+        max_pages=(technical_assignment_settings.max_pages),
+        render_dpi=(technical_assignment_settings.render_dpi),
         max_image_pixels=(settings.multimodal_embedding.max_image_pixels),
-        page_text_limit=(settings.technical_assignment.page_text_limit),
+        page_text_limit=(technical_assignment_settings.page_text_limit),
     )
 
     try:

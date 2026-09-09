@@ -13,6 +13,9 @@ from pathlib import Path
 from pdrd_api_gateway.application.ports.technical_assignment_content import (
     TechnicalAssignmentContentReader,
 )
+from pdrd_api_gateway.application.ports.technical_assignment_index import (
+    TechnicalAssignmentIndexCoordinator,
+)
 from pdrd_api_gateway.application.use_cases.check_readiness import (
     CheckReadiness,
 )
@@ -60,6 +63,9 @@ from pdrd_api_gateway.infrastructure.knowledge.normative_catalog_management impo
 from pdrd_api_gateway.infrastructure.knowledge.technical_assignment_content import (
     HttpTechnicalAssignmentContentReader,
 )
+from pdrd_api_gateway.infrastructure.knowledge.technical_assignment_index import (
+    KnowledgeTechnicalAssignmentIndexCoordinator,
+)
 from pdrd_api_gateway.infrastructure.knowledge.user_package_catalog import (
     HttpUserPackageCatalogManager,
 )
@@ -101,6 +107,10 @@ class ApplicationContainer:
 
     technical_assignment_content_reader: TechnicalAssignmentContentReader | None = None
 
+    technical_assignment_index_coordinator: (
+        TechnicalAssignmentIndexCoordinator | None
+    ) = None
+
     async def close(
         self,
     ) -> None:
@@ -127,7 +137,7 @@ def build_container() -> ApplicationContainer:
 
     database_readiness = DatabaseReadinessProbe(
         engine=engine,
-        timeout_seconds=settings.database.health_timeout_seconds,
+        timeout_seconds=(settings.database.health_timeout_seconds),
     )
 
     broker_url = build_broker_url(
@@ -136,8 +146,8 @@ def build_container() -> ApplicationContainer:
 
     broker_readiness = RabbitMqReadinessProbe(
         broker_url=broker_url,
-        connect_timeout_seconds=settings.broker.connect_timeout_seconds,
-        health_timeout_seconds=settings.broker.health_timeout_seconds,
+        connect_timeout_seconds=(settings.broker.connect_timeout_seconds),
+        health_timeout_seconds=(settings.broker.health_timeout_seconds),
     )
 
     check_readiness = CheckReadiness(
@@ -183,15 +193,33 @@ def build_container() -> ApplicationContainer:
         settings=settings.knowledge_service,
     )
 
+    technical_assignment_index_coordinator = (
+        KnowledgeTechnicalAssignmentIndexCoordinator(
+            base_url=(settings.knowledge_service.base_url),
+            request_timeout_seconds=(
+                settings.knowledge_service.request_timeout_seconds
+            ),
+            connect_timeout_seconds=(
+                settings.knowledge_service.connect_timeout_seconds
+            ),
+            wait_timeout_seconds=(
+                settings.technical_assignment.index_wait_timeout_seconds
+            ),
+            poll_interval_seconds=(
+                settings.technical_assignment.index_poll_interval_seconds
+            ),
+        )
+    )
+
     resolve_normative_snapshot = ResolveNormativeSnapshot(
         catalog_reader=normative_catalog_reader,
-        user_package_reader=user_package_catalog_manager,
+        user_package_reader=(user_package_catalog_manager),
     )
 
     submit_analysis = SubmitAnalysis(
         artifact_store=artifact_store,
         create_analysis_job=create_analysis_job,
-        resolve_normative_snapshot=resolve_normative_snapshot,
+        resolve_normative_snapshot=(resolve_normative_snapshot),
     )
 
     get_analysis_result = GetAnalysisResult(
@@ -213,4 +241,5 @@ def build_container() -> ApplicationContainer:
         normative_catalog=normative_catalog,
         user_package_catalog=user_package_catalog,
         technical_assignment_content_reader=(technical_assignment_content_reader),
+        technical_assignment_index_coordinator=(technical_assignment_index_coordinator),
     )
