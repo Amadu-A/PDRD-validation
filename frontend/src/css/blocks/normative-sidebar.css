@@ -100,6 +100,8 @@
   align-items: flex-start;
   justify-content: space-between;
 
+  min-width: 0;
+
   gap: var(--space-3);
 }
 
@@ -126,6 +128,18 @@
   background: var(--color-surface-muted);
 }
 
+/*
+ * Wrapper остаётся grid-item даже после того, как JS удаляет
+ * normative-sidebar__disabled-surface при активации ТЗ.
+ * Поэтому ограничиваем его через стабильный data-атрибут секции.
+ */
+[data-specification-placeholder] > div {
+  min-width: 0;
+  max-width: 100%;
+
+  overflow: hidden;
+}
+
 .normative-sidebar__disabled-surface {
   pointer-events: none;
 }
@@ -145,17 +159,30 @@
 }
 
 .normative-sidebar__file-picker {
-  display: flex;
+  display: grid;
+
+  grid-template-columns:
+    auto
+    minmax(0, 1fr)
+    auto;
+
   align-items: center;
 
   min-width: 0;
   width: 100%;
+  max-width: 100%;
+
+  box-sizing: border-box;
 
   gap: var(--space-2);
+
+  overflow: hidden;
 }
 
 .normative-sidebar__file-picker-button {
-  flex-shrink: 0;
+  grid-column: 1;
+
+  min-width: 0;
 
   padding: 7px 9px;
 
@@ -167,10 +194,11 @@
   border-radius: var(--radius-control);
 
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .normative-sidebar__file-picker-name {
-  flex: 1 1 0;
+  grid-column: 2;
 
   min-width: 0;
 
@@ -182,6 +210,11 @@
 
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.normative-sidebar__file-picker
+  > .normative-sidebar__status-badge {
+  grid-column: 3;
 }
 
 .normative-sidebar__documents,
