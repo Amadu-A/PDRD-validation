@@ -47,7 +47,7 @@ class VisionSettings(BaseModel):
     )
 
     num_ctx: int = Field(
-        default=16384,
+        default=32768,
         ge=1024,
         le=131072,
     )

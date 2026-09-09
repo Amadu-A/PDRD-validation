@@ -26,6 +26,8 @@ logger = logging.getLogger(
     "uvicorn.error",
 )
 
+_CONTEXT_EXHAUSTION_MARGIN_TOKENS = 64
+
 
 class OllamaStructuredVisionModel:
     """Structured VLM provider с global GPU lease."""
@@ -307,6 +309,21 @@ class OllamaStructuredVisionModel:
                 )
 
             except json.JSONDecodeError as error:
+                if self._context_window_exhausted(
+                    last_metrics,
+                ):
+                    raise VisionModelError(
+                        "Контекст Ollama исчерпан "
+                        f"на этапе {stage}: "
+                        f"num_ctx={self._num_ctx}, "
+                        "prompt_tokens="
+                        f"{last_metrics.prompt_eval_count}, "
+                        "output_tokens="
+                        f"{last_metrics.eval_count}. "
+                        "Повтор с увеличенным num_predict пропущен, "
+                        "потому что он не помещается в configured context window.",
+                    ) from error
+
                 if attempt < self._max_retries:
                     continue
 
@@ -333,6 +350,24 @@ class OllamaStructuredVisionModel:
         raise VisionModelError(
             f"Не удалось получить JSON на этапе {stage}.",
         )
+
+    def _context_window_exhausted(
+        self,
+        metrics: GenerationMetrics | None,
+    ) -> bool:
+        """Определяет, что generation упёрлась именно в context window."""
+        if metrics is None or metrics.done_reason != "length":
+            return False
+
+        prompt_tokens = metrics.prompt_eval_count
+        output_tokens = metrics.eval_count
+
+        if prompt_tokens is None or output_tokens is None:
+            return False
+
+        used_tokens = prompt_tokens + output_tokens
+
+        return used_tokens >= self._num_ctx - _CONTEXT_EXHAUSTION_MARGIN_TOKENS
 
     async def _unload_model(
         self,
