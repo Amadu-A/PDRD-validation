@@ -24,6 +24,12 @@ EMBEDDING_URL = "http://pdrd-multimodal-embedding-service:8601"
 
 OLLAMA_URL = "http://ollama:11434"
 
+TEST_IMAGE_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAYElEQVR4nO3PQQ0AIBDAMMC/"
+    "50MEj4ZkVbDtmVk/OzrgVQNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNa"
+    "A1oDWgNaA1oDWgNaA1oDWgNaA1oDWgPaBXKqA31N0fbGAAAAAElFTkSuQmCC"
+)
+
 
 @pytest.mark.skipif(
     not RUN_GPU_RUNTIME,
@@ -39,16 +45,18 @@ async def test_embedding_residency_blocks_vlm_until_release() -> None:
     async with httpx.AsyncClient(
         timeout=timeout,
     ) as client:
-        await client.post(
+        release_before = await client.post(
             f"{EMBEDDING_URL}/internal/v1/release",
         )
+
+        assert release_before.status_code == 200, release_before.text
 
         embedding_response = await client.post(
             f"{EMBEDDING_URL}/internal/v1/embeddings",
             json={
                 "inputs": [
                     {
-                        "text": ("Runtime GPU lease contention test."),
+                        "text": "Runtime GPU lease contention test.",
                         "instruction": None,
                     }
                 ]
@@ -56,6 +64,17 @@ async def test_embedding_residency_blocks_vlm_until_release() -> None:
         )
 
         assert embedding_response.status_code == 200, embedding_response.text
+
+        embedding_payload = embedding_response.json()
+
+        assert embedding_payload["dimension"] == 4096
+
+        assert (
+            len(
+                embedding_payload["embeddings"][0],
+            )
+            == 4096
+        )
 
         status = (
             await client.get(
@@ -67,7 +86,7 @@ async def test_embedding_residency_blocks_vlm_until_release() -> None:
 
         analysis_task = asyncio.create_task(
             client.post(
-                (f"{ANALYSIS_URL}/internal/v1/pages/understand"),
+                f"{ANALYSIS_URL}/internal/v1/pages/understand",
                 json={
                     "page_number": 1,
                     "heuristic_page_type": "other",
@@ -75,7 +94,7 @@ async def test_embedding_residency_blocks_vlm_until_release() -> None:
                         "Проверочный инженерный документ. "
                         "На странице указан шкаф управления."
                     ),
-                    "image_base64": None,
+                    "image_base64": TEST_IMAGE_BASE64,
                 },
             )
         )
@@ -85,7 +104,7 @@ async def test_embedding_residency_blocks_vlm_until_release() -> None:
         )
 
         # Пока embedding checkpoint удерживает global lease,
-        # Analysis должен ждать, а не получить 503/OOM.
+        # Analysis должен ждать, а не получить 422/503/OOM.
         assert not analysis_task.done()
 
         release_response = await client.post(

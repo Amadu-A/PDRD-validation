@@ -81,7 +81,10 @@
       "position": [
         -1392,
         800
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -102,7 +105,10 @@
       "position": [
         -1168,
         800
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -136,7 +142,10 @@
       "position": [
         -736,
         800
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -178,7 +187,10 @@
       "position": [
         -288,
         800
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -231,7 +243,7 @@
         "rawContentType": "application/json",
         "body": "={{\n  JSON.stringify(\n    $('POST /analysis/v2/pdf').first().json.body?.technical_assignment_id\n      ? {\n          queries: $json.queries ?? [],\n          technical_assignment_id:\n            $('POST /analysis/v2/pdf').first().json.body.technical_assignment_id,\n          section_id:\n            $('POST /analysis/v2/pdf').first().json.body.normative_section_id,\n          normative_document_ids: JSON.parse(\n            $('POST /analysis/v2/pdf').first().json.body?.normative_document_ids\n              ?? '[]'\n          ),\n        }\n      : {\n          queries: $json.queries ?? [],\n          ...(\n            $('POST /analysis/v2/pdf').first().json.body?.normative_section_id\n              ? {\n                  section_id:\n                    $('POST /analysis/v2/pdf').first().json.body.normative_section_id,\n                  document_ids: JSON.parse(\n                    $('POST /analysis/v2/pdf').first().json.body?.normative_document_ids\n                      ?? '[]'\n                  ),\n                }\n              : {}\n          ),\n        }\n  )\n}}",
         "options": {
-          "timeout": 900000
+          "timeout": 1800000
         }
       },
       "id": "5c50f897-6383-4e52-a29b-e2b471e626b0",
@@ -241,12 +253,15 @@
       "position": [
         368,
         800
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const result = $json ?? {};\n\nconst guided = (\n  Array.isArray(result.technical_assignment_sources)\n  || Array.isArray(result.normative_sources)\n  || Array.isArray(result.conflict_candidates)\n);\n\nreturn {\n  json: {\n    normative_sources: guided\n      ? (\n          Array.isArray(result.normative_sources)\n            ? result.normative_sources\n            : []\n        )\n      : (\n          Array.isArray(result.sources)\n            ? result.sources\n            : []\n        ),\n\n    technical_assignment_sources: guided\n      && Array.isArray(result.technical_assignment_sources)\n        ? result.technical_assignment_sources\n        : [],\n\n    conflict_candidates: guided\n      && Array.isArray(result.conflict_candidates)\n        ? result.conflict_candidates\n        : [],\n\n    diagnostics: guided\n      && Array.isArray(result.diagnostics)\n        ? result.diagnostics\n        : [],\n\n    reference_resolutions: guided\n      && Array.isArray(result.reference_resolutions)\n        ? result.reference_resolutions\n        : [],\n\n    targeted_normative_sources: guided\n      && Array.isArray(result.targeted_normative_sources)\n        ? result.targeted_normative_sources\n        : [],\n\n    general_normative_sources: guided\n      && Array.isArray(result.general_normative_sources)\n        ? result.general_normative_sources\n        : [],\n\n    technical_assignment_embedding_model: guided\n      ? String(result.technical_assignment_embedding_model ?? '')\n      : '',\n\n    normative_embedding_model: guided\n      ? String(result.normative_embedding_model ?? '')\n      : String(result.embedding_model ?? ''),\n\n    technical_assignment_enabled: guided,\n  },\n};"
+        "jsCode": "const result = $json ?? {};\n\nconst guided = (\n  Array.isArray(result.technical_assignment_sources)\n  || Array.isArray(result.normative_sources)\n  || Array.isArray(result.conflict_candidates)\n);\n\nreturn {\n  json: {\n    normative_sources: guided\n      ? (\n          Array.isArray(result.normative_sources)\n            ? result.normative_sources\n            : []\n        )\n      : (\n          Array.isArray(result.sources)\n            ? result.sources\n            : []\n        ),\n\n    technical_assignment_sources: guided\n      && Array.isArray(result.technical_assignment_sources)\n        ? result.technical_assignment_sources\n        : [],\n\n    conflict_candidates: guided\n      && Array.isArray(result.conflict_candidates)\n        ? result.conflict_candidates\n        : [],\n\n    diagnostics: guided\n      && Array.isArray(result.diagnostics)\n        ? result.diagnostics\n        : [],\n\n    reference_resolutions: guided\n      && Array.isArray(result.reference_resolutions)\n        ? result.reference_resolutions\n        : [],\n\n    targeted_normative_sources: guided\n      && Array.isArray(result.targeted_normative_sources)\n        ? result.targeted_normative_sources\n        : [],\n\n    general_normative_sources: guided\n      && Array.isArray(result.general_normative_sources)\n        ? result.general_normative_sources\n        : [],\n\n    technical_assignment_embedding_model: guided\n      ? String(result.technical_assignment_embedding_model ?? '')\n      : '',\n\n    normative_embedding_model: guided\n      ? String(result.normative_embedding_model ?? '')\n      : String(result.embedding_model ?? ''),\n\n    technical_assignment_enabled: guided,\n  },\n};",
+        "mode": "runOnceForEachItem"
       },
       "id": "10c3b188-c8ab-47bd-8220-20bbecacc156",
       "name": "Normalize Requirement Search",
@@ -266,7 +281,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ queries: $('Build Normative Queries').item.json.queries ?? [], ...($('POST /analysis/v2/pdf').first().json.body?.normative_section_id ? { section_id: $('POST /analysis/v2/pdf').first().json.body.normative_section_id, document_ids: JSON.parse($('POST /analysis/v2/pdf').first().json.body?.user_package_document_ids ?? '[]') } : {}) }) }}",
         "options": {
-          "timeout": 900000
+          "timeout": 1800000
         }
       },
       "id": "34a3a66e-7da0-4554-a808-108558452258",
@@ -276,7 +291,10 @@
       "position": [
         816,
         800
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -285,7 +303,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{\n  JSON.stringify({\n    page_number:\n      $('Expand PDF Pages').item.json.page.page_number,\n\n    extracted_text:\n      $('Augment Project Context').item.json.analysis_text,\n\n    page_facts:\n      $('Understand Page').item.json.facts,\n\n    normative_sources:\n      $('Normalize Requirement Search').item.json.normative_sources ?? [],\n\n    technical_assignment_sources:\n      $('Normalize Requirement Search').item.json\n        .technical_assignment_sources ?? [],\n\n    conflict_candidates:\n      $('Normalize Requirement Search').item.json\n        .conflict_candidates ?? [],\n\n    user_package_sources:\n      $json.sources ?? [],\n\n    image_base64:\n      $('Expand PDF Pages').item.json.page.image_base64,\n\n    normative_system_prompt:\n      $('POST /analysis/v2/pdf').first().json.body\n        ?.normative_system_prompt ?? null,\n  })\n}}",
+        "body": "={{\n  JSON.stringify({\n    page_number:\n      $('Expand PDF Pages').item.json.page.page_number,\n    extracted_text:\n      $('Augment Project Context').item.json.analysis_text,\n    page_facts:\n      $('Understand Page').item.json.facts,\n    normative_sources:\n      $('Normalize Requirement Search').item.json.normative_sources ?? [],\n    technical_assignment_sources:\n      $('Normalize Requirement Search').item.json.technical_assignment_sources ?? [],\n    conflict_candidates:\n      $('Normalize Requirement Search').item.json.conflict_candidates ?? [],\n    user_package_sources:\n      $json.sources ?? [],\n    image_base64:\n      $('Expand PDF Pages').item.json.page.image_base64,\n    normative_system_prompt:\n      $('POST /analysis/v2/pdf').first().json.body?.normative_system_prompt ?? null,\n  })\n}}",
         "options": {
           "timeout": 1800000
         }
@@ -297,12 +315,15 @@
       "position": [
         1040,
         800
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\n\nconst normativeQueryItems = findings\n  .map((finding) => {\n    const findingQuery = String(finding.experience_query ?? '').trim();\n    if (!findingQuery) {\n      return null;\n    }\n\n    return {\n      finding_id: String(finding.finding_id ?? ''),\n      query: [\n        'Найти нормативное основание для уже обнаруженного инженерного замечания.',\n        'Нужен фрагмент нормативного документа, который прямо относится к указанному факту и типу проектного документа.',\n        'Не считать тематически похожий норматив достаточным подтверждением.',\n        findingQuery,\n      ].join('\\n'),\n    };\n  })\n  .filter((item) => item?.finding_id && item?.query)\n  .slice(0, 10);\n\nreturn {\n  json: {\n    findings,\n    normative_query_items: normativeQueryItems,\n    normative_queries: normativeQueryItems.map((item) => item.query),\n  },\n};"
+        "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\n\nconst normativeQueryItems = findings\n  .map((finding) => {\n    const findingQuery = String(finding.experience_query ?? '').trim();\n    if (!findingQuery) {\n      return null;\n    }\n\n    return {\n      finding_id: String(finding.finding_id ?? ''),\n      query: [\n        'Найти нормативное основание для уже обнаруженного инженерного замечания.',\n        'Нужен фрагмент нормативного документа, который прямо относится к указанному факту и типу проектного документа.',\n        'Не считать тематически похожий норматив достаточным подтверждением.',\n        findingQuery,\n      ].join('\\n'),\n    };\n  })\n  .filter((item) => item?.finding_id && item?.query)\n  .slice(0, 10);\n\nreturn {\n  json: {\n    findings,\n    normative_query_items: normativeQueryItems,\n    normative_queries: normativeQueryItems.map((item) => item.query),\n  },\n};",
+        "mode": "runOnceForEachItem"
       },
       "id": "774b9b80-21d6-4b98-97d4-79f3aec10101",
       "name": "Prepare Finding Normative Queries",
@@ -322,7 +343,7 @@
         "rawContentType": "application/json",
         "body": "={{\n  JSON.stringify({\n    queries: $json.normative_queries ?? [],\n    ...(\n      $('POST /analysis/v2/pdf').first().json.body?.normative_section_id\n        ? {\n            section_id:\n              $('POST /analysis/v2/pdf').first().json.body.normative_section_id,\n            document_ids: JSON.parse(\n              $('POST /analysis/v2/pdf').first().json.body?.normative_document_ids\n                ?? '[]'\n            ),\n          }\n        : {}\n    ),\n  })\n}}",
         "options": {
-          "timeout": 900000
+          "timeout": 1800000
         }
       },
       "id": "4bd7988c-142c-4c86-9fc5-faf765210102",
@@ -332,12 +353,15 @@
       "position": [
         1472,
         800
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const prepared = $('Prepare Finding Normative Queries').item.json;\nconst findings = Array.isArray(prepared.findings) ? prepared.findings : [];\nconst queryItems = Array.isArray(prepared.normative_query_items)\n  ? prepared.normative_query_items\n  : [];\nconst results = Array.isArray($json.results) ? $json.results : [];\n\nconst normativeCandidatesByFinding = {};\n\nfor (const finding of findings) {\n  normativeCandidatesByFinding[String(finding.finding_id ?? '')] = [];\n}\n\nfor (let index = 0; index < queryItems.length; index += 1) {\n  const queryItem = queryItems[index] ?? {};\n  const findingId = String(queryItem.finding_id ?? '');\n  if (!findingId) {\n    continue;\n  }\n\n  const result = results[index] ?? {};\n  const rawSources = Array.isArray(result.sources) ? result.sources : [];\n\n  normativeCandidatesByFinding[findingId] = rawSources.map(\n    (source, sourceIndex) => ({\n      ...source,\n      source_id: `NQ${index + 1}_${sourceIndex + 1}`,\n    }),\n  );\n}\n\nreturn {\n  json: {\n    findings,\n    normative_candidates_by_finding: normativeCandidatesByFinding,\n    experience_queries: findings\n      .map((finding) => String(finding.experience_query ?? '').trim())\n      .filter((query) => query.length > 0),\n  },\n};"
+        "jsCode": "const prepared = $('Prepare Finding Normative Queries').item.json;\nconst findings = Array.isArray(prepared.findings) ? prepared.findings : [];\nconst queryItems = Array.isArray(prepared.normative_query_items)\n  ? prepared.normative_query_items\n  : [];\nconst results = Array.isArray($json.results) ? $json.results : [];\n\nconst normativeCandidatesByFinding = {};\n\nfor (const finding of findings) {\n  normativeCandidatesByFinding[String(finding.finding_id ?? '')] = [];\n}\n\nfor (let index = 0; index < queryItems.length; index += 1) {\n  const queryItem = queryItems[index] ?? {};\n  const findingId = String(queryItem.finding_id ?? '');\n  if (!findingId) {\n    continue;\n  }\n\n  const result = results[index] ?? {};\n  const rawSources = Array.isArray(result.sources) ? result.sources : [];\n\n  normativeCandidatesByFinding[findingId] = rawSources.map(\n    (source, sourceIndex) => ({\n      ...source,\n      source_id: `NQ${index + 1}_${sourceIndex + 1}`,\n    }),\n  );\n}\n\nreturn {\n  json: {\n    findings,\n    normative_candidates_by_finding: normativeCandidatesByFinding,\n    experience_queries: findings\n      .map((finding) => String(finding.experience_query ?? '').trim())\n      .filter((query) => query.length > 0),\n  },\n};",
+        "mode": "runOnceForEachItem"
       },
       "id": "fe7eb96a-ec92-44cc-b599-df45f71915fe",
       "name": "Prepare Experience Queries",
@@ -357,7 +381,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ queries: $json.experience_queries ?? [] }) }}",
         "options": {
-          "timeout": 900000
+          "timeout": 1800000
         }
       },
       "id": "48da745e-e44c-4790-afda-aa4094aa99cf",
@@ -367,12 +391,15 @@
       "position": [
         1920,
         800
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const prepared = $('Prepare Experience Queries').item.json;\nconst findings = Array.isArray(prepared.findings) ? prepared.findings : [];\nconst normativeCandidatesByFinding =\n  prepared.normative_candidates_by_finding\n  && typeof prepared.normative_candidates_by_finding === 'object'\n    ? prepared.normative_candidates_by_finding\n    : {};\nconst results = Array.isArray($json.results) ? $json.results : [];\nconst experienceByFinding = {};\n\nfor (let index = 0; index < findings.length; index += 1) {\n  const finding = findings[index];\n  const result = results[index] ?? {};\n  experienceByFinding[finding.finding_id] = Array.isArray(result.sources)\n    ? result.sources\n    : [];\n}\n\nreturn {\n  json: {\n    findings,\n    normative_candidates_by_finding: normativeCandidatesByFinding,\n    experience_by_finding: experienceByFinding,\n  },\n};"
+        "jsCode": "const prepared = $('Prepare Experience Queries').item.json;\nconst findings = Array.isArray(prepared.findings) ? prepared.findings : [];\nconst normativeCandidatesByFinding =\n  prepared.normative_candidates_by_finding\n  && typeof prepared.normative_candidates_by_finding === 'object'\n    ? prepared.normative_candidates_by_finding\n    : {};\nconst results = Array.isArray($json.results) ? $json.results : [];\nconst experienceByFinding = {};\n\nfor (let index = 0; index < findings.length; index += 1) {\n  const finding = findings[index];\n  const result = results[index] ?? {};\n  experienceByFinding[finding.finding_id] = Array.isArray(result.sources)\n    ? result.sources\n    : [];\n}\n\nreturn {\n  json: {\n    findings,\n    normative_candidates_by_finding: normativeCandidatesByFinding,\n    experience_by_finding: experienceByFinding,\n  },\n};",
+        "mode": "runOnceForEachItem"
       },
       "id": "c344d2a5-ecc8-4379-8c02-57b26155a875",
       "name": "Build Experience Map",
@@ -402,12 +429,15 @@
       "position": [
         2368,
         800
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const expanded = $('Expand PDF Pages').item.json;\nconst understanding = $('Understand Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst requirements = $('Normalize Requirement Search').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst enrichment = $('Prepare Experience Queries').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\n\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\n\nconst candidateGroups = Object.values(candidatesByFinding)\n  .filter((value) => Array.isArray(value));\n\nconst candidatesCount = candidateGroups\n  .reduce((total, sources) => total + sources.length, 0);\n\nconst findingsWithCandidates = candidateGroups\n  .filter((sources) => sources.length > 0)\n  .length;\n\nreturn {\n  json: {\n    document: expanded.document,\n    project_context: expanded.project_context,\n    page_number: expanded.page.page_number,\n    heuristic_page_type: expanded.page.page_type,\n    width_points: expanded.page.width_points,\n    height_points: expanded.page.height_points,\n    extracted_text: expanded.page.text,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: requirements.normative_sources ?? [],\n    technical_assignment_sources:\n      requirements.technical_assignment_sources ?? [],\n    conflict_candidates: requirements.conflict_candidates ?? [],\n    requirement_diagnostics: requirements.diagnostics ?? [],\n    reference_resolutions: requirements.reference_resolutions ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    normative_enrichment: {\n      queries_count:\n        $('Prepare Finding Normative Queries').item.json.normative_queries?.length ?? 0,\n      findings_with_candidates: findingsWithCandidates,\n      candidates_count: candidatesCount,\n    },\n    normative_check: {\n      summary: check.summary ?? '',\n      findings: check.findings ?? [],\n      metrics: check.metrics ?? {},\n    },\n    findings,\n  },\n};"
+        "jsCode": "const expanded = $('Expand PDF Pages').item.json;\nconst understanding = $('Understand Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst requirements = $('Normalize Requirement Search').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst enrichment = $('Prepare Experience Queries').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\n\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\n\nconst candidateGroups = Object.values(candidatesByFinding)\n  .filter((value) => Array.isArray(value));\n\nconst candidatesCount = candidateGroups\n  .reduce((total, sources) => total + sources.length, 0);\n\nconst findingsWithCandidates = candidateGroups\n  .filter((sources) => sources.length > 0)\n  .length;\n\nreturn {\n  json: {\n    document: expanded.document,\n    project_context: expanded.project_context,\n    page_number: expanded.page.page_number,\n    heuristic_page_type: expanded.page.page_type,\n    width_points: expanded.page.width_points,\n    height_points: expanded.page.height_points,\n    extracted_text: expanded.page.text,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: requirements.normative_sources ?? [],\n    technical_assignment_sources:\n      requirements.technical_assignment_sources ?? [],\n    conflict_candidates: requirements.conflict_candidates ?? [],\n    requirement_diagnostics: requirements.diagnostics ?? [],\n    reference_resolutions: requirements.reference_resolutions ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    normative_enrichment: {\n      queries_count:\n        $('Prepare Finding Normative Queries').item.json.normative_queries?.length ?? 0,\n      findings_with_candidates: findingsWithCandidates,\n      candidates_count: candidatesCount,\n    },\n    normative_check: {\n      summary: check.summary ?? '',\n      findings: check.findings ?? [],\n      metrics: check.metrics ?? {},\n    },\n    findings,\n  },\n};",
+        "mode": "runOnceForEachItem"
       },
       "id": "57a66ecb-aeff-449d-9240-38dbd0dcb7f4",
       "name": "Build Page Result",
@@ -420,7 +450,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const pageItems = $input.all().map((item) => item.json);\npageItems.sort((left, right) => left.page_number - right.page_number);\nconst document = pageItems[0]?.document ?? { file_name: 'document.pdf', total_pages: 0, selected_pages: [] };\nconst context = pageItems[0]?.project_context ?? { enabled: false };\nconst pages = pageItems.map(({ document: _document, project_context: _context, ...page }) => page);\nconst findings = pages.flatMap((page) => Array.isArray(page.findings) ? page.findings : []);\n\nreturn [{\n  json: {\n    status: 'completed',\n    source_mode: 'pdf_only',\n    file_name: document.file_name,\n    pdf_file_name: document.file_name,\n    total_pages: document.total_pages,\n    selected_pages: document.selected_pages,\n    analyzed_pages: pages.length,\n    findings_count: findings.length,\n    summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранным листам не найдены.',\n    findings,\n    pages,\n    explanatory_note_context: context,\n    pipeline: ['document_extract','explanatory_note_validation','temporary_project_context_index','page_understanding','project_context_retrieval','normative_queries','requirement_search','user_package_search','normative_check','finding_normative_search','experience_search','finalization','project_context_cleanup'],\n    limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n  },\n}];"
+        "jsCode": "const pageItems = $input.all().map((item) => item.json);\npageItems.sort((left, right) => left.page_number - right.page_number);\nconst document = pageItems[0]?.document ?? { file_name: 'document.pdf', total_pages: 0, selected_pages: [] };\nconst context = pageItems[0]?.project_context ?? { enabled: false };\nconst pages = pageItems.map(({ document: _document, project_context: _context, ...page }) => page);\nconst findings = pages.flatMap((page) => Array.isArray(page.findings) ? page.findings : []);\n\nreturn [{\n  json: {\n    status: 'completed',\n    source_mode: 'pdf_only',\n    file_name: document.file_name,\n    pdf_file_name: document.file_name,\n    total_pages: document.total_pages,\n    selected_pages: document.selected_pages,\n    analyzed_pages: pages.length,\n    findings_count: findings.length,\n    summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранным листам не найдены.',\n    findings,\n    pages,\n    explanatory_note_context: context,\n    pipeline: ['document_extract','explanatory_note_validation','temporary_project_context_index','page_understanding','project_context_retrieval','normative_queries','requirement_search','user_package_search','normative_check','finding_normative_search','experience_search','finalization','project_context_cleanup'],\n    limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Техническое задание является самостоятельным требованием проекта, но не нормативным доказательством.', 'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n  },\n}];"
       },
       "id": "c1b7af80-0faa-4369-aa77-78ef1990636f",
       "name": "Aggregate PDF Result",
@@ -724,10 +754,9 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "f5c2a000-0000-4000-8000-000000000053",
+  "versionId": "f5c2a000-0000-4000-8000-000000000054",
   "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "6b859c42b12850c66afe9a08351bc3b3663ed09a1e3306fbf9dc27521c1cad83"
+    "templateCredsSetupCompleted": true
   },
   "nodeGroups": [],
   "id": "rvVthnH4N6Qp8iIn",

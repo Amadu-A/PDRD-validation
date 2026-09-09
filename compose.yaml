@@ -502,6 +502,7 @@ services:
 
     networks:
       - app-net
+      - ai-shared
 
   technical-assignment-indexer:
     build:
@@ -560,6 +561,7 @@ services:
 
     networks:
       - app-net
+      - ai-shared
 
   knowledge-service-tests:
     build:

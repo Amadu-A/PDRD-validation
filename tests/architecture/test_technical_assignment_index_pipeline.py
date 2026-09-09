@@ -48,6 +48,33 @@ def test_t_index_uses_separate_queue_and_worker() -> None:
     assert "--prefetch-multiplier=1" in compose
 
 
+def test_knowledge_workers_can_reach_shared_rabbitmq() -> None:
+    """Оба indexing worker обязаны состоять в shared RabbitMQ network."""
+    compose = (ROOT / "compose.yaml").read_text(
+        encoding="utf-8",
+    )
+
+    knowledge_block = compose.split(
+        "  knowledge-indexer:",
+        maxsplit=1,
+    )[1].split(
+        "  technical-assignment-indexer:",
+        maxsplit=1,
+    )[0]
+
+    technical_block = compose.split(
+        "  technical-assignment-indexer:",
+        maxsplit=1,
+    )[1].split(
+        "  knowledge-service-tests:",
+        maxsplit=1,
+    )[0]
+
+    assert "ai-shared" in knowledge_block
+
+    assert "ai-shared" in technical_block
+
+
 def test_t_uses_same_embedding_identity_but_separate_collection() -> None:
     """T и text share model, но не смешивают payload vector spaces."""
     settings = (
@@ -99,6 +126,30 @@ def test_analysis_waits_for_t_before_n8n() -> None:
     assert wait_position >= 0
 
     assert orchestrator_position > wait_position
+
+
+def test_gateway_passes_t_id_to_every_source_mode() -> None:
+    """T ID формируется до выбора PDF/CAD/PDF+CAD webhook."""
+    orchestrator = (
+        ROOT
+        / "services"
+        / "api-gateway"
+        / "src"
+        / "pdrd_api_gateway"
+        / "infrastructure"
+        / "orchestration"
+        / "n8n.py"
+    ).read_text(
+        encoding="utf-8",
+    )
+
+    assert 'data["technical_assignment_id"]' in orchestrator
+
+    assert "AnalysisSourceMode.PDF_ONLY" in orchestrator
+
+    assert "AnalysisSourceMode.CAD_ONLY" in orchestrator
+
+    assert "AnalysisSourceMode.PDF_CAD" in orchestrator
 
 
 def test_t_releases_gpu_before_ready() -> None:

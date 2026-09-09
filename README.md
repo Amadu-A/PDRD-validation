@@ -2,17 +2,20 @@
 
 # PDRD Validation — Drawing Validation AI
 
-PDRD Validation — локальный сервис проверки проектной и рабочей документации по нормативной базе, пользовательским пакетам документов, контексту проекта и Базе Опыта.
+PDRD Validation — локальный сервис проверки проектной и рабочей документации по нормативной базе, техническому заданию, пользовательским пакетам документов, контексту проекта и Базе Опыта.
 
-Пользователь загружает PDF, DXF/DWG или PDF вместе с соответствующим CAD-файлом. Система извлекает текст и геометрию, формирует машинный контекст листа, подбирает релевантные фрагменты, выполняет локальный VLM-анализ и возвращает структурированные замечания с кликабельными нормативными источниками.
+Пользователь загружает PDF, DXF/DWG или PDF вместе с соответствующим CAD-файлом, при необходимости прикладывает Техническое задание и выбирает нормативный раздел/пользовательские документы. Система извлекает текст и геометрию, формирует машинный контекст листа, выполняет semantic retrieval по источникам разных типов, запускает локальный VLM-анализ и возвращает структурированные замечания с разделённой доказательной базой `N/T/U/E`.
 
-Тяжёлые AI-задачи выполняются через RabbitMQ/Celery с `concurrency=1`, чтобы несколько пользовательских запросов не запускали параллельно несколько тяжёлых GPU-задач и не конкурировали за VRAM.
+Тяжёлые GPU-задачи выполняются с общим cross-process GPU lease. Analysis VLM и unified embedding runtime не должны одновременно загружать несовместимые тяжёлые модели в одну GPU без предварительной проверки VRAM.
 
 ## Возможности
 
 - PDF-only и multi-page PDF;
 - DXF-only и DWG -> DXF normalization;
 - PDF + CAD как два представления одного листа;
+- Техническое задание как отдельный project/customer source;
+- multimodal indexing страниц ТЗ;
+- T-guided нормативный retrieval;
 - контекст Пояснительной записки;
 - временный semantic Project Context;
 - managed нормативные разделы и вложенные папки;
@@ -24,33 +27,45 @@ PDRD Validation — локальный сервис проверки проек�
 - scoped retrieval выбранных пользовательских документов;
 - отдельный system prompt нормативного раздела;
 - transient working prompt;
-- кликабельные нормативные источники;
+- кликабельные нормативные и T sources;
 - База Опыта;
-- локальная VLM и embeddings через Ollama;
+- единая embedding model для N/T/U/E/PZ;
+- blue/green переиндексация Qdrant при смене embedding identity;
+- cross-process GPU lease и RAM/VRAM admission;
 - n8n orchestration;
 - frontend только через API Gateway;
 - cleanup временного Project Context;
-- unit, integration и architecture tests.
+- unit, integration, architecture и GPU runtime tests.
 
-## Главный принцип разделения источников
+# Семантика источников N / T / U / E
 
-В одном managed catalog существуют две области:
+Источники не объединяются в одну семантическую роль. Тип источника определяет, что именно он может доказывать.
 
-- `normative` — нормативная база;
-- `user_package` — пользовательские документы проекта/заказчика.
+| Префикс | Тип | Роль |
+|---|---|---|
+| `N1`, `N2`, ... | Normative | нормативная база: ГОСТ, СП, ПУЭ и другие нормативные требования |
+| `T1`, `T2`, ... | Technical Assignment | требования ТЗ, заказчика и проекта |
+| `U1`, `U2`, ... | User Package | пользовательские документы проекта/заказчика |
+| `E1`, `E2`, ... | Experience | База Опыта, используемая при finalization/recommendation |
 
-Обе области используют:
+Главные правила:
 
-- PostgreSQL metadata;
-- один filesystem volume;
-- один indexing pipeline;
-- одну Qdrant collection `dva_normative_v2`.
+- только `N` может подтверждать утверждение о нарушении нормативного документа;
+- `T` является самостоятельным project/customer requirement и может подтверждать `customer_requirements`;
+- `T` может содержать ссылки на нормативы и направлять targeted N retrieval, но не превращается в норматив;
+- `U` является самостоятельным пользовательским/project source, но не нормативным доказательством;
+- `E` используется только для опыта, finalization и рекомендаций;
+- finding без N/T/U не удаляется автоматически: инженерное/визуальное замечание может остаться `needs_review`;
+- `normative_control` без валидного `N` не должен сохраняться только на основании `T` или `U`.
 
-Но при анализе они имеют **разные роли**.
+Итоговые typed source arrays:
 
-Нормативы формируют `N1`, `N2`, ... и только они могут попасть в `normative_source_ids`, `basis_sources` и кликабельные нормативные ссылки.
-
-Пользовательские документы формируют `U1`, `U2`, ... и используются только как дополнительный фактический контекст. Они не могут самостоятельно доказывать нарушение ГОСТ, СП, ПУЭ или другого нормативного документа.
+```text
+basis_sources                       = N
+technical_assignment_basis_sources  = T
+user_package_basis_sources          = U
+experience_sources                  = E
+```
 
 # Технологии
 
@@ -62,7 +77,8 @@ PDRD Validation — локальный сервис проверки проек�
 | Orchestration | n8n |
 | Vector DB | Qdrant |
 | VLM | Ollama + `qwen3-vl:8b-instruct` |
-| Embeddings | Ollama + `qwen3-embedding:4b` |
+| Embeddings | dedicated service + `Qwen/Qwen3-VL-Embedding-8B` |
+| Embedding dimension | `4096` |
 | PDF | PyMuPDF |
 | Word | LibreOffice headless |
 | CAD | ezdxf, LibreDWG |
@@ -74,10 +90,11 @@ PDRD Validation — локальный сервис проверки проек�
 
 Bounded contexts:
 
-- **API Gateway** — публичный API, job state, immutable analysis snapshot, Outbox, Celery и analysis artifacts.
+- **API Gateway** — публичный API, job state, immutable analysis snapshot, Outbox, Celery, analysis artifacts и public content proxy для managed sources.
 - **Document Service** — PDF/CAD extraction, render, DWG -> DXF.
-- **Knowledge Service** — managed catalog, PostgreSQL metadata, Qdrant, embeddings, Normative RAG, User Package RAG, Experience RAG и Project Context.
-- **Analysis Service** — VLM page understanding, нормативная проверка и finalization.
+- **Knowledge Service** — managed catalog, ТЗ lifecycle, PostgreSQL metadata, Qdrant, N/T/U/E retrieval и Project Context.
+- **Multimodal Embedding Service** — единый text/image/mixed embedding runtime `Qwen3-VL-Embedding-8B`.
+- **Analysis Service** — VLM page understanding, requirement check, N/T/U policy и finalization.
 - **n8n** — orchestration внутренних вызовов.
 - **Frontend** — Browser -> API Gateway; прямого доступа к n8n и внутренним сервисам нет.
 
@@ -91,8 +108,10 @@ Project infrastructure:
 
 - PostgreSQL;
 - Qdrant;
+- Multimodal Embedding Service;
 - application services;
-- project Docker volumes.
+- project Docker volumes;
+- общий GPU coordination volume.
 
 Направление зависимостей backend:
 
@@ -119,7 +138,7 @@ flowchart TD
 
     GW --> FS["Analysis Artifact Store"]
     GW --> KS["Knowledge Service"]
-    KS --> RESOLVE["Resolve analysis selection"]
+    KS --> RESOLVE["Resolve immutable analysis selection"]
     RESOLVE --> GW
 
     GW --> PG[("PostgreSQL")]
@@ -133,8 +152,12 @@ flowchart TD
     N8N --> AS["Analysis Service"]
 
     KS2 --> QD[("Qdrant")]
-    KS2 --> EMB["Ollama Embeddings"]
-    AS --> VLM["Ollama VLM"]
+    KS2 --> EMB["Unified Embedding Service\nQwen3-VL-Embedding-8B"]
+    AS --> VLM["Ollama VLM\nqwen3-vl:8b-instruct"]
+
+    EMB --> GLOCK["Global GPU lease"]
+    VLM --> GLOCK
+    GLOCK --> GPU["NVIDIA GPU"]
 
     N8N --> W
     W --> PG
@@ -144,7 +167,7 @@ flowchart TD
     POLL --> GW
 ```
 
-## 2. Managed catalog и индексация
+## 2. Managed N/U catalog и индексация
 
 ```mermaid
 flowchart TD
@@ -167,13 +190,40 @@ flowchart TD
 
     PDF --> TEXT["Page extraction"]
     TEXT --> CHUNK["Chunking"]
-    CHUNK --> EMB["Ollama embeddings"]
-    EMB --> MANAGED[("dva_normative_v2")]
+    CHUNK --> EMB["Unified text embedding\nQwen3-VL-Embedding-8B"]
+    EMB --> MANAGED[("dva_catalog_active")]
 
     IDX --> PG
 ```
 
-## 3. Анализ одного листа
+`N` и `U` используют один physical vector space, но semantic role определяется PostgreSQL `catalog_area` до vector search.
+
+## 3. Техническое задание
+
+```mermaid
+flowchart TD
+    TFILE["Техническое задание PDF/DOC/DOCX"] --> GW["API Gateway"]
+    GW --> ART["Immutable analysis artifact"]
+    GW --> KS["Knowledge Service"]
+
+    KS --> TPG[("technical_assignments metadata")]
+    KS --> TSTORE[("technical_assignment_documents volume")]
+    TPG --> TO["T Outbox"]
+    TO --> RMQ["RabbitMQ pdrd.knowledge.technical-assignment"]
+    RMQ --> TW["technical-assignment-indexer\nconcurrency=1 / prefetch=1"]
+
+    TW --> TSTORE
+    TW --> PAGE["Page text + rendered image"]
+    PAGE --> EMB["Qwen3-VL-Embedding-8B"]
+    EMB --> TQ[("dva_technical_assignment_active")]
+    TW --> READY["index_status=ready"]
+
+    READY --> ANALYSIS["Analysis allowed to enter n8n"]
+```
+
+ТЗ индексируется до запуска n8n. Analysis job не начинает orchestration, пока связанный T-index не перешёл в `READY`.
+
+## 4. Анализ одного листа с N/T/U
 
 ```mermaid
 flowchart TD
@@ -186,27 +236,82 @@ flowchart TD
     PZS --> AUG["Augmented project context"]
     EMPTY --> AUG
 
-    FACTS --> Q["Retrieval queries"]
+    FACTS --> Q["Build retrieval queries"]
     AUG --> Q
 
-    Q --> NS["Search Normative"]
+    Q --> REQ{"ТЗ подключено?"}
+    REQ -->|нет| NS["General N retrieval"]
+    REQ -->|да| TS["T multimodal retrieval"]
+    TS --> TN["T-guided N retrieval"]
+    NS --> MERGE["Typed requirement context"]
+    TN --> MERGE
+    TS --> MERGE
+
     Q --> US["Search User Packages"]
 
-    NS --> NCTX["N1, N2, N3"]
-    US --> UCTX["U1, U2, U3"]
+    MERGE --> NCTX["N1, N2, ..."]
+    MERGE --> TCTX["T1, T2, ..."]
+    US --> UCTX["U1, U2, ..."]
 
-    NCTX --> CHECK["VLM normative check"]
+    NCTX --> CHECK["VLM requirement check"]
+    TCTX --> CHECK
     UCTX --> CHECK
 
+    CHECK --> FQ["Finding-local normative queries"]
+    FQ --> FN["Finding-local N retrieval"]
+    FN --> FINALCTX["Normative enrichment"]
+
     CHECK --> EQ["Experience queries"]
+    FINALCTX --> EQ
     EQ --> ES["Experience search"]
 
-    CHECK --> FINAL["Finalization"]
-    ES --> FINAL
-    FINAL --> RESULT["Findings + normative citations"]
+    ES --> FINAL["Finalization"]
+    FINAL --> RESULT["Final findings\nN/T/U/E separated"]
 ```
 
-## 4. PostgreSQL — таблицы и связи
+## 5. GPU coordination
+
+```mermaid
+flowchart TD
+    REQ["GPU operation"] --> LOCK["Acquire cross-process GPU lease"]
+    LOCK --> ADMISSION["Check available RAM / VRAM"]
+    ADMISSION --> ENOUGH{"Resources enough?"}
+
+    ENOUGH -->|нет| WAIT["Bounded wait"]
+    WAIT --> ADMISSION
+
+    ENOUGH -->|да| LOAD{"Runtime"}
+    LOAD -->|Embedding| EMB["Load Qwen3-VL-Embedding-8B"]
+    LOAD -->|Analysis| VLM["Load qwen3-vl:8b-instruct"]
+
+    EMB --> INF["Inference"]
+    VLM --> INF
+    INF --> UNLOAD["Release / unload model"]
+    UNLOAD --> FREE["Release GPU lease"]
+```
+
+Общий lock path:
+
+```text
+/var/lock/pdrd-gpu/gpu.lock
+```
+
+Analysis Service и Multimodal Embedding Service монтируют один `gpu_coordination` volume.
+
+Порядок принципиален:
+
+```text
+acquire global lease
+  -> check free resources
+  -> load model
+  -> inference
+  -> unload/release model
+  -> release lease
+```
+
+Обычный preflight `nvidia-smi` без lease не используется как механизм координации, потому что он оставляет TOCTOU race.
+
+## 6. PostgreSQL — таблицы и связи
 
 Один PostgreSQL instance используется API Gateway и Knowledge Service. Knowledge Service хранит свои таблицы в схеме `knowledge`.
 
@@ -220,74 +325,8 @@ erDiagram
     NORMATIVE_CATEGORIES ||--o{ NORMATIVE_DOCUMENTS : groups
     NORMATIVE_DOCUMENTS ||--o{ NORMATIVE_OUTBOX_MESSAGES : indexes
 
-    ANALYSIS_JOBS {
-        uuid id PK
-        uuid document_id
-        jsonb normative_snapshot
-        varchar status
-        int attempt_count
-        varchar error_code
-        text error_message
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    OUTBOX_MESSAGES {
-        uuid id PK
-        uuid aggregate_id FK
-        varchar event_type
-        jsonb payload
-        int attempt_count
-        text last_error
-        timestamptz created_at
-        timestamptz published_at
-    }
-
-    NORMATIVE_SECTIONS {
-        uuid id PK
-        varchar name
-        text system_prompt
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    NORMATIVE_CATEGORIES {
-        uuid id PK
-        uuid section_id FK
-        uuid parent_id FK
-        varchar name
-        varchar catalog_area
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    NORMATIVE_DOCUMENTS {
-        uuid id PK
-        uuid section_id FK
-        uuid category_id FK
-        varchar original_name
-        varchar storage_key
-        varchar mime_type
-        int size_bytes
-        varchar sha256
-        varchar catalog_area
-        varchar index_status
-        text index_error
-        timestamptz indexed_at
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    NORMATIVE_OUTBOX_MESSAGES {
-        uuid id PK
-        uuid aggregate_id FK
-        varchar event_type
-        jsonb payload
-        int attempt_count
-        text last_error
-        timestamptz created_at
-        timestamptz published_at
-    }
+    NORMATIVE_SECTIONS ||--o{ TECHNICAL_ASSIGNMENTS : scopes
+    TECHNICAL_ASSIGNMENTS ||--o{ TECHNICAL_ASSIGNMENT_OUTBOX_MESSAGES : indexes
 ```
 
 ### API Gateway
@@ -296,9 +335,9 @@ erDiagram
 
 - lifecycle задания;
 - `normative_snapshot` — immutable JSONB настроек на момент создания job;
-- изменение UI, раздела, prompt или checkbox после запуска не изменяет уже созданный job.
+- изменение UI, раздела, prompt, T или checkbox после запуска не изменяет уже созданный job.
 
-Актуальный snapshot:
+Snapshot содержит независимо:
 
 ```json
 {
@@ -309,9 +348,16 @@ erDiagram
   "user_package_document_ids": [
     "<user-package-uuid>"
   ],
-  "system_prompt": "<exact resolved prompt>"
+  "system_prompt": "<exact resolved prompt>",
+  "technical_assignment": {
+    "technical_assignment_id": "<uuid>",
+    "analysis_document_id": "<uuid>",
+    "source_file": "ТЗ.pdf"
+  }
 }
 ```
+
+`technical_assignment` отсутствует, если ТЗ не подключено.
 
 `outbox_messages`
 
@@ -334,15 +380,25 @@ erDiagram
 `knowledge.normative_documents`
 
 - metadata PDF/DOC/DOCX;
-- bytes хранятся в filesystem volume, а не PostgreSQL;
+- bytes хранятся в filesystem volume;
 - `storage_key` указывает на physical file;
 - `index_status`: `uploaded`, `queued`, `indexing`, `ready`, `failed`, `deleting`;
-- `catalog_area` является source of truth для разделения нормативов и пользовательских пакетов.
+- `catalog_area` является source of truth для разделения N и U.
 
 `knowledge.normative_outbox_messages`
 
-- durable события managed индексации;
-- связаны с `normative_documents`.
+- durable события managed N/U indexing.
+
+`knowledge.technical_assignments`
+
+- metadata ТЗ конкретного analysis document;
+- lifecycle T indexing;
+- `index_status`: upload/index queue/indexing/ready/failed состояния.
+
+`knowledge.technical_assignment_outbox_messages`
+
+- отдельный durable outbox для T indexing;
+- не смешивается с normative outbox.
 
 Knowledge Service использует отдельную Alembic version table:
 
@@ -350,27 +406,52 @@ Knowledge Service использует отдельную Alembic version table:
 alembic_version_knowledge
 ```
 
-## 5. Qdrant — коллекции
+## 7. Qdrant — stable aliases и physical collections
 
 ```mermaid
 flowchart LR
-    KS["Knowledge Service"] --> M[("dva_normative_v2")]
-    KS --> E[("dva_experience_v2")]
-    KS --> P[("pdrd_project_context_CONTEXT_ID")]
+    KS["Knowledge Service"] --> CA["dva_catalog_active"]
+    KS --> TA["dva_technical_assignment_active"]
+    KS --> EA["dva_experience_active"]
+    KS --> P["pdrd_project_context_<context_id>"]
 
-    M --> MN["Managed normative + user-package chunks"]
-    E --> EP["Постоянная База Опыта"]
+    CA --> CP[("dva_catalog_<fingerprint>")]
+    TA --> TP[("dva_technical_assignment_<fingerprint>")]
+    EA --> EP[("dva_experience_<fingerprint>")]
+
+    CP --> NU["N + U chunks"]
+    TP --> T["T page multimodal points"]
+    EP --> E["Experience points"]
+
     P --> PP["Временная ПЗ"]
     PP --> CLEAN["Cleanup после анализа"]
 ```
 
-### `dva_normative_v2`
+Stable aliases:
 
-Одна постоянная managed collection используется и для `normative`, и для `user_package`.
+```text
+dva_catalog_active
+dva_technical_assignment_active
+dva_experience_active
+```
 
-Для PDF point соответствует chunk физической страницы. Для DOC/DOCX сначала создаётся PDF-preview, поэтому `page` относится к browser-viewable PDF.
+Physical collection name определяется fingerprint:
 
-Payload:
+```text
+fingerprint = sha256(model | dimension | schema_version)[:16]
+```
+
+Для текущих default settings:
+
+```text
+PDRD_EMBEDDING_MODEL=Qwen/Qwen3-VL-Embedding-8B
+PDRD_EMBEDDING_DIMENSION=4096
+PDRD_EMBEDDING_SCHEMA_VERSION=1
+```
+
+### Managed N/U payload
+
+Для PDF point соответствует chunk физической страницы. Для DOC/DOCX сначала создаётся PDF-preview.
 
 ```json
 {
@@ -385,24 +466,41 @@ Payload:
 }
 ```
 
-`catalog_area` намеренно не дублируется в Qdrant payload. Source of truth для `normative` / `user_package` — PostgreSQL.
+`catalog_area` намеренно остаётся source of truth в PostgreSQL.
 
 Перед vector search Knowledge Service:
 
-1. получает выбранные IDs;
-2. проверяет их в PostgreSQL;
+1. получает IDs из immutable snapshot;
+2. проверяет existence;
 3. проверяет `section_id`;
 4. проверяет `catalog_area`;
 5. проверяет `index_status=ready`;
-6. только после этого строит Qdrant filter по exact `document_id`.
+6. строит exact Qdrant filter по `document_id`.
 
-Это не позволяет подставить UUID пользовательского документа в нормативный retrieval и наоборот.
+### T payload
 
-### `dva_experience_v2`
+Один T point соответствует странице и содержит multimodal representation:
 
-Постоянная База Опыта.
+```json
+{
+  "source_type": "technical_assignment",
+  "representation": "page_multimodal",
+  "technical_assignment_id": "<uuid>",
+  "analysis_document_id": "<uuid>",
+  "section_id": "<uuid>",
+  "source_file": "ТЗ.pdf",
+  "source_sha256": "<sha256>",
+  "page": 4,
+  "pixel_width": 1240,
+  "pixel_height": 1754,
+  "normative_refs": [
+    "СП 256.1325800.2016"
+  ],
+  "text": "<page text>"
+}
+```
 
-Основной payload:
+### Experience payload
 
 ```json
 {
@@ -420,13 +518,9 @@ Payload:
 }
 ```
 
-`scripts/kb_sync.py` работает только с legacy Базой Опыта. Managed normative/user-package catalog он не создаёт, не обновляет и не удаляет.
+### Project Context
 
-### `pdrd_project_context_CONTEXT_ID`
-
-Временная collection Пояснительной записки конкретного analysis context.
-
-Payload:
+Временная collection Пояснительной записки конкретного analysis context:
 
 ```json
 {
@@ -436,11 +530,56 @@ Payload:
 }
 ```
 
-Collection удаляется cleanup-механизмом после анализа. ПЗ — контекст проекта, а не нормативное доказательство.
+ПЗ — контекст проекта, а не нормативное доказательство.
 
-## 6. Физическое хранение
+## 8. Blue/green embedding migration
 
-В Mermaid пути заключены в кавычки. Без кавычек конструкция вида `NODE[/var/lib/... ]` воспринимается Mermaid как специальная shape syntax и GitHub выдаёт `Lexical error`.
+При смене:
+
+```text
+PDRD_EMBEDDING_MODEL
+PDRD_EMBEDDING_DIMENSION
+PDRD_EMBEDDING_SCHEMA_VERSION
+```
+
+меняется embedding fingerprint.
+
+```mermaid
+flowchart TD
+    START["Stack startup"] --> MIG["knowledge-embedding-migrator"]
+    MIG --> ID["Compute current fingerprint"]
+    ID --> SAME{"Aliases already point\nto current targets?"}
+
+    SAME -->|да| NOOP["Fast no-op"]
+    SAME -->|нет| CREATE["Create new physical collections"]
+
+    CREATE --> NU["Reindex persisted N/U files"]
+    CREATE --> T["Reindex persisted READY T files"]
+    CREATE --> E["Re-embed persisted Experience payload"]
+
+    NU --> CHECK["All rebuilds succeeded"]
+    T --> CHECK
+    E --> CHECK
+
+    CHECK --> SWITCH["Atomic alias switch"]
+    SWITCH --> CLEAN["Delete obsolete managed/legacy collections"]
+```
+
+Source documents не восстанавливаются из старых vectors:
+
+- N/U перечитываются из `normative_documents`;
+- T перечитывается из `technical_assignment_documents`;
+- metadata читаются из PostgreSQL;
+- E переэмбеддится из сохранённых payload;
+- временные Project Context создаются заново в конкретном analysis run.
+
+Если rebuild падает до cutover:
+
+- текущие aliases не переключаются;
+- старый рабочий vector space остаётся доступным;
+- незавершённые новые targets очищаются.
+
+## 9. Физическое хранение
 
 ```mermaid
 flowchart TD
@@ -448,168 +587,318 @@ flowchart TD
     QD[("Qdrant")] --> QDV["qdrant_data"]
     GW["API Gateway / worker"] --> AV["analysis_artifacts"]
     KS["Knowledge Service / indexer"] --> NV["normative_documents"]
+    TIDX["T indexer"] --> TV["technical_assignment_documents"]
+    EMB["Embedding Service"] --> MC["multimodal_model_cache"]
+    AS["Analysis Service"] --> GL["gpu_coordination"]
+    EMB --> GL
 
     PGV --> PGP["/var/lib/postgresql/data"]
     QDV --> QDP["/qdrant/storage"]
     AV --> AP["/data/analyses"]
     NV --> NP["/data/normative"]
+    TV --> TP["/data/technical-assignments"]
+    MC --> MCP["/models/huggingface"]
+    GL --> GP["/var/lock/pdrd-gpu"]
 ```
 
-| Данные | Docker volume | Путь в container |
+| Данные | Docker volume | Путь |
 |---|---|---|
 | PostgreSQL | `postgres_data` | `/var/lib/postgresql/data` |
 | Qdrant | `qdrant_data` | `/qdrant/storage` |
 | Analysis artifacts | `analysis_artifacts` | `/data/analyses` |
-| Managed normative + package files | `normative_documents` | `/data/normative` |
+| Managed N/U files | `normative_documents` | `/data/normative` |
+| T files | `technical_assignment_documents` | `/data/technical-assignments` |
+| HF embedding checkpoint cache | `multimodal_model_cache` | `/models/huggingface` |
+| GPU lease | `gpu_coordination` | `/var/lock/pdrd-gpu` |
 
-Фактическое Docker volume name зависит от Compose project name. Проверять нужно через Docker, а не предполагать имя:
+Обычный deploy/restart не должен использовать:
 
 ```bash
-docker compose ps -q knowledge-service \
-  | xargs docker inspect \
-  --format '{{range .Mounts}}{{println .Name "->" .Destination}}{{end}}'
+docker compose down -v
 ```
 
-На ранее проверенном deployment Compose создал volume вида:
+потому что `-v` удаляет persistent volumes.
 
-```text
-pdrd-validation-ai_normative_documents
-```
+# Как работает retrieval
 
-но на другом хосте/Compose project prefix может отличаться.
-
-### Реальное расположение managed документов
-
-PDF:
-
-```text
-/data/normative/<section_id>/<document_id>.pdf
-```
-
-DOC:
-
-```text
-/data/normative/<section_id>/<document_id>.doc
-```
-
-DOCX:
-
-```text
-/data/normative/<section_id>/<document_id>.docx
-```
-
-Word PDF-preview:
-
-```text
-/data/normative/<section_id>/<document_id>.doc.preview.pdf
-/data/normative/<section_id>/<document_id>.docx.preview.pdf
-```
-
-`storage_key` хранится в `knowledge.normative_documents`.
-
-Каталог:
-
-```text
-data/knowledge/normative/source/
-```
-
-удалён и больше не является source of truth.
-
-Repository source Базы Опыта остаётся здесь:
-
-```text
-data/knowledge/experience/cases/
-```
-
-## 7. Как работает поиск
-
-Для каждого анализируемого листа Analysis Service сначала формирует нейтральные retrieval queries по фактам листа. Если включена ПЗ, relevant Project Context помогает сформировать запрос, но не является нормативным доказательством.
-
-Дальше одна и та же query идёт в два независимых retrieval:
-
-```mermaid
-flowchart TD
-    Q["Retrieval query"] --> NDB["PostgreSQL validation: normative IDs"]
-    Q --> UDB["PostgreSQL validation: user-package IDs"]
-
-    NDB --> NF["Qdrant exact document_id filter"]
-    UDB --> UF["Qdrant exact document_id filter"]
-
-    NF --> N["N1, N2, N3"]
-    UF --> U["U1, U2, U3"]
-
-    N --> V["VLM check"]
-    U --> V
-
-    V --> BASIS["basis_sources только из N-sources"]
-```
-
-### Нормативный поиск
+## N — normative retrieval
 
 Snapshot содержит `document_ids`.
 
-Knowledge Service проверяет, что каждый UUID:
+Knowledge Service допускает только документы:
 
-- существует;
-- находится в выбранном section;
-- имеет `catalog_area=normative`;
-- имеет `index_status=ready`.
+- существующие;
+- из выбранного section;
+- `catalog_area=normative`;
+- `index_status=ready`.
 
-После этого Qdrant ищет только внутри этих exact `document_id`.
+После этого Qdrant ищет только по exact IDs.
 
-### Пользовательский поиск
+Найденные источники получают локальные IDs:
+
+```text
+N1, N2, N3, ...
+```
+
+## T — Technical Assignment retrieval
+
+Если snapshot содержит `technical_assignment_id`, workflow вызывает:
+
+```text
+/internal/v1/search/technical-assignment-guided
+```
+
+Guided retrieval выполняет:
+
+```text
+query
+  -> T multimodal search
+  -> extract/use normative_refs and T context
+  -> targeted N retrieval
+  -> general N retrieval
+  -> merge without changing source roles
+```
+
+Возвращаются отдельно:
+
+```text
+technical_assignment_sources
+normative_sources
+targeted_normative_sources
+general_normative_sources
+reference_resolutions
+conflict_candidates
+diagnostics
+```
+
+`conflict_candidates` — это T/N пары, которые Analysis Service должен оценить семантически, а не считать конфликтом только по строковому совпадению.
+
+## U — User Package retrieval
 
 Snapshot отдельно содержит `user_package_document_ids`.
 
-Knowledge Service проверяет, что каждый UUID:
+Допускаются только документы:
 
-- существует;
-- находится в том же section;
-- имеет `catalog_area=user_package`;
-- имеет `index_status=ready`.
+- существующие;
+- из того же section;
+- `catalog_area=user_package`;
+- `index_status=ready`.
 
-После этого Qdrant ищет только внутри выбранных package IDs.
-
-### Что видит модель
-
-В VLM prompt источники передаются двумя разными блоками:
+Найденные источники получают IDs:
 
 ```text
-USER PACKAGE SOURCES:
-U1 ...
-U2 ...
-
-NORMATIVE SOURCES:
-N1 ...
-N2 ...
+U1, U2, U3, ...
 ```
 
-Super-system prompt запрещает:
+## E — Experience retrieval
 
-- считать `U*` нормативными документами;
-- возвращать `U*` в `normative_source_ids`;
-- использовать пользовательский документ вместо нормативного основания;
-- придумывать нормативные документы или пункты из памяти модели.
+Experience выполняется после requirement check по `experience_query` finding.
 
-JSON Schema для нормативной проверки получает допустимые source IDs только из реальных `N*`, найденных текущим normative retrieval.
+Experience source не становится нормативным basis.
 
-Итоговые `basis_sources` строятся только из `normative_sources`.
+# Формирование N/T/U JSON
 
-### От чего это защищает
+## Retrieval JSON
 
-Архитектура защищает от следующих классов ошибок:
+Типы источников передаются независимо:
 
-1. **Смешивание нормативов и требований заказчика.** Фраза из пользовательского PDF не превращается в ГОСТ/СП/ПУЭ.
-2. **Подмена UUID.** UUID `user_package` нельзя использовать через normative scope, а normative UUID — через package scope.
-3. **Изменение выбора после старта.** Worker использует immutable snapshot job.
-4. **Поиск по случайным документам раздела.** Qdrant получает exact list `document_id`, а не просто имя папки или глобальную collection.
-5. **Неиндексированные документы.** Документ допускается в analysis snapshot/search только в `READY`.
-6. **Попадание package chunks в unscoped production normative search.** Production Knowledge Service сначала получает READY normative IDs из PostgreSQL и фильтрует Qdrant по ним.
-7. **Prompt injection из файлов.** PAGE TEXT, Project Context, USER PACKAGE SOURCES и NORMATIVE SOURCES объявлены данными, а не инструкциями.
-8. **Галлюцинация нормативной ссылки.** Модель может сослаться только на реальные `N*`, переданные в JSON Schema.
-9. **Смешивание Базы Опыта с нормой.** Experience используется для формулировок/finalization, но не становится нормативным basis.
+```json
+{
+  "normative_sources": [
+    {
+      "source_id": "N1",
+      "point_id": "<qdrant-point>",
+      "score": 0.86,
+      "document_id": "<uuid>",
+      "section_id": "<uuid>",
+      "category_id": "<uuid-or-null>",
+      "source_sha256": "<sha256>",
+      "source_file": "СП 256.1325800.2016.pdf",
+      "page": 17,
+      "chunk_index": 2,
+      "text": "<normative fragment>"
+    }
+  ],
+  "technical_assignment_sources": [
+    {
+      "source_id": "T1",
+      "point_id": "<qdrant-point>",
+      "score": 0.83,
+      "technical_assignment_id": "<uuid>",
+      "analysis_document_id": "<uuid>",
+      "section_id": "<uuid>",
+      "source_sha256": "<sha256>",
+      "source_file": "Техническое задание.pdf",
+      "page": 4,
+      "text": "<T requirement>",
+      "normative_refs": [
+        "СП 256.1325800.2016"
+      ]
+    }
+  ],
+  "user_package_sources": [
+    {
+      "source_id": "U1",
+      "point_id": "<qdrant-point>",
+      "score": 0.79,
+      "document_id": "<uuid>",
+      "section_id": "<uuid>",
+      "category_id": "<uuid-or-null>",
+      "source_sha256": "<sha256>",
+      "source_file": "Требования заказчика.pdf",
+      "page": 2,
+      "chunk_index": 0,
+      "text": "<user requirement>"
+    }
+  ]
+}
+```
 
-## 8. Пояснительная записка
+`source_id` является typed local evidence ID текущего analysis context.
+
+## FindingDraft
+
+VLM получает отдельные N/T/U blocks и возвращает ссылки только на IDs из текущего retrieval context.
+
+Пример T-backed finding:
+
+```json
+{
+  "finding_id": "F1",
+  "page": 3,
+  "page_type": "scheme",
+  "category": "customer_requirements",
+  "severity": "warning",
+  "status": "confirmed",
+  "comment": "На листе отсутствует обозначение, требуемое техническим заданием.",
+  "evidence": "На анализируемом листе обозначение не обнаружено.",
+  "recommendation_draft": "Добавить обозначение в соответствии с ТЗ.",
+  "confidence": 0.91,
+
+  "normative_source_ids": [],
+  "technical_assignment_source_ids": [
+    "T1"
+  ],
+  "user_package_source_ids": [],
+
+  "basis": "Требование технического задания.",
+  "experience_query": "Проверка оформления обозначений"
+}
+```
+
+Backend материализует IDs только через текущие retrieval candidates. Произвольный `N99/T99/U99`, которого не было в retrieval context, не должен превращаться в источник.
+
+## Typed evidence materialization
+
+```json
+{
+  "finding_id": "F1",
+  "category": "customer_requirements",
+  "basis_sources": [],
+  "technical_assignment_basis_sources": [
+    {
+      "source_id": "T1",
+      "technical_assignment_id": "<uuid>",
+      "source_file": "Техническое задание.pdf",
+      "page": 4,
+      "text": "<T requirement>"
+    }
+  ],
+  "user_package_basis_sources": []
+}
+```
+
+## Finding-local normative enrichment
+
+После первичного requirement check инженерное замечание не удаляется из-за отсутствия N.
+
+Для каждого finding может выполняться отдельный targeted N retrieval:
+
+```text
+finding
+  -> finding-local normative query
+  -> N candidates
+  -> semantic validation/finalization
+```
+
+Пример:
+
+```text
+T1
+  -> упоминание/смысл СП 256
+  -> targeted normative retrieval
+  -> N4
+```
+
+После подтверждения:
+
+```json
+{
+  "finding_id": "F1",
+  "category": "normative_control",
+  "basis_sources": [
+    {
+      "source_id": "N4",
+      "source_file": "СП 256.1325800.2016.pdf",
+      "page": 17,
+      "text": "<validated normative fragment>"
+    }
+  ],
+  "technical_assignment_basis_sources": [
+    {
+      "source_id": "T1",
+      "source_file": "Техническое задание.pdf",
+      "page": 4,
+      "text": "<project requirement>"
+    }
+  ]
+}
+```
+
+Здесь `T1` остаётся T-source, а нормативное утверждение подтверждает `N4`.
+
+## FinalFinding
+
+Финальный finding хранит источники раздельно:
+
+```json
+{
+  "finding_id": "F1",
+  "page": 3,
+  "page_type": "scheme",
+  "category": "normative_control",
+  "severity": "warning",
+  "status": "confirmed",
+  "comment": "<finding>",
+  "evidence": "<drawing evidence>",
+  "recommendation": "<recommendation>",
+  "confidence": 0.93,
+  "basis": "<human-readable basis>",
+
+  "basis_sources": [
+    {
+      "source_id": "N1"
+    }
+  ],
+  "technical_assignment_basis_sources": [
+    {
+      "source_id": "T1"
+    }
+  ],
+  "user_package_basis_sources": [
+    {
+      "source_id": "U1"
+    }
+  ],
+  "experience_sources": [
+    {
+      "source_id": "E1"
+    }
+  ]
+}
+```
+
+# Пояснительная записка
 
 ```mermaid
 flowchart TD
@@ -617,43 +906,21 @@ flowchart TD
     TEXT --> VALID["Classification"]
     VALID -->|не ПЗ| REJECT["Reject"]
     VALID -->|ПЗ| CHUNK["Chunking"]
-    CHUNK --> EMB["Embeddings"]
+    CHUNK --> EMB["Unified Embeddings"]
     EMB --> TEMP[("Temporary Project Context")]
     PAGE["Анализируемый лист"] --> QUERY["Context query"]
     QUERY --> TEMP
     TEMP --> SOURCES["Relevant fragments"]
-    SOURCES --> CHECK["Normative check"]
+    SOURCES --> CHECK["N/T/U check"]
     CHECK --> CLEAN["Cleanup"]
     CLEAN --> DELETE["Delete temporary collection"]
 ```
 
-## 9. GPU-safe очередь
-
-```mermaid
-flowchart TD
-    USERS["User requests"] --> GW["API Gateway"]
-    GW --> OUT["Transactional Outbox"]
-    OUT --> RMQ["RabbitMQ"]
-    RMQ --> J1["Job 1"]
-    RMQ --> J2["Job 2"]
-    RMQ --> JN["Job N"]
-
-    J1 --> W["Celery concurrency=1"]
-    J2 -. ждёт .-> RMQ
-    JN -. ждёт .-> RMQ
-
-    W --> N8N["n8n"]
-    N8N --> OL["Ollama"]
-    OL --> GPU["NVIDIA GPU"]
-    GPU --> NEXT["Следующий job"]
-    NEXT --> RMQ
-```
-
-Backpressure находится в RabbitMQ: количество HTTP-запросов не равно числу одновременно выполняющихся GPU inference.
+Project Context помогает понять проект, но не становится N/T/U evidence.
 
 # Managed catalog
 
-## Lifecycle документа
+## Lifecycle N/U документа
 
 ```text
 upload
@@ -673,7 +940,7 @@ indexing
 
 1. Qdrant points по `document_id`;
 2. original file;
-3. Word PDF-preview, если он существует;
+3. Word PDF-preview;
 4. SQL metadata.
 
 ## System prompt
@@ -688,30 +955,32 @@ section.system_prompt
 transient working override / dynamic context
 ```
 
-`NORMATIVE_SUPER_SYSTEM_PROMPT` хранится только в коде.
+`NORMATIVE_SUPER_SYSTEM_PROMPT` хранится в коде.
 
 `section.system_prompt` хранится в PostgreSQL.
 
-Transient working prompt может применяться к конкретному анализу без сохранения как новый system prompt.
+Transient working prompt применяется к конкретному анализу без сохранения как новый system prompt.
 
 # Пользовательские пакеты документов
 
-Пакеты относятся к текущему нормативному разделу, но имеют `catalog_area=user_package`.
+Пакеты относятся к нормативному section, но имеют:
+
+```text
+catalog_area=user_package
+```
 
 Frontend позволяет:
 
-- создать пакет;
+- создать пакет/папку;
 - создать вложенную папку;
 - загрузить PDF/DOC/DOCX;
 - автоматически поставить документ в indexing queue;
 - открыть PDF или Word PDF-preview;
-- перемещать документы drag&drop;
+- перемещать документы;
 - удалять документы/папки;
-- выбрать отдельные READY документы checkbox;
-- выбрать все READY package docs компактной кнопкой;
-- очистить package selection.
-
-Нормативные checkbox сейчас скрыты через `.is-hidden`, а READY нормативы автоматически входят в selection. Это оставляет возможность позже открыть ручное нормативное администрирование без переделки модели состояния.
+- выбирать отдельные READY документы;
+- выбирать все READY package docs;
+- очищать selection.
 
 # Public API
 
@@ -723,7 +992,7 @@ GET  /api/v1/analyses/{job_id}
 GET  /api/v1/analyses/{job_id}/result
 ```
 
-Multipart analysis fields:
+Multipart analysis fields включают:
 
 ```text
 pdf
@@ -737,9 +1006,10 @@ normative_document_ids
 user_package_document_ids
 normative_prompt_override_enabled
 normative_prompt_override
+technical_assignment
 ```
 
-`normative_document_ids` и `user_package_document_ids` передаются как JSON arrays UUID.
+Точная форма T upload определяется public analysis schema/frontend contract; внутри immutable snapshot сохраняется `technical_assignment_id`.
 
 ## Managed normative catalog
 
@@ -787,7 +1057,15 @@ POST   /api/v1/normative/user-packages/documents/{document_id}/index
 GET    /api/v1/normative/user-packages/documents/{document_id}/content
 ```
 
-Browser использует только API Gateway. Internal Knowledge API не является frontend contract.
+## Technical Assignment content
+
+Кликабельный T-source открывается через Gateway:
+
+```text
+GET /api/v1/normative/technical-assignments/{technical_assignment_id}/content
+```
+
+Browser не обращается к internal Knowledge API напрямую.
 
 # n8n workflows
 
@@ -800,35 +1078,39 @@ n8n/workflows/
 └── analysis-v2-pdf-cad.json
 ```
 
-Во всех трёх workflow retrieval path:
+Общий requirement path для всех source modes:
 
 ```text
-Build Normative Queries
-  -> Search Normative
+Page understanding
+  -> Build Normative Queries
+  -> Search Requirements
+       ├─ no T -> normative search
+       └─ T    -> technical-assignment-guided search
+  -> Normalize Requirement Search
   -> Search User Packages
   -> Check Norms
+  -> Prepare Finding Normative Queries
+  -> Search Finding Norms
+  -> Search Experience
+  -> Finalize Findings
 ```
 
-`Search User Packages` получает:
-
-```json
-{
-  "queries": ["..."],
-  "section_id": "<snapshot section>",
-  "document_ids": ["<selected user package ids>"]
-}
-```
-
-`Check Norms` получает отдельно:
+`Check Norms` получает typed sources отдельно:
 
 ```json
 {
   "normative_sources": [],
+  "technical_assignment_sources": [],
+  "conflict_candidates": [],
   "user_package_sources": []
 }
 ```
 
-n8n workflow обновляются и публикуются **вручную через UI**. CLI import/update для workflow в этом проекте не используется.
+n8n не присваивает T/U нормативную роль. Он только переносит typed data между сервисами.
+
+Transient HTTP errors на GPU-dependent retrieval nodes должны иметь bounded retry policy; основная resource-serialization логика остаётся в backend GPU coordinator, а не в workflow.
+
+Workflow обновляются и публикуются вручную через n8n UI.
 
 # Структура проекта
 
@@ -840,16 +1122,6 @@ PDRD-validation/
 │   └── src/
 │       ├── index.html
 │       ├── css/
-│       │   ├── global.css
-│       │   ├── main.css
-│       │   ├── variables.css
-│       │   └── blocks/
-│       │       ├── analysis-result.css
-│       │       ├── card.css
-│       │       ├── form.css
-│       │       ├── modal.css
-│       │       ├── normative-sidebar.css
-│       │       └── report.css
 │       └── js/
 │           ├── app.js
 │           ├── config.js
@@ -857,10 +1129,6 @@ PDRD-validation/
 │           └── features/
 │               ├── analysis/
 │               └── normative/
-│                   ├── api.js
-│                   ├── catalog.js
-│                   ├── prompt.js
-│                   └── user_packages.js
 │
 ├── services/
 │   ├── api-gateway/
@@ -871,8 +1139,29 @@ PDRD-validation/
 │   ├── knowledge-service/
 │   │   ├── alembic/
 │   │   ├── src/pdrd_knowledge_service/
+│   │   │   ├── application/
+│   │   │   ├── domain/
+│   │   │   └── infrastructure/
+│   │   │       ├── database/
+│   │   │       ├── embedding/
+│   │   │       ├── messaging/
+│   │   │       ├── migration/
+│   │   │       └── vector_store/
 │   │   └── tests/
-│   └── analysis-service/
+│   ├── analysis-service/
+│   │   ├── src/pdrd_analysis_service/
+│   │   │   ├── application/ports/gpu.py
+│   │   │   └── infrastructure/
+│   │   │       ├── gpu_coordination.py
+│   │   │       └── ollama.py
+│   │   └── tests/
+│   └── multimodal-embedding-service/
+│       ├── src/pdrd_multimodal_embedding_service/
+│       │   ├── gpu_lease.py
+│       │   ├── main.py
+│       │   ├── runtime.py
+│       │   └── settings.py
+│       └── tests/
 │
 ├── n8n/
 │   └── workflows/
@@ -893,7 +1182,9 @@ PDRD-validation/
 │   ├── kb_search.py
 │   └── kb_sync.py
 ├── tests/
-│   └── architecture/
+│   ├── architecture/
+│   └── runtime/
+│       └── test_gpu_coordination_runtime.py
 ├── .env.example
 ├── compose.yaml
 ├── pyproject.toml
@@ -903,39 +1194,47 @@ PDRD-validation/
 
 # Конфигурация
 
-Создать `.env`:
+`.env.example` — committed baseline и полный каталог ordinary runtime settings.
 
-```bash
-cp .env.example .env
-```
-
-Минимальные deployment secrets:
+`.env` — sparse private override. В обычном deployment в нём достаточно секретов:
 
 ```dotenv
 PDRD_POSTGRES_PASSWORD=replace-me
 PDRD_RABBITMQ_PASSWORD=replace-me
 ```
 
-Секреты не коммитить.
+`.env` не должен быть копией `.env.example`.
+
+Единая embedding identity:
+
+```dotenv
+PDRD_EMBEDDING_MODEL=Qwen/Qwen3-VL-Embedding-8B
+PDRD_EMBEDDING_DIMENSION=4096
+PDRD_EMBEDDING_SCHEMA_VERSION=1
+```
+
+Для замены embedding model меняются model/dimension в `.env.example`; business logic не содержит жёсткой привязки к названию модели.
 
 Ключевые Knowledge defaults:
 
 ```text
 storage.root_path = /data/normative
-qdrant.normative_collection = dva_normative_v2
-qdrant.experience_collection = dva_experience_v2
+qdrant.normative_collection = dva_catalog_active
+qdrant.multimodal_collection = dva_technical_assignment_active
+qdrant.experience_collection = dva_experience_active
 project_context.collection_prefix = pdrd_project_context
-embedding.model = qwen3-embedding:4b
+embedding.model = PDRD_EMBEDDING_MODEL
 broker.queue_name = pdrd.knowledge.indexing
 ```
 
-Ключевые API Gateway defaults:
+Ключевые GPU defaults:
 
 ```text
-storage.root_path = /data/analyses
-broker.queue_name = pdrd.analysis
-Knowledge Service = http://pdrd-knowledge-service:8401
-n8n = http://n8n:5678
+embedding min free RAM  = 20 GiB
+embedding min free VRAM = 18 GiB
+analysis VLM min VRAM   = 12 GiB
+global lease            = /var/lock/pdrd-gpu/gpu.lock
+analysis keep_alive      = 0s
 ```
 
 # Запуск
@@ -948,11 +1247,16 @@ Shared network `ai-shared` должна содержать:
 - n8n;
 - Ollama.
 
-Ollama models:
+Ollama model для PDRD Analysis:
 
 ```text
 qwen3-vl:8b-instruct
-qwen3-embedding:4b
+```
+
+Embedding checkpoint загружается dedicated service через Hugging Face cache:
+
+```text
+Qwen/Qwen3-VL-Embedding-8B
 ```
 
 Запуск:
@@ -965,6 +1269,8 @@ docker compose up -d \
   --wait \
   --wait-timeout 180
 ```
+
+При startup `knowledge-embedding-migrator` проверяет embedding fingerprint до старта Knowledge runtime.
 
 Проверка:
 
@@ -996,15 +1302,11 @@ http://127.0.0.1:8401/docs
 docker compose down
 ```
 
-Она не удаляет persistent volumes.
-
-Команда:
+Не использовать для обычного deploy:
 
 ```bash
 docker compose down -v
 ```
-
-удаляет persistent PostgreSQL/Qdrant/application volumes и managed documents. Для обычного deploy/restart её использовать нельзя.
 
 # Тестирование
 
@@ -1037,7 +1339,13 @@ docker compose --profile test run --rm api-gateway-tests
 docker compose --profile test run --rm knowledge-service-tests
 ```
 
-Runtime:
+GPU runtime coordination:
+
+```bash
+docker compose --profile gpu-runtime-test run --rm gpu-runtime-tests
+```
+
+Проверка stack:
 
 ```bash
 bash scripts/check-stack.sh
@@ -1045,22 +1353,13 @@ bash scripts/check-stack.sh
 
 # Backup и диагностика
 
-Не использовать `docker compose down -v` как обычный способ обновления.
-
 Посмотреть volumes:
 
 ```bash
-docker volume ls | grep -E 'postgres|qdrant|analysis|normative'
+docker volume ls | grep -E 'postgres|qdrant|analysis|normative|technical|gpu'
 ```
 
-Посмотреть mounts Knowledge Service:
-
-```bash
-docker compose exec -T knowledge-service \
-  sh -lc 'find /data/normative -maxdepth 3 -type f -printf "%P\n" | sort | head -n 50'
-```
-
-Количество managed SQL документов:
+Managed SQL documents:
 
 ```bash
 docker compose exec -T postgres sh -lc '
@@ -1077,45 +1376,63 @@ ORDER BY catalog_area, index_status;
 '
 ```
 
-Qdrant point count:
+Technical Assignments:
 
 ```bash
-curl -fsS \
-  -X POST \
-  http://127.0.0.1:6333/collections/dva_normative_v2/points/count \
-  -H 'Content-Type: application/json' \
-  -d '{"exact":true}' \
-  | python3 -m json.tool
+docker compose exec -T postgres sh -lc '
+psql \
+  -U "$POSTGRES_USER" \
+  -d "$POSTGRES_DB" \
+  -P pager=off \
+  -c "
+SELECT index_status, count(*)
+FROM knowledge.technical_assignments
+GROUP BY index_status
+ORDER BY index_status;
+"
+'
 ```
 
-# Текущий статус
+Qdrant aliases:
 
-Подтверждены:
+```bash
+curl -fsS http://127.0.0.1:6333/aliases | python3 -m json.tool
+```
 
-- V2 runtime;
-- PDF-only / multi-page;
-- CAD-only;
-- PDF + CAD;
-- PDF + ПЗ;
-- PDF + CAD + ПЗ;
+Embedding runtime:
+
+```bash
+curl -fsS http://127.0.0.1:8601/internal/v1/status | python3 -m json.tool
+```
+
+Ollama residency:
+
+```bash
+curl -fsS http://127.0.0.1:11434/api/ps | python3 -m json.tool
+```
+
+# Текущий функциональный контур
+
+В проекте реализованы:
+
+- V2 PDF/CAD/PDF+CAD runtime;
+- PDF + ПЗ и PDF+CAD + ПЗ;
 - Gateway -> Outbox -> RabbitMQ -> Celery -> n8n;
+- managed N/U catalog;
+- Technical Assignment lifecycle и отдельный T-index;
+- immutable T snapshot и READY barrier перед analysis;
+- multimodal T retrieval;
+- T-guided normative retrieval;
+- N/T/U typed evidence;
+- finding-local normative enrichment;
+- Experience finalization;
+- unified Qwen3-VL-Embedding-8B для N/T/U/E/PZ;
+- stable Qdrant aliases и model fingerprint;
+- blue/green automatic reindex из durable sources;
+- global cross-process GPU lease;
+- RAM/VRAM admission;
+- explicit Analysis VLM unload;
 - temporary Project Context cleanup;
-- managed нормативные разделы;
-- nested folders;
-- PDF/DOC/DOCX normative upload;
-- пользовательские package/folder CRUD;
-- PDF/DOC/DOCX user-package upload;
-- LibreOffice Word -> PDF normalization;
-- durable managed indexing;
-- `catalog_area=normative|user_package`;
-- scoped normative retrieval;
-- scoped user-package retrieval;
-- immutable snapshot с двумя независимыми списками IDs;
-- system prompt раздела;
-- transient prompt override;
-- защита `N*` vs `U*`;
-- clickable normative citations;
-- managed deletion из Qdrant + filesystem + PostgreSQL;
-- frontend нормативного каталога и пользовательских пакетов.
-
-Следующая отдельная функциональная область — ТЗ. Сейчас блок ТЗ в frontend намеренно disabled и не участвует в analysis pipeline.
+- кликабельные N/T sources через API Gateway;
+- frontend нормативного каталога, пользовательских пакетов и ТЗ;
+- unit/integration/architecture/runtime test layers.

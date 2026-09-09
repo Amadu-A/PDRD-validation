@@ -86,7 +86,10 @@
       "position": [
         -1460,
         0
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -107,7 +110,10 @@
       "position": [
         -1240,
         0
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -141,7 +147,10 @@
       "position": [
         -800,
         0
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -183,7 +192,10 @@
       "position": [
         -360,
         0
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -230,21 +242,38 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://pdrd-knowledge-service:8401/internal/v1/search/normative",
+        "url": "={{\n  $('POST /analysis/v2/pdf-cad').first().json.body?.technical_assignment_id\n    ? 'http://pdrd-knowledge-service:8401/internal/v1/search/technical-assignment-guided'\n    : 'http://pdrd-knowledge-service:8401/internal/v1/search/normative'\n}}",
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ queries: $json.queries ?? [], ...($('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id ? { section_id: $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id, document_ids: JSON.parse($('POST /analysis/v2/pdf-cad').first().json.body?.normative_document_ids ?? '[]') } : {}) }) }}",
+        "body": "={{\n  JSON.stringify(\n    $('POST /analysis/v2/pdf-cad').first().json.body?.technical_assignment_id\n      ? {\n          queries: $json.queries ?? [],\n          technical_assignment_id:\n            $('POST /analysis/v2/pdf-cad').first().json.body.technical_assignment_id,\n          section_id:\n            $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id,\n          normative_document_ids: JSON.parse(\n            $('POST /analysis/v2/pdf-cad').first().json.body?.normative_document_ids\n              ?? '[]'\n          ),\n        }\n      : {\n          queries: $json.queries ?? [],\n          ...(\n            $('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id\n              ? {\n                  section_id:\n                    $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id,\n                  document_ids: JSON.parse(\n                    $('POST /analysis/v2/pdf-cad').first().json.body?.normative_document_ids\n                      ?? '[]'\n                  ),\n                }\n              : {}\n          ),\n        }\n  )\n}}",
         "options": {
-          "timeout": 900000
+          "timeout": 1800000
         }
       },
       "id": "20000000-0000-4000-8000-000000000012",
-      "name": "Search Normative",
+      "name": "Search Requirements",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         300,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $json ?? {};\n\nconst guided = (\n  Array.isArray(result.technical_assignment_sources)\n  || Array.isArray(result.normative_sources)\n  || Array.isArray(result.conflict_candidates)\n);\n\nreturn {\n  json: {\n    normative_sources: guided\n      ? (\n          Array.isArray(result.normative_sources)\n            ? result.normative_sources\n            : []\n        )\n      : (\n          Array.isArray(result.sources)\n            ? result.sources\n            : []\n        ),\n\n    technical_assignment_sources: guided\n      && Array.isArray(result.technical_assignment_sources)\n        ? result.technical_assignment_sources\n        : [],\n\n    conflict_candidates: guided\n      && Array.isArray(result.conflict_candidates)\n        ? result.conflict_candidates\n        : [],\n\n    diagnostics: guided\n      && Array.isArray(result.diagnostics)\n        ? result.diagnostics\n        : [],\n\n    reference_resolutions: guided\n      && Array.isArray(result.reference_resolutions)\n        ? result.reference_resolutions\n        : [],\n\n    targeted_normative_sources: guided\n      && Array.isArray(result.targeted_normative_sources)\n        ? result.targeted_normative_sources\n        : [],\n\n    general_normative_sources: guided\n      && Array.isArray(result.general_normative_sources)\n        ? result.general_normative_sources\n        : [],\n\n    technical_assignment_embedding_model: guided\n      ? String(result.technical_assignment_embedding_model ?? '')\n      : '',\n\n    normative_embedding_model: guided\n      ? String(result.normative_embedding_model ?? '')\n      : String(result.embedding_model ?? ''),\n\n    technical_assignment_enabled: guided,\n  },\n};",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "20000000-0000-4000-8000-000000000023",
+      "name": "Normalize Requirement Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
         0
       ]
     },
@@ -257,7 +286,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ queries: $('Build Normative Queries').item.json.queries ?? [], ...($('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id ? { section_id: $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id, document_ids: JSON.parse($('POST /analysis/v2/pdf-cad').first().json.body?.user_package_document_ids ?? '[]') } : {}) }) }}",
         "options": {
-          "timeout": 900000
+          "timeout": 1800000
         }
       },
       "id": "20000000-0000-4000-8000-000000000022",
@@ -265,9 +294,12 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        520,
+        740,
         0
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -276,7 +308,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_number: $('Prepare Combined Context').item.json.page.page_number, extracted_text: $('Augment Project Context').item.json.analysis_text, page_facts: $('Understand Combined Page').item.json.facts, normative_sources: $('Search Normative').item.json.sources ?? [], user_package_sources: $json.sources ?? [], image_base64: $('Prepare Combined Context').item.json.page.image_base64, normative_system_prompt: $('POST /analysis/v2/pdf-cad').first().json.body?.normative_system_prompt ?? null }) }}",
+        "body": "={{ JSON.stringify({\n  page_number: $('Prepare Combined Context').item.json.page.page_number,\n  extracted_text: $('Augment Project Context').item.json.analysis_text,\n  page_facts: $('Understand Combined Page').item.json.facts,\n  normative_sources: $('Normalize Requirement Search').item.json.normative_sources ?? [],\n  technical_assignment_sources: $('Normalize Requirement Search').item.json.technical_assignment_sources ?? [],\n  conflict_candidates: $('Normalize Requirement Search').item.json.conflict_candidates ?? [],\n  user_package_sources: $json.sources ?? [],\n  image_base64: $('Prepare Combined Context').item.json.page.image_base64,\n  normative_system_prompt: $('POST /analysis/v2/pdf-cad').first().json.body?.normative_system_prompt ?? null\n}) }}",
         "options": {
           "timeout": 1800000
         }
@@ -286,21 +318,62 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        740,
+        960,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\n\nconst normativeQueryItems = findings\n  .map((finding) => {\n    const findingQuery = String(finding.experience_query ?? '').trim();\n    if (!findingQuery) {\n      return null;\n    }\n\n    return {\n      finding_id: String(finding.finding_id ?? ''),\n      query: [\n        'Найти нормативное основание для уже обнаруженного инженерного замечания.',\n        'Нужен фрагмент нормативного документа, который прямо относится к указанному факту и типу проектного документа.',\n        'Не считать тематически похожий норматив достаточным подтверждением.',\n        findingQuery,\n      ].join('\\n'),\n    };\n  })\n  .filter((item) => item?.finding_id && item?.query)\n  .slice(0, 10);\n\nreturn {\n  json: {\n    findings,\n    normative_query_items: normativeQueryItems,\n    normative_queries: normativeQueryItems.map((item) => item.query),\n  },\n};",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "20000000-0000-4000-8000-000000000024",
+      "name": "Prepare Finding Normative Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
         0
       ]
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\nreturn { json: { findings, experience_queries: findings.map((finding) => String(finding.experience_query ?? '').trim()).filter((query) => query.length > 0) } };"
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/search/normative-grouped",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{\n  JSON.stringify({\n    queries: $json.normative_queries ?? [],\n    ...(\n      $('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id\n        ? {\n            section_id:\n              $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id,\n            document_ids: JSON.parse(\n              $('POST /analysis/v2/pdf-cad').first().json.body?.normative_document_ids\n                ?? '[]'\n            ),\n          }\n        : {}\n    ),\n  })\n}}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000025",
+      "name": "Search Finding Norms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1400,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const prepared = $('Prepare Finding Normative Queries').item.json;\nconst findings = Array.isArray(prepared.findings) ? prepared.findings : [];\nconst queryItems = Array.isArray(prepared.normative_query_items)\n  ? prepared.normative_query_items\n  : [];\nconst results = Array.isArray($json.results) ? $json.results : [];\n\nconst normativeCandidatesByFinding = {};\n\nfor (const finding of findings) {\n  normativeCandidatesByFinding[String(finding.finding_id ?? '')] = [];\n}\n\nfor (let index = 0; index < queryItems.length; index += 1) {\n  const queryItem = queryItems[index] ?? {};\n  const findingId = String(queryItem.finding_id ?? '');\n  if (!findingId) {\n    continue;\n  }\n\n  const result = results[index] ?? {};\n  const rawSources = Array.isArray(result.sources) ? result.sources : [];\n\n  normativeCandidatesByFinding[findingId] = rawSources.map(\n    (source, sourceIndex) => ({\n      ...source,\n      source_id: `NQ${index + 1}_${sourceIndex + 1}`,\n    }),\n  );\n}\n\nreturn {\n  json: {\n    findings,\n    normative_candidates_by_finding: normativeCandidatesByFinding,\n    experience_queries: findings\n      .map((finding) => String(finding.experience_query ?? '').trim())\n      .filter((query) => query.length > 0),\n  },\n};",
+        "mode": "runOnceForEachItem"
       },
       "id": "20000000-0000-4000-8000-000000000014",
       "name": "Prepare Experience Queries",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        960,
+        1620,
         0
       ]
     },
@@ -313,7 +386,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ queries: $json.experience_queries ?? [] }) }}",
         "options": {
-          "timeout": 900000
+          "timeout": 1800000
         }
       },
       "id": "20000000-0000-4000-8000-000000000015",
@@ -321,21 +394,24 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1180,
+        1840,
         0
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const prepared = $('Prepare Experience Queries').item.json;\nconst findings = Array.isArray(prepared.findings) ? prepared.findings : [];\nconst results = Array.isArray($json.results) ? $json.results : [];\nconst experienceByFinding = {};\nfor (let index = 0; index < findings.length; index += 1) {\n  experienceByFinding[findings[index].finding_id] = Array.isArray(results[index]?.sources) ? results[index].sources : [];\n}\nreturn { json: { findings, experience_by_finding: experienceByFinding } };"
+        "jsCode": "const prepared = $('Prepare Experience Queries').item.json;\nconst findings = Array.isArray(prepared.findings) ? prepared.findings : [];\nconst normativeCandidatesByFinding =\n  prepared.normative_candidates_by_finding\n  && typeof prepared.normative_candidates_by_finding === 'object'\n    ? prepared.normative_candidates_by_finding\n    : {};\nconst results = Array.isArray($json.results) ? $json.results : [];\nconst experienceByFinding = {};\n\nfor (let index = 0; index < findings.length; index += 1) {\n  const finding = findings[index];\n  const result = results[index] ?? {};\n  experienceByFinding[finding.finding_id] = Array.isArray(result.sources)\n    ? result.sources\n    : [];\n}\n\nreturn {\n  json: {\n    findings,\n    normative_candidates_by_finding: normativeCandidatesByFinding,\n    experience_by_finding: experienceByFinding,\n  },\n};",
+        "mode": "runOnceForEachItem"
       },
       "id": "20000000-0000-4000-8000-000000000016",
       "name": "Build Experience Map",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1400,
+        2060,
         0
       ]
     },
@@ -346,7 +422,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ findings: $json.findings ?? [], experience_by_finding: $json.experience_by_finding ?? {} }) }}",
+        "body": "={{ JSON.stringify({ findings: $json.findings ?? [], experience_by_finding: $json.experience_by_finding ?? {}, normative_candidates_by_finding: $json.normative_candidates_by_finding ?? {} }) }}",
         "options": {
           "timeout": 1800000
         }
@@ -356,21 +432,24 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1620,
+        2280,
         0
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const prepared = $('Prepare Combined Context').item.json;\nconst understanding = $('Understand Combined Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst normative = $('Search Normative').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\nconst findings = (finalization.findings ?? []).map((finding) => ({ ...finding, project_context_sources: augmentation.sources ?? [] }));\n\nreturn { json: {\n  status: 'completed',\n  source_mode: 'pdf_cad',\n  file_name: prepared.source.pdf_file_name,\n  pdf_file_name: prepared.source.pdf_file_name,\n  cad_file_name: prepared.source.cad_file_name,\n  total_pages: prepared.source.total_pdf_pages,\n  selected_pages: [prepared.source.selected_page],\n  analyzed_pages: 1,\n  findings_count: findings.length,\n  summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранному PDF + CAD листу не найдены.',\n  findings,\n  render: prepared.render,\n  cad: prepared.cad,\n  explanatory_note_context: prepared.project_context,\n  page: {\n    page_number: prepared.page.page_number,\n    heuristic_page_type: prepared.page.page_type,\n    width_points: prepared.page.width_points,\n    height_points: prepared.page.height_points,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: normative.sources ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    normative_check: { summary: check.summary ?? '', findings: check.findings ?? [], metrics: check.metrics ?? {} },\n    project_context_sources: augmentation.sources ?? [],\n  },\n  pipeline: ['combined_document_extract','explanatory_note_validation','temporary_project_context_index','page_understanding','project_context_retrieval','normative_queries','normative_search','user_package_search','normative_check','experience_search','finalization','project_context_cleanup'],\n  limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n} };"
+        "jsCode": "const prepared = $('Prepare Combined Context').item.json;\nconst understanding = $('Understand Combined Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst requirements = $('Normalize Requirement Search').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst enrichment = $('Prepare Experience Queries').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\nconst candidateGroups = Object.values(candidatesByFinding)\n  .filter((value) => Array.isArray(value));\n\nreturn { json: {\n  status: 'completed',\n  source_mode: 'pdf_cad',\n  file_name: prepared.source.pdf_file_name,\n  pdf_file_name: prepared.source.pdf_file_name,\n  cad_file_name: prepared.source.cad_file_name,\n  total_pages: prepared.source.total_pdf_pages,\n  selected_pages: [prepared.source.selected_page],\n  analyzed_pages: 1,\n  findings_count: findings.length,\n  summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранному PDF + CAD листу не найдены.',\n  findings,\n  render: prepared.render,\n  cad: prepared.cad,\n  explanatory_note_context: prepared.project_context,\n  page: {\n    page_number: prepared.page.page_number,\n    heuristic_page_type: prepared.page.page_type,\n    width_points: prepared.page.width_points,\n    height_points: prepared.page.height_points,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: requirements.normative_sources ?? [],\n    technical_assignment_sources: requirements.technical_assignment_sources ?? [],\n    conflict_candidates: requirements.conflict_candidates ?? [],\n    requirement_diagnostics: requirements.diagnostics ?? [],\n    reference_resolutions: requirements.reference_resolutions ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    normative_enrichment: {\n      queries_count: $('Prepare Finding Normative Queries').item.json.normative_queries?.length ?? 0,\n      candidates_count: candidateGroups.reduce((total, sources) => total + sources.length, 0),\n    },\n    normative_check: { summary: check.summary ?? '', findings: check.findings ?? [], metrics: check.metrics ?? {} },\n    project_context_sources: augmentation.sources ?? [],\n  },\n  pipeline: ['combined_document_extract','explanatory_note_validation','temporary_project_context_index','page_understanding','project_context_retrieval','normative_queries','requirement_search','user_package_search','normative_check','finding_normative_search','experience_search','finalization','project_context_cleanup'],\n  limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Техническое задание является самостоятельным требованием проекта, но не нормативным доказательством.', 'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n} };",
+        "mode": "runOnceForEachItem"
       },
       "id": "20000000-0000-4000-8000-000000000018",
       "name": "Build PDF CAD Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1840,
+        2500,
         0
       ]
     },
@@ -387,7 +466,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2060,
+        2720,
         0
       ],
       "onError": "continueRegularOutput"
@@ -401,7 +480,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2280,
+        2940,
         0
       ]
     }
@@ -511,14 +590,25 @@
       "main": [
         [
           {
-            "node": "Search Normative",
+            "node": "Search Requirements",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Search Normative": {
+    "Search Requirements": {
+      "main": [
+        [
+          {
+            "node": "Normalize Requirement Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Requirement Search": {
       "main": [
         [
           {
@@ -541,6 +631,28 @@
       ]
     },
     "Check Norms": {
+      "main": [
+        [
+          {
+            "node": "Prepare Finding Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Finding Normative Queries": {
+      "main": [
+        [
+          {
+            "node": "Search Finding Norms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Finding Norms": {
       "main": [
         [
           {
@@ -622,7 +734,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "20000000-0000-4000-8000-000000000021",
+  "versionId": "20000000-0000-4000-8000-000000000026",
   "meta": {
     "templateCredsSetupCompleted": true
   },
