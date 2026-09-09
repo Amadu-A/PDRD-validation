@@ -2,6 +2,7 @@
 
 """Use cases retrieval preparation и инженерной проверки листа."""
 
+import logging
 from dataclasses import dataclass
 
 from pdrd_analysis_service.application.json_schemas import (
@@ -18,8 +19,8 @@ from pdrd_analysis_service.application.use_cases.common import (
     build_basis,
     category,
     confidence,
-    filter_violations,
     finding_status,
+    select_violation_candidates,
     severity,
     string_tuple,
 )
@@ -31,6 +32,10 @@ from pdrd_analysis_service.domain.analysis import (
     TechnicalAssignmentConflictCandidate,
     TechnicalAssignmentSource,
     UserPackageSource,
+)
+
+logger = logging.getLogger(
+    __name__,
 )
 
 
@@ -205,14 +210,29 @@ class CheckPageAgainstNorms:
             source.source_id: source for source in user_package_sources
         }
 
-        findings: list[FindingDraft] = []
-
-        for violation in filter_violations(
+        candidate_selection = select_violation_candidates(
             result.payload.get(
                 "violations",
                 [],
             )
-        ):
+        )
+
+        logger.info(
+            (
+                "normative_candidate_selection "
+                "page=%s generated=%s preserved=%s "
+                "rejected=%s rejection_reasons=%s"
+            ),
+            page_number,
+            candidate_selection.generated_count,
+            candidate_selection.preserved_count,
+            candidate_selection.rejected_count,
+            candidate_selection.rejection_counts,
+        )
+
+        findings: list[FindingDraft] = []
+
+        for violation in candidate_selection.candidates:
             requested_normative_ids = string_tuple(
                 violation.get(
                     "normative_source_ids",
@@ -252,23 +272,51 @@ class CheckPageAgainstNorms:
                 if source_id in user_package_by_id
             )
 
-            requested_any_source = bool(
-                requested_normative_ids
-                or requested_technical_assignment_ids
-                or requested_user_package_ids
+            detached_normative_ids = tuple(
+                source_id
+                for source_id in requested_normative_ids
+                if source_id not in source_by_id
             )
+
+            detached_technical_assignment_ids = tuple(
+                source_id
+                for source_id in requested_technical_assignment_ids
+                if source_id not in technical_assignment_by_id
+            )
+
+            detached_user_package_ids = tuple(
+                source_id
+                for source_id in requested_user_package_ids
+                if source_id not in user_package_by_id
+            )
+
+            if (
+                detached_normative_ids
+                or detached_technical_assignment_ids
+                or detached_user_package_ids
+            ):
+                logger.info(
+                    (
+                        "normative_candidate_source_ids_detached "
+                        "page=%s candidate=%s "
+                        "normative=%s technical_assignment=%s "
+                        "user_package=%s"
+                    ),
+                    page_number,
+                    len(
+                        findings,
+                    )
+                    + 1,
+                    detached_normative_ids,
+                    detached_technical_assignment_ids,
+                    detached_user_package_ids,
+                )
 
             selected_any_source = bool(
                 selected_normative_sources
                 or selected_technical_assignment_sources
                 or selected_user_package_sources
             )
-
-            # Если модель запросила source-id, которого ей
-            # фактически не передавали, не превращаем такой
-            # hallucinated reference в source-less finding.
-            if requested_any_source and not selected_any_source:
-                continue
 
             comment = str(
                 violation.get(
@@ -338,7 +386,7 @@ class CheckPageAgainstNorms:
                     status=normalized_status,
                     comment=comment,
                     evidence=evidence,
-                    recommendation_draft=recommendation_draft,
+                    recommendation_draft=(recommendation_draft),
                     confidence=confidence(
                         violation.get(
                             "confidence",
@@ -350,12 +398,12 @@ class CheckPageAgainstNorms:
                     basis=build_basis(
                         selected_normative_sources,
                     ),
-                    basis_sources=selected_normative_sources,
+                    basis_sources=(selected_normative_sources),
                     experience_query=build_experience_query(
                         category=finding_category,
                         comment=comment,
                         evidence=evidence,
-                        recommendation_draft=recommendation_draft,
+                        recommendation_draft=(recommendation_draft),
                     ),
                     technical_assignment_source_ids=tuple(
                         source.source_id
@@ -370,6 +418,15 @@ class CheckPageAgainstNorms:
                     user_package_basis_sources=(selected_user_package_sources),
                 )
             )
+
+        logger.info(
+            ("normative_findings_preserved page=%s candidates=%s findings=%s"),
+            page_number,
+            candidate_selection.preserved_count,
+            len(
+                findings,
+            ),
+        )
 
         return (
             str(

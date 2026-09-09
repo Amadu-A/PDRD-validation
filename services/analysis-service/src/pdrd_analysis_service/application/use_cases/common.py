@@ -3,6 +3,7 @@
 """Общие pure helpers Analysis application use cases."""
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from pdrd_analysis_service.application.json_schemas import (
@@ -56,6 +57,65 @@ _NEGATIVE_VIOLATION_MARKERS = (
     "выявлено нарушение",
     "выявлены нарушения",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ViolationCandidateSelection:
+    """Результат lossless отбора candidate findings."""
+
+    candidates: tuple[
+        dict[str, Any],
+        ...,
+    ]
+
+    generated_count: int
+
+    rejected_reasons: tuple[
+        str,
+        ...,
+    ]
+
+    @property
+    def preserved_count(
+        self,
+    ) -> int:
+        """Возвращает количество сохранённых candidates."""
+        return len(
+            self.candidates,
+        )
+
+    @property
+    def rejected_count(
+        self,
+    ) -> int:
+        """Возвращает количество отброшенных candidates."""
+        return len(
+            self.rejected_reasons,
+        )
+
+    @property
+    def rejection_counts(
+        self,
+    ) -> dict[
+        str,
+        int,
+    ]:
+        """Группирует диагностические причины rejection."""
+        result: dict[
+            str,
+            int,
+        ] = {}
+
+        for reason in self.rejected_reasons:
+            result[reason] = (
+                result.get(
+                    reason,
+                    0,
+                )
+                + 1
+            )
+
+        return result
 
 
 def zero_metrics(
@@ -122,39 +182,62 @@ def normalize_text(
     ).strip()
 
 
-def filter_violations(
+def select_violation_candidates(
     violations: Any,
-) -> list[dict[str, Any]]:
-    """Удаляет compliance confirmations и дубли."""
+) -> ViolationCandidateSelection:
+    """Сохраняет все содержательные candidates без semantic dedupe."""
     if not isinstance(
         violations,
         list,
     ):
-        return []
+        return ViolationCandidateSelection(
+            candidates=(),
+            generated_count=0,
+            rejected_reasons=(),
+        )
 
-    result: list[dict[str, Any]] = []
+    result: list[dict[str, Any],] = []
 
-    seen: set[str] = set()
+    rejected_reasons: list[str] = []
 
     for violation in violations:
         if not isinstance(
             violation,
             dict,
         ):
+            rejected_reasons.append(
+                "item_not_object",
+            )
+            continue
+
+        comment = normalize_text(
+            violation.get(
+                "comment",
+            )
+        )
+
+        if not comment:
+            rejected_reasons.append(
+                "empty_comment",
+            )
+            continue
+
+        evidence = normalize_text(
+            violation.get(
+                "evidence",
+            )
+        )
+
+        if not evidence:
+            rejected_reasons.append(
+                "empty_evidence",
+            )
             continue
 
         combined = " ".join(
             (
-                normalize_text(
-                    violation.get(
-                        "comment",
-                    )
-                ),
-                normalize_text(
-                    violation.get(
-                        "evidence",
-                    )
-                ),
+                comment,
+                evidence,
                 normalize_text(
                     violation.get(
                         "recommendation_draft",
@@ -170,36 +253,37 @@ def filter_violations(
         has_negative = any(marker in combined for marker in _NEGATIVE_VIOLATION_MARKERS)
 
         if has_positive and not has_negative:
-            continue
-
-        comment = normalize_text(
-            violation.get(
-                "comment",
+            rejected_reasons.append(
+                "compliance_confirmation",
             )
-        )
-
-        if not comment:
             continue
-
-        dedupe_key = re.sub(
-            r"[^a-zа-яё0-9]+",
-            " ",
-            comment,
-            flags=re.IGNORECASE,
-        ).strip()
-
-        if dedupe_key in seen:
-            continue
-
-        seen.add(
-            dedupe_key,
-        )
 
         result.append(
             violation,
         )
 
-    return result
+    return ViolationCandidateSelection(
+        candidates=tuple(
+            result,
+        ),
+        generated_count=len(
+            violations,
+        ),
+        rejected_reasons=tuple(
+            rejected_reasons,
+        ),
+    )
+
+
+def filter_violations(
+    violations: Any,
+) -> list[dict[str, Any]]:
+    """Возвращает backward-compatible список сохранённых candidates."""
+    return list(
+        select_violation_candidates(
+            violations,
+        ).candidates
+    )
 
 
 def build_basis(
@@ -277,6 +361,7 @@ def confidence(
         result = float(
             value,
         )
+
     except (
         TypeError,
         ValueError,
