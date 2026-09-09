@@ -15,6 +15,71 @@ from pdrd_knowledge_service.infrastructure.office.libreoffice import (
 )
 
 
+class TimeoutProcess:
+    """Fake Popen, который зависает на первом communicate."""
+
+    pid = 12345
+
+    returncode: int | None = None
+
+    terminated = False
+
+    def __init__(
+        self,
+    ) -> None:
+        """Инициализирует communicate counter."""
+        self._communicate_calls = 0
+
+    def communicate(
+        self,
+        timeout: float | None = None,
+    ) -> tuple[str, str]:
+        """Первый вызов timeout, второй возвращает diagnostics."""
+        del timeout
+
+        self._communicate_calls += 1
+
+        if self._communicate_calls == 1:
+            raise subprocess.TimeoutExpired(
+                cmd="soffice",
+                timeout=1,
+            )
+
+        return (
+            "writer8 started",
+            "Warning: failed to launch javaldx",
+        )
+
+    def poll(
+        self,
+    ) -> int | None:
+        """Возвращает текущий process status."""
+        return self.returncode
+
+    def wait(
+        self,
+        timeout: float | None = None,
+    ) -> int:
+        """Совместимый wait."""
+        del timeout
+
+        self.returncode = 255
+
+        return self.returncode
+
+    def terminate(
+        self,
+    ) -> None:
+        """Совместимый terminate."""
+        self.terminated = True
+
+    def kill(
+        self,
+    ) -> None:
+        """Совместимый kill."""
+        self.terminated = True
+
+
 def test_word_conversion_uses_odt_intermediate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -105,6 +170,7 @@ def test_conversion_timeout_terminates_process(
     )
 
     source_path = tmp_path / "source.docx"
+
     source_path.write_bytes(
         b"docx",
     )
@@ -141,22 +207,24 @@ def test_conversion_timeout_terminates_process(
                 **kwargs,
             }
         )
+
         return process
+
+    terminate_calls: list[TimeoutProcess] = []
+
+    def fake_terminate_process(
+        target: TimeoutProcess,
+    ) -> None:
+        terminate_calls.append(
+            target,
+        )
+
+        target.terminated = True
 
     monkeypatch.setattr(
         "pdrd_knowledge_service.infrastructure.office.libreoffice.subprocess.Popen",
         fake_popen,
     )
-
-    terminate_calls: list[subprocess.Popen[str],] = []
-
-    def fake_terminate_process(
-        target: subprocess.Popen[str],
-    ) -> None:
-        terminate_calls.append(
-            target,
-        )
-        process.terminated = True
 
     monkeypatch.setattr(
         converter,
@@ -179,12 +247,14 @@ def test_conversion_timeout_terminates_process(
         )
 
     assert process.terminated is True
+
     assert terminate_calls == [
         process,
     ]
 
     assert "writer8 started" in caplog.text
     assert "javaldx" in caplog.text
+
     assert "writer8 started" not in str(
         error_info.value,
     )
@@ -199,66 +269,3 @@ def test_conversion_timeout_terminates_process(
     assert popen_calls[0]["command"][-1] == str(
         source_path,
     )
-
-
-class TimeoutProcess:
-    """Fake Popen, который зависает на первом communicate."""
-
-    pid = 12345
-
-    returncode: int | None = None
-
-    terminated = False
-
-    def __init__(
-        self,
-    ) -> None:
-        """Инициализирует communicate counter."""
-        self._communicate_calls = 0
-
-    def communicate(
-        self,
-        timeout: float | None = None,
-    ) -> tuple[str, str]:
-        """Первый вызов timeout, второй возвращает diagnostics."""
-        del timeout
-
-        self._communicate_calls += 1
-
-        if self._communicate_calls == 1:
-            raise subprocess.TimeoutExpired(
-                cmd="soffice",
-                timeout=1,
-            )
-
-        return (
-            "writer8 started",
-            "Warning: failed to launch javaldx",
-        )
-
-    def poll(
-        self,
-    ) -> int | None:
-        """Возвращает текущий process status."""
-        return self.returncode
-
-    def wait(
-        self,
-        timeout: float | None = None,
-    ) -> int:
-        """Совместимый wait."""
-        del timeout
-        self.returncode = 255
-        return self.returncode
-
-    def terminate(
-        self,
-    ) -> None:
-        """Совместимый terminate."""
-        self.terminated = True
-
-    def kill(
-        self,
-    ) -> None:
-        """Совместимый kill."""
-        self.terminated = True
