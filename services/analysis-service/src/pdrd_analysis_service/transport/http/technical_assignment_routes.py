@@ -43,6 +43,25 @@ from pdrd_analysis_service.transport.http.technical_assignment_schemas import (
 router = APIRouter()
 
 
+def _validate_requirement_count(
+    *,
+    actual: int,
+    max_allowed: int,
+) -> None:
+    """Не допускает неограниченный T-first request на один лист."""
+    if actual <= max_allowed:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+        detail=(
+            "Количество требований ТЗ для одного листа "
+            f"({actual}) превышает configured limit "
+            f"({max_allowed})."
+        ),
+    )
+
+
 def _decode_image(
     *,
     encoded: str,
@@ -179,6 +198,15 @@ async def check_technical_assignment(
     ],
 ) -> CheckTechnicalAssignmentResponse:
     """Выполняет exhaustive independent T-first check."""
+    _validate_requirement_count(
+        actual=len(
+            request.requirements,
+        ),
+        max_allowed=(
+            container.settings.pipeline.technical_assignment_max_requirements_per_page
+        ),
+    )
+
     image = _decode_image(
         encoded=request.image_base64,
         max_bytes=(container.settings.pipeline.max_image_bytes),

@@ -128,7 +128,6 @@ class CheckTechnicalAssignmentRequest(
 
     requirements: list[TechnicalAssignmentRequirementPayload] = Field(
         min_length=1,
-        max_length=200,
     )
 
 

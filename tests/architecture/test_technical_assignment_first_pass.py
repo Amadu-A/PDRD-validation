@@ -92,9 +92,13 @@ def test_t_first_validation_has_dedicated_http_route() -> None:
 
     assert "check_page_against_technical_assignment" in source
 
+    assert "technical_assignment_max_requirements_per_page" in source
+
+    assert "HTTP_413_CONTENT_TOO_LARGE" in source
+
 
 def test_t_first_batch_policy_is_configurable() -> None:
-    """Batching T requirements хранится в baseline configuration."""
+    """T-first batching и transport limit хранятся в baseline configuration."""
     settings_path = (
         ROOT
         / "services"
@@ -115,11 +119,18 @@ def test_t_first_batch_policy_is_configurable() -> None:
 
     assert "technical_assignment_batch_size" in settings_source
 
+    assert "technical_assignment_max_requirements_per_page" in settings_source
+
     assert "technical_assignment_requirement_text_limit" in settings_source
 
     assert (
         "ANALYSIS_SERVICE_PIPELINE__"
         "TECHNICAL_ASSIGNMENT_BATCH_SIZE=20" in environment_source
+    )
+
+    assert (
+        "ANALYSIS_SERVICE_PIPELINE__"
+        "TECHNICAL_ASSIGNMENT_MAX_REQUIREMENTS_PER_PAGE=1000" in environment_source
     )
 
     assert (
