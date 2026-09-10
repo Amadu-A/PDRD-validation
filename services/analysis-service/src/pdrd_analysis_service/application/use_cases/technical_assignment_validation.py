@@ -311,7 +311,7 @@ class CheckPageAgainstTechnicalAssignment:
 
         return tuple(
             cls._parse_decision(
-                requirement_id=requirement.requirement_id,
+                requirement_id=(requirement.requirement_id),
                 raw=raw_decisions[requirement.requirement_id],
             )
             for requirement in requirements
@@ -336,7 +336,7 @@ class CheckPageAgainstTechnicalAssignment:
             "status",
         )
 
-        if raw_status not in (TECHNICAL_ASSIGNMENT_DECISION_STATUSES):
+        if raw_status not in TECHNICAL_ASSIGNMENT_DECISION_STATUSES:
             raise TechnicalAssignmentValidationError(
                 "T-first decision содержит неизвестный status.",
             )
@@ -349,23 +349,6 @@ class CheckPageAgainstTechnicalAssignment:
             raise TechnicalAssignmentValidationError(
                 "T-first decision содержит неизвестный severity.",
             )
-
-        comment = CheckPageAgainstTechnicalAssignment._required_text(
-            raw,
-            "comment",
-        )
-
-        evidence = CheckPageAgainstTechnicalAssignment._required_text(
-            raw,
-            "evidence",
-        )
-
-        recommendation_draft = str(
-            raw.get(
-                "recommendation_draft",
-                "",
-            )
-        ).strip()
 
         raw_confidence = raw.get(
             "confidence",
@@ -393,6 +376,29 @@ class CheckPageAgainstTechnicalAssignment:
             raise TechnicalAssignmentValidationError(
                 "T-first decision confidence вне диапазона 0..1.",
             )
+
+        if raw_status in _FINDING_DECISION_STATUSES:
+            comment = CheckPageAgainstTechnicalAssignment._required_text(
+                raw,
+                "comment",
+            )
+
+            evidence = CheckPageAgainstTechnicalAssignment._required_text(
+                raw,
+                "evidence",
+            )
+
+            recommendation_draft = str(
+                raw.get(
+                    "recommendation_draft",
+                    "",
+                )
+            ).strip()
+
+        else:
+            comment = ""
+            evidence = ""
+            recommendation_draft = ""
 
         return TechnicalAssignmentDecision(
             requirement_id=requirement_id,
@@ -455,7 +461,7 @@ class CheckPageAgainstTechnicalAssignment:
     ) -> FindingDraft:
         """Преобразует violated/review T decision без потери candidate."""
         source = TechnicalAssignmentSource(
-            source_id=requirement.requirement_id,
+            source_id=(requirement.requirement_id),
             point_id=requirement.point_id,
             score=0.0,
             technical_assignment_id=(technical_assignment_id),
@@ -486,11 +492,13 @@ class CheckPageAgainstTechnicalAssignment:
             normative_source_ids=(),
             basis="",
             basis_sources=(),
-            experience_query=build_experience_query(
-                category="customer_requirements",
-                comment=decision.comment,
-                evidence=decision.evidence,
-                recommendation_draft=(decision.recommendation_draft),
+            experience_query=(
+                build_experience_query(
+                    category=("customer_requirements"),
+                    comment=decision.comment,
+                    evidence=decision.evidence,
+                    recommendation_draft=(decision.recommendation_draft),
+                )
             ),
             technical_assignment_source_ids=(requirement.requirement_id,),
             technical_assignment_basis_sources=(source,),

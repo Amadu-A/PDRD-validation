@@ -57,12 +57,10 @@ def build_technical_assignment_check_schema(
             },
             "comment": {
                 "type": "string",
-                "minLength": 1,
                 "maxLength": 420,
             },
             "evidence": {
                 "type": "string",
-                "minLength": 1,
                 "maxLength": 500,
             },
             "recommendation_draft": {
@@ -92,7 +90,10 @@ def build_technical_assignment_check_schema(
             "decisions": {
                 "type": "object",
                 "additionalProperties": False,
-                "properties": dict.fromkeys(requirement_ids, decision_schema),
+                "properties": dict.fromkeys(
+                    requirement_ids,
+                    decision_schema,
+                ),
                 "required": list(
                     requirement_ids,
                 ),

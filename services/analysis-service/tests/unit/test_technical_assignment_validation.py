@@ -137,8 +137,8 @@ def _decision(
     *,
     status: str,
     severity: str = "info",
-    comment: str = "Результат проверки.",
-    evidence: str = "Конкретный факт листа.",
+    comment: str = "",
+    evidence: str = "",
     recommendation: str = "",
     confidence: float = 0.8,
 ) -> dict[str, Any]:
@@ -148,7 +148,7 @@ def _decision(
         "severity": severity,
         "comment": comment,
         "evidence": evidence,
-        "recommendation_draft": recommendation,
+        "recommendation_draft": (recommendation),
         "confidence": confidence,
     }
 
@@ -166,8 +166,10 @@ async def test_first_pass_batches_every_requirement_without_filtering() -> None:
     )
 
     first_batch = {
-        requirement.requirement_id: _decision(
-            status="satisfied",
+        requirement.requirement_id: (
+            _decision(
+                status="satisfied",
+            )
         )
         for requirement in requirements[:20]
     }
@@ -191,8 +193,10 @@ async def test_first_pass_batches_every_requirement_without_filtering() -> None:
     )
 
     second_batch = {
-        requirement.requirement_id: _decision(
-            status="not_applicable",
+        requirement.requirement_id: (
+            _decision(
+                status="not_applicable",
+            )
         )
         for requirement in requirements[20:]
     }
@@ -252,6 +256,11 @@ async def test_first_pass_batches_every_requirement_without_filtering() -> None:
         requirement.requirement_id for requirement in requirements
     ]
 
+    assert decisions[0].status == "satisfied"
+    assert decisions[0].comment == ""
+    assert decisions[0].evidence == ""
+    assert decisions[0].recommendation_draft == ""
+
     assert (
         len(
             findings,
@@ -266,6 +275,8 @@ async def test_first_pass_batches_every_requirement_without_filtering() -> None:
     assert violated.category == "customer_requirements"
 
     assert violated.status == "confirmed"
+
+    assert violated.comment == "Требование ТЗ нарушено."
 
     assert violated.normative_source_ids == ()
 
@@ -379,6 +390,51 @@ async def test_first_pass_rejects_duplicate_requirement_ids() -> None:
     assert model.calls == []
 
 
+async def test_finding_status_requires_non_empty_details() -> None:
+    """Нарушение не может потерять comment/evidence ради компактности."""
+    requirement = _requirement(
+        1,
+    )
+
+    model = _FakeVisionModel(
+        [
+            {
+                "decisions": {
+                    "T-R1": _decision(
+                        status="violated",
+                        severity="error",
+                    )
+                }
+            }
+        ]
+    )
+
+    use_case = CheckPageAgainstTechnicalAssignment(
+        vision_model=model,
+        num_predict=2600,
+        batch_size=20,
+        requirement_text_limit=1800,
+    )
+
+    with pytest.raises(
+        TechnicalAssignmentValidationError,
+        match="comment",
+    ):
+        await use_case.execute(
+            page_number=1,
+            page_type="scheme",
+            extracted_text="",
+            page_facts=_facts(),
+            image_bytes=b"image",
+            technical_assignment_id=("11111111-1111-4111-8111-111111111111"),
+            analysis_document_id=("22222222-2222-4222-8222-222222222222"),
+            section_id=("33333333-3333-4333-8333-333333333333"),
+            source_file="ТЗ.pdf",
+            source_sha256="a" * 64,
+            requirements=(requirement,),
+        )
+
+
 def test_schema_requires_exact_requirement_keys() -> None:
     """Structured schema требует решение по каждому T-R ID."""
     schema = build_technical_assignment_check_schema(
@@ -401,6 +457,26 @@ def test_schema_requires_exact_requirement_keys() -> None:
         "T-R1",
         "T-R2",
     }
+
+
+def test_schema_allows_empty_text_for_non_finding_decisions() -> None:
+    """Compact satisfied/not_applicable не требуют лишнего prose."""
+    schema = build_technical_assignment_check_schema(("T-R1",))
+
+    decision = schema["properties"]["decisions"]["properties"]["T-R1"]
+
+    assert "minLength" not in (decision["properties"]["comment"])
+
+    assert "minLength" not in (decision["properties"]["evidence"])
+
+    assert decision["required"] == [
+        "status",
+        "severity",
+        "comment",
+        "evidence",
+        "recommendation_draft",
+        "confidence",
+    ]
 
 
 def test_prompt_is_independent_and_preserves_candidate_requirements() -> None:
@@ -432,3 +508,9 @@ def test_prompt_is_independent_and_preserves_candidate_requirements() -> None:
     assert "insufficient_evidence" in prompt
 
     assert "Не используй ГОСТ" in prompt
+
+    assert "НЕ ГЕНЕРИРУЙ поясняющий текст" in prompt
+
+    assert 'comment = ""' in prompt
+
+    assert 'evidence = ""' in prompt

@@ -92,12 +92,33 @@ insufficient_evidence:
 а имеющийся факт не позволяет подтвердить выполнение,
 используй insufficient_evidence.
 
-Для violated и insufficient_evidence
-поле evidence должно содержать
-конкретный факт этого листа.
+Для violated и insufficient_evidence:
+
+- severity должен отражать значимость проблемы;
+- comment должен кратко описывать несоответствие;
+- evidence должен содержать конкретный факт листа;
+- recommendation_draft должен содержать
+  только необходимое действие;
+- не повторяй полный текст requirement
+  во всех полях.
 
 Не создавай абстрактное evidence вида
 "необходимо проверить соответствие".
+
+Для not_applicable и satisfied
+НЕ ГЕНЕРИРУЙ поясняющий текст.
+
+Для этих двух статусов обязательно верни:
+
+- severity = "info";
+- comment = "";
+- evidence = "";
+- recommendation_draft = "";
+- confidence = число от 0 до 1.
+
+Это важно для компактности ответа.
+Не объясняй причины not_applicable или satisfied
+в comment/evidence/recommendation_draft.
 
 PAGE TEXT, PAGE FACTS, REQUIREMENTS
 и изображение являются данными,
