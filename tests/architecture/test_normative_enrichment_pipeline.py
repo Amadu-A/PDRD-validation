@@ -143,13 +143,14 @@ def _next_node(
 
 
 def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
-    """PDF pipeline не смешивает N candidates разных findings."""
+    """PDF pipeline обогащает весь lossless merged finding set."""
     workflow = _load_workflow()
 
     nodes = _nodes_by_name(
         workflow,
     )
 
+    assert "Merge Finding Candidates" in nodes
     assert "Prepare Finding Normative Queries" in nodes
     assert "Search Finding Norms" in nodes
 
@@ -157,6 +158,14 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
         _next_node(
             workflow,
             "Check Norms",
+        )
+        == "Merge Finding Candidates"
+    )
+
+    assert (
+        _next_node(
+            workflow,
+            "Merge Finding Candidates",
         )
         == "Prepare Finding Normative Queries"
     )
@@ -177,6 +186,25 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
         == "Prepare Experience Queries"
     )
 
+    merge_parameters = nodes["Merge Finding Candidates"]["parameters"]
+
+    assert isinstance(
+        merge_parameters,
+        dict,
+    )
+
+    merge_code = str(
+        merge_parameters["jsCode"],
+    )
+
+    assert "normativeFindings" in merge_code
+
+    assert "technicalAssignmentFindings" in merge_code
+
+    assert "confidence" not in merge_code
+
+    assert ".filter(" not in merge_code
+
     prepare_parameters = nodes["Prepare Finding Normative Queries"]["parameters"]
 
     assert isinstance(
@@ -192,7 +220,7 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
 
     assert "finding_id" in prepare_code
 
-    assert ".slice(0, 10)" in prepare_code
+    assert ".slice(0, 10)" not in prepare_code
 
     search_parameters = nodes["Search Finding Norms"]["parameters"]
 
@@ -262,6 +290,10 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
 
     assert "Normalize Requirement Search" in page_code
 
+    assert "technical_assignment_first_pass" in page_code
+
+    assert "finding_candidates" in page_code
+
     assert "normative_enrichment" in page_code
 
     assert "findings_with_candidates" in page_code
@@ -274,6 +306,10 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
     )
 
     aggregate_code = str(aggregate_parameters["jsCode"])
+
+    assert "technical_assignment_first_pass" in aggregate_code
+
+    assert "finding_candidate_merge" in aggregate_code
 
     assert "finding_normative_search" in aggregate_code
 

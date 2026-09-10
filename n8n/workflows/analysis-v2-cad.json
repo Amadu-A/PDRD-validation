@@ -13,7 +13,7 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -1200,
+        -2080,
         0
       ],
       "webhookId": "ad01c934-a691-45da-8c3a-b986f3e70ce1"
@@ -42,20 +42,20 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -980,
+        -1860,
         0
       ]
     },
     {
       "parameters": {
-        "jsCode": "const cad = $input.first().json;\n\nreturn [{\n  json: {\n    cad: {\n      original_file_name: cad.original_file_name ?? 'drawing.dxf',\n      original_format: cad.original_format ?? '',\n      normalized_format: cad.normalized_format ?? '',\n      converted_from_dwg: cad.converted_from_dwg ?? false,\n      selected_layout: cad.selected_layout ?? '',\n      warnings: Array.isArray(cad.warnings) ? cad.warnings : [],\n      machine_data: cad.machine_data ?? {},\n      machine_context: cad.machine_context ?? '',\n    },\n    page: {\n      page_number: 1,\n      page_type: 'cad',\n      text: cad.machine_context ?? '',\n      image_base64: cad.image_base64 ?? '',\n    },\n  },\n}];"
+        "jsCode": "const cad = $('Document Extract CAD').first().json;\nconst technicalAssignment = $input.first().json;\n\nreturn [{\n  json: {\n    cad: {\n      original_file_name: cad.original_file_name ?? 'drawing.dxf',\n      original_format: cad.original_format ?? '',\n      normalized_format: cad.normalized_format ?? '',\n      converted_from_dwg: cad.converted_from_dwg ?? false,\n      selected_layout: cad.selected_layout ?? '',\n      warnings: Array.isArray(cad.warnings) ? cad.warnings : [],\n      machine_data: cad.machine_data ?? {},\n      machine_context: cad.machine_context ?? '',\n    },\n    technical_assignment: technicalAssignment,\n    page: {\n      page_number: 1,\n      page_type: 'cad',\n      text: cad.machine_context ?? '',\n      image_base64: cad.image_base64 ?? '',\n    },\n  },\n}];"
       },
       "id": "f55504e8-af30-4abd-8214-a3f9403101d8",
       "name": "Prepare CAD Context",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -760,
+        -1200,
         0
       ]
     },
@@ -76,7 +76,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -540,
+        -980,
         0
       ],
       "retryOnFail": true,
@@ -192,7 +192,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\n\nconst normativeQueryItems = findings\n  .map((finding) => {\n    const findingQuery = String(finding.experience_query ?? '').trim();\n    if (!findingQuery) {\n      return null;\n    }\n\n    return {\n      finding_id: String(finding.finding_id ?? ''),\n      query: [\n        'Найти нормативное основание для уже обнаруженного инженерного замечания.',\n        'Нужен фрагмент нормативного документа, который прямо относится к указанному факту и типу проектного документа.',\n        'Не считать тематически похожий норматив достаточным подтверждением.',\n        findingQuery,\n      ].join('\\n'),\n    };\n  })\n  .filter((item) => item?.finding_id && item?.query)\n  .slice(0, 10);\n\nreturn {\n  json: {\n    findings,\n    normative_query_items: normativeQueryItems,\n    normative_queries: normativeQueryItems.map((item) => item.query),\n  },\n};",
+        "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\n\nconst normativeQueryItems = findings\n  .map((finding) => {\n    const findingQuery = String(finding.experience_query ?? '').trim();\n    if (!findingQuery) {\n      return null;\n    }\n\n    return {\n      finding_id: String(finding.finding_id ?? ''),\n      query: [\n        'Найти нормативное основание для уже обнаруженного инженерного замечания.',\n        'Нужен фрагмент нормативного документа, который прямо относится к указанному факту и типу проектного документа.',\n        'Не считать тематически похожий норматив достаточным подтверждением.',\n        findingQuery,\n      ].join('\\n'),\n    };\n  })\n  .filter((item) => item?.finding_id && item?.query);\n\nreturn {\n  json: {\n    findings,\n    normative_query_items: normativeQueryItems,\n    normative_queries: normativeQueryItems.map((item) => item.query),\n  },\n};",
         "mode": "runOnceForEachItem"
       },
       "id": "cad00000-0000-4000-8000-000000000002",
@@ -200,7 +200,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        780,
+        1000,
         0
       ]
     },
@@ -221,7 +221,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1000,
+        1220,
         0
       ],
       "retryOnFail": true,
@@ -238,7 +238,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1220,
+        1440,
         0
       ]
     },
@@ -259,7 +259,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1440,
+        1660,
         0
       ],
       "retryOnFail": true,
@@ -276,7 +276,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1660,
+        1880,
         0
       ]
     },
@@ -297,7 +297,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1880,
+        2100,
         0
       ],
       "retryOnFail": true,
@@ -306,7 +306,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const prepared = $('Prepare CAD Context').item.json;\nconst understanding = $('Understand CAD').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst requirements = $('Normalize Requirement Search').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst enrichment = $('Prepare Experience Queries').item.json;\nconst finalization = $json;\nconst findings = Array.isArray(finalization.findings)\n  ? finalization.findings\n  : [];\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\nconst candidateGroups = Object.values(candidatesByFinding)\n  .filter((value) => Array.isArray(value));\n\nreturn {\n  json: {\n    status: 'completed',\n    source_mode: 'cad_only',\n    file_name: prepared.cad.original_file_name,\n    analyzed_pages: 1,\n    findings_count: findings.length,\n    summary:\n      findings.length > 0\n        ? `Найдено замечаний: ${findings.length}.`\n        : 'Замечания по CAD-чертежу не найдены.',\n    findings,\n    cad: prepared.cad,\n    page: {\n      page_number: 1,\n      heuristic_page_type: 'cad',\n      facts: understanding.facts ?? {},\n      understanding_metrics: understanding.metrics ?? {},\n      normative_queries: queries.queries ?? [],\n      normative_sources: requirements.normative_sources ?? [],\n      technical_assignment_sources: requirements.technical_assignment_sources ?? [],\n      conflict_candidates: requirements.conflict_candidates ?? [],\n      requirement_diagnostics: requirements.diagnostics ?? [],\n      reference_resolutions: requirements.reference_resolutions ?? [],\n      user_package_sources: userPackages.sources ?? [],\n      normative_embedding_model: requirements.normative_embedding_model ?? '',\n      technical_assignment_embedding_model: requirements.technical_assignment_embedding_model ?? '',\n      user_package_embedding_model: userPackages.embedding_model ?? '',\n      normative_enrichment: {\n        queries_count: $('Prepare Finding Normative Queries').item.json.normative_queries?.length ?? 0,\n        candidates_count: candidateGroups.reduce((total, sources) => total + sources.length, 0),\n      },\n      normative_check: {\n        summary: check.summary ?? '',\n        findings: check.findings ?? [],\n        metrics: check.metrics ?? {},\n      },\n      finalization: {\n        summary: finalization.summary ?? '',\n        metrics: finalization.metrics ?? {},\n      },\n    },\n    pipeline: [\n      'cad_extract',\n      'page_understanding',\n      'normative_queries',\n      'requirement_search',\n      'user_package_search',\n      'normative_check',\n      'finding_normative_search',\n      'experience_search',\n      'finalization',\n    ],\n    limitations: [\n      'Пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.',\n      'Техническое задание является самостоятельным требованием проекта, но не нормативным доказательством.',\n      'В CAD-only workflow не используется контекст пояснительной записки.',\n    ],\n  },\n};",
+        "jsCode": "const prepared = $('Prepare CAD Context').item.json;\nconst understanding = $('Understand CAD').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst requirements = $('Normalize Requirement Search').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst merged = $('Merge Finding Candidates').item.json;\nconst tFirst = $('Technical Assignment First Pass').item.json;\nconst enrichment = $('Prepare Experience Queries').item.json;\nconst finalization = $json;\nconst findings = Array.isArray(finalization.findings)\n  ? finalization.findings\n  : [];\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\nconst candidateGroups = Object.values(candidatesByFinding)\n  .filter((value) => Array.isArray(value));\nconst tDecisions = Array.isArray(tFirst.decisions)\n  ? tFirst.decisions\n  : [];\n\nreturn {\n  json: {\n    status: 'completed',\n    source_mode: 'cad_only',\n    file_name: prepared.cad.original_file_name,\n    analyzed_pages: 1,\n    findings_count: findings.length,\n    summary:\n      findings.length > 0\n        ? `Найдено замечаний: ${findings.length}.`\n        : 'Замечания по CAD-чертежу не найдены.',\n    findings,\n    cad: prepared.cad,\n    page: {\n      page_number: 1,\n      heuristic_page_type: 'cad',\n      facts: understanding.facts ?? {},\n      understanding_metrics: understanding.metrics ?? {},\n      normative_queries: queries.queries ?? [],\n      normative_sources: requirements.normative_sources ?? [],\n      technical_assignment_sources: requirements.technical_assignment_sources ?? [],\n      conflict_candidates: requirements.conflict_candidates ?? [],\n      requirement_diagnostics: requirements.diagnostics ?? [],\n      reference_resolutions: requirements.reference_resolutions ?? [],\n      user_package_sources: userPackages.sources ?? [],\n      normative_embedding_model: requirements.normative_embedding_model ?? '',\n      technical_assignment_embedding_model: requirements.technical_assignment_embedding_model ?? '',\n      user_package_embedding_model: userPackages.embedding_model ?? '',\n      technical_assignment_first_pass: {\n        enabled: Boolean(tFirst.enabled),\n        requirements_count: Number(tFirst.requirements_count ?? 0),\n        decisions_count: tDecisions.length,\n        satisfied_count: tDecisions.filter((decision) => decision.status === 'satisfied').length,\n        not_applicable_count: tDecisions.filter((decision) => decision.status === 'not_applicable').length,\n        violated_count: tDecisions.filter((decision) => decision.status === 'violated').length,\n        needs_review_count: tDecisions.filter((decision) => decision.status === 'insufficient_evidence').length,\n        findings_count: Array.isArray(tFirst.findings) ? tFirst.findings.length : 0,\n        summary: String(tFirst.summary ?? ''),\n        metrics: Array.isArray(tFirst.metrics) ? tFirst.metrics : [],\n      },\n      finding_candidates: {\n        normative_check_count: Array.isArray(check.findings) ? check.findings.length : 0,\n        merged_count: Array.isArray(merged.findings) ? merged.findings.length : 0,\n      },\n      normative_enrichment: {\n        queries_count: $('Prepare Finding Normative Queries').item.json.normative_queries?.length ?? 0,\n        candidates_count: candidateGroups.reduce((total, sources) => total + sources.length, 0),\n      },\n      normative_check: {\n        summary: check.summary ?? '',\n        findings: check.findings ?? [],\n        metrics: check.metrics ?? {},\n      },\n      finalization: {\n        summary: finalization.summary ?? '',\n        metrics: finalization.metrics ?? {},\n      },\n    },\n    pipeline: [\n      'cad_extract',\n      'technical_assignment_requirement_feed',\n      'page_understanding',\n      'technical_assignment_first_pass',\n      'normative_queries',\n      'requirement_search',\n      'user_package_search',\n      'normative_check',\n      'finding_candidate_merge',\n      'finding_normative_search',\n      'experience_search',\n      'finalization',\n    ],\n    limitations: [\n      'Пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.',\n      'Техническое задание проверяется независимым exhaustive T-first проходом и не является нормативным доказательством.',\n      'T-guided retrieval используется дополнительно и не управляет сохранением T-first findings.',\n      'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.',\n      'В CAD-only workflow не используется контекст пояснительной записки.',\n    ],\n  },\n};",
         "mode": "runOnceForEachItem"
       },
       "id": "fd6e589b-c751-471a-bfc2-e47e710c7c6e",
@@ -314,7 +314,187 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2100,
+        2320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5b200000-0000-4000-8000-000000000011",
+              "leftValue": "={{ String($('POST /analysis/v2/cad').first().json.body?.technical_assignment_id ?? '') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5b200000-0000-4000-8000-000000000001",
+      "name": "Has Technical Assignment",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'http://pdrd-knowledge-service:8401/internal/v1/technical-assignments/' + $('POST /analysis/v2/cad').first().json.body.technical_assignment_id + '/requirements' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "200"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 900000,
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "offset",
+                    "value": "={{ $pageCount * 200 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ Number($response.body.offset ?? 0) + (($response.body.requirements ?? []).length) >= Number($response.body.total ?? 0) }}",
+              "limitPagesFetched": true,
+              "maxRequests": 5,
+              "requestInterval": 0
+            }
+          }
+        }
+      },
+      "id": "5b200000-0000-4000-8000-000000000002",
+      "name": "Load Technical Assignment Requirements",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1420,
+        -160
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const technicalAssignmentId = String(\n  $('POST /analysis/v2/cad').first().json.body?.technical_assignment_id ?? '',\n).trim();\n\nif (!technicalAssignmentId) {\n  return [{\n    json: {\n      enabled: false,\n      technical_assignment_id: null,\n      analysis_document_id: null,\n      section_id: null,\n      source_file: '',\n      source_sha256: '',\n      total: 0,\n      requirements: [],\n    },\n  }];\n}\n\nconst pages = $input.all().map((item) => item.json ?? {});\n\nif (pages.length === 0) {\n  throw new Error('T-first requirement feed вернул пустой набор страниц.');\n}\n\nconst first = pages[0];\nconst expectedDocumentId = String(\n  $('POST /analysis/v2/cad').first().json.body?.document_id ?? '',\n).trim();\nconst expectedSectionId = String(\n  $('POST /analysis/v2/cad').first().json.body?.normative_section_id ?? '',\n).trim();\n\nconst total = Number(first.total ?? 0);\n\nif (!Number.isInteger(total) || total < 1) {\n  throw new Error(\n    `T-first requirement feed должен содержать хотя бы одно atomic requirement; total=${first.total}.`,\n  );\n}\n\nif (total > 1000) {\n  throw new Error(\n    `T-first requirement feed превышает configured Analysis limit: total=${total}, limit=1000.`,\n  );\n}\n\nconst requirements = pages\n  .flatMap((page) => Array.isArray(page.requirements) ? page.requirements : [])\n  .sort(\n    (left, right) =>\n      Number(left.requirement_index ?? 0) - Number(right.requirement_index ?? 0),\n  );\n\nfor (const page of pages) {\n  if (String(page.technical_assignment_id ?? '') !== technicalAssignmentId) {\n    throw new Error('T-first requirement feed содержит другой technical_assignment_id.');\n  }\n\n  if (String(page.analysis_document_id ?? '') !== expectedDocumentId) {\n    throw new Error('T-first requirement feed содержит другой analysis_document_id.');\n  }\n\n  if (String(page.section_id ?? '') !== expectedSectionId) {\n    throw new Error('T-first requirement feed содержит другой section_id.');\n  }\n\n  if (Number(page.total ?? -1) !== total) {\n    throw new Error('T-first requirement feed содержит несовместимые total между страницами.');\n  }\n\n  if (\n    String(page.source_file ?? '') !== String(first.source_file ?? '')\n    || String(page.source_sha256 ?? '') !== String(first.source_sha256 ?? '')\n  ) {\n    throw new Error('T-first requirement feed содержит несовместимые source metadata.');\n  }\n}\n\nif (requirements.length !== total) {\n  throw new Error(\n    `T-first requirement feed получен не полностью: expected=${total}, actual=${requirements.length}.`,\n  );\n}\n\nconst requirementIds = requirements.map(\n  (requirement) => String(requirement.requirement_id ?? ''),\n);\n\nif (\n  requirementIds.some((requirementId) => !requirementId)\n  || new Set(requirementIds).size !== requirementIds.length\n) {\n  throw new Error('T-first requirement feed содержит пустые или повторяющиеся requirement_id.');\n}\n\nreturn [{\n  json: {\n    enabled: true,\n    technical_assignment_id: technicalAssignmentId,\n    analysis_document_id: expectedDocumentId,\n    section_id: expectedSectionId,\n    source_file: String(first.source_file ?? ''),\n    source_sha256: String(first.source_sha256 ?? ''),\n    total,\n    requirements,\n  },\n}];"
+      },
+      "id": "5b200000-0000-4000-8000-000000000003",
+      "name": "Technical Assignment Requirement Feed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1200,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5b200000-0000-4000-8000-000000000012",
+              "leftValue": "={{ Boolean($('Prepare CAD Context').item.json.technical_assignment?.enabled) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5b200000-0000-4000-8000-000000000004",
+      "name": "Has T First Pass",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/check-technical-assignment",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({\n  page_number: $('Prepare CAD Context').item.json.page.page_number,\n  extracted_text: $('Prepare CAD Context').item.json.page.text,\n  page_facts: $('Understand CAD').item.json.facts,\n  image_base64: $('Prepare CAD Context').item.json.page.image_base64,\n  technical_assignment_id: $('Prepare CAD Context').item.json.technical_assignment.technical_assignment_id,\n  analysis_document_id: $('Prepare CAD Context').item.json.technical_assignment.analysis_document_id,\n  section_id: $('Prepare CAD Context').item.json.technical_assignment.section_id,\n  source_file: $('Prepare CAD Context').item.json.technical_assignment.source_file,\n  source_sha256: $('Prepare CAD Context').item.json.technical_assignment.source_sha256,\n  requirements: $('Prepare CAD Context').item.json.technical_assignment.requirements ?? [],\n}) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "5b200000-0000-4000-8000-000000000005",
+      "name": "Check Technical Assignment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -540,
+        -160
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const enabled = Boolean(\n  $('Prepare CAD Context').item.json.technical_assignment?.enabled,\n);\n\nif (!enabled) {\n  return {\n    json: {\n      enabled: false,\n      requirements_count: 0,\n      summary: '',\n      decisions: [],\n      findings: [],\n      metrics: [],\n    },\n  };\n}\n\nconst response = $json ?? {};\nconst decisions = Array.isArray(response.decisions) ? response.decisions : [];\nconst findings = Array.isArray(response.findings) ? response.findings : [];\nconst metrics = Array.isArray(response.metrics) ? response.metrics : [];\nconst requirementsCount = Number(\n  $('Prepare CAD Context').item.json.technical_assignment?.total ?? 0,\n);\n\nif (decisions.length !== requirementsCount) {\n  throw new Error(\n    `T-first потеряла atomic decisions: expected=${requirementsCount}, actual=${decisions.length}.`,\n  );\n}\n\nconst decisionIds = decisions.map(\n  (decision) => String(decision.requirement_id ?? ''),\n);\nconst expectedIds = $('Prepare CAD Context').item.json.technical_assignment.requirements\n  .map((requirement) => String(requirement.requirement_id ?? ''));\n\nif (\n  decisionIds.length !== expectedIds.length\n  || decisionIds.some((requirementId) => !requirementId)\n  || new Set(decisionIds).size !== decisionIds.length\n  || expectedIds.some((requirementId, index) => requirementId !== decisionIds[index])\n) {\n  throw new Error('T-first decisions не соответствуют полному ordered atomic requirement feed.');\n}\n\nreturn {\n  json: {\n    enabled: true,\n    requirements_count: requirementsCount,\n    summary: String(response.summary ?? ''),\n    decisions,\n    findings,\n    metrics,\n  },\n};"
+      },
+      "id": "5b200000-0000-4000-8000-000000000006",
+      "name": "Technical Assignment First Pass",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const normativeCheck = $json ?? {};\nconst normativeFindings = Array.isArray(normativeCheck.findings)\n  ? normativeCheck.findings\n  : [];\nconst technicalAssignment = $('Technical Assignment First Pass').item.json ?? {};\nconst technicalAssignmentFindings = Array.isArray(technicalAssignment.findings)\n  ? technicalAssignment.findings\n  : [];\n\nconst findings = [\n  ...normativeFindings,\n  ...technicalAssignmentFindings,\n];\n\nconst findingIds = findings.map(\n  (finding) => String(finding.finding_id ?? ''),\n);\n\nif (\n  findingIds.some((findingId) => !findingId)\n  || new Set(findingIds).size !== findingIds.length\n) {\n  throw new Error(\n    'Finding candidate merge обнаружил пустой или повторяющийся finding_id.',\n  );\n}\n\nreturn {\n  json: {\n    ...normativeCheck,\n    findings,\n    technical_assignment_first_pass: {\n      enabled: Boolean(technicalAssignment.enabled),\n      requirements_count: Number(\n        technicalAssignment.requirements_count ?? 0,\n      ),\n      decisions_count: Array.isArray(technicalAssignment.decisions)\n        ? technicalAssignment.decisions.length\n        : 0,\n      findings_count: technicalAssignmentFindings.length,\n      summary: String(technicalAssignment.summary ?? ''),\n      metrics: Array.isArray(technicalAssignment.metrics)\n        ? technicalAssignment.metrics\n        : [],\n    },\n  },\n};",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "5b200000-0000-4000-8000-000000000007",
+      "name": "Merge Finding Candidates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
         0
       ]
     }
@@ -336,7 +516,7 @@
       "main": [
         [
           {
-            "node": "Prepare CAD Context",
+            "node": "Has Technical Assignment",
             "type": "main",
             "index": 0
           }
@@ -358,7 +538,7 @@
       "main": [
         [
           {
-            "node": "Build Normative Queries",
+            "node": "Has T First Pass",
             "type": "main",
             "index": 0
           }
@@ -413,7 +593,7 @@
       "main": [
         [
           {
-            "node": "Prepare Finding Normative Queries",
+            "node": "Merge Finding Candidates",
             "type": "main",
             "index": 0
           }
@@ -485,13 +665,104 @@
           }
         ]
       ]
+    },
+    "Has Technical Assignment": {
+      "main": [
+        [
+          {
+            "node": "Load Technical Assignment Requirements",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Technical Assignment Requirement Feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Technical Assignment Requirements": {
+      "main": [
+        [
+          {
+            "node": "Technical Assignment Requirement Feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Technical Assignment Requirement Feed": {
+      "main": [
+        [
+          {
+            "node": "Prepare CAD Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has T First Pass": {
+      "main": [
+        [
+          {
+            "node": "Check Technical Assignment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Technical Assignment First Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Technical Assignment": {
+      "main": [
+        [
+          {
+            "node": "Technical Assignment First Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Technical Assignment First Pass": {
+      "main": [
+        [
+          {
+            "node": "Build Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Finding Candidates": {
+      "main": [
+        [
+          {
+            "node": "Prepare Finding Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "fc7d1c1d-24ac-4a83-9875-14c59c39ffd0",
+  "versionId": "5b200000-0000-4000-8000-000000000013",
   "meta": {
     "templateCredsSetupCompleted": true
   },

@@ -67,7 +67,7 @@ def _nodes_by_name(
 
 
 def test_every_analysis_workflow_supports_t_guided_requirements() -> None:
-    """PDF, CAD и PDF+CAD одинаково учитывают техническое задание."""
+    """PDF, CAD и PDF+CAD одинаково учитывают T-guided retrieval."""
     for path in WORKFLOW_PATHS:
         workflow = _workflow(
             path,
@@ -121,7 +121,7 @@ def test_every_analysis_workflow_passes_n_t_u_separately() -> None:
 
 
 def test_every_analysis_workflow_has_finding_local_normative_enrichment() -> None:
-    """TZ-5.2 enrichment не должен существовать только в PDF workflow."""
+    """Normative enrichment существует во всех analysis workflow."""
     required = {
         "Prepare Finding Normative Queries",
         "Search Finding Norms",
@@ -156,46 +156,61 @@ def test_every_analysis_workflow_has_finding_local_normative_enrichment() -> Non
 
 
 def test_gpu_dependent_requirement_nodes_retry_transient_errors() -> None:
-    """Search Requirements делает bounded retry поверх backend wait policy."""
+    """GPU-зависимые retrieval/check nodes имеют bounded retry."""
     for path in WORKFLOW_PATHS:
         workflow = _workflow(
             path,
         )
 
-        search = _nodes_by_name(
+        nodes = _nodes_by_name(
             workflow,
-        )["Search Requirements"]
+        )
 
-        assert (
-            search.get(
-                "retryOnFail",
-            )
-            is True
-        ), path
+        for node_name in (
+            "Search Requirements",
+            "Check Technical Assignment",
+        ):
+            node = nodes[node_name]
 
-        assert (
-            int(
-                search.get(
-                    "maxTries",
-                    0,
+            assert (
+                node.get(
+                    "retryOnFail",
                 )
+                is True
+            ), (
+                path,
+                node_name,
             )
-            >= 2
-        ), path
 
-        assert (
-            int(
-                search.get(
-                    "waitBetweenTries",
-                    0,
+            assert (
+                int(
+                    node.get(
+                        "maxTries",
+                        0,
+                    )
                 )
+                >= 2
+            ), (
+                path,
+                node_name,
             )
-            >= 1000
-        ), path
+
+            assert (
+                int(
+                    node.get(
+                        "waitBetweenTries",
+                        0,
+                    )
+                )
+                >= 1000
+            ), (
+                path,
+                node_name,
+            )
 
 
 def test_requirement_flow_order_is_consistent() -> None:
-    """Connections сохраняют одинаковый N/T/U sequence."""
+    """Connections сохраняют общий flow после lossless merge."""
     expected_pairs = (
         (
             "Build Normative Queries",
@@ -215,6 +230,10 @@ def test_requirement_flow_order_is_consistent() -> None:
         ),
         (
             "Check Norms",
+            "Merge Finding Candidates",
+        ),
+        (
+            "Merge Finding Candidates",
             "Prepare Finding Normative Queries",
         ),
         (

@@ -13,7 +13,7 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -1840,
+        -2400,
         800
       ],
       "webhookId": "10000000-0000-4000-8000-000000000002"
@@ -58,7 +58,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1616,
+        -2180,
         800
       ]
     },
@@ -79,7 +79,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1392,
+        -1960,
         800
       ],
       "retryOnFail": true,
@@ -103,7 +103,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1168,
+        -1740,
         800
       ],
       "retryOnFail": true,
@@ -112,14 +112,109 @@
     },
     {
       "parameters": {
-        "jsCode": "const document = $('Document Extract PDF').first().json;\nconst validation = $('Validate Project Context').first().json;\nconst context = $input.first().json;\nconst pages = Array.isArray(document.pages) ? document.pages : [];\n\nreturn pages.map((page) => ({\n  json: {\n    document: {\n      file_name: document.file_name ?? 'document.pdf',\n      total_pages: document.total_pages ?? pages.length,\n      selected_pages: document.selected_pages ?? pages.map((item) => item.page_number),\n    },\n    project_context: {\n      context_id: context.context_id,\n      enabled: context.enabled ?? false,\n      start_page: document.explanatory_note_context?.start_page ?? null,\n      end_page: document.explanatory_note_context?.end_page ?? null,\n      pages_count: context.pages_count ?? 0,\n      indexed_chunks: context.chunks_count ?? 0,\n      vector_size: context.vector_size ?? 0,\n      validation,\n    },\n    page,\n  },\n}));"
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5a100000-0000-4000-8000-000000000011",
+              "leftValue": "={{ String($('POST /analysis/v2/pdf').first().json.body?.technical_assignment_id ?? '') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5a100000-0000-4000-8000-000000000001",
+      "name": "Has Technical Assignment",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1520,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'http://pdrd-knowledge-service:8401/internal/v1/technical-assignments/' + $('POST /analysis/v2/pdf').first().json.body.technical_assignment_id + '/requirements' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "200"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 900000,
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "offset",
+                    "value": "={{ $pageCount * 200 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ Number($response.body.offset ?? 0) + (($response.body.requirements ?? []).length) >= Number($response.body.total ?? 0) }}",
+              "limitPagesFetched": true,
+              "maxRequests": 5,
+              "requestInterval": 0
+            }
+          }
+        }
+      },
+      "id": "5a100000-0000-4000-8000-000000000002",
+      "name": "Load Technical Assignment Requirements",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1300,
+        640
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const technicalAssignmentId = String(\n  $('POST /analysis/v2/pdf').first().json.body?.technical_assignment_id ?? '',\n).trim();\n\nif (!technicalAssignmentId) {\n  return [{\n    json: {\n      enabled: false,\n      technical_assignment_id: null,\n      analysis_document_id: null,\n      section_id: null,\n      source_file: '',\n      source_sha256: '',\n      total: 0,\n      requirements: [],\n    },\n  }];\n}\n\nconst pages = $input.all().map((item) => item.json ?? {});\n\nif (pages.length === 0) {\n  throw new Error('T-first requirement feed вернул пустой набор страниц.');\n}\n\nconst first = pages[0];\nconst expectedDocumentId = String(\n  $('POST /analysis/v2/pdf').first().json.body?.document_id ?? '',\n).trim();\nconst expectedSectionId = String(\n  $('POST /analysis/v2/pdf').first().json.body?.normative_section_id ?? '',\n).trim();\n\nconst total = Number(first.total ?? 0);\n\nif (!Number.isInteger(total) || total < 1) {\n  throw new Error(\n    `T-first requirement feed должен содержать хотя бы одно atomic requirement; total=${first.total}.`,\n  );\n}\n\nif (total > 1000) {\n  throw new Error(\n    `T-first requirement feed превышает configured Analysis limit: total=${total}, limit=1000.`,\n  );\n}\n\nconst requirements = pages\n  .flatMap((page) => Array.isArray(page.requirements) ? page.requirements : [])\n  .sort(\n    (left, right) =>\n      Number(left.requirement_index ?? 0) - Number(right.requirement_index ?? 0),\n  );\n\nfor (const page of pages) {\n  if (String(page.technical_assignment_id ?? '') !== technicalAssignmentId) {\n    throw new Error('T-first requirement feed содержит другой technical_assignment_id.');\n  }\n\n  if (String(page.analysis_document_id ?? '') !== expectedDocumentId) {\n    throw new Error('T-first requirement feed содержит другой analysis_document_id.');\n  }\n\n  if (String(page.section_id ?? '') !== expectedSectionId) {\n    throw new Error('T-first requirement feed содержит другой section_id.');\n  }\n\n  if (Number(page.total ?? -1) !== total) {\n    throw new Error('T-first requirement feed содержит несовместимые total между страницами.');\n  }\n\n  if (\n    String(page.source_file ?? '') !== String(first.source_file ?? '')\n    || String(page.source_sha256 ?? '') !== String(first.source_sha256 ?? '')\n  ) {\n    throw new Error('T-first requirement feed содержит несовместимые source metadata.');\n  }\n}\n\nif (requirements.length !== total) {\n  throw new Error(\n    `T-first requirement feed получен не полностью: expected=${total}, actual=${requirements.length}.`,\n  );\n}\n\nconst requirementIds = requirements.map(\n  (requirement) => String(requirement.requirement_id ?? ''),\n);\n\nif (\n  requirementIds.some((requirementId) => !requirementId)\n  || new Set(requirementIds).size !== requirementIds.length\n) {\n  throw new Error('T-first requirement feed содержит пустые или повторяющиеся requirement_id.');\n}\n\nreturn [{\n  json: {\n    enabled: true,\n    technical_assignment_id: technicalAssignmentId,\n    analysis_document_id: expectedDocumentId,\n    section_id: expectedSectionId,\n    source_file: String(first.source_file ?? ''),\n    source_sha256: String(first.source_sha256 ?? ''),\n    total,\n    requirements,\n  },\n}];"
+      },
+      "id": "5a100000-0000-4000-8000-000000000003",
+      "name": "Technical Assignment Requirement Feed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1080,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const document = $('Document Extract PDF').first().json;\nconst validation = $('Validate Project Context').first().json;\nconst context = $('Create Project Context').first().json;\nconst technicalAssignment = $input.first().json;\nconst pages = Array.isArray(document.pages) ? document.pages : [];\n\nreturn pages.map((page) => ({\n  json: {\n    document: {\n      file_name: document.file_name ?? 'document.pdf',\n      total_pages: document.total_pages ?? pages.length,\n      selected_pages: document.selected_pages ?? pages.map((item) => item.page_number),\n    },\n    project_context: {\n      context_id: context.context_id,\n      enabled: context.enabled ?? false,\n      start_page: document.explanatory_note_context?.start_page ?? null,\n      end_page: document.explanatory_note_context?.end_page ?? null,\n      pages_count: context.pages_count ?? 0,\n      indexed_chunks: context.chunks_count ?? 0,\n      vector_size: context.vector_size ?? 0,\n      validation,\n    },\n    technical_assignment: technicalAssignment,\n    page,\n  },\n}));"
       },
       "id": "19c6a327-80d6-4404-980c-46de2000847b",
       "name": "Expand PDF Pages",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -960,
+        -860,
         800
       ]
     },
@@ -140,7 +235,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -736,
+        -640,
         800
       ],
       "retryOnFail": true,
@@ -149,12 +244,83 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5a100000-0000-4000-8000-000000000012",
+              "leftValue": "={{ Boolean($('Expand PDF Pages').item.json.technical_assignment?.enabled) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5a100000-0000-4000-8000-000000000004",
+      "name": "Has T First Pass",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -420,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/check-technical-assignment",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({\n  page_number: $('Expand PDF Pages').item.json.page.page_number,\n  extracted_text: $('Expand PDF Pages').item.json.page.text,\n  page_facts: $('Understand Page').item.json.facts,\n  image_base64: $('Expand PDF Pages').item.json.page.image_base64,\n  technical_assignment_id: $('Expand PDF Pages').item.json.technical_assignment.technical_assignment_id,\n  analysis_document_id: $('Expand PDF Pages').item.json.technical_assignment.analysis_document_id,\n  section_id: $('Expand PDF Pages').item.json.technical_assignment.section_id,\n  source_file: $('Expand PDF Pages').item.json.technical_assignment.source_file,\n  source_sha256: $('Expand PDF Pages').item.json.technical_assignment.source_sha256,\n  requirements: $('Expand PDF Pages').item.json.technical_assignment.requirements ?? [],\n}) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "5a100000-0000-4000-8000-000000000005",
+      "name": "Check Technical Assignment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -200,
+        640
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const enabled = Boolean(\n  $('Expand PDF Pages').item.json.technical_assignment?.enabled,\n);\n\nif (!enabled) {\n  return {\n    json: {\n      enabled: false,\n      requirements_count: 0,\n      summary: '',\n      decisions: [],\n      findings: [],\n      metrics: [],\n    },\n  };\n}\n\nconst response = $json ?? {};\nconst decisions = Array.isArray(response.decisions) ? response.decisions : [];\nconst findings = Array.isArray(response.findings) ? response.findings : [];\nconst metrics = Array.isArray(response.metrics) ? response.metrics : [];\nconst requirementsCount = Number(\n  $('Expand PDF Pages').item.json.technical_assignment?.total ?? 0,\n);\n\nif (decisions.length !== requirementsCount) {\n  throw new Error(\n    `T-first потеряла atomic decisions: expected=${requirementsCount}, actual=${decisions.length}.`,\n  );\n}\n\nconst decisionIds = decisions.map(\n  (decision) => String(decision.requirement_id ?? ''),\n);\nconst expectedIds = $('Expand PDF Pages').item.json.technical_assignment.requirements\n  .map((requirement) => String(requirement.requirement_id ?? ''));\n\nif (\n  decisionIds.length !== expectedIds.length\n  || decisionIds.some((requirementId) => !requirementId)\n  || new Set(decisionIds).size !== decisionIds.length\n  || expectedIds.some((requirementId, index) => requirementId !== decisionIds[index])\n) {\n  throw new Error('T-first decisions не соответствуют полному ordered atomic requirement feed.');\n}\n\nreturn {\n  json: {\n    enabled: true,\n    requirements_count: requirementsCount,\n    summary: String(response.summary ?? ''),\n    decisions,\n    findings,\n    metrics,\n  },\n};"
+      },
+      "id": "5a100000-0000-4000-8000-000000000006",
+      "name": "Technical Assignment First Pass",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        800
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "http://pdrd-analysis-service:8501/internal/v1/project-context/query",
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_facts: $json.facts, extracted_text: $('Expand PDF Pages').item.json.page.text }) }}",
+        "body": "={{ JSON.stringify({ page_facts: $('Understand Page').item.json.facts, extracted_text: $('Expand PDF Pages').item.json.page.text }) }}",
         "options": {
           "timeout": 1800000
         }
@@ -164,7 +330,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -512,
+        240,
         800
       ]
     },
@@ -185,7 +351,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -288,
+        460,
         800
       ],
       "retryOnFail": true,
@@ -209,7 +375,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -80,
+        680,
         800
       ]
     },
@@ -230,7 +396,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        160,
+        900,
         800
       ]
     },
@@ -251,7 +417,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        368,
+        1120,
         800
       ],
       "retryOnFail": true,
@@ -268,7 +434,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        592,
+        1340,
         800
       ]
     },
@@ -289,7 +455,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        816,
+        1560,
         800
       ],
       "retryOnFail": true,
@@ -313,7 +479,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1040,
+        1780,
         800
       ],
       "retryOnFail": true,
@@ -322,7 +488,21 @@
     },
     {
       "parameters": {
-        "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\n\nconst normativeQueryItems = findings\n  .map((finding) => {\n    const findingQuery = String(finding.experience_query ?? '').trim();\n    if (!findingQuery) {\n      return null;\n    }\n\n    return {\n      finding_id: String(finding.finding_id ?? ''),\n      query: [\n        'Найти нормативное основание для уже обнаруженного инженерного замечания.',\n        'Нужен фрагмент нормативного документа, который прямо относится к указанному факту и типу проектного документа.',\n        'Не считать тематически похожий норматив достаточным подтверждением.',\n        findingQuery,\n      ].join('\\n'),\n    };\n  })\n  .filter((item) => item?.finding_id && item?.query)\n  .slice(0, 10);\n\nreturn {\n  json: {\n    findings,\n    normative_query_items: normativeQueryItems,\n    normative_queries: normativeQueryItems.map((item) => item.query),\n  },\n};",
+        "mode": "runOnceForEachItem",
+        "jsCode": "const normativeCheck = $json ?? {};\nconst normativeFindings = Array.isArray(normativeCheck.findings)\n  ? normativeCheck.findings\n  : [];\nconst technicalAssignment = $('Technical Assignment First Pass').item.json ?? {};\nconst technicalAssignmentFindings = Array.isArray(technicalAssignment.findings)\n  ? technicalAssignment.findings\n  : [];\n\nconst findings = [\n  ...normativeFindings,\n  ...technicalAssignmentFindings,\n];\n\nconst findingIds = findings.map(\n  (finding) => String(finding.finding_id ?? ''),\n);\n\nif (\n  findingIds.some((findingId) => !findingId)\n  || new Set(findingIds).size !== findingIds.length\n) {\n  throw new Error(\n    'Finding candidate merge обнаружил пустой или повторяющийся finding_id.',\n  );\n}\n\nreturn {\n  json: {\n    ...normativeCheck,\n    findings,\n    technical_assignment_first_pass: {\n      enabled: Boolean(technicalAssignment.enabled),\n      requirements_count: Number(\n        technicalAssignment.requirements_count ?? 0,\n      ),\n      decisions_count: Array.isArray(technicalAssignment.decisions)\n        ? technicalAssignment.decisions.length\n        : 0,\n      findings_count: technicalAssignmentFindings.length,\n      summary: String(technicalAssignment.summary ?? ''),\n      metrics: Array.isArray(technicalAssignment.metrics)\n        ? technicalAssignment.metrics\n        : [],\n    },\n  },\n};"
+      },
+      "id": "5a100000-0000-4000-8000-000000000007",
+      "name": "Merge Finding Candidates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\n\nconst normativeQueryItems = findings\n  .map((finding) => {\n    const findingQuery = String(finding.experience_query ?? '').trim();\n    if (!findingQuery) {\n      return null;\n    }\n\n    return {\n      finding_id: String(finding.finding_id ?? ''),\n      query: [\n        'Найти нормативное основание для уже обнаруженного инженерного замечания.',\n        'Нужен фрагмент нормативного документа, который прямо относится к указанному факту и типу проектного документа.',\n        'Не считать тематически похожий норматив достаточным подтверждением.',\n        findingQuery,\n      ].join('\\n'),\n    };\n  })\n  .filter((item) => item?.finding_id && item?.query);\n\nreturn {\n  json: {\n    findings,\n    normative_query_items: normativeQueryItems,\n    normative_queries: normativeQueryItems.map((item) => item.query),\n  },\n};",
         "mode": "runOnceForEachItem"
       },
       "id": "774b9b80-21d6-4b98-97d4-79f3aec10101",
@@ -330,7 +510,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1264,
+        2220,
         800
       ]
     },
@@ -351,7 +531,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1472,
+        2440,
         800
       ],
       "retryOnFail": true,
@@ -368,7 +548,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1696,
+        2660,
         800
       ]
     },
@@ -389,7 +569,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1920,
+        2880,
         800
       ],
       "retryOnFail": true,
@@ -406,7 +586,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2144,
+        3100,
         800
       ]
     },
@@ -427,7 +607,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2368,
+        3320,
         800
       ],
       "retryOnFail": true,
@@ -436,7 +616,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const expanded = $('Expand PDF Pages').item.json;\nconst understanding = $('Understand Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst requirements = $('Normalize Requirement Search').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst enrichment = $('Prepare Experience Queries').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\n\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\n\nconst candidateGroups = Object.values(candidatesByFinding)\n  .filter((value) => Array.isArray(value));\n\nconst candidatesCount = candidateGroups\n  .reduce((total, sources) => total + sources.length, 0);\n\nconst findingsWithCandidates = candidateGroups\n  .filter((sources) => sources.length > 0)\n  .length;\n\nreturn {\n  json: {\n    document: expanded.document,\n    project_context: expanded.project_context,\n    page_number: expanded.page.page_number,\n    heuristic_page_type: expanded.page.page_type,\n    width_points: expanded.page.width_points,\n    height_points: expanded.page.height_points,\n    extracted_text: expanded.page.text,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: requirements.normative_sources ?? [],\n    technical_assignment_sources:\n      requirements.technical_assignment_sources ?? [],\n    conflict_candidates: requirements.conflict_candidates ?? [],\n    requirement_diagnostics: requirements.diagnostics ?? [],\n    reference_resolutions: requirements.reference_resolutions ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    normative_enrichment: {\n      queries_count:\n        $('Prepare Finding Normative Queries').item.json.normative_queries?.length ?? 0,\n      findings_with_candidates: findingsWithCandidates,\n      candidates_count: candidatesCount,\n    },\n    normative_check: {\n      summary: check.summary ?? '',\n      findings: check.findings ?? [],\n      metrics: check.metrics ?? {},\n    },\n    findings,\n  },\n};",
+        "jsCode": "const expanded = $('Expand PDF Pages').item.json;\nconst understanding = $('Understand Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst requirements = $('Normalize Requirement Search').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst merged = $('Merge Finding Candidates').item.json;\nconst tFirst = $('Technical Assignment First Pass').item.json;\nconst enrichment = $('Prepare Experience Queries').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\n\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\n\nconst candidateGroups = Object.values(candidatesByFinding)\n  .filter((value) => Array.isArray(value));\n\nconst candidatesCount = candidateGroups\n  .reduce((total, sources) => total + sources.length, 0);\n\nconst findingsWithCandidates = candidateGroups\n  .filter((sources) => sources.length > 0)\n  .length;\n\nconst tDecisions = Array.isArray(tFirst.decisions)\n  ? tFirst.decisions\n  : [];\n\nreturn {\n  json: {\n    document: expanded.document,\n    project_context: expanded.project_context,\n    page_number: expanded.page.page_number,\n    heuristic_page_type: expanded.page.page_type,\n    width_points: expanded.page.width_points,\n    height_points: expanded.page.height_points,\n    extracted_text: expanded.page.text,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: requirements.normative_sources ?? [],\n    technical_assignment_sources:\n      requirements.technical_assignment_sources ?? [],\n    conflict_candidates: requirements.conflict_candidates ?? [],\n    requirement_diagnostics: requirements.diagnostics ?? [],\n    reference_resolutions: requirements.reference_resolutions ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    technical_assignment_first_pass: {\n      enabled: Boolean(tFirst.enabled),\n      requirements_count: Number(tFirst.requirements_count ?? 0),\n      decisions_count: tDecisions.length,\n      satisfied_count: tDecisions.filter(\n        (decision) => decision.status === 'satisfied',\n      ).length,\n      not_applicable_count: tDecisions.filter(\n        (decision) => decision.status === 'not_applicable',\n      ).length,\n      violated_count: tDecisions.filter(\n        (decision) => decision.status === 'violated',\n      ).length,\n      needs_review_count: tDecisions.filter(\n        (decision) => decision.status === 'insufficient_evidence',\n      ).length,\n      findings_count: Array.isArray(tFirst.findings)\n        ? tFirst.findings.length\n        : 0,\n      summary: String(tFirst.summary ?? ''),\n      metrics: Array.isArray(tFirst.metrics) ? tFirst.metrics : [],\n    },\n    finding_candidates: {\n      normative_check_count: Array.isArray(check.findings)\n        ? check.findings.length\n        : 0,\n      merged_count: Array.isArray(merged.findings)\n        ? merged.findings.length\n        : 0,\n    },\n    normative_enrichment: {\n      queries_count:\n        $('Prepare Finding Normative Queries').item.json.normative_queries?.length ?? 0,\n      findings_with_candidates: findingsWithCandidates,\n      candidates_count: candidatesCount,\n    },\n    normative_check: {\n      summary: check.summary ?? '',\n      findings: check.findings ?? [],\n      metrics: check.metrics ?? {},\n    },\n    findings,\n  },\n};",
         "mode": "runOnceForEachItem"
       },
       "id": "57a66ecb-aeff-449d-9240-38dbd0dcb7f4",
@@ -444,20 +624,20 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2592,
+        3540,
         800
       ]
     },
     {
       "parameters": {
-        "jsCode": "const pageItems = $input.all().map((item) => item.json);\npageItems.sort((left, right) => left.page_number - right.page_number);\nconst document = pageItems[0]?.document ?? { file_name: 'document.pdf', total_pages: 0, selected_pages: [] };\nconst context = pageItems[0]?.project_context ?? { enabled: false };\nconst pages = pageItems.map(({ document: _document, project_context: _context, ...page }) => page);\nconst findings = pages.flatMap((page) => Array.isArray(page.findings) ? page.findings : []);\n\nreturn [{\n  json: {\n    status: 'completed',\n    source_mode: 'pdf_only',\n    file_name: document.file_name,\n    pdf_file_name: document.file_name,\n    total_pages: document.total_pages,\n    selected_pages: document.selected_pages,\n    analyzed_pages: pages.length,\n    findings_count: findings.length,\n    summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранным листам не найдены.',\n    findings,\n    pages,\n    explanatory_note_context: context,\n    pipeline: ['document_extract','explanatory_note_validation','temporary_project_context_index','page_understanding','project_context_retrieval','normative_queries','requirement_search','user_package_search','normative_check','finding_normative_search','experience_search','finalization','project_context_cleanup'],\n    limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Техническое задание является самостоятельным требованием проекта, но не нормативным доказательством.', 'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n  },\n}];"
+        "jsCode": "const pageItems = $input.all().map((item) => item.json);\npageItems.sort((left, right) => left.page_number - right.page_number);\nconst document = pageItems[0]?.document ?? { file_name: 'document.pdf', total_pages: 0, selected_pages: [] };\nconst context = pageItems[0]?.project_context ?? { enabled: false };\nconst pages = pageItems.map(({ document: _document, project_context: _context, ...page }) => page);\nconst findings = pages.flatMap((page) => Array.isArray(page.findings) ? page.findings : []);\n\nreturn [{\n  json: {\n    status: 'completed',\n    source_mode: 'pdf_only',\n    file_name: document.file_name,\n    pdf_file_name: document.file_name,\n    total_pages: document.total_pages,\n    selected_pages: document.selected_pages,\n    analyzed_pages: pages.length,\n    findings_count: findings.length,\n    summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранным листам не найдены.',\n    findings,\n    pages,\n    explanatory_note_context: context,\n    pipeline: ['document_extract','explanatory_note_validation','temporary_project_context_index','technical_assignment_requirement_feed','page_understanding','technical_assignment_first_pass','project_context_retrieval','normative_queries','requirement_search','user_package_search','normative_check','finding_candidate_merge','finding_normative_search','experience_search','finalization','project_context_cleanup'],\n    limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Техническое задание проверяется независимым exhaustive T-first проходом и не является нормативным доказательством.', 'T-guided retrieval используется дополнительно и не управляет сохранением T-first findings.', 'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n  },\n}];"
       },
       "id": "c1b7af80-0faa-4369-aa77-78ef1990636f",
       "name": "Aggregate PDF Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2816,
+        3760,
         800
       ]
     },
@@ -474,7 +654,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3040,
+        3980,
         800
       ],
       "onError": "continueRegularOutput"
@@ -488,7 +668,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3264,
+        4200,
         800
       ]
     }
@@ -532,7 +712,7 @@
       "main": [
         [
           {
-            "node": "Expand PDF Pages",
+            "node": "Has Technical Assignment",
             "type": "main",
             "index": 0
           }
@@ -554,7 +734,7 @@
       "main": [
         [
           {
-            "node": "Build Project Context Query",
+            "node": "Has T First Pass",
             "type": "main",
             "index": 0
           }
@@ -642,7 +822,7 @@
       "main": [
         [
           {
-            "node": "Prepare Finding Normative Queries",
+            "node": "Merge Finding Candidates",
             "type": "main",
             "index": 0
           }
@@ -747,6 +927,97 @@
           }
         ]
       ]
+    },
+    "Has Technical Assignment": {
+      "main": [
+        [
+          {
+            "node": "Load Technical Assignment Requirements",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Technical Assignment Requirement Feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Technical Assignment Requirements": {
+      "main": [
+        [
+          {
+            "node": "Technical Assignment Requirement Feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Technical Assignment Requirement Feed": {
+      "main": [
+        [
+          {
+            "node": "Expand PDF Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has T First Pass": {
+      "main": [
+        [
+          {
+            "node": "Check Technical Assignment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Technical Assignment First Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Technical Assignment": {
+      "main": [
+        [
+          {
+            "node": "Technical Assignment First Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Technical Assignment First Pass": {
+      "main": [
+        [
+          {
+            "node": "Build Project Context Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Finding Candidates": {
+      "main": [
+        [
+          {
+            "node": "Prepare Finding Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
@@ -754,7 +1025,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "f5c2a000-0000-4000-8000-000000000054",
+  "versionId": "5a200000-0000-4000-8000-000000000001",
   "meta": {
     "templateCredsSetupCompleted": true
   },
