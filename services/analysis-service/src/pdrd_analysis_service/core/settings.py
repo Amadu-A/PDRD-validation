@@ -135,6 +135,18 @@ class PipelineSettings(BaseModel):
         le=10000,
     )
 
+    technical_assignment_batch_size: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+    )
+
+    technical_assignment_requirement_text_limit: int = Field(
+        default=1800,
+        ge=100,
+        le=10000,
+    )
+
     final_num_predict: int = Field(
         default=1800,
         ge=1,

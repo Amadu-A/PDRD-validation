@@ -13,6 +13,9 @@ from pdrd_analysis_service.application.use_cases import (
     FinalizeFindings,
     UnderstandPage,
 )
+from pdrd_analysis_service.application.use_cases.technical_assignment_validation import (
+    CheckPageAgainstTechnicalAssignment,
+)
 from pdrd_analysis_service.core.container import (
     ApplicationContainer,
 )
@@ -67,6 +70,29 @@ class FakeVisionModel:
             }
 
         elif stage.startswith(
+            "technical_assignment_check:",
+        ):
+            required_ids = schema["properties"]["decisions"]["required"]
+
+            payload = {
+                "decisions": {
+                    str(
+                        requirement_id,
+                    ): {
+                        "status": "violated",
+                        "severity": "warning",
+                        "comment": ("Требование ТЗ нарушено."),
+                        "evidence": ("На листе показано противоречащее решение."),
+                        "recommendation_draft": (
+                            "Привести решение в соответствие с ТЗ."
+                        ),
+                        "confidence": 0.01,
+                    }
+                    for requirement_id in required_ids
+                }
+            }
+
+        elif stage.startswith(
             "normative_check:",
         ):
             payload = {
@@ -117,7 +143,9 @@ class FakeVisionModel:
             ),
         )
 
-    async def is_ready(self) -> bool:
+    async def is_ready(
+        self,
+    ) -> bool:
         """Возвращает readiness."""
         return True
 
@@ -150,6 +178,14 @@ def build_app():
                 num_predict=2600,
                 max_issues=10,
                 normative_text_limit=700,
+            )
+        ),
+        check_page_against_technical_assignment=(
+            CheckPageAgainstTechnicalAssignment(
+                vision_model=vision_model,
+                num_predict=2600,
+                batch_size=20,
+                requirement_text_limit=1800,
             )
         ),
         finalize_findings=FinalizeFindings(
@@ -231,7 +267,7 @@ def normative_payload() -> dict[str, Any]:
         "source_path": "/PUE.pdf",
         "page": 51,
         "chunk_index": 3,
-        "text": "Корпуса подлежат заземлению.",
+        "text": ("Корпуса подлежат заземлению."),
     }
 
 
@@ -248,6 +284,7 @@ async def test_health_ready() -> None:
     )
 
     assert live.status_code == 200
+
     assert ready.status_code == 200
 
     assert ready.json()["dependencies"]["vision_model"] is True
@@ -287,7 +324,12 @@ async def test_normative_queries_endpoint() -> None:
 
     assert response.status_code == 200
 
-    assert len(response.json()["queries"]) >= 1
+    assert (
+        len(
+            response.json()["queries"],
+        )
+        >= 1
+    )
 
 
 async def test_check_norms_endpoint() -> None:
@@ -312,7 +354,81 @@ async def test_check_norms_endpoint() -> None:
 
     assert finding["finding_id"] == "p1-f1"
 
-    assert finding["normative_source_ids"] == ["N1"]
+    assert finding["normative_source_ids"] == [
+        "N1",
+    ]
+
+
+async def test_check_technical_assignment_endpoint() -> None:
+    """Проверяет independent T-first HTTP API."""
+    response = await request(
+        "POST",
+        ("/internal/v1/pages/check-technical-assignment"),
+        json={
+            "page_number": 14,
+            "extracted_text": "QF1 400 А",
+            "page_facts": facts_payload(),
+            "image_base64": encoded_image(),
+            "technical_assignment_id": ("11111111-1111-4111-8111-111111111111"),
+            "analysis_document_id": ("22222222-2222-4222-8222-222222222222"),
+            "section_id": ("33333333-3333-4333-8333-333333333333"),
+            "source_file": "ТЗ.pdf",
+            "source_sha256": "a" * 64,
+            "requirements": [
+                {
+                    "point_id": "point-1",
+                    "requirement_id": "T-R1",
+                    "requirement_index": 1,
+                    "page": 13,
+                    "requirement_strength": ("candidate"),
+                    "scopes": [
+                        "electrical",
+                    ],
+                    "normative_refs": [],
+                    "source_text": ("На схеме должен быть предусмотрен QF1."),
+                    "text": ("На схеме должен быть предусмотрен QF1."),
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert (
+        len(
+            payload["decisions"],
+        )
+        == 1
+    )
+
+    decision = payload["decisions"][0]
+
+    assert decision["requirement_id"] == "T-R1"
+
+    assert decision["status"] == "violated"
+
+    assert decision["confidence"] == 0.01
+
+    assert (
+        len(
+            payload["findings"],
+        )
+        == 1
+    )
+
+    finding = payload["findings"][0]
+
+    assert finding["category"] == "customer_requirements"
+
+    assert finding["status"] == "confirmed"
+
+    assert finding["technical_assignment_source_ids"] == [
+        "T-R1",
+    ]
+
+    assert finding["confidence"] == 0.01
 
 
 async def test_finalize_filters_low_score_experience() -> None:
@@ -353,8 +469,8 @@ async def test_finalize_filters_low_score_experience() -> None:
                         "verified_fixed": True,
                         "before_page": 1,
                         "after_page": 2,
-                        "before_context": "без PE",
-                        "after_context": "с PE",
+                        "before_context": ("без PE"),
+                        "after_context": ("с PE"),
                     }
                 ]
             },

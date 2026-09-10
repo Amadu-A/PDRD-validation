@@ -14,6 +14,9 @@ from pdrd_analysis_service.transport.http.project_context_routes import (
 from pdrd_analysis_service.transport.http.routes import (
     router,
 )
+from pdrd_analysis_service.transport.http.technical_assignment_routes import (
+    router as technical_assignment_router,
+)
 
 
 def create_app(
@@ -40,6 +43,10 @@ def create_app(
 
     application.include_router(
         project_context_router,
+    )
+
+    application.include_router(
+        technical_assignment_router,
     )
 
     return application
