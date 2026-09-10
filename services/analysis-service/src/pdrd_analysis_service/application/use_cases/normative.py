@@ -38,6 +38,45 @@ logger = logging.getLogger(
     __name__,
 )
 
+_HIGH_RECALL_FINDING_POLICY = """
+--- HIGH-RECALL FINDING POLICY ---
+
+Массив violations — это полный набор конкретных
+candidate findings текущего листа, а не shortlist.
+
+Перед формированием JSON сделай полный проход по листу
+и перечисли КАЖДУЮ различимую проблему, для которой
+есть конкретный визуальный или текстовый факт.
+
+НЕ выбирай только самые важные замечания.
+НЕ ограничивай ответ несколькими примерами.
+НЕ удаляй candidate только потому, что:
+
+- у него ниже confidence, чем у другого candidate;
+- для него не найден N/T/U source;
+- он требует инженерной проверки;
+- рядом уже есть похожее, но относящееся
+  к другому объекту, обозначению или участку;
+- нормативное основание пока не удалось подтвердить.
+
+Если конкретный факт существует, но уверенности
+недостаточно, сохрани candidate со status=needs_review.
+
+При этом НЕ добавляй в violations подтверждения
+соответствия и положительные результаты проверки.
+Если проблемы нет, candidate не создавай.
+
+Один физически различимый объект/участок/несоответствие
+не объединяй с другим только ради сокращения ответа.
+
+После генерации backend не будет выполнять
+semantic filtering массива violations:
+ответственность за то, что в массив попадают именно
+реальные candidate findings, находится на этом этапе.
+
+--- END HIGH-RECALL FINDING POLICY ---
+""".strip()
+
 
 @dataclass(frozen=True, slots=True)
 class BuildNormativeQueries:
@@ -176,18 +215,20 @@ class CheckPageAgainstNorms:
             source.source_id for source in user_package_sources if source.source_id
         )
 
+        prompt = build_normative_check_prompt(
+            page_number=page_number,
+            extracted_text=extracted_text,
+            page_facts=page_facts,
+            normative_sources=normative_sources,
+            technical_assignment_sources=technical_assignment_sources,
+            conflict_candidates=conflict_candidates,
+            user_package_sources=user_package_sources,
+            normative_text_limit=self.normative_text_limit,
+            normative_system_prompt=normative_system_prompt,
+        )
+
         result = await self.vision_model.generate_json(
-            prompt=build_normative_check_prompt(
-                page_number=page_number,
-                extracted_text=extracted_text,
-                page_facts=page_facts,
-                normative_sources=normative_sources,
-                technical_assignment_sources=technical_assignment_sources,
-                conflict_candidates=conflict_candidates,
-                user_package_sources=user_package_sources,
-                normative_text_limit=self.normative_text_limit,
-                normative_system_prompt=normative_system_prompt,
-            ),
+            prompt=f"{prompt}\n\n{_HIGH_RECALL_FINDING_POLICY}",
             schema=build_normative_check_schema(
                 source_ids=normative_source_ids,
                 technical_assignment_source_ids=(technical_assignment_source_ids),
@@ -221,7 +262,7 @@ class CheckPageAgainstNorms:
             (
                 "normative_candidate_selection "
                 "page=%s generated=%s preserved=%s "
-                "rejected=%s rejection_reasons=%s"
+                "rejected=%s rejection_reasons=%s lossless=true"
             ),
             page_number,
             candidate_selection.generated_count,
@@ -420,10 +461,17 @@ class CheckPageAgainstNorms:
             )
 
         logger.info(
-            ("normative_findings_preserved page=%s candidates=%s findings=%s"),
+            (
+                "normative_findings_preserved "
+                "page=%s candidates=%s findings=%s lossless=%s"
+            ),
             page_number,
             candidate_selection.preserved_count,
             len(
+                findings,
+            ),
+            candidate_selection.preserved_count
+            == len(
                 findings,
             ),
         )

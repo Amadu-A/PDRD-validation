@@ -85,8 +85,8 @@ def test_t_first_validation_has_dedicated_http_route() -> None:
     assert "HTTP_413_CONTENT_TOO_LARGE" in source
 
 
-def test_t_first_batch_policy_is_configurable_for_reference_case() -> None:
-    """96 atomic requirements помещаются в один configured batch."""
+def test_t_first_batch_policy_balances_recall_and_round_trips() -> None:
+    """96 atomic requirements разбиваются на два configured batch."""
     settings_path = (
         ROOT
         / "services"
@@ -117,7 +117,7 @@ def test_t_first_batch_policy_is_configurable_for_reference_case() -> None:
 
     assert (
         "ANALYSIS_SERVICE_PIPELINE__"
-        "TECHNICAL_ASSIGNMENT_BATCH_SIZE=100" in environment_source
+        "TECHNICAL_ASSIGNMENT_BATCH_SIZE=48" in environment_source
     )
 
     assert (

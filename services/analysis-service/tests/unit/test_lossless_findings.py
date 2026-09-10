@@ -5,6 +5,7 @@
 import logging
 from typing import Any
 
+import pytest
 from pdrd_analysis_service.application.use_cases.common import (
     select_violation_candidates,
 )
@@ -153,24 +154,65 @@ def test_exact_duplicate_comments_are_not_removed_by_python() -> None:
     )
 
 
-def test_clear_compliance_confirmation_is_not_a_finding() -> None:
-    """Явное подтверждение соответствия не превращается в замечание."""
+def test_semantic_content_is_not_filtered_after_generation() -> None:
+    """Даже ошибочно generated compliance candidate не исчезает молча."""
+    candidate = violation(
+        comment=("Решение соответствует требованиям."),
+        evidence=("На листе требование выполнено."),
+    )
+
     selection = select_violation_candidates(
         [
-            violation(
-                comment=("Решение соответствует требованиям."),
-                evidence=("На листе требование выполнено."),
-            )
+            candidate,
         ]
     )
 
     assert selection.generated_count == 1
-    assert selection.preserved_count == 0
-    assert selection.rejected_count == 1
+    assert selection.preserved_count == 1
+    assert selection.rejected_count == 0
+    assert selection.rejection_counts == {}
+    assert selection.candidates == (candidate,)
 
-    assert selection.rejection_counts == {
-        "compliance_confirmation": 1,
-    }
+
+def test_blank_text_is_not_silently_deleted_by_post_filter() -> None:
+    """Структурную ошибку должен ловить schema boundary, не semantic filter."""
+    candidate = violation(
+        comment="",
+        evidence="",
+    )
+
+    selection = select_violation_candidates(
+        [
+            candidate,
+        ]
+    )
+
+    assert selection.generated_count == 1
+    assert selection.preserved_count == 1
+    assert selection.rejected_count == 0
+
+
+def test_malformed_candidate_collection_fails_instead_of_losing_data() -> None:
+    """Невалидная структура не превращается в тихое уменьшение findings."""
+    with pytest.raises(
+        ValueError,
+        match="JSON array",
+    ):
+        select_violation_candidates(
+            {
+                "comment": "not-a-list",
+            }
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="JSON object",
+    ):
+        select_violation_candidates(
+            [
+                "not-an-object",
+            ]
+        )
 
 
 async def test_unknown_source_id_does_not_delete_candidate(
@@ -234,6 +276,7 @@ async def test_unknown_source_id_does_not_delete_candidate(
     assert "N999" in caplog.text
 
     assert "generated=1 preserved=1 rejected=0" in caplog.text
+    assert "lossless=true" in caplog.text
 
 
 async def test_invalid_source_is_detached_but_valid_source_is_kept(

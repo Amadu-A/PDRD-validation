@@ -19,49 +19,10 @@ from pdrd_analysis_service.domain.analysis import (
     NormativeSource,
 )
 
-_POSITIVE_COMPLIANCE_MARKERS = (
-    "соответствует требован",
-    "соответствует рекоменда",
-    "соответствует норм",
-    "выполнено в соответствии",
-    "выполнено правильно",
-    "требование выполнено",
-    "требования выполнены",
-    "требование соблюдено",
-    "требования соблюдены",
-    "нарушений не выявлено",
-    "нарушение отсутствует",
-    "как это сделано на листе",
-    "что соответствует",
-)
-
-_NEGATIVE_VIOLATION_MARKERS = (
-    "не соответствует",
-    "не выполн",
-    "не указан",
-    "не указана",
-    "не указаны",
-    "не соблюд",
-    "отсутств",
-    "противореч",
-    "недостаточ",
-    "ошиб",
-    "невер",
-    "некоррект",
-    "требуется исправ",
-    "необходимо исправ",
-    "необходимо добавить",
-    "требуется добавить",
-    "нарушено",
-    "нарушены",
-    "выявлено нарушение",
-    "выявлены нарушения",
-)
-
 
 @dataclass(frozen=True, slots=True)
 class ViolationCandidateSelection:
-    """Результат lossless отбора candidate findings."""
+    """Результат lossless передачи generated finding candidates."""
 
     candidates: tuple[
         dict[str, Any],
@@ -73,7 +34,7 @@ class ViolationCandidateSelection:
     rejected_reasons: tuple[
         str,
         ...,
-    ]
+    ] = ()
 
     @property
     def preserved_count(
@@ -88,7 +49,7 @@ class ViolationCandidateSelection:
     def rejected_count(
         self,
     ) -> int:
-        """Возвращает количество отброшенных candidates."""
+        """Возвращает количество structural rejection."""
         return len(
             self.rejected_reasons,
         )
@@ -100,7 +61,7 @@ class ViolationCandidateSelection:
         str,
         int,
     ]:
-        """Группирует диагностические причины rejection."""
+        """Группирует диагностические причины structural rejection."""
         result: dict[
             str,
             int,
@@ -172,7 +133,7 @@ def string_tuple(
 def normalize_text(
     value: Any,
 ) -> str:
-    """Нормализует строку для comparison/filtering."""
+    """Нормализует строку для comparison без semantic filtering."""
     return re.sub(
         r"\s+",
         " ",
@@ -185,92 +146,44 @@ def normalize_text(
 def select_violation_candidates(
     violations: Any,
 ) -> ViolationCandidateSelection:
-    """Сохраняет все содержательные candidates без semantic dedupe."""
+    """Передаёт каждый schema-valid generated candidate без semantic filtering."""
+    if violations is None:
+        return ViolationCandidateSelection(
+            candidates=(),
+            generated_count=0,
+        )
+
     if not isinstance(
         violations,
         list,
     ):
-        return ViolationCandidateSelection(
-            candidates=(),
-            generated_count=0,
-            rejected_reasons=(),
+        raise ValueError(
+            "Поле violations должно быть JSON array.",
         )
 
-    result: list[dict[str, Any],] = []
+    candidates: list[dict[str, Any]] = []
 
-    rejected_reasons: list[str] = []
-
-    for violation in violations:
+    for index, violation in enumerate(
+        violations,
+    ):
         if not isinstance(
             violation,
             dict,
         ):
-            rejected_reasons.append(
-                "item_not_object",
+            raise ValueError(
+                f"Каждый элемент violations должен быть JSON object; index={index}.",
             )
-            continue
 
-        comment = normalize_text(
-            violation.get(
-                "comment",
-            )
-        )
-
-        if not comment:
-            rejected_reasons.append(
-                "empty_comment",
-            )
-            continue
-
-        evidence = normalize_text(
-            violation.get(
-                "evidence",
-            )
-        )
-
-        if not evidence:
-            rejected_reasons.append(
-                "empty_evidence",
-            )
-            continue
-
-        combined = " ".join(
-            (
-                comment,
-                evidence,
-                normalize_text(
-                    violation.get(
-                        "recommendation_draft",
-                    )
-                ),
-            )
-        )
-
-        has_positive = any(
-            marker in combined for marker in _POSITIVE_COMPLIANCE_MARKERS
-        )
-
-        has_negative = any(marker in combined for marker in _NEGATIVE_VIOLATION_MARKERS)
-
-        if has_positive and not has_negative:
-            rejected_reasons.append(
-                "compliance_confirmation",
-            )
-            continue
-
-        result.append(
+        candidates.append(
             violation,
         )
 
     return ViolationCandidateSelection(
         candidates=tuple(
-            result,
+            candidates,
         ),
         generated_count=len(
             violations,
-        ),
-        rejected_reasons=tuple(
-            rejected_reasons,
         ),
     )
 
@@ -278,7 +191,7 @@ def select_violation_candidates(
 def filter_violations(
     violations: Any,
 ) -> list[dict[str, Any]]:
-    """Возвращает backward-compatible список сохранённых candidates."""
+    """Возвращает backward-compatible lossless список candidates."""
     return list(
         select_violation_candidates(
             violations,
@@ -304,7 +217,9 @@ def build_basis(
                 source.source_file,
             )
         else:
-            parts.append(f"{source.source_file}, PDF стр. {source.page}")
+            parts.append(
+                f"{source.source_file}, PDF стр. {source.page}",
+            )
 
     return "; ".join(
         parts,

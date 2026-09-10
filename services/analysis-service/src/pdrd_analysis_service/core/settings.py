@@ -130,7 +130,7 @@ class PipelineSettings(BaseModel):
     )
 
     norm_check_num_predict: int = Field(
-        default=2600,
+        default=4000,
         ge=1,
         le=10000,
     )
@@ -142,7 +142,7 @@ class PipelineSettings(BaseModel):
     )
 
     technical_assignment_batch_size: int = Field(
-        default=100,
+        default=48,
         ge=1,
         le=100,
     )
