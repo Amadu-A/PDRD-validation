@@ -111,7 +111,7 @@ def build_container() -> ApplicationContainer:
         check_page_against_technical_assignment=(
             CheckPageAgainstTechnicalAssignment(
                 vision_model=vision_model,
-                num_predict=(settings.pipeline.norm_check_num_predict),
+                num_predict=(settings.pipeline.technical_assignment_num_predict),
                 batch_size=(settings.pipeline.technical_assignment_batch_size),
                 requirement_text_limit=(
                     settings.pipeline.technical_assignment_requirement_text_limit

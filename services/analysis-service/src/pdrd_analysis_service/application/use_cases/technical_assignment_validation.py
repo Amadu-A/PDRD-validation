@@ -107,7 +107,6 @@ class CheckPageAgainstTechnicalAssignment:
         )
 
         decisions: list[TechnicalAssignmentDecision] = []
-
         metrics: list[GenerationMetrics] = []
 
         for batch_number, start in enumerate(
@@ -125,19 +124,15 @@ class CheckPageAgainstTechnicalAssignment:
             requirement_ids = tuple(requirement.requirement_id for requirement in batch)
 
             result = await self.vision_model.generate_json(
-                prompt=(
-                    build_technical_assignment_check_prompt(
-                        page_number=page_number,
-                        extracted_text=extracted_text,
-                        page_facts=page_facts,
-                        requirements=batch,
-                        requirement_text_limit=(self.requirement_text_limit),
-                    )
+                prompt=build_technical_assignment_check_prompt(
+                    page_number=page_number,
+                    extracted_text=extracted_text,
+                    page_facts=page_facts,
+                    requirements=batch,
+                    requirement_text_limit=(self.requirement_text_limit),
                 ),
-                schema=(
-                    build_technical_assignment_check_schema(
-                        requirement_ids,
-                    )
+                schema=build_technical_assignment_check_schema(
+                    requirement_ids,
                 ),
                 num_predict=self.num_predict,
                 seed=500 + batch_number,
@@ -149,13 +144,11 @@ class CheckPageAgainstTechnicalAssignment:
                 result.metrics,
             )
 
-            batch_decisions = self._parse_batch_decisions(
-                payload=result.payload,
-                requirements=batch,
-            )
-
             decisions.extend(
-                batch_decisions,
+                self._parse_batch_decisions(
+                    payload=result.payload,
+                    requirements=batch,
+                )
             )
 
         findings: list[FindingDraft] = []
@@ -274,7 +267,7 @@ class CheckPageAgainstTechnicalAssignment:
         TechnicalAssignmentDecision,
         ...,
     ]:
-        """Проверяет exact coverage одного VLM batch."""
+        """Проверяет exact coverage compact VLM batch."""
         raw_decisions = payload.get(
             "decisions",
         )
@@ -309,19 +302,133 @@ class CheckPageAgainstTechnicalAssignment:
                 "T-first VLM потеряла или добавила atomic requirement decision.",
             )
 
-        return tuple(
+        compact_mode = "issues" in payload
+        issues_by_requirement = cls._parse_issues(
+            raw_issues=payload.get(
+                "issues",
+                [],
+            ),
+            expected_ids=set(
+                expected_ids,
+            ),
+            enabled=compact_mode,
+        )
+
+        decisions = tuple(
             cls._parse_decision(
                 requirement_id=(requirement.requirement_id),
                 raw=raw_decisions[requirement.requirement_id],
+                compact_mode=compact_mode,
+                raw_issue=issues_by_requirement.get(
+                    requirement.requirement_id,
+                ),
             )
             for requirement in requirements
         )
 
+        if compact_mode:
+            finding_ids = {
+                decision.requirement_id
+                for decision in decisions
+                if decision.status in _FINDING_DECISION_STATUSES
+            }
+
+            issue_ids = set(
+                issues_by_requirement,
+            )
+
+            if issue_ids != finding_ids:
+                raise TechnicalAssignmentValidationError(
+                    "T-first issues должны содержать "
+                    "ровно violated/insufficient_evidence decisions.",
+                )
+
+        return decisions
+
     @staticmethod
+    def _parse_issues(
+        *,
+        raw_issues: Any,
+        expected_ids: set[str],
+        enabled: bool,
+    ) -> dict[
+        str,
+        dict[
+            str,
+            Any,
+        ],
+    ]:
+        """Строит карту compact issue details без дублей."""
+        if not enabled:
+            return {}
+
+        if not isinstance(
+            raw_issues,
+            list,
+        ):
+            raise TechnicalAssignmentValidationError(
+                "T-first VLM должна вернуть массив issues.",
+            )
+
+        result: dict[
+            str,
+            dict[
+                str,
+                Any,
+            ],
+        ] = {}
+
+        for raw_issue in raw_issues:
+            if not isinstance(
+                raw_issue,
+                dict,
+            ):
+                raise TechnicalAssignmentValidationError(
+                    "T-first issue должен быть объектом.",
+                )
+
+            requirement_id = str(
+                raw_issue.get(
+                    "requirement_id",
+                    "",
+                )
+            ).strip()
+
+            if requirement_id not in expected_ids:
+                raise TechnicalAssignmentValidationError(
+                    "T-first issue содержит неизвестный requirement_id.",
+                )
+
+            if requirement_id in result:
+                raise TechnicalAssignmentValidationError(
+                    "T-first issues содержат повторяющийся requirement_id.",
+                )
+
+            raw_status = raw_issue.get(
+                "status",
+            )
+
+            if raw_status not in _FINDING_DECISION_STATUSES:
+                raise TechnicalAssignmentValidationError(
+                    "T-first issue содержит недопустимый status.",
+                )
+
+            result[requirement_id] = raw_issue
+
+        return result
+
+    @classmethod
     def _parse_decision(
+        cls,
         *,
         requirement_id: str,
         raw: Any,
+        compact_mode: bool,
+        raw_issue: dict[
+            str,
+            Any,
+        ]
+        | None,
     ) -> TechnicalAssignmentDecision:
         """Строго преобразует один structured decision."""
         if not isinstance(
@@ -341,61 +448,71 @@ class CheckPageAgainstTechnicalAssignment:
                 "T-first decision содержит неизвестный status.",
             )
 
-        raw_severity = raw.get(
-            "severity",
-        )
-
-        if raw_severity not in _ALLOWED_SEVERITIES:
-            raise TechnicalAssignmentValidationError(
-                "T-first decision содержит неизвестный severity.",
+        normalized_confidence = cls._parse_confidence(
+            raw.get(
+                "confidence",
             )
-
-        raw_confidence = raw.get(
-            "confidence",
         )
-
-        if isinstance(
-            raw_confidence,
-            bool,
-        ) or not isinstance(
-            raw_confidence,
-            (
-                int,
-                float,
-            ),
-        ):
-            raise TechnicalAssignmentValidationError(
-                "T-first decision confidence должен быть числом.",
-            )
-
-        normalized_confidence = float(
-            raw_confidence,
-        )
-
-        if not (0.0 <= normalized_confidence <= 1.0):
-            raise TechnicalAssignmentValidationError(
-                "T-first decision confidence вне диапазона 0..1.",
-            )
 
         if raw_status in _FINDING_DECISION_STATUSES:
-            comment = CheckPageAgainstTechnicalAssignment._required_text(
-                raw,
+            if compact_mode:
+                if raw_issue is None:
+                    raise TechnicalAssignmentValidationError(
+                        "T-first finding decision не имеет "
+                        "обязательного issue details.",
+                    )
+
+                if (
+                    raw_issue.get(
+                        "status",
+                    )
+                    != raw_status
+                ):
+                    raise TechnicalAssignmentValidationError(
+                        "T-first issue status не совпадает с decisions status.",
+                    )
+
+                detail = raw_issue
+
+            else:
+                # Legacy fallback нужен для совместимости внутренних
+                # тестовых doubles и старых persisted payload.
+                detail = raw
+
+            severity = cls._parse_severity(
+                detail.get(
+                    "severity",
+                )
+            )
+
+            comment = cls._required_text(
+                detail,
                 "comment",
             )
 
-            evidence = CheckPageAgainstTechnicalAssignment._required_text(
-                raw,
+            evidence = cls._required_text(
+                detail,
                 "evidence",
             )
 
             recommendation_draft = str(
-                raw.get(
+                detail.get(
                     "recommendation_draft",
                     "",
                 )
             ).strip()
 
         else:
+            if compact_mode and raw_issue is not None:
+                raise TechnicalAssignmentValidationError(
+                    "T-first issue нельзя создавать для "
+                    "satisfied/not_applicable decision.",
+                )
+
+            severity = cast(
+                FindingSeverity,
+                "info",
+            )
             comment = ""
             evidence = ""
             recommendation_draft = ""
@@ -406,14 +523,56 @@ class CheckPageAgainstTechnicalAssignment:
                 TechnicalAssignmentDecisionStatus,
                 raw_status,
             ),
-            severity=cast(
-                FindingSeverity,
-                raw_severity,
-            ),
+            severity=severity,
             comment=comment,
             evidence=evidence,
             recommendation_draft=(recommendation_draft),
             confidence=normalized_confidence,
+        )
+
+    @staticmethod
+    def _parse_confidence(
+        value: Any,
+    ) -> float:
+        """Проверяет generated confidence 0..1."""
+        if isinstance(
+            value,
+            bool,
+        ) or not isinstance(
+            value,
+            (
+                int,
+                float,
+            ),
+        ):
+            raise TechnicalAssignmentValidationError(
+                "T-first decision confidence должен быть числом.",
+            )
+
+        normalized = float(
+            value,
+        )
+
+        if not (0.0 <= normalized <= 1.0):
+            raise TechnicalAssignmentValidationError(
+                "T-first decision confidence вне диапазона 0..1.",
+            )
+
+        return normalized
+
+    @staticmethod
+    def _parse_severity(
+        value: Any,
+    ) -> FindingSeverity:
+        """Проверяет severity только для issue decisions."""
+        if value not in _ALLOWED_SEVERITIES:
+            raise TechnicalAssignmentValidationError(
+                "T-first issue содержит неизвестный severity.",
+            )
+
+        return cast(
+            FindingSeverity,
+            value,
         )
 
     @staticmethod
@@ -492,13 +651,11 @@ class CheckPageAgainstTechnicalAssignment:
             normative_source_ids=(),
             basis="",
             basis_sources=(),
-            experience_query=(
-                build_experience_query(
-                    category=("customer_requirements"),
-                    comment=decision.comment,
-                    evidence=decision.evidence,
-                    recommendation_draft=(decision.recommendation_draft),
-                )
+            experience_query=build_experience_query(
+                category="customer_requirements",
+                comment=decision.comment,
+                evidence=decision.evidence,
+                recommendation_draft=(decision.recommendation_draft),
             ),
             technical_assignment_source_ids=(requirement.requirement_id,),
             technical_assignment_basis_sources=(source,),

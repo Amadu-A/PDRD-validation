@@ -15,6 +15,11 @@ TECHNICAL_ASSIGNMENT_DECISION_STATUSES = (
     "insufficient_evidence",
 )
 
+TECHNICAL_ASSIGNMENT_FINDING_STATUSES = (
+    "violated",
+    "insufficient_evidence",
+)
+
 
 def build_technical_assignment_check_schema(
     requirement_ids: tuple[
@@ -22,7 +27,7 @@ def build_technical_assignment_check_schema(
         ...,
     ],
 ) -> dict[str, Any]:
-    """Строит exact-key schema для одного T validation batch."""
+    """Строит compact exact-key schema для одного T validation batch."""
     if not requirement_ids:
         raise ValueError(
             "Для T-first проверки нужен хотя бы один requirement.",
@@ -49,24 +54,6 @@ def build_technical_assignment_check_schema(
                     TECHNICAL_ASSIGNMENT_DECISION_STATUSES,
                 ),
             },
-            "severity": {
-                "type": "string",
-                "enum": list(
-                    FINDING_SEVERITIES,
-                ),
-            },
-            "comment": {
-                "type": "string",
-                "maxLength": 420,
-            },
-            "evidence": {
-                "type": "string",
-                "maxLength": 500,
-            },
-            "recommendation_draft": {
-                "type": "string",
-                "maxLength": 420,
-            },
             "confidence": {
                 "type": "number",
                 "minimum": 0,
@@ -75,11 +62,54 @@ def build_technical_assignment_check_schema(
         },
         "required": [
             "status",
+            "confidence",
+        ],
+    }
+
+    issue_schema: dict[str, Any] = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "requirement_id": {
+                "type": "string",
+                "enum": list(
+                    requirement_ids,
+                ),
+            },
+            "status": {
+                "type": "string",
+                "enum": list(
+                    TECHNICAL_ASSIGNMENT_FINDING_STATUSES,
+                ),
+            },
+            "severity": {
+                "type": "string",
+                "enum": list(
+                    FINDING_SEVERITIES,
+                ),
+            },
+            "comment": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 420,
+            },
+            "evidence": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+            },
+            "recommendation_draft": {
+                "type": "string",
+                "maxLength": 420,
+            },
+        },
+        "required": [
+            "requirement_id",
+            "status",
             "severity",
             "comment",
             "evidence",
             "recommendation_draft",
-            "confidence",
         ],
     }
 
@@ -90,16 +120,21 @@ def build_technical_assignment_check_schema(
             "decisions": {
                 "type": "object",
                 "additionalProperties": False,
-                "properties": dict.fromkeys(
-                    requirement_ids,
-                    decision_schema,
-                ),
+                "properties": dict.fromkeys(requirement_ids, decision_schema),
                 "required": list(
                     requirement_ids,
                 ),
-            }
+            },
+            "issues": {
+                "type": "array",
+                "items": issue_schema,
+                "maxItems": len(
+                    requirement_ids,
+                ),
+            },
         },
         "required": [
             "decisions",
+            "issues",
         ],
     }
