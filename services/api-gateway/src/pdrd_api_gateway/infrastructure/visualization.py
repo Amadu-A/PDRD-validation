@@ -1,33 +1,39 @@
 # services/api-gateway/src/pdrd_api_gateway/infrastructure/visualization.py
 
-"""HTTP adapter повторного рендера selected PDF pages через Document Service."""
+"""HTTP adapters lazy-визуализации анализа."""
 
 import base64
 import binascii
+from typing import Any
 
 import httpx
 
 from pdrd_api_gateway.application.ports.analysis_visualization import (
+    AnalysisBoundingBox,
+    AnalysisFindingLocation,
+    AnalysisFindingTarget,
     AnalysisPagePreview,
+)
+from pdrd_api_gateway.core.settings import (
+    AnalysisServiceSettings,
+    DocumentServiceSettings,
 )
 
 
 class DocumentServiceAnalysisPdfPageRenderer:
-    """Использует существующий /internal/v1/pdf/extract."""
+    """Рендерит selected PDF pages через Document Service."""
 
     def __init__(
         self,
         *,
-        base_url: str,
-        request_timeout_seconds: float,
-        connect_timeout_seconds: float,
+        settings: DocumentServiceSettings,
     ) -> None:
         """Сохраняет bounded HTTP settings."""
-        self._base_url = base_url.rstrip(
+        self._base_url = settings.base_url.rstrip(
             "/",
         )
-        self._request_timeout_seconds = request_timeout_seconds
-        self._connect_timeout_seconds = connect_timeout_seconds
+        self._request_timeout_seconds = settings.request_timeout_seconds
+        self._connect_timeout_seconds = settings.connect_timeout_seconds
 
     async def render(
         self,
@@ -39,7 +45,7 @@ class DocumentServiceAnalysisPdfPageRenderer:
         AnalysisPagePreview,
         ...,
     ]:
-        """Рендерит selected pages ровно одним internal HTTP-вызовом."""
+        """Рендерит selected pages одним HTTP request."""
         timeout = httpx.Timeout(
             self._request_timeout_seconds,
             connect=self._connect_timeout_seconds,
@@ -143,9 +149,228 @@ class DocumentServiceAnalysisPdfPageRenderer:
                         raw_page["height_points"],
                     ),
                     image_base64=image_base64,
+                    extracted_text=str(
+                        raw_page.get(
+                            "text",
+                            "",
+                        )
+                    ),
                 )
             )
 
         return tuple(
             pages,
+        )
+
+
+class HttpAnalysisFindingLocator:
+    """Вызывает visual localization Analysis Service."""
+
+    def __init__(
+        self,
+        *,
+        settings: AnalysisServiceSettings,
+    ) -> None:
+        """Сохраняет internal Analysis Service settings."""
+        self._base_url = settings.base_url.rstrip(
+            "/",
+        )
+        self._request_timeout_seconds = settings.request_timeout_seconds
+        self._connect_timeout_seconds = settings.connect_timeout_seconds
+
+    async def localize(
+        self,
+        *,
+        page_number: int,
+        extracted_text: str,
+        image_base64: str,
+        findings: tuple[
+            AnalysisFindingTarget,
+            ...,
+        ],
+    ) -> tuple[
+        AnalysisFindingLocation,
+        ...,
+    ]:
+        """Локализует все findings страницы одним HTTP request."""
+        if not findings:
+            return ()
+
+        timeout = httpx.Timeout(
+            self._request_timeout_seconds,
+            connect=self._connect_timeout_seconds,
+        )
+
+        payload = {
+            "page_number": page_number,
+            "extracted_text": extracted_text,
+            "image_base64": image_base64,
+            "findings": [
+                {
+                    "finding_id": finding.finding_id,
+                    "comment": finding.comment,
+                    "evidence": finding.evidence,
+                }
+                for finding in findings
+            ],
+        }
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=timeout,
+            ) as client:
+                response = await client.post(
+                    (f"{self._base_url}/internal/v1/findings/localize"),
+                    json=payload,
+                )
+
+                response.raise_for_status()
+
+        except httpx.HTTPError as error:
+            raise RuntimeError(
+                "Analysis Service не выполнил visual localization.",
+            ) from error
+
+        try:
+            response_payload = response.json()
+            raw_locations = response_payload["locations"]
+
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as error:
+            raise RuntimeError(
+                "Analysis Service вернул некорректный localization payload.",
+            ) from error
+
+        if not isinstance(
+            raw_locations,
+            list,
+        ):
+            raise RuntimeError(
+                "Localization locations должен быть массивом.",
+            )
+
+        allowed_ids = {finding.finding_id for finding in findings}
+
+        parsed: dict[
+            str,
+            AnalysisFindingLocation,
+        ] = {}
+
+        for raw_location in raw_locations:
+            location = self._parse_location(
+                raw_location=raw_location,
+                allowed_ids=allowed_ids,
+            )
+
+            if location is None or location.finding_id in parsed:
+                continue
+
+            parsed[location.finding_id] = location
+
+        return tuple(
+            parsed.get(
+                finding.finding_id,
+                AnalysisFindingLocation.unlocated(
+                    finding_id=finding.finding_id,
+                ),
+            )
+            for finding in findings
+        )
+
+    @staticmethod
+    def _parse_location(
+        *,
+        raw_location: Any,
+        allowed_ids: set[str],
+    ) -> AnalysisFindingLocation | None:
+        """Проверяет один localization item."""
+        if not isinstance(
+            raw_location,
+            dict,
+        ):
+            return None
+
+        finding_id = str(
+            raw_location.get(
+                "finding_id",
+                "",
+            )
+        ).strip()
+
+        if finding_id not in allowed_ids:
+            return None
+
+        if (
+            str(
+                raw_location.get(
+                    "status",
+                    "",
+                )
+            )
+            != "located"
+        ):
+            return AnalysisFindingLocation.unlocated(
+                finding_id=finding_id,
+            )
+
+        raw_bbox = raw_location.get(
+            "bbox",
+        )
+
+        if not isinstance(
+            raw_bbox,
+            dict,
+        ):
+            return AnalysisFindingLocation.unlocated(
+                finding_id=finding_id,
+            )
+
+        try:
+            bbox = AnalysisBoundingBox(
+                x_min=int(
+                    raw_bbox["x_min"],
+                ),
+                y_min=int(
+                    raw_bbox["y_min"],
+                ),
+                x_max=int(
+                    raw_bbox["x_max"],
+                ),
+                y_max=int(
+                    raw_bbox["y_max"],
+                ),
+            )
+
+            confidence = float(
+                raw_location.get(
+                    "confidence",
+                    0.0,
+                )
+            )
+
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
+            return AnalysisFindingLocation.unlocated(
+                finding_id=finding_id,
+            )
+
+        confidence = min(
+            max(
+                confidence,
+                0.0,
+            ),
+            1.0,
+        )
+
+        return AnalysisFindingLocation(
+            finding_id=finding_id,
+            status="located",
+            bbox=bbox,
+            confidence=confidence,
         )

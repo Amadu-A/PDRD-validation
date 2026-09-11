@@ -9,6 +9,7 @@
 
 import {
   getAnalysisResult,
+  getAnalysisVisualization,
   submitAnalysis,
 } from "./api.js";
 
@@ -136,11 +137,43 @@ export function createAnalysisController({
         jobId,
       );
 
+      let visualization = null;
+
+      if (
+        payload.source_mode === "pdf_only"
+        || payload.source_mode === "pdf_cad"
+      ) {
+        modal.show(
+          "Анализ завершён. Готовим визуализацию замечаний…",
+        );
+
+        try {
+          visualization = (
+            await getAnalysisVisualization(
+              jobId,
+            )
+          );
+
+        } catch (visualizationError) {
+          visualization = {
+            pages: [],
+            error: (
+              visualizationError instanceof Error
+                ? visualizationError.message
+                : String(
+                  visualizationError,
+                )
+            ),
+          };
+        }
+      }
+
       resultView.showReport(
         renderAnalysisReport(
           payload,
           {
             jobId,
+            visualization,
           },
         ),
       );

@@ -107,9 +107,41 @@ function normalizedBox(
 }
 
 
+function pageLocationMap(
+  page,
+) {
+  const locations = (
+    Array.isArray(
+      page.locations,
+    )
+      ? page.locations
+      : []
+  );
+
+  return new Map(
+    locations
+      .filter(
+        (location) => (
+          location
+          && typeof location === "object"
+        ),
+      )
+      .map(
+        (location) => [
+          String(
+            location.finding_id
+            ?? "",
+          ),
+          location,
+        ],
+      ),
+  );
+}
+
+
 function findingsForPage(
   payload,
-  pageNumber,
+  page,
 ) {
   if (!Array.isArray(
     payload.findings,
@@ -117,14 +149,67 @@ function findingsForPage(
     return [];
   }
 
-  return payload.findings.filter(
-    (finding) => (
-      normalizedPage(
-        finding.page
-        ?? finding.page_number,
-      ) === pageNumber
-    ),
+  const pageNumber = normalizedPage(
+    page.page_number,
   );
+
+  if (pageNumber === null) {
+    return [];
+  }
+
+  const locations = pageLocationMap(
+    page,
+  );
+
+  return payload.findings
+    .map(
+      (
+        finding,
+        findingIndex,
+      ) => ({
+        finding,
+        findingIndex,
+      }),
+    )
+    .filter(
+      ({
+        finding,
+      }) => (
+        normalizedPage(
+          finding.page
+          ?? finding.page_number,
+        ) === pageNumber
+      ),
+    )
+    .map(
+      ({
+        finding,
+        findingIndex,
+      }) => {
+        const findingId = String(
+          finding.finding_id
+          ?? "",
+        );
+
+        return {
+          finding: {
+            ...finding,
+            location: (
+              locations.get(
+                findingId,
+              )
+              ?? finding.location
+              ?? {
+                status: "unlocated",
+                bbox: null,
+                confidence: 0,
+              }
+            ),
+          },
+          findingIndex,
+        };
+      },
+    );
 }
 
 
@@ -331,12 +416,15 @@ function createBoundingBox(
   node.style.left = (
     `${box.xMin / 10}%`
   );
+
   node.style.top = (
     `${box.yMin / 10}%`
   );
+
   node.style.width = (
     `${(box.xMax - box.xMin) / 10}%`
   );
+
   node.style.height = (
     `${(box.yMax - box.yMin) / 10}%`
   );
@@ -374,9 +462,17 @@ function drawConnector(
     return;
   }
 
-  const stageRect = stage.getBoundingClientRect();
-  const bboxRect = bboxNode.getBoundingClientRect();
-  const calloutRect = callout.getBoundingClientRect();
+  const stageRect = (
+    stage.getBoundingClientRect()
+  );
+
+  const bboxRect = (
+    bboxNode.getBoundingClientRect()
+  );
+
+  const calloutRect = (
+    callout.getBoundingClientRect()
+  );
 
   const width = Math.max(
     stage.clientWidth,
@@ -510,6 +606,16 @@ function appendPageVisualization(
     "analysis-result__annotation-list",
   );
 
+  if (page.localization_warning) {
+    calloutPane.append(
+      createElement(
+        "p",
+        "analysis-result__visualization-warning",
+        page.localization_warning,
+      ),
+    );
+  }
+
   const svg = document.createElementNS(
     "http://www.w3.org/2000/svg",
     "svg",
@@ -526,16 +632,16 @@ function appendPageVisualization(
 
   const findings = findingsForPage(
     payload,
-    pageNumber,
+    page,
   );
 
   const connectorPairs = [];
 
   findings.forEach(
-    (
+    ({
       finding,
       findingIndex,
-    ) => {
+    }) => {
       const bboxNode = createBoundingBox(
         finding,
         findingIndex,

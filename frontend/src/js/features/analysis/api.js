@@ -96,3 +96,12 @@ export async function getAnalysisResult(
     `${ANALYSES_ENDPOINT}/${jobId}/result`,
   );
 }
+
+
+export async function getAnalysisVisualization(
+  jobId,
+) {
+  return fetchJson(
+    `${ANALYSES_ENDPOINT}/${jobId}/visualization`,
+  );
+}

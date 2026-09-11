@@ -5,6 +5,9 @@
 from pdrd_analysis_service.application.use_cases.finalization import (
     FinalizeFindings,
 )
+from pdrd_analysis_service.application.use_cases.finding_localization import (
+    LocalizeFindings,
+)
 from pdrd_analysis_service.application.use_cases.health import (
     CheckReadiness,
 )
@@ -28,6 +31,7 @@ __all__ = [
     "CheckPageAgainstNorms",
     "CheckReadiness",
     "FinalizeFindings",
+    "LocalizeFindings",
     "UnderstandPage",
     "ValidateProjectContext",
 ]

@@ -34,6 +34,12 @@ from pdrd_api_gateway.application.use_cases.get_analysis_result import (
     AnalysisResultUnavailableError,
     GetAnalysisResult,
 )
+from pdrd_api_gateway.application.use_cases.get_analysis_visualization import (
+    AnalysisVisualizationJobNotFoundError,
+    AnalysisVisualizationNotReadyError,
+    AnalysisVisualizationUnavailableError,
+    GetAnalysisVisualization,
+)
 from pdrd_api_gateway.application.use_cases.resolve_normative_snapshot import (
     InvalidNormativeSelectionError,
     NormativeSelectionConflictError,
@@ -108,6 +114,18 @@ def require_get_analysis_result(
         )
 
     return container.get_analysis_result
+
+
+def require_get_analysis_visualization(
+    container: ApplicationContainer,
+) -> GetAnalysisVisualization:
+    """Возвращает настроенный visualization use case."""
+    if container.get_analysis_visualization is None:
+        raise RuntimeError(
+            "GetAnalysisVisualization is not configured.",
+        )
+
+    return container.get_analysis_visualization
 
 
 async def read_upload(
@@ -542,6 +560,60 @@ async def get_analysis_result(
     except AnalysisResultUnavailableError as error:
         raise HTTPException(
             status_code=(status.HTTP_500_INTERNAL_SERVER_ERROR),
+            detail=str(
+                error,
+            ),
+        ) from error
+
+
+@router.get(
+    "/{job_id}/visualization",
+    response_model=dict[
+        str,
+        Any,
+    ],
+)
+async def get_analysis_visualization(
+    job_id: UUID,
+    container: Annotated[
+        ApplicationContainer,
+        Depends(
+            get_container,
+        ),
+    ],
+) -> dict[
+    str,
+    Any,
+]:
+    """Возвращает rendered PDF pages и lazy bbox locations."""
+    use_case = require_get_analysis_visualization(
+        container,
+    )
+
+    try:
+        return await use_case.execute(
+            job_id=job_id,
+        )
+
+    except AnalysisVisualizationJobNotFoundError as error:
+        raise HTTPException(
+            status_code=(status.HTTP_404_NOT_FOUND),
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    except AnalysisVisualizationNotReadyError as error:
+        raise HTTPException(
+            status_code=(status.HTTP_409_CONFLICT),
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    except AnalysisVisualizationUnavailableError as error:
+        raise HTTPException(
+            status_code=(status.HTTP_502_BAD_GATEWAY),
             detail=str(
                 error,
             ),

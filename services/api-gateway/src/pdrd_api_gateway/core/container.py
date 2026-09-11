@@ -28,6 +28,9 @@ from pdrd_api_gateway.application.use_cases.get_analysis_job import (
 from pdrd_api_gateway.application.use_cases.get_analysis_result import (
     GetAnalysisResult,
 )
+from pdrd_api_gateway.application.use_cases.get_analysis_visualization import (
+    GetAnalysisVisualization,
+)
 from pdrd_api_gateway.application.use_cases.manage_normative_catalog import (
     NormativeCatalogFacade,
 )
@@ -76,6 +79,10 @@ from pdrd_api_gateway.infrastructure.messaging.broker import (
 from pdrd_api_gateway.infrastructure.storage.filesystem import (
     LocalFilesystemAnalysisArtifactStore,
 )
+from pdrd_api_gateway.infrastructure.visualization import (
+    DocumentServiceAnalysisPdfPageRenderer,
+    HttpAnalysisFindingLocator,
+)
 
 ShutdownCallback = Callable[
     [],
@@ -98,6 +105,8 @@ class ApplicationContainer:
     get_analysis_job: GetAnalysisJob | None = None
 
     get_analysis_result: GetAnalysisResult | None = None
+
+    get_analysis_visualization: GetAnalysisVisualization | None = None
 
     submit_analysis: SubmitAnalysis | None = None
 
@@ -227,6 +236,21 @@ def build_container() -> ApplicationContainer:
         artifact_store=artifact_store,
     )
 
+    pdf_page_renderer = DocumentServiceAnalysisPdfPageRenderer(
+        settings=settings.document_service,
+    )
+
+    finding_locator = HttpAnalysisFindingLocator(
+        settings=settings.analysis_service,
+    )
+
+    get_analysis_visualization = GetAnalysisVisualization(
+        get_analysis_job=get_analysis_job,
+        artifact_store=artifact_store,
+        pdf_page_renderer=pdf_page_renderer,
+        finding_locator=finding_locator,
+    )
+
     async def _shutdown_database() -> None:
         await engine.dispose()
 
@@ -237,6 +261,7 @@ def build_container() -> ApplicationContainer:
         create_analysis_job=create_analysis_job,
         get_analysis_job=get_analysis_job,
         get_analysis_result=get_analysis_result,
+        get_analysis_visualization=(get_analysis_visualization),
         submit_analysis=submit_analysis,
         normative_catalog=normative_catalog,
         user_package_catalog=user_package_catalog,

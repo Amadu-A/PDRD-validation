@@ -13,6 +13,10 @@ import {
   statusLabel,
 } from "./labels.js";
 
+import {
+  appendAnalysisVisualization,
+} from "./visualization.js";
+
 
 const CATEGORY_LABELS = {
   normative_control: "Нормоконтроль",
@@ -273,7 +277,7 @@ function preferredSourceArray(
 }
 
 
-function normativeSources(
+export function normativeSources(
   finding,
 ) {
   return uniqueSources(
@@ -437,7 +441,7 @@ function createManagedCitation(
 }
 
 
-function createNormativeCitation(
+export function createNormativeCitation(
   source,
 ) {
   return createManagedCitation(
@@ -1227,6 +1231,7 @@ export function renderAnalysisReport(
   payload,
   {
     jobId = null,
+    visualization = null,
   } = {},
 ) {
   const fragment = (
@@ -1259,6 +1264,16 @@ export function renderAnalysisReport(
 
     return fragment;
   }
+
+  appendAnalysisVisualization(
+    payload,
+    visualization,
+    fragment,
+    {
+      normativeSources,
+      createNormativeCitation,
+    },
+  );
 
   appendOverview(
     payload,

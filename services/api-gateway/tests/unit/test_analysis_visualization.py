@@ -1,12 +1,13 @@
 # services/api-gateway/tests/unit/test_analysis_visualization.py
 
-"""Unit tests lazy PDF visualization endpoint use case."""
+"""Unit tests lazy visualization completed analysis."""
 
-from typing import Any
 from uuid import UUID
 
 import pytest
 from pdrd_api_gateway.application.ports.analysis_visualization import (
+    AnalysisBoundingBox,
+    AnalysisFindingLocation,
     AnalysisPagePreview,
 )
 from pdrd_api_gateway.application.ports.artifacts import (
@@ -48,10 +49,13 @@ class FakeArtifactStore:
 
     def __init__(
         self,
+        *,
         request: AnalysisRequestArtifacts,
+        result: dict[str, object],
     ) -> None:
-        """Сохраняет request."""
+        """Сохраняет request/result."""
         self.request = request
+        self.result = result
 
     async def load_request(
         self,
@@ -60,7 +64,18 @@ class FakeArtifactStore:
     ) -> AnalysisRequestArtifacts:
         """Возвращает request."""
         assert document_id == self.request.submission.document_id
+
         return self.request
+
+    async def load_result(
+        self,
+        *,
+        document_id: UUID,
+    ) -> dict[str, object]:
+        """Возвращает result."""
+        assert document_id == self.request.submission.document_id
+
+        return self.result
 
 
 class FakeRenderer:
@@ -98,12 +113,77 @@ class FakeRenderer:
         return self.pages
 
 
+class FakeLocator:
+    """Fake Analysis Service localization."""
+
+    def __init__(
+        self,
+    ) -> None:
+        """Инициализирует counters."""
+        self.calls = 0
+        self.finding_counts: list[int] = []
+
+    async def localize(
+        self,
+        *,
+        page_number: int,
+        extracted_text: str,
+        image_base64: str,
+        findings: tuple[
+            object,
+            ...,
+        ],
+    ) -> tuple[
+        AnalysisFindingLocation,
+        ...,
+    ]:
+        """Возвращает deterministic bbox каждого target."""
+        assert page_number >= 1
+        assert extracted_text
+        assert image_base64
+
+        self.calls += 1
+
+        self.finding_counts.append(
+            len(
+                findings,
+            )
+        )
+
+        result: list[AnalysisFindingLocation] = []
+
+        for index, finding in enumerate(
+            findings,
+        ):
+            finding_id = finding.finding_id
+
+            left = 10 + index
+
+            result.append(
+                AnalysisFindingLocation(
+                    finding_id=finding_id,
+                    status="located",
+                    bbox=AnalysisBoundingBox(
+                        x_min=left,
+                        y_min=20,
+                        x_max=left + 5,
+                        y_max=30,
+                    ),
+                    confidence=0.9,
+                )
+            )
+
+        return tuple(
+            result,
+        )
+
+
 def completed_job(
     submission: AnalysisSubmission,
 ) -> AnalysisJob:
     """Создаёт completed job."""
     job = AnalysisJob.create(
-        document_id=submission.document_id,
+        document_id=(submission.document_id),
     )
 
     job.mark_queued()
@@ -114,12 +194,12 @@ def completed_job(
 
 
 @pytest.mark.asyncio
-async def test_visualization_renders_selected_pages_once() -> None:
-    """Все selected pages готовятся одним internal renderer call."""
+async def test_visualization_renders_and_localizes_selected_page() -> None:
+    """Preview получает bbox после completed analysis."""
     submission = AnalysisSubmission.create(
         pdf_present=True,
         cad_present=False,
-        pages="14-16",
+        pages="14",
         pdf_file_name="drawing.pdf",
         cad_file_name=None,
     )
@@ -131,20 +211,18 @@ async def test_visualization_renders_selected_pages_once() -> None:
     )
 
     renderer = FakeRenderer(
-        pages=tuple(
+        pages=(
             AnalysisPagePreview(
-                page_number=page,
+                page_number=14,
                 width_points=841.89,
                 height_points=595.28,
                 image_base64="iVBORw0KGgo=",
-            )
-            for page in (
-                14,
-                15,
-                16,
-            )
+                extracted_text="synthetic sheet",
+            ),
         ),
     )
+
+    locator = FakeLocator()
 
     job = completed_job(
         submission,
@@ -155,9 +233,20 @@ async def test_visualization_renders_selected_pages_once() -> None:
             job,
         ),  # type: ignore[arg-type]
         artifact_store=FakeArtifactStore(
-            request,
+            request=request,
+            result={
+                "findings": [
+                    {
+                        "finding_id": "F-1",
+                        "page": 14,
+                        "comment": "Ошибка",
+                        "evidence": "Факт",
+                    },
+                ],
+            },
         ),  # type: ignore[arg-type]
         pdf_page_renderer=renderer,
+        finding_locator=locator,  # type: ignore[arg-type]
     )
 
     payload = await use_case.execute(
@@ -170,19 +259,34 @@ async def test_visualization_renders_selected_pages_once() -> None:
         pages,
         list,
     )
+
     assert (
         len(
             pages,
         )
-        == 3
+        == 1
     )
+
     assert renderer.calls == 1
-    assert renderer.page_spec == "14-16"
+    assert locator.calls == 1
+
+    locations = pages[0]["locations"]
+
+    assert (
+        len(
+            locations,
+        )
+        == 1
+    )
+
+    assert locations[0]["finding_id"] == "F-1"
+
+    assert locations[0]["status"] == "located"
 
 
 @pytest.mark.asyncio
-async def test_cad_only_visualization_has_no_pdf_pages() -> None:
-    """CAD-only result не запускает PDF renderer."""
+async def test_cad_only_visualization_skips_pdf_and_locator() -> None:
+    """CAD-only не создаёт фиктивный PDF preview."""
     submission = AnalysisSubmission.create(
         pdf_present=False,
         cad_present=True,
@@ -201,6 +305,8 @@ async def test_cad_only_visualization_has_no_pdf_pages() -> None:
         pages=(),
     )
 
+    locator = FakeLocator()
+
     job = completed_job(
         submission,
     )
@@ -210,9 +316,13 @@ async def test_cad_only_visualization_has_no_pdf_pages() -> None:
             job,
         ),  # type: ignore[arg-type]
         artifact_store=FakeArtifactStore(
-            request,
+            request=request,
+            result={
+                "findings": [],
+            },
         ),  # type: ignore[arg-type]
         pdf_page_renderer=renderer,
+        finding_locator=locator,  # type: ignore[arg-type]
     )
 
     payload = await use_case.execute(
@@ -221,15 +331,16 @@ async def test_cad_only_visualization_has_no_pdf_pages() -> None:
 
     assert payload["pages"] == []
     assert renderer.calls == 0
+    assert locator.calls == 0
 
 
 @pytest.mark.asyncio
-async def test_visualization_handles_50_synthetic_pages_in_one_call() -> None:
-    """Synthetic load проверяет отсутствие N HTTP calls на N pages."""
+async def test_fifty_findings_use_one_localization_call_per_page() -> None:
+    """Synthetic load: 50 findings не создают 50 VLM requests."""
     submission = AnalysisSubmission.create(
         pdf_present=True,
         cad_present=False,
-        pages="1-50",
+        pages="1",
         pdf_file_name="drawing.pdf",
         cad_file_name=None,
     )
@@ -241,19 +352,30 @@ async def test_visualization_handles_50_synthetic_pages_in_one_call() -> None:
     )
 
     renderer = FakeRenderer(
-        pages=tuple(
+        pages=(
             AnalysisPagePreview(
-                page_number=page,
+                page_number=1,
                 width_points=1000.0,
                 height_points=700.0,
                 image_base64="iVBORw0KGgo=",
-            )
-            for page in range(
-                1,
-                51,
-            )
+                extracted_text="synthetic sheet",
+            ),
         ),
     )
+
+    findings = [
+        {
+            "finding_id": f"F-{index:02d}",
+            "page": 1,
+            "comment": f"Замечание {index}",
+            "evidence": f"Факт {index}",
+        }
+        for index in range(
+            50,
+        )
+    ]
+
+    locator = FakeLocator()
 
     job = completed_job(
         submission,
@@ -264,22 +386,37 @@ async def test_visualization_handles_50_synthetic_pages_in_one_call() -> None:
             job,
         ),  # type: ignore[arg-type]
         artifact_store=FakeArtifactStore(
-            request,
+            request=request,
+            result={
+                "findings": findings,
+            },
         ),  # type: ignore[arg-type]
         pdf_page_renderer=renderer,
+        finding_locator=locator,  # type: ignore[arg-type]
     )
 
-    payload: dict[
-        str,
-        Any,
-    ] = await use_case.execute(
+    payload = await use_case.execute(
         job_id=job.id,
+    )
+
+    pages = payload["pages"]
+
+    assert isinstance(
+        pages,
+        list,
     )
 
     assert (
         len(
-            payload["pages"],  # type: ignore[arg-type]
+            pages[0]["locations"],
         )
         == 50
     )
+
     assert renderer.calls == 1
+
+    assert locator.calls == 1
+
+    assert locator.finding_counts == [
+        50,
+    ]

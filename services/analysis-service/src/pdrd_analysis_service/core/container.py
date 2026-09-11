@@ -11,6 +11,7 @@ from pdrd_analysis_service.application.use_cases import (
     CheckPageAgainstNorms,
     CheckReadiness,
     FinalizeFindings,
+    LocalizeFindings,
     UnderstandPage,
     ValidateProjectContext,
 )
@@ -46,6 +47,8 @@ class ApplicationContainer:
     check_page_against_technical_assignment: CheckPageAgainstTechnicalAssignment
 
     finalize_findings: FinalizeFindings
+
+    localize_findings: LocalizeFindings
 
     check_readiness: CheckReadiness
 
@@ -124,6 +127,10 @@ def build_container() -> ApplicationContainer:
             batch_size=(settings.pipeline.final_batch_size),
             experience_context_limit=(settings.pipeline.experience_context_limit),
             experience_min_score=(settings.pipeline.experience_min_score),
+        ),
+        localize_findings=LocalizeFindings(
+            vision_model=vision_model,
+            num_predict=(settings.pipeline.finding_location_num_predict),
         ),
         check_readiness=CheckReadiness(
             vision_model=vision_model,

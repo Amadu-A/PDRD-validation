@@ -374,6 +374,42 @@ class ProjectContextCleanupSettings(BaseModel):
     )
 
 
+class DocumentServiceSettings(BaseModel):
+    """Internal Document Service для PDF-preview."""
+
+    base_url: str = "http://pdrd-document-service:8301"
+
+    request_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        le=600,
+    )
+
+    connect_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=120,
+    )
+
+
+class AnalysisServiceSettings(BaseModel):
+    """Internal Analysis Service для lazy bbox localization."""
+
+    base_url: str = "http://pdrd-analysis-service:8501"
+
+    request_timeout_seconds: float = Field(
+        default=600.0,
+        gt=0,
+        le=1200,
+    )
+
+    connect_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=120,
+    )
+
+
 class Settings(BaseSettings):
     """Runtime API Gateway settings."""
 
@@ -438,6 +474,14 @@ class Settings(BaseSettings):
 
     project_context_cleanup: ProjectContextCleanupSettings = Field(
         default_factory=ProjectContextCleanupSettings,
+    )
+
+    document_service: DocumentServiceSettings = Field(
+        default_factory=DocumentServiceSettings,
+    )
+
+    analysis_service: AnalysisServiceSettings = Field(
+        default_factory=AnalysisServiceSettings,
     )
 
 

@@ -19,6 +19,9 @@ from pdrd_analysis_service.domain.analysis import (
     TechnicalAssignmentSource,
     UserPackageSource,
 )
+from pdrd_analysis_service.domain.visualization import (
+    FindingLocalizationTarget,
+)
 
 
 class PageFactsPayload(BaseModel):
@@ -138,8 +141,8 @@ class TechnicalAssignmentSourcePayload(BaseModel):
             source_id=self.source_id,
             point_id=self.point_id,
             score=self.score,
-            technical_assignment_id=self.technical_assignment_id,
-            analysis_document_id=self.analysis_document_id,
+            technical_assignment_id=(self.technical_assignment_id),
+            analysis_document_id=(self.analysis_document_id),
             section_id=self.section_id,
             source_sha256=self.source_sha256,
             source_file=self.source_file,
@@ -324,7 +327,7 @@ class FindingDraftPayload(BaseModel):
             status=self.status,  # type: ignore[arg-type]
             comment=self.comment,
             evidence=self.evidence,
-            recommendation_draft=self.recommendation_draft,
+            recommendation_draft=(self.recommendation_draft),
             confidence=self.confidence,
             normative_source_ids=tuple(
                 self.normative_source_ids,
@@ -441,6 +444,104 @@ class CheckNormsResponse(BaseModel):
     summary: str
 
     findings: list[FindingDraftPayload]
+
+    metrics: dict[
+        str,
+        Any,
+    ]
+
+
+class FindingLocalizationTargetPayload(
+    BaseModel,
+):
+    """Финальный finding для visual localization."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    finding_id: str = Field(
+        min_length=1,
+    )
+
+    comment: str
+
+    evidence: str
+
+    def to_domain(
+        self,
+    ) -> FindingLocalizationTarget:
+        """Преобразует payload в domain target."""
+        return FindingLocalizationTarget(
+            finding_id=self.finding_id,
+            comment=self.comment,
+            evidence=self.evidence,
+        )
+
+
+class FindingLocalizationRequest(BaseModel):
+    """Запрос bbox-localization одного PDF-листа."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    page_number: int = Field(
+        ge=1,
+    )
+
+    extracted_text: str
+
+    image_base64: str = Field(
+        min_length=1,
+    )
+
+    findings: list[FindingLocalizationTargetPayload]
+
+
+class FindingBoundingBoxPayload(BaseModel):
+    """Нормализованный bbox 0..1000."""
+
+    x_min: int = Field(
+        ge=0,
+        le=1000,
+    )
+
+    y_min: int = Field(
+        ge=0,
+        le=1000,
+    )
+
+    x_max: int = Field(
+        ge=0,
+        le=1000,
+    )
+
+    y_max: int = Field(
+        ge=0,
+        le=1000,
+    )
+
+
+class FindingLocationPayload(BaseModel):
+    """HTTP representation finding location."""
+
+    finding_id: str
+
+    status: str
+
+    bbox: FindingBoundingBoxPayload | None
+
+    confidence: float = Field(
+        ge=0,
+        le=1,
+    )
+
+
+class FindingLocalizationResponse(BaseModel):
+    """Ответ visual localization."""
+
+    locations: list[FindingLocationPayload]
 
     metrics: dict[
         str,

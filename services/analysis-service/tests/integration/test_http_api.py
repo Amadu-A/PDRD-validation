@@ -11,6 +11,7 @@ from pdrd_analysis_service.application.use_cases import (
     CheckPageAgainstNorms,
     CheckReadiness,
     FinalizeFindings,
+    LocalizeFindings,
     UnderstandPage,
 )
 from pdrd_analysis_service.application.use_cases.technical_assignment_validation import (
@@ -195,6 +196,10 @@ def build_app():
             experience_context_limit=600,
             experience_min_score=0.55,
         ),
+        localize_findings=LocalizeFindings(
+            vision_model=vision_model,
+            num_predict=4000,
+        ),
         check_readiness=CheckReadiness(
             vision_model=vision_model,
         ),
@@ -297,9 +302,9 @@ async def test_understand_endpoint() -> None:
         "/internal/v1/pages/understand",
         json={
             "page_number": 1,
-            "heuristic_page_type": "unknown",
+            "heuristic_page_type": ("unknown"),
             "extracted_text": "test",
-            "image_base64": encoded_image(),
+            "image_base64": (encoded_image()),
         },
     )
 
@@ -316,7 +321,7 @@ async def test_normative_queries_endpoint() -> None:
         "POST",
         "/internal/v1/pages/normative-queries",
         json={
-            "page_facts": facts_payload(),
+            "page_facts": (facts_payload()),
             "extracted_text": "test",
             "project_context_texts": [],
         },
@@ -340,11 +345,11 @@ async def test_check_norms_endpoint() -> None:
         json={
             "page_number": 1,
             "extracted_text": "test",
-            "page_facts": facts_payload(),
+            "page_facts": (facts_payload()),
             "normative_sources": [
                 normative_payload(),
             ],
-            "image_base64": encoded_image(),
+            "image_base64": (encoded_image()),
         },
     )
 
@@ -366,18 +371,18 @@ async def test_check_technical_assignment_endpoint() -> None:
         ("/internal/v1/pages/check-technical-assignment"),
         json={
             "page_number": 14,
-            "extracted_text": "QF1 400 А",
-            "page_facts": facts_payload(),
-            "image_base64": encoded_image(),
+            "extracted_text": ("QF1 400 А"),
+            "page_facts": (facts_payload()),
+            "image_base64": (encoded_image()),
             "technical_assignment_id": ("11111111-1111-4111-8111-111111111111"),
             "analysis_document_id": ("22222222-2222-4222-8222-222222222222"),
             "section_id": ("33333333-3333-4333-8333-333333333333"),
             "source_file": "ТЗ.pdf",
-            "source_sha256": "a" * 64,
+            "source_sha256": ("a" * 64),
             "requirements": [
                 {
                     "point_id": "point-1",
-                    "requirement_id": "T-R1",
+                    "requirement_id": ("T-R1"),
                     "requirement_index": 1,
                     "page": 13,
                     "requirement_strength": ("candidate"),
@@ -439,11 +444,11 @@ async def test_finalize_filters_low_score_experience() -> None:
         json={
             "page_number": 1,
             "extracted_text": "test",
-            "page_facts": facts_payload(),
+            "page_facts": (facts_payload()),
             "normative_sources": [
                 normative_payload(),
             ],
-            "image_base64": encoded_image(),
+            "image_base64": (encoded_image()),
         },
     )
 
@@ -462,10 +467,10 @@ async def test_finalize_filters_low_score_experience() -> None:
                         "source_id": "E1",
                         "point_id": "exp-1",
                         "score": 0.8,
-                        "project_id": "project",
-                        "issue_id": "issue",
-                        "issue_text": "заземление",
-                        "status": "fixed",
+                        "project_id": ("project"),
+                        "issue_id": ("issue"),
+                        "issue_text": ("заземление"),
+                        "status": ("fixed"),
                         "verified_fixed": True,
                         "before_page": 1,
                         "after_page": 2,
@@ -491,9 +496,9 @@ async def test_invalid_base64_is_rejected() -> None:
         "/internal/v1/pages/understand",
         json={
             "page_number": 1,
-            "heuristic_page_type": "unknown",
+            "heuristic_page_type": ("unknown"),
             "extracted_text": "test",
-            "image_base64": "***broken***",
+            "image_base64": ("***broken***"),
         },
     )
 

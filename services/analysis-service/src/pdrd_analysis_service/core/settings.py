@@ -165,6 +165,12 @@ class PipelineSettings(BaseModel):
         le=10000,
     )
 
+    finding_location_num_predict: int = Field(
+        default=4000,
+        ge=200,
+        le=10000,
+    )
+
     max_issues: int = Field(
         default=10,
         ge=1,
