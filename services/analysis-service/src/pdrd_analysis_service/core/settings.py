@@ -61,7 +61,7 @@ class VisionSettings(BaseModel):
     keep_alive: str = "0s"
 
     max_retry_num_predict: int = Field(
-        default=6000,
+        default=14000,
         ge=1,
         le=20000,
     )
@@ -130,9 +130,9 @@ class PipelineSettings(BaseModel):
     )
 
     norm_check_num_predict: int = Field(
-        default=4000,
+        default=14000,
         ge=1,
-        le=10000,
+        le=20000,
     )
 
     technical_assignment_num_predict: int = Field(

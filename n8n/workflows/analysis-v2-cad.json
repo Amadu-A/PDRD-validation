@@ -68,7 +68,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ page_number: $json.page.page_number, heuristic_page_type: $json.page.page_type, extracted_text: $json.page.text, image_base64: $json.page.image_base64 }) }}",
         "options": {
-          "timeout": 1800000
+          "timeout": 600000
         }
       },
       "id": "68dcf04a-c0ad-421a-a8a4-18e8682cb6de",
@@ -79,9 +79,7 @@
         -980,
         0
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -175,7 +173,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({\n  page_number: 1,\n  extracted_text: $('Prepare CAD Context').item.json.page.text,\n  page_facts: $('Understand CAD').item.json.facts,\n  normative_sources: $('Normalize Requirement Search').item.json.normative_sources ?? [],\n  technical_assignment_sources: $('Normalize Requirement Search').item.json.technical_assignment_sources ?? [],\n  conflict_candidates: $('Normalize Requirement Search').item.json.conflict_candidates ?? [],\n  user_package_sources: $json.sources ?? [],\n  image_base64: $('Prepare CAD Context').item.json.page.image_base64,\n  normative_system_prompt: $('POST /analysis/v2/cad').first().json.body?.normative_system_prompt ?? null\n}) }}",
         "options": {
-          "timeout": 1800000
+          "timeout": 600000
         }
       },
       "id": "615d8639-b3a5-4ae9-98cb-e41bc6f2b556",
@@ -186,9 +184,7 @@
         560,
         0
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -289,7 +285,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ findings: $json.findings ?? [], experience_by_finding: $json.experience_by_finding ?? {}, normative_candidates_by_finding: $json.normative_candidates_by_finding ?? {} }) }}",
         "options": {
-          "timeout": 1800000
+          "timeout": 600000
         }
       },
       "id": "40fe6170-0687-43cf-b048-32a14ff88b8e",
@@ -300,9 +296,7 @@
         2100,
         0
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -455,7 +449,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({\n  page_number: $('Prepare CAD Context').item.json.page.page_number,\n  extracted_text: $('Prepare CAD Context').item.json.page.text,\n  page_facts: $('Understand CAD').item.json.facts,\n  image_base64: $('Prepare CAD Context').item.json.page.image_base64,\n  technical_assignment_id: $('Prepare CAD Context').item.json.technical_assignment.technical_assignment_id,\n  analysis_document_id: $('Prepare CAD Context').item.json.technical_assignment.analysis_document_id,\n  section_id: $('Prepare CAD Context').item.json.technical_assignment.section_id,\n  source_file: $('Prepare CAD Context').item.json.technical_assignment.source_file,\n  source_sha256: $('Prepare CAD Context').item.json.technical_assignment.source_sha256,\n  requirements: $('Prepare CAD Context').item.json.technical_assignment.requirements ?? [],\n}) }}",
         "options": {
-          "timeout": 1800000
+          "timeout": 600000
         }
       },
       "id": "5b200000-0000-4000-8000-000000000005",
@@ -466,9 +460,7 @@
         -540,
         -160
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -760,7 +752,8 @@
   },
   "active": false,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "executionTimeout": 1650
   },
   "versionId": "5b200000-0000-4000-8000-000000000013",
   "meta": {

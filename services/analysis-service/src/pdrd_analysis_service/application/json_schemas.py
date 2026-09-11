@@ -122,17 +122,23 @@ def build_normative_check_schema(
     *,
     source_ids: tuple[str, ...],
     max_issues: int,
-    technical_assignment_source_ids: tuple[str, ...] = (),
-    user_package_source_ids: tuple[str, ...] = (),
+    technical_assignment_source_ids: tuple[
+        str,
+        ...,
+    ] = (),
+    user_package_source_ids: tuple[
+        str,
+        ...,
+    ] = (),
 ) -> dict[str, Any]:
-    """Возвращает schema проверки N/T/U требований."""
+    """Возвращает компактную schema exhaustive N/T/U candidate check."""
     return {
         "type": "object",
         "additionalProperties": False,
         "properties": {
             "summary": {
                 "type": "string",
-                "maxLength": 400,
+                "maxLength": 200,
             },
             "violations": {
                 "type": "array",
@@ -162,30 +168,39 @@ def build_normative_check_schema(
                         "comment": {
                             "type": "string",
                             "minLength": 1,
-                            "maxLength": 420,
+                            "maxLength": 160,
                         },
                         "evidence": {
                             "type": "string",
                             "minLength": 1,
-                            "maxLength": 420,
+                            "maxLength": 180,
                         },
                         "recommendation_draft": {
                             "type": "string",
-                            "maxLength": 420,
+                            "maxLength": 0,
+                            "enum": [
+                                "",
+                            ],
                         },
                         "confidence": {
                             "type": "number",
                             "minimum": 0,
                             "maximum": 1,
                         },
-                        "normative_source_ids": _source_ids_schema(
-                            source_ids,
+                        "normative_source_ids": (
+                            _source_ids_schema(
+                                source_ids,
+                            )
                         ),
-                        "technical_assignment_source_ids": _source_ids_schema(
-                            technical_assignment_source_ids,
+                        "technical_assignment_source_ids": (
+                            _source_ids_schema(
+                                technical_assignment_source_ids,
+                            )
                         ),
-                        "user_package_source_ids": _source_ids_schema(
-                            user_package_source_ids,
+                        "user_package_source_ids": (
+                            _source_ids_schema(
+                                user_package_source_ids,
+                            )
                         ),
                     },
                     "required": [
@@ -212,7 +227,10 @@ def build_normative_check_schema(
 
 def build_finalization_schema(
     finding_ids: tuple[str, ...],
-    normative_source_ids: tuple[str, ...] = (),
+    normative_source_ids: tuple[
+        str,
+        ...,
+    ] = (),
 ) -> dict[str, Any]:
     """Возвращает schema финализации одного batch."""
     return {
@@ -258,8 +276,10 @@ def build_finalization_schema(
                                 "type": "string",
                             },
                         },
-                        "normative_source_ids": _source_ids_schema(
-                            normative_source_ids,
+                        "normative_source_ids": (
+                            _source_ids_schema(
+                                normative_source_ids,
+                            )
                         ),
                     },
                     "required": [

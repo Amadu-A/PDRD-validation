@@ -27,12 +27,18 @@ _RETRYABLE_HTTP_STATUSES = frozenset(
         408,
         425,
         429,
-        500,
         502,
         503,
         504,
     }
 )
+
+
+def _is_retryable_http_status(
+    status_code: int,
+) -> bool:
+    """Отличает недоступность n8n ingress от ошибки уже запущенного workflow."""
+    return status_code in _RETRYABLE_HTTP_STATUSES
 
 
 class N8nAnalysisOrchestrator:
@@ -77,8 +83,8 @@ class N8nAnalysisOrchestrator:
         )
 
         timeout = httpx.Timeout(
-            timeout=self._settings.request_timeout_seconds,
-            connect=self._settings.connect_timeout_seconds,
+            timeout=(self._settings.request_timeout_seconds),
+            connect=(self._settings.connect_timeout_seconds),
         )
 
         try:
@@ -98,12 +104,15 @@ class N8nAnalysisOrchestrator:
 
             error_type = (
                 AnalysisOrchestrationTransientError
-                if error.response.status_code in _RETRYABLE_HTTP_STATUSES
+                if _is_retryable_http_status(
+                    error.response.status_code,
+                )
                 else AnalysisOrchestrationError
             )
 
             raise error_type(
-                "n8n workflow завершился HTTP ошибкой: "
+                "n8n workflow завершился "
+                "HTTP ошибкой: "
                 f"{error.response.status_code}. "
                 f"Ответ: {response_text}",
             ) from error
@@ -113,14 +122,19 @@ class N8nAnalysisOrchestrator:
             httpx.NetworkError,
             httpx.RemoteProtocolError,
         ) as error:
-            raise AnalysisOrchestrationTransientError(
-                "Временная transport-ошибка HTTP-запроса к n8n: "
-                f"{type(error).__name__}: {error}",
+            raise (
+                AnalysisOrchestrationTransientError(
+                    "Временная transport-ошибка "
+                    "HTTP-запроса к n8n: "
+                    f"{type(error).__name__}: "
+                    f"{error}",
+                )
             ) from error
 
         except httpx.HTTPError as error:
             raise AnalysisOrchestrationError(
-                "Не удалось выполнить HTTP-запрос к n8n: "
+                "Не удалось выполнить "
+                "HTTP-запрос к n8n: "
                 f"{type(error).__name__}: {error}",
             ) from error
 
@@ -217,7 +231,7 @@ class N8nAnalysisOrchestrator:
                     str(
                         document_id,
                     )
-                    for document_id in snapshot.user_package_document_ids
+                    for document_id in (snapshot.user_package_document_ids)
                 ],
                 ensure_ascii=False,
                 separators=(
@@ -291,8 +305,10 @@ class N8nAnalysisOrchestrator:
             files["cad"] = (
                 cad_file_name,
                 artifacts.cad_content,
-                N8nAnalysisOrchestrator._cad_mime_type(
-                    cad_file_name,
+                (
+                    N8nAnalysisOrchestrator._cad_mime_type(
+                        cad_file_name,
+                    )
                 ),
             )
 

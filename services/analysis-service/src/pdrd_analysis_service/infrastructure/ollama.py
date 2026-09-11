@@ -28,6 +28,18 @@ logger = logging.getLogger(
 
 _CONTEXT_EXHAUSTION_MARGIN_TOKENS = 64
 
+_RETRYABLE_HTTP_STATUSES = frozenset(
+    {
+        408,
+        425,
+        429,
+        500,
+        502,
+        503,
+        504,
+    }
+)
+
 
 class OllamaStructuredVisionModel:
     """Structured VLM provider с global GPU lease."""
@@ -135,19 +147,15 @@ class OllamaStructuredVisionModel:
 
         last_metrics: GenerationMetrics | None = None
 
+        attempt_num_predict = min(
+            num_predict,
+            self._max_retry_num_predict,
+        )
+
         for attempt in range(
             1,
             self._max_retries + 1,
         ):
-            attempt_num_predict = (
-                num_predict
-                if attempt == 1
-                else min(
-                    num_predict * 2,
-                    self._max_retry_num_predict,
-                )
-            )
-
             attempt_prompt = prompt
 
             if attempt > 1:
@@ -155,6 +163,7 @@ class OllamaStructuredVisionModel:
                     "\n\nПРЕДЫДУЩИЙ ОТВЕТ БЫЛ ОБРЕЗАН "
                     "ИЛИ НЕ ЯВЛЯЛСЯ ПОЛНЫМ JSON. "
                     "Ответь существенно короче. "
+                    "Не уменьшай количество найденных candidate findings. "
                     "Не повторяй рассуждения. "
                     "Верни только полный JSON."
                 )
@@ -181,7 +190,7 @@ class OllamaStructuredVisionModel:
                 async with httpx.AsyncClient(
                     timeout=httpx.Timeout(
                         self._request_timeout_seconds,
-                        connect=self._connect_timeout_seconds,
+                        connect=(self._connect_timeout_seconds),
                     ),
                 ) as client:
                     response = await client.post(
@@ -208,11 +217,43 @@ class OllamaStructuredVisionModel:
                     response.raise_for_status()
 
             except httpx.HTTPStatusError as error:
+                if self._can_retry_transport_error(
+                    attempt=attempt,
+                    status_code=(error.response.status_code),
+                ):
+                    logger.warning(
+                        "[VLM:%s] RETRY attempt=%s reason=http_status status=%s",
+                        stage,
+                        attempt,
+                        error.response.status_code,
+                    )
+
+                    continue
+
                 raise VisionModelError(
                     "Ollama вернул ошибку "
                     f"на этапе {stage}: "
                     f"{error.response.status_code}: "
                     f"{error.response.text[:1500]}",
+                ) from error
+
+            except (
+                httpx.TimeoutException,
+                httpx.NetworkError,
+                httpx.RemoteProtocolError,
+            ) as error:
+                if attempt < self._max_retries:
+                    logger.warning(
+                        "[VLM:%s] RETRY attempt=%s reason=transport error_type=%s",
+                        stage,
+                        attempt,
+                        type(error).__name__,
+                    )
+
+                    continue
+
+                raise VisionModelError(
+                    f"Не удалось обратиться к Ollama на этапе {stage}: {error}",
                 ) from error
 
             except httpx.HTTPError as error:
@@ -224,6 +265,15 @@ class OllamaStructuredVisionModel:
                 response_payload = response.json()
 
             except ValueError as error:
+                if attempt < self._max_retries:
+                    logger.warning(
+                        "[VLM:%s] RETRY attempt=%s reason=invalid_http_json",
+                        stage,
+                        attempt,
+                    )
+
+                    continue
+
                 raise VisionModelError(
                     f"Ollama вернул не-JSON HTTP-ответ на этапе {stage}.",
                 ) from error
@@ -320,11 +370,56 @@ class OllamaStructuredVisionModel:
                         f"{last_metrics.prompt_eval_count}, "
                         "output_tokens="
                         f"{last_metrics.eval_count}. "
-                        "Повтор с увеличенным num_predict пропущен, "
-                        "потому что он не помещается в configured context window.",
+                        "Повтор с увеличенным num_predict "
+                        "пропущен, потому что он не помещается "
+                        "в configured context window.",
                     ) from error
 
+                if last_metrics.done_reason == "length":
+                    next_num_predict = min(
+                        attempt_num_predict * 2,
+                        self._max_retry_num_predict,
+                    )
+
+                    if (
+                        attempt >= self._max_retries
+                        or next_num_predict <= attempt_num_predict
+                    ):
+                        raise VisionModelError(
+                            "Ollama исчерпал output budget "
+                            f"на этапе {stage}: "
+                            "num_predict="
+                            f"{attempt_num_predict}, "
+                            "prompt_tokens="
+                            f"{last_metrics.prompt_eval_count}, "
+                            "output_tokens="
+                            f"{last_metrics.eval_count}. "
+                            "Повтор с тем же output budget "
+                            "запрещён.",
+                        ) from error
+
+                    logger.warning(
+                        "[VLM:%s] RETRY attempt=%s "
+                        "reason=output_limit "
+                        "current_num_predict=%s "
+                        "next_num_predict=%s",
+                        stage,
+                        attempt,
+                        attempt_num_predict,
+                        next_num_predict,
+                    )
+
+                    attempt_num_predict = next_num_predict
+
+                    continue
+
                 if attempt < self._max_retries:
+                    logger.warning(
+                        "[VLM:%s] RETRY attempt=%s reason=malformed_json",
+                        stage,
+                        attempt,
+                    )
+
                     continue
 
                 raise VisionModelError(
@@ -351,6 +446,15 @@ class OllamaStructuredVisionModel:
             f"Не удалось получить JSON на этапе {stage}.",
         )
 
+    def _can_retry_transport_error(
+        self,
+        *,
+        attempt: int,
+        status_code: int,
+    ) -> bool:
+        """Разрешает локальный retry только transient Ollama HTTP ошибки."""
+        return attempt < self._max_retries and status_code in _RETRYABLE_HTTP_STATUSES
+
     def _context_window_exhausted(
         self,
         metrics: GenerationMetrics | None,
@@ -360,6 +464,7 @@ class OllamaStructuredVisionModel:
             return False
 
         prompt_tokens = metrics.prompt_eval_count
+
         output_tokens = metrics.eval_count
 
         if prompt_tokens is None or output_tokens is None:

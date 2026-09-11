@@ -155,8 +155,8 @@ def test_every_analysis_workflow_has_finding_local_normative_enrichment() -> Non
         assert "normative_candidates_by_finding" in serialized, path
 
 
-def test_gpu_dependent_requirement_nodes_retry_transient_errors() -> None:
-    """GPU-зависимые retrieval/check nodes имеют bounded retry."""
+def test_requirement_retrieval_retries_transient_errors() -> None:
+    """I/O retrieval сохраняет bounded n8n retry."""
     for path in WORKFLOW_PATHS:
         workflow = _workflow(
             path,
@@ -166,47 +166,87 @@ def test_gpu_dependent_requirement_nodes_retry_transient_errors() -> None:
             workflow,
         )
 
-        for node_name in (
-            "Search Requirements",
-            "Check Technical Assignment",
-        ):
-            node = nodes[node_name]
+        node = nodes["Search Requirements"]
 
-            assert (
+        assert (
+            node.get(
+                "retryOnFail",
+            )
+            is True
+        ), path
+
+        assert (
+            int(
                 node.get(
-                    "retryOnFail",
+                    "maxTries",
+                    0,
                 )
-                is True
-            ), (
-                path,
-                node_name,
             )
+            >= 2
+        ), path
 
-            assert (
-                int(
-                    node.get(
-                        "maxTries",
-                        0,
-                    )
+        assert (
+            int(
+                node.get(
+                    "waitBetweenTries",
+                    0,
                 )
-                >= 2
-            ), (
-                path,
-                node_name,
             )
+            >= 1000
+        ), path
 
-            assert (
-                int(
-                    node.get(
-                        "waitBetweenTries",
-                        0,
-                    )
-                )
-                >= 1000
-            ), (
-                path,
-                node_name,
+
+def test_t_first_vlm_has_no_n8n_level_retry() -> None:
+    """T-first VLM не повторяется orchestration-слоем n8n."""
+    for path in WORKFLOW_PATHS:
+        workflow = _workflow(
+            path,
+        )
+
+        nodes = _nodes_by_name(
+            workflow,
+        )
+
+        node = nodes["Check Technical Assignment"]
+
+        assert (
+            node.get(
+                "retryOnFail",
+                False,
             )
+            is False
+        ), path
+
+        assert "maxTries" not in node, path
+
+        assert "waitBetweenTries" not in node, path
+
+        parameters = node.get(
+            "parameters",
+            {},
+        )
+
+        assert isinstance(
+            parameters,
+            dict,
+        )
+
+        options = parameters.get(
+            "options",
+            {},
+        )
+
+        assert isinstance(
+            options,
+            dict,
+        )
+
+        assert (
+            options.get(
+                "timeout",
+            )
+            == 600000
+        ), path
 
 
 def test_requirement_flow_order_is_consistent() -> None:

@@ -71,7 +71,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ enabled: $('Document Extract PDF').item.json.explanatory_note_context?.enabled ?? false, pages: ($('Document Extract PDF').item.json.explanatory_note_context?.pages ?? []).map((page) => ({ page_number: page.page_number, text: page.text })) }) }}",
         "options": {
-          "timeout": 1800000
+          "timeout": 600000
         }
       },
       "id": "d5b2aa6e-09c6-4d35-8e93-590b736817d5",
@@ -82,9 +82,7 @@
         -1960,
         800
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -227,7 +225,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ page_number: $json.page.page_number, heuristic_page_type: $json.page.page_type, extracted_text: $json.page.text, image_base64: $json.page.image_base64 }) }}",
         "options": {
-          "timeout": 1800000
+          "timeout": 600000
         }
       },
       "id": "396791ba-1c47-4c90-96f9-68e396d0672f",
@@ -238,9 +236,7 @@
         -640,
         800
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -284,7 +280,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({\n  page_number: $('Expand PDF Pages').item.json.page.page_number,\n  extracted_text: $('Expand PDF Pages').item.json.page.text,\n  page_facts: $('Understand Page').item.json.facts,\n  image_base64: $('Expand PDF Pages').item.json.page.image_base64,\n  technical_assignment_id: $('Expand PDF Pages').item.json.technical_assignment.technical_assignment_id,\n  analysis_document_id: $('Expand PDF Pages').item.json.technical_assignment.analysis_document_id,\n  section_id: $('Expand PDF Pages').item.json.technical_assignment.section_id,\n  source_file: $('Expand PDF Pages').item.json.technical_assignment.source_file,\n  source_sha256: $('Expand PDF Pages').item.json.technical_assignment.source_sha256,\n  requirements: $('Expand PDF Pages').item.json.technical_assignment.requirements ?? [],\n}) }}",
         "options": {
-          "timeout": 1800000
+          "timeout": 600000
         }
       },
       "id": "5a100000-0000-4000-8000-000000000005",
@@ -295,9 +291,7 @@
         -200,
         640
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -471,7 +465,7 @@
         "rawContentType": "application/json",
         "body": "={{\n  JSON.stringify({\n    page_number:\n      $('Expand PDF Pages').item.json.page.page_number,\n    extracted_text:\n      $('Augment Project Context').item.json.analysis_text,\n    page_facts:\n      $('Understand Page').item.json.facts,\n    normative_sources:\n      $('Normalize Requirement Search').item.json.normative_sources ?? [],\n    technical_assignment_sources:\n      $('Normalize Requirement Search').item.json.technical_assignment_sources ?? [],\n    conflict_candidates:\n      $('Normalize Requirement Search').item.json.conflict_candidates ?? [],\n    user_package_sources:\n      $json.sources ?? [],\n    image_base64:\n      $('Expand PDF Pages').item.json.page.image_base64,\n    normative_system_prompt:\n      $('POST /analysis/v2/pdf').first().json.body?.normative_system_prompt ?? null,\n  })\n}}",
         "options": {
-          "timeout": 1800000
+          "timeout": 600000
         }
       },
       "id": "4abeef13-13e8-481e-b3d4-6cf9a536fdf1",
@@ -482,9 +476,7 @@
         1780,
         800
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -599,7 +591,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ findings: $json.findings ?? [], experience_by_finding: $json.experience_by_finding ?? {}, normative_candidates_by_finding: $json.normative_candidates_by_finding ?? {} }) }}",
         "options": {
-          "timeout": 1800000
+          "timeout": 600000
         }
       },
       "id": "6d35b3ed-a71d-4d80-bb2f-41f830120da9",
@@ -610,9 +602,7 @@
         3320,
         800
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -1023,7 +1013,8 @@
   "active": true,
   "settings": {
     "executionOrder": "v1",
-    "binaryMode": "separate"
+    "binaryMode": "separate",
+    "executionTimeout": 1650
   },
   "versionId": "5a200000-0000-4000-8000-000000000001",
   "meta": {

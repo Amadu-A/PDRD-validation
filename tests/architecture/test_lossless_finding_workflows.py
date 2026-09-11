@@ -184,7 +184,7 @@ def test_finalization_source_contains_per_finding_fallback() -> None:
 
 
 def test_high_recall_budget_is_committed_in_settings_and_env() -> None:
-    """High-recall normative pass получает расширенный output budget."""
+    """High-recall normative pass получает единый увеличенный output budget."""
     settings_path = (
         ROOT
         / "services"
@@ -203,8 +203,17 @@ def test_high_recall_budget_is_committed_in_settings_and_env() -> None:
         encoding="utf-8",
     )
 
-    assert "norm_check_num_predict: int = Field(" in settings_source
-    assert "default=4000" in settings_source
-    assert "ANALYSIS_SERVICE_PIPELINE__NORM_CHECK_NUM_PREDICT=4000" in (
-        environment_source
+    assert (
+        "norm_check_num_predict: int = Field(\n"
+        "        default=14000," in settings_source
     )
+
+    assert (
+        "max_retry_num_predict: int = Field(\n        default=14000," in settings_source
+    )
+
+    assert (
+        "ANALYSIS_SERVICE_PIPELINE__NORM_CHECK_NUM_PREDICT=14000" in environment_source
+    )
+
+    assert "ANALYSIS_SERVICE_VISION__MAX_RETRY_NUM_PREDICT=14000" in environment_source
