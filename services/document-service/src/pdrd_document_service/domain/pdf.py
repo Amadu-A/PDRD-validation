@@ -25,6 +25,50 @@ class InvalidPageSelectionError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class PdfNormalizedBoundingBox:
+    """BBox PDF-объекта в нормализованных координатах 0..1000."""
+
+    x_min: int
+    y_min: int
+    x_max: int
+    y_max: int
+
+    def __post_init__(
+        self,
+    ) -> None:
+        """Проверяет диапазон и положительную площадь."""
+        coordinates = (
+            self.x_min,
+            self.y_min,
+            self.x_max,
+            self.y_max,
+        )
+
+        if any(coordinate < 0 or coordinate > 1000 for coordinate in coordinates):
+            raise ValueError(
+                "PDF bbox coordinates должны находиться в диапазоне 0..1000.",
+            )
+
+        if self.x_min >= self.x_max or self.y_min >= self.y_max:
+            raise ValueError(
+                "PDF bbox должен иметь положительную площадь.",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class PdfTextWord:
+    """Слово PDF вместе с его физическим положением на странице."""
+
+    text: str
+
+    bbox: PdfNormalizedBoundingBox
+
+    block_no: int
+    line_no: int
+    word_no: int
+
+
+@dataclass(frozen=True, slots=True)
 class PdfPage:
     """Извлечённое представление одной физической PDF-страницы."""
 
@@ -35,16 +79,26 @@ class PdfPage:
     height_points: float
     rendered_png: bytes
 
+    text_words: tuple[
+        PdfTextWord,
+        ...,
+    ] = ()
+
 
 @dataclass(frozen=True, slots=True)
 class PdfDocument:
     """Результат подготовки выбранных PDF-страниц."""
 
     total_pages: int
-    pages: tuple[PdfPage, ...]
+    pages: tuple[
+        PdfPage,
+        ...,
+    ]
 
     @property
-    def selected_page_numbers(self) -> tuple[int, ...]:
+    def selected_page_numbers(
+        self,
+    ) -> tuple[int, ...]:
         """Возвращает физические номера подготовленных страниц."""
         return tuple(page.number for page in self.pages)
 
@@ -80,7 +134,9 @@ def parse_page_spec(
 
     result: set[int] = set()
 
-    for raw_part in normalized.split(","):
+    for raw_part in normalized.split(
+        ",",
+    ):
         part = raw_part.strip()
 
         if not part:
@@ -93,11 +149,15 @@ def parse_page_spec(
 
         if range_match is not None:
             start = int(
-                range_match.group(1),
+                range_match.group(
+                    1,
+                )
             )
 
             end = int(
-                range_match.group(2),
+                range_match.group(
+                    2,
+                )
             )
 
             if start > end:
@@ -123,7 +183,9 @@ def parse_page_spec(
             )
 
         result.add(
-            int(part),
+            int(
+                part,
+            )
         )
 
     if not result:
@@ -132,7 +194,9 @@ def parse_page_spec(
         )
 
     selected = tuple(
-        sorted(result),
+        sorted(
+            result,
+        )
     )
 
     invalid_pages = tuple(
@@ -140,7 +204,12 @@ def parse_page_spec(
     )
 
     if invalid_pages:
-        invalid_text = ", ".join(str(page_number) for page_number in invalid_pages)
+        invalid_text = ", ".join(
+            str(
+                page_number,
+            )
+            for page_number in invalid_pages
+        )
 
         raise InvalidPageSelectionError(
             "Страницы выходят за пределы PDF: "
@@ -232,7 +301,12 @@ def _validate_page_limit(
     *,
     max_selected_pages: int,
 ) -> None:
-    if len(selected_pages) <= max_selected_pages:
+    if (
+        len(
+            selected_pages,
+        )
+        <= max_selected_pages
+    ):
         return
 
     raise InvalidPageSelectionError(

@@ -13,6 +13,8 @@ from pdrd_api_gateway.application.ports.analysis_visualization import (
     AnalysisFindingLocation,
     AnalysisFindingTarget,
     AnalysisPagePreview,
+    AnalysisTextWord,
+    AnalysisVisualRegion,
 )
 from pdrd_api_gateway.core.settings import (
     AnalysisServiceSettings,
@@ -32,7 +34,9 @@ class DocumentServiceAnalysisPdfPageRenderer:
         self._base_url = settings.base_url.rstrip(
             "/",
         )
+
         self._request_timeout_seconds = settings.request_timeout_seconds
+
         self._connect_timeout_seconds = settings.connect_timeout_seconds
 
     async def render(
@@ -48,7 +52,7 @@ class DocumentServiceAnalysisPdfPageRenderer:
         """Рендерит selected pages одним HTTP request."""
         timeout = httpx.Timeout(
             self._request_timeout_seconds,
-            connect=self._connect_timeout_seconds,
+            connect=(self._connect_timeout_seconds),
         )
 
         try:
@@ -65,8 +69,9 @@ class DocumentServiceAnalysisPdfPageRenderer:
                         ),
                     },
                     data={
-                        "pages": page_spec or "",
-                        "use_explanatory_note": "false",
+                        "pages": (page_spec or ""),
+                        "use_explanatory_note": ("false"),
+                        "include_text_geometry": ("true"),
                     },
                 )
 
@@ -79,6 +84,7 @@ class DocumentServiceAnalysisPdfPageRenderer:
 
         try:
             payload = response.json()
+
             raw_pages = payload["pages"]
 
         except (
@@ -148,11 +154,19 @@ class DocumentServiceAnalysisPdfPageRenderer:
                     height_points=float(
                         raw_page["height_points"],
                     ),
-                    image_base64=image_base64,
+                    image_base64=(image_base64),
                     extracted_text=str(
                         raw_page.get(
                             "text",
                             "",
+                        )
+                    ),
+                    text_words=(
+                        self._parse_text_words(
+                            raw_page.get(
+                                "text_words",
+                                [],
+                            ),
                         )
                     ),
                 )
@@ -162,9 +176,99 @@ class DocumentServiceAnalysisPdfPageRenderer:
             pages,
         )
 
+    @staticmethod
+    def _parse_text_words(
+        raw_words: Any,
+    ) -> tuple[
+        AnalysisTextWord,
+        ...,
+    ]:
+        """Разбирает optional PDF text geometry."""
+        if not isinstance(
+            raw_words,
+            list,
+        ):
+            return ()
+
+        result: list[AnalysisTextWord] = []
+
+        for raw_word in raw_words:
+            if not isinstance(
+                raw_word,
+                dict,
+            ):
+                continue
+
+            text = str(
+                raw_word.get(
+                    "text",
+                    "",
+                )
+            ).strip()
+
+            raw_bbox = raw_word.get(
+                "bbox",
+            )
+
+            if not text or not isinstance(
+                raw_bbox,
+                dict,
+            ):
+                continue
+
+            try:
+                result.append(
+                    AnalysisTextWord(
+                        text=text,
+                        bbox=AnalysisBoundingBox(
+                            x_min=int(
+                                raw_bbox["x_min"],
+                            ),
+                            y_min=int(
+                                raw_bbox["y_min"],
+                            ),
+                            x_max=int(
+                                raw_bbox["x_max"],
+                            ),
+                            y_max=int(
+                                raw_bbox["y_max"],
+                            ),
+                        ),
+                        block_no=int(
+                            raw_word.get(
+                                "block_no",
+                                0,
+                            )
+                        ),
+                        line_no=int(
+                            raw_word.get(
+                                "line_no",
+                                0,
+                            )
+                        ),
+                        word_no=int(
+                            raw_word.get(
+                                "word_no",
+                                0,
+                            )
+                        ),
+                    )
+                )
+
+            except (
+                KeyError,
+                TypeError,
+                ValueError,
+            ):
+                continue
+
+        return tuple(
+            result,
+        )
+
 
 class HttpAnalysisFindingLocator:
-    """Вызывает visual localization Analysis Service."""
+    """Вызывает VLM fallback localization Analysis Service."""
 
     def __init__(
         self,
@@ -175,7 +279,9 @@ class HttpAnalysisFindingLocator:
         self._base_url = settings.base_url.rstrip(
             "/",
         )
+
         self._request_timeout_seconds = settings.request_timeout_seconds
+
         self._connect_timeout_seconds = settings.connect_timeout_seconds
 
     async def localize(
@@ -192,13 +298,13 @@ class HttpAnalysisFindingLocator:
         AnalysisFindingLocation,
         ...,
     ]:
-        """Локализует все findings страницы одним HTTP request."""
+        """Локализует unresolved findings одним HTTP request."""
         if not findings:
             return ()
 
         timeout = httpx.Timeout(
             self._request_timeout_seconds,
-            connect=self._connect_timeout_seconds,
+            connect=(self._connect_timeout_seconds),
         )
 
         payload = {
@@ -207,9 +313,9 @@ class HttpAnalysisFindingLocator:
             "image_base64": image_base64,
             "findings": [
                 {
-                    "finding_id": finding.finding_id,
-                    "comment": finding.comment,
-                    "evidence": finding.evidence,
+                    "finding_id": (finding.finding_id),
+                    "comment": (finding.comment),
+                    "evidence": (finding.evidence),
                 }
                 for finding in findings
             ],
@@ -233,6 +339,7 @@ class HttpAnalysisFindingLocator:
 
         try:
             response_payload = response.json()
+
             raw_locations = response_payload["locations"]
 
         except (
@@ -274,7 +381,7 @@ class HttpAnalysisFindingLocator:
             parsed.get(
                 finding.finding_id,
                 AnalysisFindingLocation.unlocated(
-                    finding_id=finding.finding_id,
+                    finding_id=(finding.finding_id),
                 ),
             )
             for finding in findings
@@ -286,7 +393,7 @@ class HttpAnalysisFindingLocator:
         raw_location: Any,
         allowed_ids: set[str],
     ) -> AnalysisFindingLocation | None:
-        """Проверяет один localization item."""
+        """Проверяет один VLM localization item."""
         if not isinstance(
             raw_location,
             dict,
@@ -368,9 +475,16 @@ class HttpAnalysisFindingLocator:
             1.0,
         )
 
-        return AnalysisFindingLocation(
-            finding_id=finding_id,
-            status="located",
+        region = AnalysisVisualRegion(
             bbox=bbox,
+            source="vlm",
             confidence=confidence,
+            label=None,
+        )
+
+        return AnalysisFindingLocation.located(
+            finding_id=finding_id,
+            regions=(region,),
+            confidence=confidence,
+            method="vlm",
         )

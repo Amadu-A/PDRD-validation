@@ -1,6 +1,6 @@
 # tests/architecture/test_analysis_visualization.py
 
-"""Architecture guards end-to-end lazy visualization wiring."""
+"""Architecture guards hybrid end-to-end visualization wiring."""
 
 import ast
 import json
@@ -23,6 +23,41 @@ REPORT_JS = FRONTEND_DIR / "report.js"
 CONTROLLER_JS = FRONTEND_DIR / "controller.js"
 
 API_JS = FRONTEND_DIR / "api.js"
+
+DOCUMENT_PYMUPDF = (
+    ROOT
+    / "services"
+    / "document-service"
+    / "src"
+    / "pdrd_document_service"
+    / "infrastructure"
+    / "pdf"
+    / "pymupdf.py"
+)
+
+DOCUMENT_PDF_SCHEMA = (
+    ROOT
+    / "services"
+    / "document-service"
+    / "src"
+    / "pdrd_document_service"
+    / "transport"
+    / "http"
+    / "schemas"
+    / "pdf.py"
+)
+
+DOCUMENT_PDF_ROUTER = (
+    ROOT
+    / "services"
+    / "document-service"
+    / "src"
+    / "pdrd_document_service"
+    / "transport"
+    / "http"
+    / "routers"
+    / "pdf.py"
+)
 
 GATEWAY_ROUTER = (
     ROOT
@@ -55,6 +90,16 @@ GATEWAY_USE_CASE = (
     / "application"
     / "use_cases"
     / "get_analysis_visualization.py"
+)
+
+GATEWAY_ANCHOR_MATCHER = (
+    ROOT
+    / "services"
+    / "api-gateway"
+    / "src"
+    / "pdrd_api_gateway"
+    / "application"
+    / "finding_anchor_matcher.py"
 )
 
 VISUALIZATION_RENDERER = (
@@ -113,7 +158,10 @@ def _read(
 
 def _workflow(
     file_name: str,
-) -> dict[str, object]:
+) -> dict[
+    str,
+    object,
+]:
     """Читает committed n8n workflow."""
     return json.loads(
         (WORKFLOW_DIR / file_name).read_text(
@@ -122,8 +170,37 @@ def _workflow(
     )
 
 
-def test_frontend_visualization_is_fully_wired() -> None:
-    """Controller/API/report действительно используют visualization module."""
+def test_document_service_preserves_pdf_text_geometry() -> None:
+    """PyMuPDF word bbox должен доходить до optional HTTP contract."""
+    pymupdf = _read(
+        DOCUMENT_PYMUPDF,
+    )
+
+    schema = _read(
+        DOCUMENT_PDF_SCHEMA,
+    )
+
+    router = _read(
+        DOCUMENT_PDF_ROUTER,
+    )
+
+    assert '"words"' in pymupdf
+
+    assert "PdfTextWord" in pymupdf
+
+    assert "PdfNormalizedBoundingBox" in pymupdf
+
+    assert "PdfTextWordResponse" in schema
+
+    assert "text_words" in schema
+
+    assert "include_text_geometry" in router
+
+    assert "page.text_words" in router
+
+
+def test_frontend_visualization_supports_multiple_regions() -> None:
+    """Frontend рисует несколько bbox одного finding безопасно."""
     visualization = _read(
         VISUALIZATION_JS,
     )
@@ -142,7 +219,8 @@ def test_frontend_visualization_is_fully_wired() -> None:
 
     required = (
         "page.locations",
-        "location.bbox",
+        "location.regions",
+        "region?.bbox",
         "x_min",
         "y_min",
         "x_max",
@@ -175,12 +253,8 @@ def test_frontend_visualization_is_fully_wired() -> None:
     assert "/visualization" in api
 
 
-def test_gateway_exposes_and_builds_lazy_visualization() -> None:
-    """Gateway route, use case и adapters соединены через DI."""
-    router = _read(
-        GATEWAY_ROUTER,
-    )
-
+def test_gateway_uses_pdf_geometry_before_vlm_fallback() -> None:
+    """Exact PDF anchors должны иметь приоритет над VLM."""
     container = _read(
         GATEWAY_CONTAINER,
     )
@@ -189,31 +263,41 @@ def test_gateway_exposes_and_builds_lazy_visualization() -> None:
         GATEWAY_USE_CASE,
     )
 
+    matcher = _read(
+        GATEWAY_ANCHOR_MATCHER,
+    )
+
     adapter = _read(
         VISUALIZATION_RENDERER,
     )
 
+    router = _read(
+        GATEWAY_ROUTER,
+    )
+
     assert '"/{job_id}/visualization"' in router
 
-    assert "GetAnalysisVisualization" in router
+    assert "FindingAnchorMatcher" in container
 
-    assert "get_analysis_visualization" in container
+    assert "anchor_matcher=" in container
 
-    assert "DocumentServiceAnalysisPdfPageRenderer" in container
+    assert "anchor_matcher.locate" in use_case
 
-    assert "HttpAnalysisFindingLocator" in container
-
-    assert "artifact_store.load_result" in use_case
+    assert "unresolved_targets" in use_case
 
     assert "finding_locator.localize" in use_case
 
-    assert "/internal/v1/pdf/extract" in adapter
+    assert "pdf_text" in matcher
 
-    assert "/internal/v1/findings/localize" in adapter
+    assert "AnalysisVisualRegion" in matcher
+
+    assert '"include_text_geometry"' in adapter
+
+    assert '"text_words"' in adapter
 
 
-def test_analysis_service_exposes_localization_use_case() -> None:
-    """Analysis Service localization доступен через HTTP и DI."""
+def test_analysis_service_remains_vlm_fallback() -> None:
+    """Analysis Service localization сохраняется для pure graphical cases."""
     routes = _read(
         ANALYSIS_ROUTES,
     )
@@ -232,13 +316,9 @@ def test_analysis_service_exposes_localization_use_case() -> None:
 
     assert "localize_findings: LocalizeFindings" in container
 
-    assert "localize_findings=LocalizeFindings(" in container
-
     assert "def build_finding_localization_schema(" in localization
 
     assert "def build_finding_localization_prompt(" in localization
-
-    assert "FindingLocation.unlocated" in localization
 
 
 def test_pdf_renderer_uses_one_document_service_request() -> None:
@@ -256,11 +336,13 @@ def test_pdf_renderer_uses_one_document_service_request() -> None:
         for node in ast.walk(
             tree,
         )
-        if isinstance(
-            node,
-            ast.Constant,
+        if (
+            isinstance(
+                node,
+                ast.Constant,
+            )
+            and node.value == "/internal/v1/pdf/extract"
         )
-        and node.value == "/internal/v1/pdf/extract"
     ]
 
     assert (

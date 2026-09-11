@@ -1,14 +1,20 @@
 # services/api-gateway/tests/unit/test_analysis_visualization.py
 
-"""Unit tests lazy visualization completed analysis."""
+"""Unit tests hybrid lazy visualization completed analysis."""
 
 from uuid import UUID
 
 import pytest
+from pdrd_api_gateway.application.finding_anchor_matcher import (
+    FindingAnchorMatcher,
+)
 from pdrd_api_gateway.application.ports.analysis_visualization import (
     AnalysisBoundingBox,
     AnalysisFindingLocation,
+    AnalysisFindingTarget,
     AnalysisPagePreview,
+    AnalysisTextWord,
+    AnalysisVisualRegion,
 )
 from pdrd_api_gateway.application.ports.artifacts import (
     AnalysisRequestArtifacts,
@@ -41,6 +47,7 @@ class FakeGetJob:
     ) -> AnalysisJob | None:
         """Возвращает job."""
         assert job_id == self.job.id
+
         return self.job
 
 
@@ -51,7 +58,10 @@ class FakeArtifactStore:
         self,
         *,
         request: AnalysisRequestArtifacts,
-        result: dict[str, object],
+        result: dict[
+            str,
+            object,
+        ],
     ) -> None:
         """Сохраняет request/result."""
         self.request = request
@@ -71,7 +81,10 @@ class FakeArtifactStore:
         self,
         *,
         document_id: UUID,
-    ) -> dict[str, object]:
+    ) -> dict[
+        str,
+        object,
+    ]:
         """Возвращает result."""
         assert document_id == self.request.submission.document_id
 
@@ -105,22 +118,25 @@ class FakeRenderer:
     ]:
         """Возвращает synthetic pages."""
         assert pdf_content == b"pdf"
+
         assert file_name == "drawing.pdf"
 
         self.calls += 1
+
         self.page_spec = page_spec
 
         return self.pages
 
 
 class FakeLocator:
-    """Fake Analysis Service localization."""
+    """Fake VLM fallback locator."""
 
     def __init__(
         self,
     ) -> None:
         """Инициализирует counters."""
         self.calls = 0
+
         self.finding_counts: list[int] = []
 
     async def localize(
@@ -130,14 +146,14 @@ class FakeLocator:
         extracted_text: str,
         image_base64: str,
         findings: tuple[
-            object,
+            AnalysisFindingTarget,
             ...,
         ],
     ) -> tuple[
         AnalysisFindingLocation,
         ...,
     ]:
-        """Возвращает deterministic bbox каждого target."""
+        """Возвращает deterministic fake VLM bbox."""
         assert page_number >= 1
         assert extracted_text
         assert image_base64
@@ -150,31 +166,27 @@ class FakeLocator:
             )
         )
 
-        result: list[AnalysisFindingLocation] = []
-
-        for index, finding in enumerate(
-            findings,
-        ):
-            finding_id = finding.finding_id
-
-            left = 10 + index
-
-            result.append(
-                AnalysisFindingLocation(
-                    finding_id=finding_id,
-                    status="located",
-                    bbox=AnalysisBoundingBox(
-                        x_min=left,
-                        y_min=20,
-                        x_max=left + 5,
-                        y_max=30,
-                    ),
-                    confidence=0.9,
-                )
-            )
-
         return tuple(
-            result,
+            AnalysisFindingLocation.located(
+                finding_id=(finding.finding_id),
+                regions=(
+                    AnalysisVisualRegion(
+                        bbox=(
+                            AnalysisBoundingBox(
+                                x_min=500,
+                                y_min=500,
+                                x_max=600,
+                                y_max=600,
+                            )
+                        ),
+                        source="vlm",
+                        confidence=0.9,
+                    ),
+                ),
+                confidence=0.9,
+                method="vlm",
+            )
+            for finding in findings
         )
 
 
@@ -187,20 +199,40 @@ def completed_job(
     )
 
     job.mark_queued()
+
     job.mark_processing()
+
     job.mark_completed()
 
     return job
 
 
+def pdf_word(
+    text: str,
+) -> AnalysisTextWord:
+    """Создаёт synthetic positioned PDF word."""
+    return AnalysisTextWord(
+        text=text,
+        bbox=AnalysisBoundingBox(
+            x_min=100,
+            y_min=200,
+            x_max=140,
+            y_max=220,
+        ),
+        block_no=1,
+        line_no=1,
+        word_no=1,
+    )
+
+
 @pytest.mark.asyncio
-async def test_visualization_renders_and_localizes_selected_page() -> None:
-    """Preview получает bbox после completed analysis."""
+async def test_exact_pdf_anchor_skips_vlm_localization() -> None:
+    """Если XT1 есть в PDF text layer, VLM не нужен."""
     submission = AnalysisSubmission.create(
         pdf_present=True,
         cad_present=False,
         pages="14",
-        pdf_file_name="drawing.pdf",
+        pdf_file_name=("drawing.pdf"),
         cad_file_name=None,
     )
 
@@ -216,8 +248,13 @@ async def test_visualization_renders_and_localizes_selected_page() -> None:
                 page_number=14,
                 width_points=841.89,
                 height_points=595.28,
-                image_base64="iVBORw0KGgo=",
-                extracted_text="synthetic sheet",
+                image_base64=("iVBORw0KGgo="),
+                extracted_text=("XT1"),
+                text_words=(
+                    pdf_word(
+                        "XT1",
+                    ),
+                ),
             ),
         ),
     )
@@ -237,16 +274,17 @@ async def test_visualization_renders_and_localizes_selected_page() -> None:
             result={
                 "findings": [
                     {
-                        "finding_id": "F-1",
+                        "finding_id": ("F-1"),
                         "page": 14,
-                        "comment": "Ошибка",
-                        "evidence": "Факт",
+                        "comment": ("Нет маркировки XT1."),
+                        "evidence": ("Разъём XT1 не маркирован."),
                     },
                 ],
             },
         ),  # type: ignore[arg-type]
-        pdf_page_renderer=renderer,
-        finding_locator=locator,  # type: ignore[arg-type]
+        pdf_page_renderer=(renderer),
+        finding_locator=(locator),  # type: ignore[arg-type]
+        anchor_matcher=(FindingAnchorMatcher()),
     )
 
     payload = await use_case.execute(
@@ -260,28 +298,89 @@ async def test_visualization_renders_and_localizes_selected_page() -> None:
         list,
     )
 
+    location = pages[0]["locations"][0]
+
+    assert location["status"] == "located"
+
+    assert location["method"] == "pdf_text"
+
     assert (
         len(
-            pages,
+            location["regions"],
         )
         == 1
     )
 
-    assert renderer.calls == 1
+    assert locator.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_unresolved_finding_uses_vlm_fallback() -> None:
+    """Pure graphical finding уходит в один VLM fallback."""
+    submission = AnalysisSubmission.create(
+        pdf_present=True,
+        cad_present=False,
+        pages="14",
+        pdf_file_name=("drawing.pdf"),
+        cad_file_name=None,
+    )
+
+    request = AnalysisRequestArtifacts(
+        submission=submission,
+        pdf_content=b"pdf",
+        cad_content=None,
+    )
+
+    renderer = FakeRenderer(
+        pages=(
+            AnalysisPagePreview(
+                page_number=14,
+                width_points=841.89,
+                height_points=595.28,
+                image_base64=("iVBORw0KGgo="),
+                extracted_text=("synthetic sheet"),
+                text_words=(),
+            ),
+        ),
+    )
+
+    locator = FakeLocator()
+
+    job = completed_job(
+        submission,
+    )
+
+    use_case = GetAnalysisVisualization(
+        get_analysis_job=FakeGetJob(
+            job,
+        ),  # type: ignore[arg-type]
+        artifact_store=FakeArtifactStore(
+            request=request,
+            result={
+                "findings": [
+                    {
+                        "finding_id": ("F-1"),
+                        "page": 14,
+                        "comment": ("Некорректное соединение."),
+                        "evidence": ("Провод подключён не к тому контакту."),
+                    },
+                ],
+            },
+        ),  # type: ignore[arg-type]
+        pdf_page_renderer=(renderer),
+        finding_locator=(locator),  # type: ignore[arg-type]
+        anchor_matcher=(FindingAnchorMatcher()),
+    )
+
+    payload = await use_case.execute(
+        job_id=job.id,
+    )
+
+    location = payload["pages"][0]["locations"][0]
+
+    assert location["method"] == "vlm"
+
     assert locator.calls == 1
-
-    locations = pages[0]["locations"]
-
-    assert (
-        len(
-            locations,
-        )
-        == 1
-    )
-
-    assert locations[0]["finding_id"] == "F-1"
-
-    assert locations[0]["status"] == "located"
 
 
 @pytest.mark.asyncio
@@ -292,7 +391,7 @@ async def test_cad_only_visualization_skips_pdf_and_locator() -> None:
         cad_present=True,
         pages=None,
         pdf_file_name=None,
-        cad_file_name="drawing.dxf",
+        cad_file_name=("drawing.dxf"),
     )
 
     request = AnalysisRequestArtifacts(
@@ -321,8 +420,9 @@ async def test_cad_only_visualization_skips_pdf_and_locator() -> None:
                 "findings": [],
             },
         ),  # type: ignore[arg-type]
-        pdf_page_renderer=renderer,
-        finding_locator=locator,  # type: ignore[arg-type]
+        pdf_page_renderer=(renderer),
+        finding_locator=(locator),  # type: ignore[arg-type]
+        anchor_matcher=(FindingAnchorMatcher()),
     )
 
     payload = await use_case.execute(
@@ -330,18 +430,20 @@ async def test_cad_only_visualization_skips_pdf_and_locator() -> None:
     )
 
     assert payload["pages"] == []
+
     assert renderer.calls == 0
+
     assert locator.calls == 0
 
 
 @pytest.mark.asyncio
-async def test_fifty_findings_use_one_localization_call_per_page() -> None:
-    """Synthetic load: 50 findings не создают 50 VLM requests."""
+async def test_fifty_unresolved_findings_use_one_vlm_call_per_page() -> None:
+    """50 unresolved findings всё равно дают только один VLM request."""
     submission = AnalysisSubmission.create(
         pdf_present=True,
         cad_present=False,
         pages="1",
-        pdf_file_name="drawing.pdf",
+        pdf_file_name=("drawing.pdf"),
         cad_file_name=None,
     )
 
@@ -357,18 +459,19 @@ async def test_fifty_findings_use_one_localization_call_per_page() -> None:
                 page_number=1,
                 width_points=1000.0,
                 height_points=700.0,
-                image_base64="iVBORw0KGgo=",
-                extracted_text="synthetic sheet",
+                image_base64=("iVBORw0KGgo="),
+                extracted_text=("synthetic sheet"),
+                text_words=(),
             ),
         ),
     )
 
     findings = [
         {
-            "finding_id": f"F-{index:02d}",
+            "finding_id": (f"F-{index:02d}"),
             "page": 1,
-            "comment": f"Замечание {index}",
-            "evidence": f"Факт {index}",
+            "comment": (f"Графическое замечание {index}"),
+            "evidence": (f"Графический факт {index}"),
         }
         for index in range(
             50,
@@ -391,8 +494,9 @@ async def test_fifty_findings_use_one_localization_call_per_page() -> None:
                 "findings": findings,
             },
         ),  # type: ignore[arg-type]
-        pdf_page_renderer=renderer,
-        finding_locator=locator,  # type: ignore[arg-type]
+        pdf_page_renderer=(renderer),
+        finding_locator=(locator),  # type: ignore[arg-type]
+        anchor_matcher=(FindingAnchorMatcher()),
     )
 
     payload = await use_case.execute(

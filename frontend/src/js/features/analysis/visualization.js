@@ -4,6 +4,7 @@
  * Визуализация findings поверх rendered PDF pages.
  *
  * BBox приходит в нормализованных координатах 0..1000.
+ * Один finding может содержать несколько visual regions.
  * Текст и source data вставляются только через textContent.
  */
 
@@ -56,36 +57,43 @@ function normalizedPage(
 }
 
 
-function normalizedBox(
-  finding,
+function normalizeRawBox(
+  rawBox,
+  region = null,
 ) {
-  const location = finding?.location;
-
-  if (
-    location?.status !== "located"
-    || !location.bbox
-  ) {
+  if (!rawBox) {
     return null;
   }
 
   const box = {
     xMin: Number(
-      location.bbox.x_min,
+      rawBox.x_min,
     ),
     yMin: Number(
-      location.bbox.y_min,
+      rawBox.y_min,
     ),
     xMax: Number(
-      location.bbox.x_max,
+      rawBox.x_max,
     ),
     yMax: Number(
-      location.bbox.y_max,
+      rawBox.y_max,
+    ),
+    label: (
+      region?.label
+      ?? null
+    ),
+    source: (
+      region?.source
+      ?? null
     ),
   };
 
-  const values = Object.values(
-    box,
-  );
+  const values = [
+    box.xMin,
+    box.yMin,
+    box.xMax,
+    box.yMax,
+  ];
 
   if (
     values.some(
@@ -107,6 +115,58 @@ function normalizedBox(
 }
 
 
+function normalizedBoxes(
+  finding,
+) {
+  const location = (
+    finding?.location
+  );
+
+  if (
+    location?.status !== "located"
+  ) {
+    return [];
+  }
+
+  const rawRegions = (
+    Array.isArray(
+      location.regions,
+    )
+      ? location.regions
+      : []
+  );
+
+  const regionBoxes = rawRegions
+    .map(
+      (region) => (
+        normalizeRawBox(
+          region?.bbox,
+          region,
+        )
+      ),
+    )
+    .filter(
+      Boolean,
+    );
+
+  if (regionBoxes.length) {
+    return regionBoxes;
+  }
+
+  const legacyBox = normalizeRawBox(
+    location.bbox,
+  );
+
+  return (
+    legacyBox
+      ? [
+        legacyBox,
+      ]
+      : []
+  );
+}
+
+
 function pageLocationMap(
   page,
 ) {
@@ -123,7 +183,8 @@ function pageLocationMap(
       .filter(
         (location) => (
           location
-          && typeof location === "object"
+          && typeof location
+          === "object"
         ),
       )
       .map(
@@ -202,7 +263,9 @@ function findingsForPage(
               ?? {
                 status: "unlocated",
                 bbox: null,
+                regions: [],
                 confidence: 0,
+                method: "unlocated",
               }
             ),
           },
@@ -281,8 +344,10 @@ function appendNormativeLinks(
       }
 
       const sourceTitle = [
-        source.source_file
-          || "Нормативный источник",
+        (
+          source.source_file
+          || "Нормативный источник"
+        ),
         (
           source.page !== null
           && source.page !== undefined
@@ -380,9 +445,11 @@ function createCallout(
     dependencies,
   );
 
-  if (!normalizedBox(
-    finding,
-  )) {
+  if (
+    !normalizedBoxes(
+      finding,
+    ).length
+  ) {
     callout.append(
       createElement(
         "span",
@@ -396,48 +463,58 @@ function createCallout(
 }
 
 
-function createBoundingBox(
+function createBoundingBoxes(
   finding,
   findingIndex,
 ) {
-  const box = normalizedBox(
+  return normalizedBoxes(
     finding,
+  ).map(
+    (box) => {
+      const node = createElement(
+        "div",
+        "analysis-result__bbox",
+      );
+
+      node.style.left = (
+        `${box.xMin / 10}%`
+      );
+
+      node.style.top = (
+        `${box.yMin / 10}%`
+      );
+
+      node.style.width = (
+        `${(
+          box.xMax
+          - box.xMin
+        ) / 10}%`
+      );
+
+      node.style.height = (
+        `${(
+          box.yMax
+          - box.yMin
+        ) / 10}%`
+      );
+
+      if (box.label) {
+        node.title = (
+          `Область: ${box.label}`
+        );
+      }
+
+      node.append(
+        createElement(
+          "span",
+          "analysis-result__bbox-number",
+          findingIndex + 1,
+        ),
+      );
+
+      return node;
+    },
   );
-
-  if (!box) {
-    return null;
-  }
-
-  const node = createElement(
-    "div",
-    "analysis-result__bbox",
-  );
-
-  node.style.left = (
-    `${box.xMin / 10}%`
-  );
-
-  node.style.top = (
-    `${box.yMin / 10}%`
-  );
-
-  node.style.width = (
-    `${(box.xMax - box.xMin) / 10}%`
-  );
-
-  node.style.height = (
-    `${(box.yMax - box.yMin) / 10}%`
-  );
-
-  node.append(
-    createElement(
-      "span",
-      "analysis-result__bbox-number",
-      findingIndex + 1,
-    ),
-  );
-
-  return node;
 }
 
 
@@ -518,7 +595,10 @@ function drawConnector(
     x1
     + Math.max(
       12,
-      (x2 - x1) * 0.45,
+      (
+        x2
+        - x1
+      ) * 0.45,
     )
   );
 
@@ -606,7 +686,9 @@ function appendPageVisualization(
     "analysis-result__annotation-list",
   );
 
-  if (page.localization_warning) {
+  if (
+    page.localization_warning
+  ) {
     calloutPane.append(
       createElement(
         "p",
@@ -616,9 +698,11 @@ function appendPageVisualization(
     );
   }
 
-  const svg = document.createElementNS(
-    "http://www.w3.org/2000/svg",
-    "svg",
+  const svg = (
+    document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "svg",
+    )
   );
 
   svg.classList.add(
@@ -642,16 +726,20 @@ function appendPageVisualization(
       finding,
       findingIndex,
     }) => {
-      const bboxNode = createBoundingBox(
-        finding,
-        findingIndex,
+      const bboxNodes = (
+        createBoundingBoxes(
+          finding,
+          findingIndex,
+        )
       );
 
-      if (bboxNode) {
-        imagePane.append(
-          bboxNode,
-        );
-      }
+      bboxNodes.forEach(
+        (bboxNode) => {
+          imagePane.append(
+            bboxNode,
+          );
+        },
+      );
 
       const callout = createCallout(
         finding,
@@ -663,28 +751,32 @@ function appendPageVisualization(
         callout,
       );
 
-      if (bboxNode) {
-        const polyline = document.createElementNS(
-          "http://www.w3.org/2000/svg",
-          "polyline",
-        );
+      bboxNodes.forEach(
+        (bboxNode) => {
+          const polyline = (
+            document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "polyline",
+            )
+          );
 
-        polyline.classList.add(
-          "analysis-result__connector",
-        );
+          polyline.classList.add(
+            "analysis-result__connector",
+          );
 
-        svg.append(
-          polyline,
-        );
-
-        connectorPairs.push(
-          {
-            bboxNode,
-            callout,
+          svg.append(
             polyline,
-          },
-        );
-      }
+          );
+
+          connectorPairs.push(
+            {
+              bboxNode,
+              callout,
+              polyline,
+            },
+          );
+        },
+      );
     },
   );
 
@@ -739,10 +831,13 @@ function appendPageVisualization(
   );
 
   if (
-    typeof ResizeObserver !== "undefined"
+    typeof ResizeObserver
+    !== "undefined"
   ) {
-    const observer = new ResizeObserver(
-      redraw,
+    const observer = (
+      new ResizeObserver(
+        redraw,
+      )
     );
 
     observer.observe(

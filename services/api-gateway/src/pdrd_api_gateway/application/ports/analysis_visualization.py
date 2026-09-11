@@ -49,6 +49,19 @@ class AnalysisBoundingBox:
 
 
 @dataclass(frozen=True, slots=True)
+class AnalysisTextWord:
+    """PDF text word вместе с его реальным bbox."""
+
+    text: str
+
+    bbox: AnalysisBoundingBox
+
+    block_no: int
+    line_no: int
+    word_no: int
+
+
+@dataclass(frozen=True, slots=True)
 class AnalysisFindingTarget:
     """Finding, который требуется найти на странице."""
 
@@ -58,13 +71,90 @@ class AnalysisFindingTarget:
 
 
 @dataclass(frozen=True, slots=True)
+class AnalysisVisualRegion:
+    """Одна визуальная область finding."""
+
+    bbox: AnalysisBoundingBox
+
+    source: str
+
+    confidence: float
+
+    label: str | None = None
+
+    def as_dict(
+        self,
+    ) -> dict[
+        str,
+        object,
+    ]:
+        """Возвращает JSON-ready region."""
+        return {
+            "bbox": self.bbox.as_dict(),
+            "source": self.source,
+            "confidence": self.confidence,
+            "label": self.label,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class AnalysisFindingLocation:
     """Visual location одного finding."""
 
     finding_id: str
+
     status: str
-    bbox: AnalysisBoundingBox | None
+
+    regions: tuple[
+        AnalysisVisualRegion,
+        ...,
+    ]
+
     confidence: float
+
+    method: str
+
+    @property
+    def bbox(
+        self,
+    ) -> AnalysisBoundingBox | None:
+        """Возвращает primary bbox для backward compatibility."""
+        if not self.regions:
+            return None
+
+        return self.regions[0].bbox
+
+    @classmethod
+    def located(
+        cls,
+        *,
+        finding_id: str,
+        regions: tuple[
+            AnalysisVisualRegion,
+            ...,
+        ],
+        confidence: float,
+        method: str,
+    ) -> "AnalysisFindingLocation":
+        """Создаёт located location."""
+        if not regions:
+            return cls.unlocated(
+                finding_id=finding_id,
+            )
+
+        return cls(
+            finding_id=finding_id,
+            status="located",
+            regions=regions,
+            confidence=min(
+                max(
+                    confidence,
+                    0.0,
+                ),
+                1.0,
+            ),
+            method=method,
+        )
 
     @classmethod
     def unlocated(
@@ -76,8 +166,9 @@ class AnalysisFindingLocation:
         return cls(
             finding_id=finding_id,
             status="unlocated",
-            bbox=None,
+            regions=(),
             confidence=0.0,
+            method="unlocated",
         )
 
     def as_dict(
@@ -87,11 +178,15 @@ class AnalysisFindingLocation:
         object,
     ]:
         """Возвращает JSON-ready location."""
+        bbox = self.bbox
+
         return {
             "finding_id": self.finding_id,
             "status": self.status,
-            "bbox": (self.bbox.as_dict() if self.bbox is not None else None),
+            "bbox": (bbox.as_dict() if bbox is not None else None),
+            "regions": [region.as_dict() for region in self.regions],
             "confidence": self.confidence,
+            "method": self.method,
         }
 
 
@@ -100,10 +195,18 @@ class AnalysisPagePreview:
     """Один rendered PDF-preview."""
 
     page_number: int
+
     width_points: float
     height_points: float
+
     image_base64: str
+
     extracted_text: str
+
+    text_words: tuple[
+        AnalysisTextWord,
+        ...,
+    ] = ()
 
     def as_dict(
         self,
@@ -111,7 +214,7 @@ class AnalysisPagePreview:
         str,
         object,
     ]:
-        """Возвращает frontend payload без дублирования page text."""
+        """Возвращает frontend payload без internal text geometry."""
         return {
             "page_number": self.page_number,
             "width_points": self.width_points,
@@ -138,7 +241,7 @@ class AnalysisPdfPageRenderer(Protocol):
 
 
 class AnalysisFindingLocator(Protocol):
-    """Контракт lazy visual localization."""
+    """Контракт VLM fallback visual localization."""
 
     async def localize(
         self,
@@ -154,5 +257,5 @@ class AnalysisFindingLocator(Protocol):
         AnalysisFindingLocation,
         ...,
     ]:
-        """Локализует findings одним запросом на страницу."""
+        """Локализует unresolved findings одним запросом на страницу."""
         ...

@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from pdrd_api_gateway.application.finding_anchor_matcher import (
+    FindingAnchorMatcher,
+)
 from pdrd_api_gateway.application.ports.analysis_visualization import (
     AnalysisFindingLocation,
     AnalysisFindingLocator,
@@ -43,12 +46,17 @@ class AnalysisVisualizationUnavailableError(
 
 @dataclass(frozen=True, slots=True)
 class GetAnalysisVisualization:
-    """Рендерит PDF и лениво локализует готовые findings."""
+    """Рендерит PDF и гибридно локализует готовые findings."""
 
     get_analysis_job: GetAnalysisJob
+
     artifact_store: AnalysisArtifactStore
+
     pdf_page_renderer: AnalysisPdfPageRenderer
+
     finding_locator: AnalysisFindingLocator
+
+    anchor_matcher: FindingAnchorMatcher
 
     async def execute(
         self,
@@ -58,7 +66,7 @@ class GetAnalysisVisualization:
         str,
         object,
     ]:
-        """Возвращает PDF pages вместе с bbox locations."""
+        """Возвращает PDF pages вместе с exact/VLM locations."""
         job = await self.get_analysis_job.execute(
             job_id=job_id,
         )
@@ -81,11 +89,11 @@ class GetAnalysisVisualization:
 
         try:
             artifacts = await self.artifact_store.load_request(
-                document_id=job.document_id,
+                document_id=(job.document_id),
             )
 
             result = await self.artifact_store.load_result(
-                document_id=job.document_id,
+                document_id=(job.document_id),
             )
 
         except Exception as error:
@@ -111,7 +119,7 @@ class GetAnalysisVisualization:
 
         try:
             pages = await self.pdf_page_renderer.render(
-                pdf_content=artifacts.pdf_content,
+                pdf_content=(artifacts.pdf_content),
                 file_name=(artifacts.submission.pdf_file_name or "document.pdf"),
                 page_spec=(artifacts.submission.pages),
             )
@@ -142,40 +150,71 @@ class GetAnalysisVisualization:
         for page in pages:
             targets = self._targets_for_page(
                 findings=raw_findings,
-                page_number=page.page_number,
+                page_number=(page.page_number),
             )
+
+            deterministic_locations = self.anchor_matcher.locate(
+                findings=targets,
+                text_words=(page.text_words),
+            )
+
+            deterministic_by_id = {
+                location.finding_id: location for location in deterministic_locations
+            }
+
+            unresolved_targets = tuple(
+                target
+                for target in targets
+                if (deterministic_by_id[target.finding_id].status != "located")
+            )
+
+            fallback_by_id: dict[
+                str,
+                AnalysisFindingLocation,
+            ] = {}
 
             localization_error = False
 
-            if targets:
+            if unresolved_targets:
                 try:
-                    locations = await self.finding_locator.localize(
-                        page_number=page.page_number,
+                    fallback_locations = await self.finding_locator.localize(
+                        page_number=(page.page_number),
                         extracted_text=(page.extracted_text),
                         image_base64=(page.image_base64),
-                        findings=targets,
+                        findings=(unresolved_targets),
                     )
+
+                    fallback_by_id = {
+                        location.finding_id: location for location in fallback_locations
+                    }
 
                 except Exception:
-                    locations = tuple(
-                        AnalysisFindingLocation.unlocated(
-                            finding_id=(target.finding_id),
-                        )
-                        for target in targets
-                    )
-
                     localization_error = True
 
-            else:
-                locations = ()
+            locations = tuple(
+                self._merge_location(
+                    target=target,
+                    deterministic=(deterministic_by_id[target.finding_id]),
+                    fallback=(
+                        fallback_by_id.get(
+                            target.finding_id,
+                        )
+                    ),
+                )
+                for target in targets
+            )
 
             page_payload = page.as_dict()
 
             page_payload["locations"] = [location.as_dict() for location in locations]
 
+            page_payload["localization"] = self._localization_summary(
+                locations,
+            )
+
             if localization_error:
                 page_payload["localization_warning"] = (
-                    "Точная visual localization временно недоступна."
+                    "Часть замечаний не удалось локализовать через VLM fallback."
                 )
 
             page_payloads.append(
@@ -190,6 +229,41 @@ class GetAnalysisVisualization:
                 job.document_id,
             ),
             "pages": page_payloads,
+        }
+
+    @staticmethod
+    def _merge_location(
+        *,
+        target: AnalysisFindingTarget,
+        deterministic: AnalysisFindingLocation,
+        fallback: AnalysisFindingLocation | None,
+    ) -> AnalysisFindingLocation:
+        """Приоритетно сохраняет deterministic PDF location."""
+        if deterministic.status == "located":
+            return deterministic
+
+        if fallback is not None and fallback.status == "located":
+            return fallback
+
+        return AnalysisFindingLocation.unlocated(
+            finding_id=(target.finding_id),
+        )
+
+    @staticmethod
+    def _localization_summary(
+        locations: tuple[
+            AnalysisFindingLocation,
+            ...,
+        ],
+    ) -> dict[
+        str,
+        int,
+    ]:
+        """Возвращает диагностическую статистику страницы."""
+        return {
+            "pdf_text": sum(location.method == "pdf_text" for location in locations),
+            "vlm": sum(location.method == "vlm" for location in locations),
+            "unlocated": sum(location.status != "located" for location in locations),
         }
 
     @classmethod
