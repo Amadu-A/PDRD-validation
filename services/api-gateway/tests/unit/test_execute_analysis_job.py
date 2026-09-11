@@ -1,7 +1,8 @@
 # services/api-gateway/tests/unit/test_execute_analysis_job.py
 
-"""Unit tests выполнения queued analysis job."""
+"""Unit tests bounded lifecycle queued analysis job."""
 
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
@@ -11,14 +12,17 @@ from pdrd_api_gateway.application.ports.artifacts import (
 )
 from pdrd_api_gateway.application.ports.orchestration import (
     AnalysisOrchestrationError,
+    AnalysisOrchestrationTransientError,
 )
 from pdrd_api_gateway.application.use_cases.execute_analysis_job import (
     AnalysisExecutionError,
+    AnalysisTransientExecutionError,
     ExecuteAnalysisJob,
 )
 from pdrd_api_gateway.domain.analysis_job import (
     AnalysisJob,
     AnalysisJobStatus,
+    utc_now,
 )
 from pdrd_api_gateway.domain.analysis_submission import (
     AnalysisSubmission,
@@ -40,6 +44,15 @@ class FakeAnalysisJobRepository:
         job_id: UUID,
     ) -> AnalysisJob | None:
         """Возвращает job."""
+        return self._state.get(
+            job_id,
+        )
+
+    async def get_for_update(
+        self,
+        job_id: UUID,
+    ) -> AnalysisJob | None:
+        """Имитирует row lock."""
         return self._state.get(
             job_id,
         )
@@ -201,6 +214,27 @@ def build_submission() -> AnalysisRequestArtifacts:
     )
 
 
+def build_use_case(
+    *,
+    state: dict[UUID, AnalysisJob],
+    artifact_store: FakeArtifactStore,
+    orchestrator: FakeOrchestrator,
+    max_runtime_seconds: int = 1740,
+    min_retry_budget_seconds: int = 300,
+) -> ExecuteAnalysisJob:
+    """Создаёт use case с production-like lifecycle limits."""
+    return ExecuteAnalysisJob(
+        unit_of_work_factory=FakeUnitOfWorkFactory(
+            state,
+        ),
+        artifact_store=artifact_store,  # type: ignore[arg-type]
+        orchestrator=orchestrator,
+        max_runtime_seconds=max_runtime_seconds,
+        max_attempts=3,
+        min_retry_budget_seconds=min_retry_budget_seconds,
+    )
+
+
 @pytest.mark.asyncio
 async def test_execute_analysis_job_completes() -> None:
     """Queued job проходит до completed."""
@@ -222,32 +256,28 @@ async def test_execute_analysis_job_completes() -> None:
 
     orchestrator = FakeOrchestrator()
 
-    use_case = ExecuteAnalysisJob(
-        unit_of_work_factory=FakeUnitOfWorkFactory(
-            state,
-        ),
-        artifact_store=artifact_store,  # type: ignore[arg-type]
+    use_case = build_use_case(
+        state=state,
+        artifact_store=artifact_store,
         orchestrator=orchestrator,
     )
 
     result = await use_case.execute(
         job_id=job.id,
+        allow_retry=True,
+        redelivered=False,
     )
 
     assert result["status"] == "completed"
-
     assert state[job.id].status is AnalysisJobStatus.COMPLETED
-
     assert state[job.id].attempt_count == 1
-
     assert orchestrator.calls == 1
-
     assert artifact_store.result == result
 
 
 @pytest.mark.asyncio
-async def test_execute_analysis_job_marks_failure() -> None:
-    """Ошибка orchestration переводит job в failed."""
+async def test_execute_analysis_job_marks_terminal_failure() -> None:
+    """Терминальная orchestration ошибка переводит job в failed."""
     artifacts = build_submission()
 
     job = AnalysisJob.create(
@@ -262,17 +292,15 @@ async def test_execute_analysis_job_marks_failure() -> None:
 
     orchestrator = FakeOrchestrator(
         error=AnalysisOrchestrationError(
-            "n8n unavailable",
+            "invalid workflow result",
         ),
     )
 
-    use_case = ExecuteAnalysisJob(
-        unit_of_work_factory=FakeUnitOfWorkFactory(
-            state,
-        ),
+    use_case = build_use_case(
+        state=state,
         artifact_store=FakeArtifactStore(
             request=artifacts,
-        ),  # type: ignore[arg-type]
+        ),
         orchestrator=orchestrator,
     )
 
@@ -281,18 +309,101 @@ async def test_execute_analysis_job_marks_failure() -> None:
     ):
         await use_case.execute(
             job_id=job.id,
+            allow_retry=True,
+            redelivered=False,
         )
 
     assert state[job.id].status is AnalysisJobStatus.FAILED
-
     assert state[job.id].error_code == "analysis_execution_failed"
-
     assert state[job.id].attempt_count == 1
 
 
 @pytest.mark.asyncio
+async def test_transient_failure_returns_job_to_queue() -> None:
+    """Короткая infrastructure ошибка допускает controlled retry."""
+    artifacts = build_submission()
+
+    job = AnalysisJob.create(
+        document_id=(artifacts.submission.document_id),
+    )
+    job.mark_queued()
+
+    state = {
+        job.id: job,
+    }
+
+    use_case = build_use_case(
+        state=state,
+        artifact_store=FakeArtifactStore(
+            request=artifacts,
+        ),
+        orchestrator=FakeOrchestrator(
+            error=AnalysisOrchestrationTransientError(
+                "EAI_AGAIN",
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        AnalysisTransientExecutionError,
+    ):
+        await use_case.execute(
+            job_id=job.id,
+            allow_retry=True,
+            redelivered=False,
+        )
+
+    assert state[job.id].status is AnalysisJobStatus.QUEUED
+    assert state[job.id].attempt_count == 1
+    assert state[job.id].error_code == "analysis_transient_failure"
+
+
+@pytest.mark.asyncio
+async def test_transient_failure_near_deadline_is_terminal() -> None:
+    """Read/transport retry не стартует без достаточного deadline budget."""
+    artifacts = build_submission()
+
+    job = AnalysisJob.create(
+        document_id=(artifacts.submission.document_id),
+    )
+    job.created_at = utc_now() - timedelta(
+        seconds=1600,
+    )
+    job.updated_at = job.created_at
+    job.mark_queued()
+
+    state = {
+        job.id: job,
+    }
+
+    use_case = build_use_case(
+        state=state,
+        artifact_store=FakeArtifactStore(
+            request=artifacts,
+        ),
+        orchestrator=FakeOrchestrator(
+            error=AnalysisOrchestrationTransientError(
+                "ReadTimeout",
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        AnalysisExecutionError,
+    ):
+        await use_case.execute(
+            job_id=job.id,
+            allow_retry=True,
+            redelivered=False,
+        )
+
+    assert state[job.id].status is AnalysisJobStatus.FAILED
+    assert state[job.id].error_code == "analysis_transient_retry_exhausted"
+
+
+@pytest.mark.asyncio
 async def test_execute_recovers_existing_result() -> None:
-    """Redelivery использует уже сохранённый result.json."""
+    """Redelivery использует уже сохранённый result.json без второго n8n call."""
     artifacts = build_submission()
 
     job = AnalysisJob.create(
@@ -319,22 +430,61 @@ async def test_execute_recovers_existing_result() -> None:
 
     orchestrator = FakeOrchestrator()
 
-    use_case = ExecuteAnalysisJob(
-        unit_of_work_factory=FakeUnitOfWorkFactory(
-            state,
-        ),
-        artifact_store=artifact_store,  # type: ignore[arg-type]
+    use_case = build_use_case(
+        state=state,
+        artifact_store=artifact_store,
         orchestrator=orchestrator,
     )
 
     result = await use_case.execute(
         job_id=job.id,
+        allow_retry=True,
+        redelivered=True,
     )
 
     assert result == saved_result
+    assert orchestrator.calls == 0
+    assert state[job.id].status is AnalysisJobStatus.COMPLETED
+    assert state[job.id].attempt_count == 2
+
+
+@pytest.mark.asyncio
+async def test_job_older_than_absolute_deadline_never_starts_orchestrator() -> None:
+    """Просроченная queued задача завершается до внешнего orchestration."""
+    artifacts = build_submission()
+
+    job = AnalysisJob.create(
+        document_id=(artifacts.submission.document_id),
+    )
+    job.created_at = utc_now() - timedelta(
+        seconds=1801,
+    )
+    job.updated_at = job.created_at
+    job.mark_queued()
+
+    state = {
+        job.id: job,
+    }
+
+    orchestrator = FakeOrchestrator()
+
+    use_case = build_use_case(
+        state=state,
+        artifact_store=FakeArtifactStore(
+            request=artifacts,
+        ),
+        orchestrator=orchestrator,
+    )
+
+    with pytest.raises(
+        AnalysisExecutionError,
+    ):
+        await use_case.execute(
+            job_id=job.id,
+            allow_retry=True,
+            redelivered=False,
+        )
 
     assert orchestrator.calls == 0
-
-    assert state[job.id].status is AnalysisJobStatus.COMPLETED
-
-    assert state[job.id].attempt_count == 1
+    assert state[job.id].status is AnalysisJobStatus.FAILED
+    assert state[job.id].error_code == "analysis_deadline_exceeded"

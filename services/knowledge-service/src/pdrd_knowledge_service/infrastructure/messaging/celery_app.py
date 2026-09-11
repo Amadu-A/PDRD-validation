@@ -18,7 +18,6 @@ from pdrd_knowledge_service.infrastructure.messaging.broker import (
 settings = get_settings()
 
 broker_settings = settings.broker
-
 technical_settings = settings.technical_assignment_queue
 
 normative_exchange = Exchange(
@@ -32,6 +31,10 @@ normative_queue = Queue(
     exchange=normative_exchange,
     routing_key=broker_settings.routing_key,
     durable=True,
+    queue_arguments={
+        "x-message-ttl": broker_settings.message_ttl_seconds * 1000,
+        "x-expires": broker_settings.queue_expires_seconds * 1000,
+    },
 )
 
 technical_exchange = Exchange(
@@ -45,6 +48,10 @@ technical_queue = Queue(
     exchange=technical_exchange,
     routing_key=technical_settings.routing_key,
     durable=True,
+    queue_arguments={
+        "x-message-ttl": technical_settings.message_ttl_seconds * 1000,
+        "x-expires": technical_settings.queue_expires_seconds * 1000,
+    },
 )
 
 celery_app = Celery(
@@ -83,6 +90,16 @@ celery_app.conf.update(
         "pdrd.knowledge.technical_assignment.index": {
             "queue": technical_settings.queue_name,
             "routing_key": (technical_settings.routing_key),
+        },
+    },
+    task_annotations={
+        "pdrd.knowledge.normative.index": {
+            "soft_time_limit": broker_settings.task_soft_time_limit_seconds,
+            "time_limit": broker_settings.task_hard_time_limit_seconds,
+        },
+        "pdrd.knowledge.technical_assignment.index": {
+            "soft_time_limit": technical_settings.task_soft_time_limit_seconds,
+            "time_limit": technical_settings.task_hard_time_limit_seconds,
         },
     },
     task_acks_late=True,

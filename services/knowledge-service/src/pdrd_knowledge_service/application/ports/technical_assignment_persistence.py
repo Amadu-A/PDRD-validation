@@ -3,6 +3,7 @@
 """Persistence ports технических заданий."""
 
 from collections.abc import Callable
+from datetime import datetime
 from types import TracebackType
 from typing import (
     Protocol,
@@ -45,6 +46,16 @@ class TechnicalAssignmentRepository(
         technical_assignment_id: UUID,
     ) -> TechnicalAssignment | None:
         """Возвращает ТЗ с PostgreSQL row lock."""
+        ...
+
+    async def get_recoverable(
+        self,
+        *,
+        stale_indexing_before: datetime,
+        deadline_before: datetime,
+        limit: int,
+    ) -> list[TechnicalAssignment]:
+        """Возвращает stale indexing и просроченные queued/indexing ТЗ."""
         ...
 
     async def list_all(

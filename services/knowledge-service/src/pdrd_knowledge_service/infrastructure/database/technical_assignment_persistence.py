@@ -2,10 +2,11 @@
 
 """SQLAlchemy repositories и Unit of Work ТЗ."""
 
+from datetime import datetime
 from types import TracebackType
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -89,6 +90,55 @@ class SqlAlchemyTechnicalAssignmentRepository:
             else None
         )
 
+    async def get_recoverable(
+        self,
+        *,
+        stale_indexing_before: datetime,
+        deadline_before: datetime,
+        limit: int,
+    ) -> list[TechnicalAssignment]:
+        """Блокирует stale INDEXING и просроченные QUEUED/INDEXING ТЗ."""
+        result = await self._session.scalars(
+            select(
+                TechnicalAssignmentModel,
+            )
+            .where(
+                or_(
+                    and_(
+                        TechnicalAssignmentModel.index_status
+                        == TechnicalAssignmentIndexStatus.INDEXING.value,
+                        TechnicalAssignmentModel.updated_at < stale_indexing_before,
+                    ),
+                    and_(
+                        TechnicalAssignmentModel.index_status.in_(
+                            (
+                                TechnicalAssignmentIndexStatus.QUEUED.value,
+                                TechnicalAssignmentIndexStatus.INDEXING.value,
+                            )
+                        ),
+                        TechnicalAssignmentModel.created_at < deadline_before,
+                    ),
+                )
+            )
+            .order_by(
+                TechnicalAssignmentModel.created_at,
+                TechnicalAssignmentModel.id,
+            )
+            .limit(
+                limit,
+            )
+            .with_for_update(
+                skip_locked=True,
+            )
+        )
+
+        return [
+            self._to_domain(
+                model,
+            )
+            for model in result.all()
+        ]
+
     async def list_all(
         self,
     ) -> list[TechnicalAssignment]:
@@ -125,25 +175,15 @@ class SqlAlchemyTechnicalAssignmentRepository:
             )
 
         model.analysis_document_id = assignment.analysis_document_id
-
         model.section_id = assignment.section_id
-
         model.original_name = assignment.original_name
-
         model.mime_type = assignment.mime_type
-
         model.size_bytes = assignment.size_bytes
-
         model.sha256 = assignment.sha256
-
         model.index_status = assignment.index_status.value
-
         model.index_error = assignment.index_error
-
         model.indexed_at = assignment.indexed_at
-
         model.created_at = assignment.created_at
-
         model.updated_at = assignment.updated_at
 
     @staticmethod
@@ -271,9 +311,7 @@ class SqlAlchemyTechnicalAssignmentOutboxRepository:
             )
 
         model.attempt_count = message.attempt_count
-
         model.last_error = message.last_error
-
         model.published_at = message.published_at
 
     @staticmethod

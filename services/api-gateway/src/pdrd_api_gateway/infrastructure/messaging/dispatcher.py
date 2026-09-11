@@ -1,13 +1,17 @@
 # services/api-gateway/src/pdrd_api_gateway/infrastructure/messaging/dispatcher.py
 
-"""Фоновый процесс transactional outbox dispatcher."""
+"""Фоновый процесс transactional outbox dispatcher и reconciliation."""
 
 import asyncio
 import logging
 from functools import partial
+from time import monotonic
 
 from pdrd_api_gateway.application.use_cases.dispatch_outbox import (
     DispatchOutbox,
+)
+from pdrd_api_gateway.application.use_cases.recover_stale_analysis_jobs import (
+    RecoverStaleAnalysisJobs,
 )
 from pdrd_api_gateway.core.settings import get_settings
 from pdrd_api_gateway.infrastructure.database.engine import (
@@ -30,7 +34,7 @@ LOGGER = logging.getLogger(
 
 
 async def run_dispatcher() -> None:
-    """Непрерывно публикует committed outbox messages."""
+    """Публикует outbox и периодически восстанавливает stale analysis jobs."""
     settings = get_settings()
 
     engine = build_async_engine(
@@ -56,8 +60,34 @@ async def run_dispatcher() -> None:
         publisher=publisher,
     )
 
+    recovery = RecoverStaleAnalysisJobs(
+        unit_of_work_factory=unit_of_work_factory,
+        max_runtime_seconds=settings.lifecycle.max_runtime_seconds,
+        max_attempts=settings.lifecycle.max_attempts,
+        stale_processing_seconds=settings.lifecycle.stale_processing_seconds,
+    )
+
+    next_recovery_at = 0.0
+
     try:
         while True:
+            now = monotonic()
+
+            if now >= next_recovery_at:
+                recovery_report = await recovery.execute(
+                    limit=settings.lifecycle.recovery_batch_size,
+                )
+
+                if recovery_report.selected:
+                    LOGGER.info(
+                        "analysis_recovery selected=%s requeued=%s failed=%s",
+                        recovery_report.selected,
+                        recovery_report.requeued,
+                        recovery_report.failed,
+                    )
+
+                next_recovery_at = now + settings.lifecycle.recovery_interval_seconds
+
             report = await use_case.execute(
                 limit=settings.outbox.batch_size,
             )
@@ -81,7 +111,7 @@ async def run_dispatcher() -> None:
 
 
 def main() -> None:
-    """Запускает отдельный outbox dispatcher process."""
+    """Запускает отдельный outbox/reconciliation process."""
     logging.basicConfig(
         level=logging.INFO,
         format=("%(asctime)s %(levelname)s %(name)s %(message)s"),

@@ -2,6 +2,7 @@
 
 """Runtime composition T-indexing worker."""
 
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from uuid import UUID
@@ -14,6 +15,7 @@ from pdrd_knowledge_service.core.settings import (
 )
 from pdrd_knowledge_service.domain.technical_assignment import (
     TechnicalAssignment,
+    TechnicalAssignmentIndexStatus,
 )
 from pdrd_knowledge_service.infrastructure.database.engine import (
     build_async_engine,
@@ -114,6 +116,52 @@ async def execute_technical_assignment_indexing(
             technical_assignment_id=(technical_assignment_id),
             allow_retry=allow_retry,
         )
+
+    finally:
+        await engine.dispose()
+
+
+async def touch_technical_assignment_indexing(
+    *,
+    technical_assignment_id: UUID,
+) -> None:
+    """Обновляет heartbeat INDEXING ТЗ короткой transaction."""
+    settings = get_settings()
+
+    engine = build_async_engine(
+        settings.database,
+    )
+
+    session_factory = build_session_factory(
+        engine,
+    )
+
+    try:
+        async with SqlAlchemyTechnicalAssignmentUnitOfWork(
+            session_factory,
+        ) as unit_of_work:
+            assignment = await unit_of_work.assignments.get_for_update(
+                technical_assignment_id,
+            )
+
+            if (
+                assignment is None
+                or assignment.index_status
+                is not TechnicalAssignmentIndexStatus.INDEXING
+            ):
+                return
+
+            changed = assignment.touch_indexing(
+                changed_at=datetime.now(
+                    UTC,
+                ),
+            )
+
+            await unit_of_work.assignments.update(
+                changed,
+            )
+
+            await unit_of_work.commit()
 
     finally:
         await engine.dispose()

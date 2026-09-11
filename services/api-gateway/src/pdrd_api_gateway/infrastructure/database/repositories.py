@@ -2,9 +2,10 @@
 
 """SQLAlchemy repositories API Gateway."""
 
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pdrd_api_gateway.domain.analysis_job import (
@@ -72,6 +73,80 @@ class SqlAlchemyAnalysisJobRepository:
         return self._to_domain(
             model,
         )
+
+    async def get_for_update(
+        self,
+        job_id: UUID,
+    ) -> AnalysisJob | None:
+        """Загружает job с PostgreSQL row lock."""
+        model = await self._session.scalar(
+            select(
+                AnalysisJobModel,
+            )
+            .where(
+                AnalysisJobModel.id == job_id,
+            )
+            .with_for_update()
+        )
+
+        if model is None:
+            return None
+
+        return self._to_domain(
+            model,
+        )
+
+    async def get_recoverable(
+        self,
+        *,
+        stale_processing_before: datetime,
+        deadline_before: datetime,
+        limit: int,
+    ) -> list[AnalysisJob]:
+        """Блокирует stale processing и просроченные queued/processing jobs."""
+        statement = (
+            select(
+                AnalysisJobModel,
+            )
+            .where(
+                or_(
+                    and_(
+                        AnalysisJobModel.status == AnalysisJobStatus.PROCESSING.value,
+                        AnalysisJobModel.updated_at < stale_processing_before,
+                    ),
+                    and_(
+                        AnalysisJobModel.status.in_(
+                            (
+                                AnalysisJobStatus.QUEUED.value,
+                                AnalysisJobStatus.PROCESSING.value,
+                            )
+                        ),
+                        AnalysisJobModel.created_at < deadline_before,
+                    ),
+                )
+            )
+            .order_by(
+                AnalysisJobModel.created_at,
+                AnalysisJobModel.id,
+            )
+            .limit(
+                limit,
+            )
+            .with_for_update(
+                skip_locked=True,
+            )
+        )
+
+        result = await self._session.scalars(
+            statement,
+        )
+
+        return [
+            self._to_domain(
+                model,
+            )
+            for model in result.all()
+        ]
 
     async def update(
         self,

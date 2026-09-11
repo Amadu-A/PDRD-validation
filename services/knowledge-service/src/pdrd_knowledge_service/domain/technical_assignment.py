@@ -68,6 +68,7 @@ _ALLOWED_TRANSITIONS: dict[
     TechnicalAssignmentIndexStatus.QUEUED: frozenset(
         {
             TechnicalAssignmentIndexStatus.INDEXING,
+            TechnicalAssignmentIndexStatus.FAILED,
             TechnicalAssignmentIndexStatus.DELETING,
         }
     ),
@@ -296,5 +297,29 @@ class TechnicalAssignment:
             index_status=target_status,
             index_error=normalized_error,
             indexed_at=indexed_at,
+            updated_at=changed_at,
+        )
+
+    def touch_indexing(
+        self,
+        *,
+        changed_at: datetime,
+    ) -> "TechnicalAssignment":
+        """Обновляет heartbeat только для INDEXING ТЗ."""
+        _validate_datetime(
+            changed_at,
+            field_name="changed_at",
+        )
+
+        if self.index_status is not TechnicalAssignmentIndexStatus.INDEXING:
+            return self
+
+        if changed_at < self.updated_at:
+            raise TechnicalAssignmentError(
+                "changed_at не может быть раньше updated_at.",
+            )
+
+        return replace(
+            self,
             updated_at=changed_at,
         )

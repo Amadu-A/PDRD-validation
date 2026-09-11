@@ -13,12 +13,25 @@ from pdrd_api_gateway.application.ports.artifacts import (
 )
 from pdrd_api_gateway.application.ports.orchestration import (
     AnalysisOrchestrationError,
+    AnalysisOrchestrationTransientError,
 )
 from pdrd_api_gateway.core.settings import (
     OrchestrationSettings,
 )
 from pdrd_api_gateway.domain.analysis_submission import (
     AnalysisSourceMode,
+)
+
+_RETRYABLE_HTTP_STATUSES = frozenset(
+    {
+        408,
+        425,
+        429,
+        500,
+        502,
+        503,
+        504,
+    }
 )
 
 
@@ -83,10 +96,26 @@ class N8nAnalysisOrchestrator:
         except httpx.HTTPStatusError as error:
             response_text = error.response.text[:1000]
 
-            raise AnalysisOrchestrationError(
+            error_type = (
+                AnalysisOrchestrationTransientError
+                if error.response.status_code in _RETRYABLE_HTTP_STATUSES
+                else AnalysisOrchestrationError
+            )
+
+            raise error_type(
                 "n8n workflow завершился HTTP ошибкой: "
                 f"{error.response.status_code}. "
                 f"Ответ: {response_text}",
+            ) from error
+
+        except (
+            httpx.TimeoutException,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+        ) as error:
+            raise AnalysisOrchestrationTransientError(
+                "Временная transport-ошибка HTTP-запроса к n8n: "
+                f"{type(error).__name__}: {error}",
             ) from error
 
         except httpx.HTTPError as error:
@@ -235,7 +264,7 @@ class N8nAnalysisOrchestrator:
             str,
         ],
     ]:
-        """Формирует multipart files для n8n."""
+        """Формирует multipart files для orchestration."""
         submission = artifacts.submission
 
         files: dict[

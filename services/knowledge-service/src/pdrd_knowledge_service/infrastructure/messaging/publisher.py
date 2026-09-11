@@ -48,7 +48,6 @@ class CeleryNormativeOutboxPublisher:
     ) -> None:
         """Сохраняет routing."""
         self._celery_app = celery_app
-
         self._broker_settings = broker_settings
 
     async def publish(
@@ -86,6 +85,7 @@ class CeleryNormativeOutboxPublisher:
                 exchange=self._broker_settings.exchange_name,
                 routing_key=self._broker_settings.routing_key,
                 retry=True,
+                expires=self._broker_settings.task_expires_seconds,
                 ignore_result=True,
             )
 
@@ -122,7 +122,6 @@ class CeleryTechnicalAssignmentOutboxPublisher:
     ) -> None:
         """Сохраняет отдельный T routing."""
         self._celery_app = celery_app
-
         self._queue_settings = queue_settings
 
     async def publish(
@@ -160,6 +159,7 @@ class CeleryTechnicalAssignmentOutboxPublisher:
                 exchange=self._queue_settings.exchange_name,
                 routing_key=self._queue_settings.routing_key,
                 retry=True,
+                expires=self._queue_settings.task_expires_seconds,
                 ignore_result=True,
             )
 

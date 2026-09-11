@@ -9,6 +9,7 @@ from pydantic import (
     BaseModel,
     Field,
     SecretStr,
+    model_validator,
 )
 from pydantic_settings import (
     BaseSettings,
@@ -99,6 +100,24 @@ class BrokerSettings(BaseModel):
 
     routing_key: str = "analysis.execute"
 
+    message_ttl_seconds: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+    )
+
+    queue_expires_seconds: int = Field(
+        default=86400,
+        ge=3600,
+        le=2_592_000,
+    )
+
+    task_expires_seconds: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+    )
+
     connect_timeout_seconds: float = Field(
         default=5.0,
         gt=0,
@@ -134,6 +153,104 @@ class OutboxSettings(BaseModel):
     )
 
 
+class AnalysisLifecycleSettings(BaseModel):
+    """Bounded lifecycle одного пользовательского анализа."""
+
+    max_runtime_seconds: int = Field(
+        default=1740,
+        ge=60,
+        le=3600,
+    )
+
+    task_soft_time_limit_seconds: int = Field(
+        default=1770,
+        ge=60,
+        le=3600,
+    )
+
+    task_hard_time_limit_seconds: int = Field(
+        default=1800,
+        ge=60,
+        le=3600,
+    )
+
+    transient_max_retries: int = Field(
+        default=2,
+        ge=0,
+        le=10,
+    )
+
+    transient_retry_delay_seconds: int = Field(
+        default=10,
+        ge=1,
+        le=300,
+    )
+
+    min_retry_budget_seconds: int = Field(
+        default=300,
+        ge=1,
+        le=1800,
+    )
+
+    max_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+    )
+
+    heartbeat_interval_seconds: int = Field(
+        default=15,
+        ge=5,
+        le=300,
+    )
+
+    stale_processing_seconds: int = Field(
+        default=120,
+        ge=30,
+        le=3600,
+    )
+
+    recovery_interval_seconds: int = Field(
+        default=30,
+        ge=5,
+        le=600,
+    )
+
+    recovery_batch_size: int = Field(
+        default=50,
+        ge=1,
+        le=1000,
+    )
+
+    @model_validator(
+        mode="after",
+    )
+    def validate_deadlines(
+        self,
+    ) -> "AnalysisLifecycleSettings":
+        """Проверяет порядок application/soft/hard deadlines."""
+        if not (
+            self.max_runtime_seconds
+            < self.task_soft_time_limit_seconds
+            < self.task_hard_time_limit_seconds
+        ):
+            raise ValueError(
+                "Analysis lifecycle требует max_runtime < soft_limit < hard_limit.",
+            )
+
+        if self.stale_processing_seconds <= self.heartbeat_interval_seconds * 2:
+            raise ValueError(
+                "stale_processing_seconds должен быть больше двух heartbeat interval.",
+            )
+
+        if self.min_retry_budget_seconds >= self.max_runtime_seconds:
+            raise ValueError(
+                "min_retry_budget_seconds должен быть меньше max_runtime_seconds.",
+            )
+
+        return self
+
+
 class StorageSettings(BaseModel):
     """Temporary analysis storage."""
 
@@ -165,7 +282,7 @@ class TechnicalAssignmentSettings(
     )
 
     index_wait_timeout_seconds: float = Field(
-        default=1800.0,
+        default=1200.0,
         gt=0,
         le=7200,
     )
@@ -196,13 +313,13 @@ class OrchestrationSettings(BaseModel):
     pdf_cad_webhook_path: str = "/webhook/analysis/v2/pdf-cad"
 
     request_timeout_seconds: float = Field(
-        default=1800.0,
+        default=1680.0,
         gt=0,
-        le=7200,
+        le=3600,
     )
 
     connect_timeout_seconds: float = Field(
-        default=20.0,
+        default=10.0,
         gt=0,
         le=120,
     )
@@ -297,6 +414,10 @@ class Settings(BaseSettings):
 
     outbox: OutboxSettings = Field(
         default_factory=OutboxSettings,
+    )
+
+    lifecycle: AnalysisLifecycleSettings = Field(
+        default_factory=AnalysisLifecycleSettings,
     )
 
     storage: StorageSettings = Field(
