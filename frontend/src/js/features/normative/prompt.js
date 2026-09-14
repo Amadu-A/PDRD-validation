@@ -37,6 +37,40 @@ export function createNormativePromptEditor(
     "[data-normative-prompt-status]",
   );
 
+  const openButton = requireElementWithin(
+    root,
+    "[data-normative-prompt-open]",
+  );
+
+  const dialog = requireElementWithin(
+    root,
+    "[data-normative-prompt-dialog]",
+  );
+
+  const dialogTextarea = requireElementWithin(
+    dialog,
+    "[data-normative-prompt-dialog-textarea]",
+  );
+
+  const dialogSaveButton = requireElementWithin(
+    dialog,
+    "[data-normative-prompt-dialog-save]",
+  );
+
+  const dialogRestoreButton = requireElementWithin(
+    dialog,
+    "[data-normative-prompt-dialog-restore]",
+  );
+
+  const dialogStatusElement = requireElementWithin(
+    dialog,
+    "[data-normative-prompt-dialog-status]",
+  );
+
+  const dialogCloseButtons = dialog.querySelectorAll(
+    "[data-normative-prompt-dialog-close]",
+  );
+
 
   const state = {
     sectionId: null,
@@ -56,6 +90,10 @@ export function createNormativePromptEditor(
     statusElement.textContent = message;
 
     statusElement.dataset.state = stateName;
+
+    dialogStatusElement.textContent = message;
+
+    dialogStatusElement.dataset.state = stateName;
   }
 
 
@@ -67,6 +105,32 @@ export function createNormativePromptEditor(
     saveButton.disabled = disabled;
 
     restoreButton.disabled = disabled;
+
+    dialogTextarea.disabled = disabled;
+
+    dialogSaveButton.disabled = disabled;
+
+    dialogRestoreButton.disabled = disabled;
+  }
+
+
+  function syncPromptValues(
+    value,
+    source = null,
+  ) {
+    if (
+      source !== textarea
+      && textarea.value !== value
+    ) {
+      textarea.value = value;
+    }
+
+    if (
+      source !== dialogTextarea
+      && dialogTextarea.value !== value
+    ) {
+      dialogTextarea.value = value;
+    }
   }
 
 
@@ -125,6 +189,76 @@ export function createNormativePromptEditor(
   }
 
 
+  function updateWorkingPrompt(
+    source,
+  ) {
+    if (!state.sectionId) {
+      return;
+    }
+
+    state.workingBySection.set(
+      state.sectionId,
+      source.value,
+    );
+
+    syncPromptValues(
+      source.value,
+      source,
+    );
+
+    renderDirtyState();
+  }
+
+
+  function openDialog() {
+    syncPromptValues(
+      textarea.value,
+    );
+
+    if (dialog.open) {
+      return;
+    }
+
+    if (
+      typeof dialog.showModal === "function"
+    ) {
+      dialog.showModal();
+
+    } else {
+      dialog.setAttribute(
+        "open",
+        "",
+      );
+    }
+
+    window.requestAnimationFrame(
+      () => {
+        if (!dialogTextarea.disabled) {
+          dialogTextarea.focus();
+        }
+      },
+    );
+  }
+
+
+  function closeDialog() {
+    if (!dialog.open) {
+      return;
+    }
+
+    if (
+      typeof dialog.close === "function"
+    ) {
+      dialog.close();
+
+    } else {
+      dialog.removeAttribute(
+        "open",
+      );
+    }
+  }
+
+
   async function loadSection(
     sectionId,
     {
@@ -141,7 +275,9 @@ export function createNormativePromptEditor(
     state.sectionId = sectionId;
 
     if (!sectionId) {
-      textarea.value = "";
+      syncPromptValues(
+        "",
+      );
 
       setDisabled(
         true,
@@ -191,11 +327,11 @@ export function createNormativePromptEditor(
         );
       }
 
-      textarea.value = (
+      syncPromptValues(
         state.workingBySection.get(
           sectionId,
         )
-        ?? ""
+        ?? "",
       );
 
       setDisabled(
@@ -212,7 +348,9 @@ export function createNormativePromptEditor(
         return;
       }
 
-      textarea.value = "";
+      syncPromptValues(
+        "",
+      );
 
       setDisabled(
         true,
@@ -235,7 +373,7 @@ export function createNormativePromptEditor(
 
     const sectionId = state.sectionId;
 
-    const workingPrompt = textarea.value;
+    const workingPrompt = currentWorkingPrompt();
 
     setDisabled(
       true,
@@ -270,8 +408,8 @@ export function createNormativePromptEditor(
         section.system_prompt,
       );
 
-      textarea.value = (
-        section.system_prompt
+      syncPromptValues(
+        section.system_prompt,
       );
 
       setStatus(
@@ -327,16 +465,19 @@ export function createNormativePromptEditor(
   textarea.addEventListener(
     "input",
     () => {
-      if (!state.sectionId) {
-        return;
-      }
-
-      state.workingBySection.set(
-        state.sectionId,
-        textarea.value,
+      updateWorkingPrompt(
+        textarea,
       );
+    },
+  );
 
-      renderDirtyState();
+
+  dialogTextarea.addEventListener(
+    "input",
+    () => {
+      updateWorkingPrompt(
+        dialogTextarea,
+      );
     },
   );
 
@@ -353,6 +494,48 @@ export function createNormativePromptEditor(
     "click",
     async () => {
       await restoreSystemPrompt();
+    },
+  );
+
+
+  dialogSaveButton.addEventListener(
+    "click",
+    async () => {
+      await saveSystemPrompt();
+    },
+  );
+
+
+  dialogRestoreButton.addEventListener(
+    "click",
+    async () => {
+      await restoreSystemPrompt();
+    },
+  );
+
+
+  openButton.addEventListener(
+    "click",
+    openDialog,
+  );
+
+
+  dialogCloseButtons.forEach(
+    (button) => {
+      button.addEventListener(
+        "click",
+        closeDialog,
+      );
+    },
+  );
+
+
+  dialog.addEventListener(
+    "click",
+    (event) => {
+      if (event.target === dialog) {
+        closeDialog();
+      }
     },
   );
 

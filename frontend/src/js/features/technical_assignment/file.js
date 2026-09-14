@@ -23,6 +23,12 @@ const TECHNICAL_ASSIGNMENT_ENDPOINT = (
 
 const POLL_INTERVAL_MS = 2000;
 
+const SUPPORTED_EXTENSIONS = [
+  ".pdf",
+  ".doc",
+  ".docx",
+];
+
 const STATUS_LABELS = {
   waiting_section: "Ожидает раздел",
   uploading: "Загрузка",
@@ -82,6 +88,21 @@ async function requestJson(
 }
 
 
+function isSupportedFile(
+  file,
+) {
+  const lowerName = file.name.toLowerCase();
+
+  return SUPPORTED_EXTENSIONS.some(
+    (extension) => (
+      lowerName.endsWith(
+        extension,
+      )
+    ),
+  );
+}
+
+
 export function createTechnicalAssignmentFilePicker(
   root,
   {
@@ -98,14 +119,9 @@ export function createTechnicalAssignmentFilePicker(
     "#specificationFile",
   );
 
-  const disabledSurface = requireElementWithin(
+  const uploadZone = requireElementWithin(
     section,
-    ".normative-sidebar__disabled-surface",
-  );
-
-  const selectLabel = requireElementWithin(
-    section,
-    "label[for=\"specificationFile\"]",
+    "[data-technical-assignment-upload-zone]",
   );
 
   const fileName = requireElementWithin(
@@ -113,9 +129,14 @@ export function createTechnicalAssignmentFilePicker(
     ".normative-sidebar__file-picker-name",
   );
 
-  const badge = requireElementWithin(
+  const availabilityBadge = requireElementWithin(
     section,
-    ".normative-sidebar__disabled-badge",
+    "[data-technical-assignment-badge]",
+  );
+
+  const clearButton = requireElementWithin(
+    section,
+    "[data-technical-assignment-clear]",
   );
 
   const hint = requireElementWithin(
@@ -591,35 +612,44 @@ export function createTechnicalAssignmentFilePicker(
         : "Файл не выбран"
     );
 
-    if (file) {
-      badge.textContent = "Очистить";
+    fileName.title = (
+      file
+        ? file.name
+        : ""
+    );
 
-      badge.setAttribute(
-        "role",
-        "button",
-      );
+    clearButton.hidden = !file;
+  }
 
-      badge.setAttribute(
-        "tabindex",
-        "0",
-      );
 
-      badge.dataset.action = "clear";
+  function setUploadEnabled(
+    enabled,
+  ) {
+    uploadZone.dataset.disabled = (
+      enabled
+        ? "false"
+        : "true"
+    );
 
-      return;
+    uploadZone.setAttribute(
+      "aria-disabled",
+      enabled
+        ? "false"
+        : "true",
+    );
+
+    uploadZone.tabIndex = (
+      enabled
+        ? 0
+        : -1
+    );
+
+    if (enabled) {
+      input.disabled = false;
+
+    } else {
+      input.disabled = true;
     }
-
-    badge.textContent = "Необязательно";
-
-    badge.removeAttribute(
-      "role",
-    );
-
-    badge.removeAttribute(
-      "tabindex",
-    );
-
-    delete badge.dataset.action;
   }
 
 
@@ -632,28 +662,16 @@ export function createTechnicalAssignmentFilePicker(
       "normative-sidebar__specification",
     );
 
-    disabledSurface.classList.remove(
-      "normative-sidebar__disabled-surface",
+    availabilityBadge.textContent = (
+      "Необязательно"
     );
-
-    selectLabel.classList.add(
-      "normative-sidebar__button",
-    );
-
-    selectLabel.setAttribute(
-      "role",
-      "button",
-    );
-
-    selectLabel.setAttribute(
-      "tabindex",
-      "0",
-    );
-
-    input.disabled = false;
 
     input.accept = (
       TECHNICAL_ASSIGNMENT_ACCEPT
+    );
+
+    setUploadEnabled(
+      true,
     );
 
     hint.textContent = (
@@ -691,36 +709,87 @@ export function createTechnicalAssignmentFilePicker(
   }
 
 
-  function handleSelectKeydown(
-    event,
+  function showUnsupportedFileMessage() {
+    hint.textContent = (
+      "Поддерживаются только PDF, DOC и DOCX."
+    );
+  }
+
+
+  function assignFile(
+    file,
   ) {
     if (
-      event.key !== "Enter"
-      && event.key !== " "
+      !file
+      || !isSupportedFile(
+        file,
+      )
     ) {
+      showUnsupportedFileMessage();
+
+      return false;
+    }
+
+    const transfer = new DataTransfer();
+
+    transfer.items.add(
+      file,
+    );
+
+    input.files = transfer.files;
+
+    sync();
+
+    void prepareCurrentFile();
+
+    return true;
+  }
+
+
+  function handleFiles(
+    fileList,
+  ) {
+    const files = Array.from(
+      fileList || [],
+    );
+
+    const file = files.find(
+      isSupportedFile,
+    );
+
+    if (!file) {
+      showUnsupportedFileMessage();
+
       return;
     }
 
-    event.preventDefault();
+    assignFile(
+      file,
+    );
+  }
+
+
+  function handleUploadZoneClick(
+    event,
+  ) {
+    if (
+      uploadZone.dataset.disabled === "true"
+      || event.target.closest(
+        "[data-technical-assignment-clear]",
+      )
+    ) {
+      return;
+    }
 
     input.click();
   }
 
 
-  function handleBadgeClick() {
-    if (!hasFile()) {
-      return;
-    }
-
-    clear();
-  }
-
-
-  function handleBadgeKeydown(
+  function handleUploadZoneKeydown(
     event,
   ) {
     if (
-      !hasFile()
+      uploadZone.dataset.disabled === "true"
       || (
         event.key !== "Enter"
         && event.key !== " "
@@ -731,7 +800,76 @@ export function createTechnicalAssignmentFilePicker(
 
     event.preventDefault();
 
-    clear();
+    input.click();
+  }
+
+
+  function handleDragEnter(
+    event,
+  ) {
+    if (
+      uploadZone.dataset.disabled === "true"
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    uploadZone.dataset.dragOver = "true";
+  }
+
+
+  function handleDragOver(
+    event,
+  ) {
+    if (
+      uploadZone.dataset.disabled === "true"
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    uploadZone.dataset.dragOver = "true";
+
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+  }
+
+
+  function handleDragLeave(
+    event,
+  ) {
+    if (
+      event.relatedTarget
+      && uploadZone.contains(
+        event.relatedTarget,
+      )
+    ) {
+      return;
+    }
+
+    uploadZone.dataset.dragOver = "false";
+  }
+
+
+  function handleDrop(
+    event,
+  ) {
+    if (
+      uploadZone.dataset.disabled === "true"
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    uploadZone.dataset.dragOver = "false";
+
+    handleFiles(
+      event.dataTransfer?.files,
+    );
   }
 
 
@@ -747,19 +885,43 @@ export function createTechnicalAssignmentFilePicker(
       },
     );
 
-    selectLabel.addEventListener(
-      "keydown",
-      handleSelectKeydown,
-    );
-
-    badge.addEventListener(
+    uploadZone.addEventListener(
       "click",
-      handleBadgeClick,
+      handleUploadZoneClick,
     );
 
-    badge.addEventListener(
+    uploadZone.addEventListener(
       "keydown",
-      handleBadgeKeydown,
+      handleUploadZoneKeydown,
+    );
+
+    uploadZone.addEventListener(
+      "dragenter",
+      handleDragEnter,
+    );
+
+    uploadZone.addEventListener(
+      "dragover",
+      handleDragOver,
+    );
+
+    uploadZone.addEventListener(
+      "dragleave",
+      handleDragLeave,
+    );
+
+    uploadZone.addEventListener(
+      "drop",
+      handleDrop,
+    );
+
+    clearButton.addEventListener(
+      "click",
+      (event) => {
+        event.stopPropagation();
+
+        clear();
+      },
     );
 
     setStatus(
