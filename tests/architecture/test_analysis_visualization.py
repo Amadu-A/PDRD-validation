@@ -271,7 +271,7 @@ def test_frontend_visualization_supports_inline_overlay_regions() -> None:
 
     assert "inset: 0;" in css
 
-    assert "var(--color-danger) 30%" in css
+    assert "var(--color-danger) 10%" in css
 
     assert ".analysis-result__connector--active" in css
 

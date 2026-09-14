@@ -75,9 +75,13 @@ export function createNormativePromptEditor(
   const state = {
     sectionId: null,
 
+    readySectionId: null,
+
     workingBySection: new Map(),
 
     systemBySection: new Map(),
+
+    dirtySections: new Set(),
 
     requestToken: 0,
   };
@@ -162,6 +166,16 @@ export function createNormativePromptEditor(
   }
 
 
+  function isCurrentSectionDirty() {
+    return Boolean(
+      state.sectionId
+      && state.dirtySections.has(
+        state.sectionId,
+      )
+    );
+  }
+
+
   function renderDirtyState() {
     if (!state.sectionId) {
       setStatus(
@@ -171,10 +185,7 @@ export function createNormativePromptEditor(
       return;
     }
 
-    if (
-      currentWorkingPrompt()
-      === currentSystemPrompt()
-    ) {
+    if (!isCurrentSectionDirty()) {
       setStatus(
         "Используется сохранённый системный prompt.",
       );
@@ -189,6 +200,37 @@ export function createNormativePromptEditor(
   }
 
 
+  function updateDirtyState(
+    sectionId,
+  ) {
+    const workingPrompt = (
+      state.workingBySection.get(
+        sectionId,
+      )
+      ?? ""
+    );
+
+    const systemPrompt = (
+      state.systemBySection.get(
+        sectionId,
+      )
+      ?? ""
+    );
+
+    if (workingPrompt === systemPrompt) {
+      state.dirtySections.delete(
+        sectionId,
+      );
+
+      return;
+    }
+
+    state.dirtySections.add(
+      sectionId,
+    );
+  }
+
+
   function updateWorkingPrompt(
     source,
   ) {
@@ -196,9 +238,15 @@ export function createNormativePromptEditor(
       return;
     }
 
+    const sectionId = state.sectionId;
+
     state.workingBySection.set(
-      state.sectionId,
+      sectionId,
       source.value,
+    );
+
+    updateDirtyState(
+      sectionId,
     );
 
     syncPromptValues(
@@ -274,6 +322,8 @@ export function createNormativePromptEditor(
 
     state.sectionId = sectionId;
 
+    state.readySectionId = null;
+
     if (!sectionId) {
       syncPromptValues(
         "",
@@ -287,7 +337,7 @@ export function createNormativePromptEditor(
         "Выберите нормативный раздел.",
       );
 
-      return;
+      return false;
     }
 
     setDisabled(
@@ -307,7 +357,7 @@ export function createNormativePromptEditor(
         token
         !== state.requestToken
       ) {
-        return;
+        return false;
       }
 
       state.systemBySection.set(
@@ -317,13 +367,21 @@ export function createNormativePromptEditor(
 
       if (
         replaceWorking
-        || !state.workingBySection.has(
+        || !state.dirtySections.has(
           sectionId,
         )
       ) {
         state.workingBySection.set(
           sectionId,
           section.system_prompt,
+        );
+
+        state.dirtySections.delete(
+          sectionId,
+        );
+      } else {
+        updateDirtyState(
+          sectionId,
         );
       }
 
@@ -334,19 +392,25 @@ export function createNormativePromptEditor(
         ?? "",
       );
 
+      state.readySectionId = sectionId;
+
       setDisabled(
         false,
       );
 
       renderDirtyState();
 
+      return true;
+
     } catch (error) {
       if (
         token
         !== state.requestToken
       ) {
-        return;
+        return false;
       }
+
+      state.readySectionId = null;
 
       syncPromptValues(
         "",
@@ -362,12 +426,17 @@ export function createNormativePromptEditor(
           : String(error),
         "error",
       );
+
+      return false;
     }
   }
 
 
   async function saveSystemPrompt() {
-    if (!state.sectionId) {
+    if (
+      !state.sectionId
+      || state.readySectionId !== state.sectionId
+    ) {
       return;
     }
 
@@ -408,6 +477,12 @@ export function createNormativePromptEditor(
         section.system_prompt,
       );
 
+      state.dirtySections.delete(
+        sectionId,
+      );
+
+      state.readySectionId = sectionId;
+
       syncPromptValues(
         section.system_prompt,
       );
@@ -444,7 +519,7 @@ export function createNormativePromptEditor(
 
     const sectionId = state.sectionId;
 
-    await loadSection(
+    const restored = await loadSection(
       sectionId,
       {
         replaceWorking: true,
@@ -452,8 +527,9 @@ export function createNormativePromptEditor(
     );
 
     if (
-      state.sectionId
-      === sectionId
+      restored
+      && state.sectionId === sectionId
+      && state.readySectionId === sectionId
     ) {
       setStatus(
         "Рабочий prompt восстановлен из системного.",
@@ -543,25 +619,42 @@ export function createNormativePromptEditor(
   function getOverride(
     sectionId,
   ) {
+    const canUseWorkingPrompt = (
+      Boolean(
+        sectionId,
+      )
+      && sectionId === state.sectionId
+      && sectionId === state.readySectionId
+      && state.workingBySection.has(
+        sectionId,
+      )
+      && state.systemBySection.has(
+        sectionId,
+      )
+    );
+
     if (
-      !sectionId
-      || sectionId !== state.sectionId
-      || !state.workingBySection.has(
+      !canUseWorkingPrompt
+      || !state.dirtySections.has(
         sectionId,
       )
     ) {
       return {
+        /*
+         * Если пользователь prompt не менял, frontend не подменяет
+         * серверный system prompt его локальной копией. Gateway сам
+         * возьмёт актуальный section.system_prompt при создании snapshot.
+         */
         promptOverrideEnabled: false,
+
         promptOverride: "",
       };
     }
 
     return {
       /*
-       * Всегда передаём рабочий текст как snapshot override.
-       *
-       * Это гарантирует, что между нажатием "Запустить анализ"
-       * и чтением DB другим процессом prompt не изменится.
+       * Override передаётся только для реального несохранённого
+       * пользовательского изменения рабочего prompt.
        */
       promptOverrideEnabled: true,
 

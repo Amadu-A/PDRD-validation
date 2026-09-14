@@ -49,8 +49,8 @@ def test_prompt_editor_hooks_exist() -> None:
     )
 
 
-def test_exact_working_prompt_goes_to_analysis_form() -> None:
-    """Working prompt входит в immutable snapshot multipart."""
+def test_unmodified_system_prompt_is_not_forced_as_frontend_override() -> None:
+    """Неизменённый prompt должен браться Gateway из server-side section."""
     prompt_content = PROMPT_JS.read_text(
         encoding="utf-8",
     )
@@ -59,9 +59,54 @@ def test_exact_working_prompt_goes_to_analysis_form() -> None:
         encoding="utf-8",
     )
 
-    assert "promptOverrideEnabled: true" in prompt_content
+    required_prompt_markers = (
+        "readySectionId: null",
+        "dirtySections: new Set()",
+        "state.dirtySections.has(",
+        "promptOverrideEnabled: false",
+    )
+
+    missing = [
+        marker for marker in required_prompt_markers if marker not in prompt_content
+    ]
+
+    assert not missing, "\n".join(
+        missing,
+    )
+
+    assert "|| !state.dirtySections.has(" in prompt_content
+
+    assert "Всегда передаём рабочий текст как snapshot override." not in prompt_content
 
     assert '"normative_prompt_override_enabled"' in form_content
+
+
+def test_dirty_working_prompt_can_go_to_analysis_as_snapshot_override() -> None:
+    """Только пользовательское изменение включает immutable override."""
+    prompt_content = PROMPT_JS.read_text(
+        encoding="utf-8",
+    )
+
+    form_content = FORM_JS.read_text(
+        encoding="utf-8",
+    )
+
+    required_prompt_markers = (
+        "updateDirtyState(",
+        "state.dirtySections.add(",
+        "state.dirtySections.delete(",
+        "promptOverrideEnabled: true",
+    )
+
+    missing = [
+        marker for marker in required_prompt_markers if marker not in prompt_content
+    ]
+
+    assert not missing, "\n".join(
+        missing,
+    )
+
+    assert "selection.promptOverrideEnabled" in form_content
 
     assert '"normative_prompt_override"' in form_content
 
