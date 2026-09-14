@@ -161,6 +161,60 @@ def _use_case(
     )
 
 
+async def test_ten_findings_use_one_vlm_call() -> None:
+    """10 findings финализируются одним configured VLM batch."""
+    model = BatchVisionModel()
+
+    findings = tuple(
+        _finding(
+            index,
+        )
+        for index in range(
+            1,
+            11,
+        )
+    )
+
+    _, finalized, metrics = await _use_case(
+        model,
+        batch_size=10,
+    ).execute(
+        findings=findings,
+        experience_by_finding={},
+    )
+
+    assert (
+        len(
+            finalized,
+        )
+        == 10
+    )
+
+    assert tuple(finding.finding_id for finding in finalized) == tuple(
+        finding.finding_id for finding in findings
+    )
+
+    assert model.calls == 1
+
+    assert model.batch_sizes == [
+        10,
+    ]
+
+    assert metrics["effective_batch_size"] == 10
+
+    assert metrics["initial_batch_count"] == 1
+
+    assert metrics["vlm_call_count"] == 1
+
+    assert metrics["successful_vlm_call_count"] == 1
+
+    assert metrics["failed_vlm_call_count"] == 0
+
+    assert metrics["fallback_count"] == 0
+
+    assert metrics["split_count"] == 0
+
+
 async def test_fifty_findings_use_configured_batch_size() -> None:
     """50 findings не превращаются в 50 VLM calls."""
     model = BatchVisionModel()
