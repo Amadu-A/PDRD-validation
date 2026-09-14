@@ -82,7 +82,7 @@ class DatabaseSettings(BaseModel):
 
 
 class BrokerSettings(BaseModel):
-    """Настройки RabbitMQ."""
+    """Настройки RabbitMQ нормативной индексации."""
 
     host: str = "rabbitmq"
 
@@ -106,15 +106,59 @@ class BrokerSettings(BaseModel):
 
     routing_key: str = "normative.index"
 
+    message_ttl_seconds: int = Field(
+        default=14400,
+        ge=300,
+        le=86400,
+    )
+
+    queue_expires_seconds: int = Field(
+        default=604800,
+        ge=3600,
+        le=2_592_000,
+    )
+
+    task_expires_seconds: int = Field(
+        default=14400,
+        ge=300,
+        le=86400,
+    )
+
+    task_soft_time_limit_seconds: int = Field(
+        default=14100,
+        ge=300,
+        le=86400,
+    )
+
+    task_hard_time_limit_seconds: int = Field(
+        default=14400,
+        ge=300,
+        le=86400,
+    )
+
     connect_timeout_seconds: float = Field(
         default=5.0,
         gt=0,
         le=60,
     )
 
+    @model_validator(
+        mode="after",
+    )
+    def validate_task_limits(
+        self,
+    ) -> "BrokerSettings":
+        """Требует hard limit после soft limit."""
+        if self.task_soft_time_limit_seconds >= self.task_hard_time_limit_seconds:
+            raise ValueError(
+                "Knowledge broker hard time limit должен быть больше soft limit.",
+            )
+
+        return self
+
 
 class TechnicalAssignmentQueueSettings(BaseModel):
-    """Отдельная RabbitMQ очередь ТЗ."""
+    """Отдельная bounded RabbitMQ очередь ТЗ."""
 
     queue_name: str = "pdrd.knowledge.technical-assignment"
 
@@ -127,6 +171,89 @@ class TechnicalAssignmentQueueSettings(BaseModel):
         ge=1,
         le=10,
     )
+
+    message_ttl_seconds: int = Field(
+        default=3600,
+        ge=300,
+        le=86400,
+    )
+
+    queue_expires_seconds: int = Field(
+        default=86400,
+        ge=3600,
+        le=2_592_000,
+    )
+
+    task_expires_seconds: int = Field(
+        default=3600,
+        ge=300,
+        le=86400,
+    )
+
+    max_runtime_seconds: int = Field(
+        default=1740,
+        ge=300,
+        le=3600,
+    )
+
+    task_soft_time_limit_seconds: int = Field(
+        default=1770,
+        ge=300,
+        le=3600,
+    )
+
+    task_hard_time_limit_seconds: int = Field(
+        default=1800,
+        ge=300,
+        le=3600,
+    )
+
+    heartbeat_interval_seconds: int = Field(
+        default=15,
+        ge=5,
+        le=300,
+    )
+
+    stale_indexing_seconds: int = Field(
+        default=120,
+        ge=30,
+        le=3600,
+    )
+
+    recovery_interval_seconds: int = Field(
+        default=30,
+        ge=5,
+        le=600,
+    )
+
+    recovery_batch_size: int = Field(
+        default=50,
+        ge=1,
+        le=1000,
+    )
+
+    @model_validator(
+        mode="after",
+    )
+    def validate_lifecycle(
+        self,
+    ) -> "TechnicalAssignmentQueueSettings":
+        """Проверяет bounded T lifecycle settings."""
+        if not (
+            self.max_runtime_seconds
+            < self.task_soft_time_limit_seconds
+            < self.task_hard_time_limit_seconds
+        ):
+            raise ValueError(
+                "T lifecycle требует max_runtime < soft_limit < hard_limit.",
+            )
+
+        if self.stale_indexing_seconds <= self.heartbeat_interval_seconds * 2:
+            raise ValueError(
+                "stale_indexing_seconds должен быть больше двух heartbeat interval.",
+            )
+
+        return self
 
 
 class OutboxSettings(BaseModel):
@@ -249,6 +376,28 @@ class TechnicalAssignmentSettings(BaseModel):
         le=100,
     )
 
+    ocr_min_text_chars: int = Field(
+        default=80,
+        ge=0,
+        le=10_000,
+    )
+
+    ocr_executable: str = "tesseract"
+
+    ocr_language: str = "rus+eng"
+
+    ocr_page_segmentation_mode: int = Field(
+        default=3,
+        ge=1,
+        le=13,
+    )
+
+    ocr_timeout_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        le=600,
+    )
+
     @property
     def max_upload_bytes(
         self,
@@ -283,7 +432,7 @@ class EmbeddingSettings(BaseModel):
     )
 
     request_timeout_seconds: float = Field(
-        default=1800.0,
+        default=600.0,
         gt=0,
         le=7200,
     )
@@ -301,7 +450,9 @@ class EmbeddingSettings(BaseModel):
     )
 
 
-class MultimodalEmbeddingSettings(EmbeddingSettings):
+class MultimodalEmbeddingSettings(
+    EmbeddingSettings,
+):
     """Backward-compatible T settings той же unified model."""
 
     model_context_tokens: int = Field(
@@ -364,7 +515,10 @@ class QdrantSettings(BaseModel):
         le=60,
     )
 
-    legacy_collections: tuple[str, ...] = (
+    legacy_collections: tuple[
+        str,
+        ...,
+    ] = (
         "dva_normative_v2",
         "dva_experience_v2",
         "dva_multimodal_qwen3vl2b_v1",
@@ -455,14 +609,14 @@ class Settings(BaseSettings):
         default=4096,
         ge=64,
         le=4096,
-        validation_alias="PDRD_EMBEDDING_DIMENSION",
+        validation_alias=("PDRD_EMBEDDING_DIMENSION"),
     )
 
     embedding_schema_version: int = Field(
         default=1,
         ge=1,
         le=1000,
-        validation_alias="PDRD_EMBEDDING_SCHEMA_VERSION",
+        validation_alias=("PDRD_EMBEDDING_SCHEMA_VERSION"),
     )
 
     service_name: str = "PDRD Knowledge Service"
@@ -498,15 +652,15 @@ class Settings(BaseSettings):
     )
 
     storage: NormativeStorageSettings = Field(
-        default_factory=NormativeStorageSettings,
+        default_factory=(NormativeStorageSettings),
     )
 
     indexing: NormativeIndexingSettings = Field(
-        default_factory=NormativeIndexingSettings,
+        default_factory=(NormativeIndexingSettings),
     )
 
     technical_assignment: TechnicalAssignmentSettings = Field(
-        default_factory=TechnicalAssignmentSettings,
+        default_factory=(TechnicalAssignmentSettings),
     )
 
     office_conversion: OfficeConversionSettings = Field(
@@ -518,7 +672,7 @@ class Settings(BaseSettings):
     )
 
     multimodal_embedding: MultimodalEmbeddingSettings = Field(
-        default_factory=MultimodalEmbeddingSettings,
+        default_factory=(MultimodalEmbeddingSettings),
     )
 
     qdrant: QdrantSettings = Field(
@@ -562,7 +716,7 @@ class Settings(BaseSettings):
         """Возвращает immutable vector-space identity."""
         return EmbeddingIdentity(
             model=self.embedding_model,
-            dimension=self.embedding_dimension,
+            dimension=(self.embedding_dimension),
             schema_version=(self.embedding_schema_version),
         )
 

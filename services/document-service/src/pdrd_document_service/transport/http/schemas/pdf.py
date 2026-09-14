@@ -2,9 +2,46 @@
 
 """HTTP schemas PDF extraction."""
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+)
 
-from pdrd_document_service.domain.pdf import PdfPageType
+from pdrd_document_service.domain.pdf import (
+    PdfPageType,
+)
+
+
+class PdfNormalizedBoundingBoxResponse(
+    BaseModel,
+):
+    """Нормализованный bbox PDF text word."""
+
+    model_config = ConfigDict(
+        frozen=True,
+    )
+
+    x_min: int
+    y_min: int
+    x_max: int
+    y_max: int
+
+
+class PdfTextWordResponse(BaseModel):
+    """Слово PDF с геометрией."""
+
+    model_config = ConfigDict(
+        frozen=True,
+    )
+
+    text: str
+
+    bbox: PdfNormalizedBoundingBoxResponse
+
+    block_no: int
+    line_no: int
+    word_no: int
 
 
 class PdfPageResponse(BaseModel):
@@ -24,8 +61,14 @@ class PdfPageResponse(BaseModel):
 
     image_base64: str
 
+    text_words: list[PdfTextWordResponse] = Field(
+        default_factory=list,
+    )
 
-class ProjectContextTextPageResponse(BaseModel):
+
+class ProjectContextTextPageResponse(
+    BaseModel,
+):
     """Text-only страница выбранного диапазона ПЗ."""
 
     model_config = ConfigDict(
@@ -36,7 +79,9 @@ class ProjectContextTextPageResponse(BaseModel):
     text: str
 
 
-class ExplanatoryNoteContextResponse(BaseModel):
+class ExplanatoryNoteContextResponse(
+    BaseModel,
+):
     """Извлечённый контекст Пояснительной записки."""
 
     model_config = ConfigDict(

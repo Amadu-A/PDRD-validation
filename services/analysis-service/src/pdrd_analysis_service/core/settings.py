@@ -61,7 +61,7 @@ class VisionSettings(BaseModel):
     keep_alive: str = "0s"
 
     max_retry_num_predict: int = Field(
-        default=6000,
+        default=14000,
         ge=1,
         le=20000,
     )
@@ -130,14 +130,44 @@ class PipelineSettings(BaseModel):
     )
 
     norm_check_num_predict: int = Field(
-        default=2600,
+        default=14000,
         ge=1,
+        le=20000,
+    )
+
+    technical_assignment_num_predict: int = Field(
+        default=4000,
+        ge=1,
+        le=10000,
+    )
+
+    technical_assignment_batch_size: int = Field(
+        default=48,
+        ge=1,
+        le=100,
+    )
+
+    technical_assignment_max_requirements_per_page: int = Field(
+        default=1000,
+        ge=1,
+        le=10000,
+    )
+
+    technical_assignment_requirement_text_limit: int = Field(
+        default=1800,
+        ge=100,
         le=10000,
     )
 
     final_num_predict: int = Field(
         default=1800,
         ge=1,
+        le=10000,
+    )
+
+    finding_location_num_predict: int = Field(
+        default=4000,
+        ge=200,
         le=10000,
     )
 

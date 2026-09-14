@@ -70,6 +70,7 @@ class AnalysisJob:
         ),
         AnalysisJobStatus.PROCESSING: frozenset(
             {
+                AnalysisJobStatus.QUEUED,
                 AnalysisJobStatus.COMPLETED,
                 AnalysisJobStatus.FAILED,
                 AnalysisJobStatus.CANCELLED,
@@ -132,6 +133,47 @@ class AnalysisJob:
         )
 
         self.attempt_count += 1
+        self.error_code = None
+        self.error_message = None
+
+    def resume_processing_attempt(
+        self,
+    ) -> None:
+        """Учитывает broker redelivery уже processing задания."""
+        if self.status is not AnalysisJobStatus.PROCESSING:
+            raise InvalidAnalysisJobTransitionError(
+                "Повтор processing attempt допустим только из processing.",
+            )
+
+        self.attempt_count += 1
+        self.error_code = None
+        self.error_message = None
+        self.updated_at = utc_now()
+
+    def mark_requeued(
+        self,
+        *,
+        error_code: str,
+        error_message: str,
+    ) -> None:
+        """Возвращает transient/stale processing job в durable queue."""
+        self._transition_to(
+            AnalysisJobStatus.QUEUED,
+        )
+
+        self.error_code = error_code[:128]
+        self.error_message = error_message[:2000]
+
+    def touch_processing(
+        self,
+        *,
+        changed_at: datetime | None = None,
+    ) -> None:
+        """Обновляет heartbeat только у processing задания."""
+        if self.status is not AnalysisJobStatus.PROCESSING:
+            return
+
+        self.updated_at = changed_at or utc_now()
 
     def mark_completed(
         self,
@@ -155,8 +197,8 @@ class AnalysisJob:
             AnalysisJobStatus.FAILED,
         )
 
-        self.error_code = error_code
-        self.error_message = error_message
+        self.error_code = error_code[:128]
+        self.error_message = error_message[:2000]
 
     def mark_cancelled(
         self,

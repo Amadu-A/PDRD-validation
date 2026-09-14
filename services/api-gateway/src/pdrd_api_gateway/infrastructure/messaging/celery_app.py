@@ -12,6 +12,7 @@ from pdrd_api_gateway.infrastructure.messaging.broker import (
 
 settings = get_settings()
 broker_settings = settings.broker
+lifecycle_settings = settings.lifecycle
 
 analysis_exchange = Exchange(
     broker_settings.exchange_name,
@@ -24,6 +25,10 @@ analysis_queue = Queue(
     exchange=analysis_exchange,
     routing_key=broker_settings.routing_key,
     durable=True,
+    queue_arguments={
+        "x-message-ttl": broker_settings.message_ttl_seconds * 1000,
+        "x-expires": broker_settings.queue_expires_seconds * 1000,
+    },
 )
 
 celery_app = Celery(
@@ -58,6 +63,12 @@ celery_app.conf.update(
     task_send_sent_event=True,
     worker_send_task_events=True,
     task_ignore_result=True,
+    task_annotations={
+        "pdrd.analysis.requested": {
+            "soft_time_limit": lifecycle_settings.task_soft_time_limit_seconds,
+            "time_limit": lifecycle_settings.task_hard_time_limit_seconds,
+        },
+    },
     result_expires=broker_settings.result_expires_seconds,
     broker_connection_retry_on_startup=True,
     broker_connection_timeout=(broker_settings.connect_timeout_seconds),

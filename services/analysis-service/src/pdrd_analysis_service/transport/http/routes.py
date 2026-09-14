@@ -38,7 +38,11 @@ from pdrd_analysis_service.transport.http.schemas import (
     FinalFindingPayload,
     FinalizeRequest,
     FinalizeResponse,
+    FindingBoundingBoxPayload,
     FindingDraftPayload,
+    FindingLocalizationRequest,
+    FindingLocalizationResponse,
+    FindingLocationPayload,
     LiveHealthResponse,
     NormativeQueriesRequest,
     NormativeQueriesResponse,
@@ -141,8 +145,8 @@ def _technical_assignment_source_payload(
         source_id=source.source_id,
         point_id=source.point_id,
         score=source.score,
-        technical_assignment_id=source.technical_assignment_id,
-        analysis_document_id=source.analysis_document_id,
+        technical_assignment_id=(source.technical_assignment_id),
+        analysis_document_id=(source.analysis_document_id),
         section_id=source.section_id,
         source_sha256=source.source_sha256,
         source_file=source.source_file,
@@ -207,7 +211,7 @@ def _finding_draft_payload(
         status=finding.status,
         comment=finding.comment,
         evidence=finding.evidence,
-        recommendation_draft=finding.recommendation_draft,
+        recommendation_draft=(finding.recommendation_draft),
         confidence=finding.confidence,
         normative_source_ids=list(
             finding.normative_source_ids,
@@ -477,6 +481,61 @@ async def check_norms(
 
 
 @router.post(
+    "/internal/v1/findings/localize",
+    response_model=FindingLocalizationResponse,
+)
+async def localize_findings(
+    request: FindingLocalizationRequest,
+    container: Annotated[
+        ApplicationContainer,
+        Depends(
+            get_container,
+        ),
+    ],
+) -> FindingLocalizationResponse:
+    """Локализует готовые findings на PDF-изображении страницы."""
+    image = _decode_image(
+        encoded=request.image_base64,
+        max_bytes=(container.settings.pipeline.max_image_bytes),
+    )
+
+    try:
+        locations, metrics = await container.localize_findings.execute(
+            page_number=request.page_number,
+            extracted_text=request.extracted_text,
+            image_bytes=image,
+            findings=tuple(finding.to_domain() for finding in request.findings),
+        )
+
+    except VisionModelError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    return FindingLocalizationResponse(
+        locations=[
+            FindingLocationPayload(
+                finding_id=location.finding_id,
+                status=location.status,
+                bbox=(
+                    FindingBoundingBoxPayload(
+                        **location.bbox.as_dict(),
+                    )
+                    if location.bbox is not None
+                    else None
+                ),
+                confidence=location.confidence,
+            )
+            for location in locations
+        ],
+        metrics=metrics,
+    )
+
+
+@router.post(
     "/internal/v1/findings/finalize",
     response_model=FinalizeResponse,
 )
@@ -498,14 +557,20 @@ async def finalize_findings(
         findings=tuple(finding.to_domain() for finding in request.findings),
         experience_by_finding={
             finding_id: tuple(source.to_domain() for source in sources)
-            for finding_id, sources in request.experience_by_finding.items()
+            for (
+                finding_id,
+                sources,
+            ) in request.experience_by_finding.items()
         },
         normative_candidates=tuple(
             source.to_domain() for source in request.normative_candidates
         ),
         normative_candidates_by_finding={
             finding_id: tuple(source.to_domain() for source in sources)
-            for finding_id, sources in request.normative_candidates_by_finding.items()
+            for (
+                finding_id,
+                sources,
+            ) in request.normative_candidates_by_finding.items()
         },
     )
 

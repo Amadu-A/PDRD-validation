@@ -2,11 +2,13 @@
 
 """Use case выполнения queued analysis job."""
 
+import asyncio
 import logging
 from dataclasses import (
     dataclass,
     replace,
 )
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -14,6 +16,7 @@ from pdrd_api_gateway.application.ports.artifacts import (
     AnalysisArtifactStore,
 )
 from pdrd_api_gateway.application.ports.orchestration import (
+    AnalysisOrchestrationTransientError,
     AnalysisOrchestrator,
 )
 from pdrd_api_gateway.application.ports.persistence import (
@@ -28,6 +31,7 @@ from pdrd_api_gateway.application.ports.technical_assignment_index import (
 from pdrd_api_gateway.domain.analysis_job import (
     AnalysisJob,
     AnalysisJobStatus,
+    utc_now,
 )
 
 LOGGER = logging.getLogger(
@@ -53,6 +57,12 @@ class AnalysisExecutionError(
     """Ошибка фактического выполнения анализа."""
 
 
+class AnalysisTransientExecutionError(
+    RuntimeError,
+):
+    """Временная ошибка, для которой разрешён controlled Celery retry."""
+
+
 @dataclass(frozen=True, slots=True)
 class ExecuteAnalysisJob:
     """Выполняет одно asynchronous analysis job."""
@@ -63,6 +73,12 @@ class ExecuteAnalysisJob:
 
     orchestrator: AnalysisOrchestrator
 
+    max_runtime_seconds: int
+
+    max_attempts: int
+
+    min_retry_budget_seconds: int
+
     project_context_cleaner: ProjectContextCleaner | None = None
 
     technical_assignment_coordinator: TechnicalAssignmentIndexCoordinator | None = None
@@ -71,13 +87,16 @@ class ExecuteAnalysisJob:
         self,
         *,
         job_id: UUID,
+        allow_retry: bool,
+        redelivered: bool,
     ) -> dict[
         str,
         Any,
     ]:
-        """Запускает job только после READY ТЗ."""
+        """Запускает job с абсолютным deadline и idempotent redelivery."""
         job = await self._prepare_job(
             job_id=job_id,
+            redelivered=redelivered,
         )
 
         if job.status is AnalysisJobStatus.COMPLETED:
@@ -90,6 +109,19 @@ class ExecuteAnalysisJob:
             )
 
             return result
+
+        if job.attempt_count > self.max_attempts:
+            await self._mark_failed(
+                job_id=job_id,
+                error=RuntimeError(
+                    "Исчерпан лимит analysis attempts.",
+                ),
+                error_code="analysis_attempts_exhausted",
+            )
+
+            raise AnalysisExecutionError(
+                f"Analysis job {job_id} превысил max_attempts.",
+            )
 
         document_id = job.document_id
 
@@ -109,40 +141,69 @@ class ExecuteAnalysisJob:
                 )
             ) from error
 
-        try:
-            existing_result = await self.artifact_store.load_result(
-                document_id=document_id,
+        remaining_seconds = self._remaining_seconds(
+            job=job,
+        )
+
+        if remaining_seconds <= 0:
+            await self._mark_failed(
+                job_id=job_id,
+                error=TimeoutError(
+                    "Истёк абсолютный deadline analysis job.",
+                ),
+                error_code="analysis_deadline_exceeded",
             )
 
-            if existing_result is not None:
-                await self._mark_completed(
-                    job_id=job_id,
+            raise AnalysisExecutionError(
+                f"Analysis job {job_id} уже превысил lifecycle deadline.",
+            )
+
+        try:
+            async with asyncio.timeout(
+                remaining_seconds,
+            ):
+                result = await self._execute_pipeline(
+                    job=job,
+                    document_id=document_id,
                 )
 
-                return existing_result
-
-            artifacts = await self.artifact_store.load_request(
-                document_id=document_id,
+        except TimeoutError as error:
+            await self._mark_failed(
+                job_id=job_id,
+                error=error,
+                error_code="analysis_deadline_exceeded",
             )
 
-            await self._ensure_technical_assignment_ready(
+            raise AnalysisExecutionError(
+                "Analysis job превысил абсолютный lifecycle deadline "
+                f"{self.max_runtime_seconds} секунд.",
+            ) from error
+
+        except AnalysisOrchestrationTransientError as error:
+            if self._can_retry(
                 job=job,
-                document_id=document_id,
+                allow_retry=allow_retry,
+            ):
+                await self._mark_requeued(
+                    job_id=job_id,
+                    error=error,
+                )
+
+                raise AnalysisTransientExecutionError(
+                    "Transient orchestration error допускает controlled retry: "
+                    f"{type(error).__name__}: {error}",
+                ) from error
+
+            await self._mark_failed(
+                job_id=job_id,
+                error=error,
+                error_code="analysis_transient_retry_exhausted",
             )
 
-            artifacts = replace(
-                artifacts,
-                normative_snapshot=job.normative_snapshot,
-            )
-
-            result = await self.orchestrator.execute(
-                artifacts=artifacts,
-            )
-
-            await self.artifact_store.save_result(
-                document_id=document_id,
-                result=result,
-            )
+            raise AnalysisExecutionError(
+                "Transient orchestration error не может быть повторена "
+                "в оставшемся deadline budget.",
+            ) from error
 
         except Exception as error:
             await self._mark_failed(
@@ -166,6 +227,81 @@ class ExecuteAnalysisJob:
         )
 
         return result
+
+    async def _execute_pipeline(
+        self,
+        *,
+        job: AnalysisJob,
+        document_id: UUID,
+    ) -> dict[str, Any]:
+        """Выполняет idempotent pipeline внутри lifecycle deadline."""
+        existing_result = await self.artifact_store.load_result(
+            document_id=document_id,
+        )
+
+        if existing_result is not None:
+            return existing_result
+
+        artifacts = await self.artifact_store.load_request(
+            document_id=document_id,
+        )
+
+        await self._ensure_technical_assignment_ready(
+            job=job,
+            document_id=document_id,
+        )
+
+        artifacts = replace(
+            artifacts,
+            normative_snapshot=job.normative_snapshot,
+        )
+
+        result = await self.orchestrator.execute(
+            artifacts=artifacts,
+        )
+
+        await self.artifact_store.save_result(
+            document_id=document_id,
+            result=result,
+        )
+
+        return result
+
+    def _remaining_seconds(
+        self,
+        *,
+        job: AnalysisJob,
+        now: datetime | None = None,
+    ) -> float:
+        """Возвращает остаток абсолютного lifecycle budget."""
+        current = now or utc_now()
+
+        elapsed = (current - job.created_at).total_seconds()
+
+        return max(
+            float(self.max_runtime_seconds) - elapsed,
+            0.0,
+        )
+
+    def _can_retry(
+        self,
+        *,
+        job: AnalysisJob,
+        allow_retry: bool,
+    ) -> bool:
+        """Разрешает retry только при достаточном времени и attempts budget."""
+        if not allow_retry:
+            return False
+
+        if job.attempt_count >= self.max_attempts:
+            return False
+
+        return (
+            self._remaining_seconds(
+                job=job,
+            )
+            >= self.min_retry_budget_seconds
+        )
 
     async def _ensure_technical_assignment_ready(
         self,
@@ -228,10 +364,11 @@ class ExecuteAnalysisJob:
         self,
         *,
         job_id: UUID,
+        redelivered: bool,
     ) -> AnalysisJob:
-        """Загружает job и переводит в processing."""
+        """Загружает job под row lock и переводит в processing."""
         async with self.unit_of_work_factory() as unit_of_work:
-            job = await unit_of_work.analysis_jobs.get(
+            job = await unit_of_work.analysis_jobs.get_for_update(
                 job_id,
             )
 
@@ -257,18 +394,16 @@ class ExecuteAnalysisJob:
 
             if job.status is AnalysisJobStatus.PENDING:
                 job.mark_queued()
-
                 job.mark_processing()
-
                 changed = True
 
             elif job.status is AnalysisJobStatus.QUEUED:
                 job.mark_processing()
-
                 changed = True
 
-            elif job.status is AnalysisJobStatus.PROCESSING:
-                pass
+            elif job.status is AnalysisJobStatus.PROCESSING and redelivered:
+                job.resume_processing_attempt()
+                changed = True
 
             if changed:
                 await unit_of_work.analysis_jobs.update(
@@ -311,7 +446,7 @@ class ExecuteAnalysisJob:
     ) -> None:
         """Фиксирует успешное завершение."""
         async with self.unit_of_work_factory() as unit_of_work:
-            job = await unit_of_work.analysis_jobs.get(
+            job = await unit_of_work.analysis_jobs.get_for_update(
                 job_id,
             )
 
@@ -338,15 +473,45 @@ class ExecuteAnalysisJob:
 
             await unit_of_work.commit()
 
-    async def _mark_failed(
+    async def _mark_requeued(
         self,
         *,
         job_id: UUID,
         error: Exception,
     ) -> None:
+        """Возвращает transient failure в queued перед Celery retry."""
+        async with self.unit_of_work_factory() as unit_of_work:
+            job = await unit_of_work.analysis_jobs.get_for_update(
+                job_id,
+            )
+
+            if job is None:
+                return
+
+            if job.status is not AnalysisJobStatus.PROCESSING:
+                return
+
+            job.mark_requeued(
+                error_code="analysis_transient_failure",
+                error_message=(f"{type(error).__name__}: {error}"),
+            )
+
+            await unit_of_work.analysis_jobs.update(
+                job,
+            )
+
+            await unit_of_work.commit()
+
+    async def _mark_failed(
+        self,
+        *,
+        job_id: UUID,
+        error: Exception,
+        error_code: str = "analysis_execution_failed",
+    ) -> None:
         """Фиксирует terminal execution error."""
         async with self.unit_of_work_factory() as unit_of_work:
-            job = await unit_of_work.analysis_jobs.get(
+            job = await unit_of_work.analysis_jobs.get_for_update(
                 job_id,
             )
 
@@ -361,8 +526,8 @@ class ExecuteAnalysisJob:
                 return
 
             job.mark_failed(
-                error_code="analysis_execution_failed",
-                error_message=(f"{type(error).__name__}: {error}")[:2000],
+                error_code=error_code,
+                error_message=(f"{type(error).__name__}: {error}"),
             )
 
             await unit_of_work.analysis_jobs.update(

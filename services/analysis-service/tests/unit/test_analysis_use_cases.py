@@ -221,8 +221,10 @@ def test_normative_queries_preserve_model_queries() -> None:
     assert any("Контекст ПЗ проекта" in query for query in queries)
 
 
-async def test_normative_check_filters_compliance() -> None:
-    """Проверяет удаление compliance confirmation."""
+async def test_normative_check_does_not_semantically_filter_generated_candidates() -> (
+    None
+):
+    """Backend не удаляет schema-valid candidate по смыслу его текста."""
     model = FakeVisionModel(
         [
             {
@@ -280,18 +282,24 @@ async def test_normative_check_filters_compliance() -> None:
         len(
             findings,
         )
-        == 1
+        == 2
     )
 
-    assert findings[0].finding_id == "p1-f1"
+    assert [item.finding_id for item in findings] == [
+        "p1-f1",
+        "p1-f2",
+    ]
+
+    assert findings[0].comment == "Заземление соответствует требованиям."
+    assert findings[1].comment == "Металлический корпус не заземлён."
 
     assert findings[0].normative_source_ids == ("N1",)
+    assert findings[1].normative_source_ids == ("N1",)
 
-    assert findings[0].status == "confirmed"
+    assert "PUE.pdf" in findings[1].basis
 
-    assert "PUE.pdf" in findings[0].basis
-
-    assert "Категория:" in findings[0].experience_query
+    assert "HIGH-RECALL FINDING POLICY" in model.prompts[0]
+    assert "НЕ ограничивай ответ несколькими примерами." in model.prompts[0]
 
 
 async def test_engineering_check_without_sources_calls_vlm_and_keeps_finding() -> None:

@@ -57,6 +57,9 @@ const normativeRoot = requireElement(
 const technicalAssignmentFilePicker = (
   createTechnicalAssignmentFilePicker(
     normativeRoot,
+    {
+      submitButton,
+    },
   )
 );
 
@@ -88,6 +91,10 @@ const normativeCatalog = createNormativeCatalog(
           ),
 
           userPackageCatalog.setSection(
+            sectionId,
+          ),
+
+          technicalAssignmentFilePicker.setSection(
             sectionId,
           ),
         ],

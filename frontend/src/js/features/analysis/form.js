@@ -275,6 +275,65 @@ export function createAnalysisForm({
       };
     }
 
+    const indexStatus = (
+      technicalAssignmentInput.dataset.indexStatus
+      ?? ""
+    );
+
+    if (indexStatus !== "ready") {
+      return {
+        valid: false,
+
+        message: (
+          "Подождите, пока техническое задание "
+          + "будет проиндексировано."
+        ),
+      };
+    }
+
+    const technicalAssignmentId = (
+      technicalAssignmentInput.dataset.technicalAssignmentId
+      ?? ""
+    );
+
+    const analysisDocumentId = (
+      technicalAssignmentInput.dataset.analysisDocumentId
+      ?? ""
+    );
+
+    const preparedSectionId = (
+      technicalAssignmentInput.dataset.preparedSectionId
+      ?? ""
+    );
+
+    if (
+      !technicalAssignmentId
+      || !analysisDocumentId
+    ) {
+      return {
+        valid: false,
+
+        message: (
+          "ТЗ имеет статус «Готов», "
+          + "но preflight identity отсутствует."
+        ),
+      };
+    }
+
+    if (
+      preparedSectionId
+      !== selection.sectionId
+    ) {
+      return {
+        valid: false,
+
+        message: (
+          "ТЗ было проиндексировано для другого раздела. "
+          + "Дождитесь повторной индексации."
+        ),
+      };
+    }
+
     return {
       valid: true,
 
@@ -393,16 +452,40 @@ export function createAnalysisForm({
   }
 
 
+  function appendTechnicalAssignment(
+    body,
+  ) {
+    const technicalAssignment = (
+      technicalAssignmentInput.files[0]
+    );
+
+    if (!technicalAssignment) {
+      return;
+    }
+
+    body.append(
+      "technical_assignment",
+      technicalAssignment,
+    );
+
+    body.append(
+      "technical_assignment_id",
+      technicalAssignmentInput.dataset.technicalAssignmentId,
+    );
+
+    body.append(
+      "technical_assignment_analysis_document_id",
+      technicalAssignmentInput.dataset.analysisDocumentId,
+    );
+  }
+
+
   function toFormData() {
     const body = new FormData();
 
     const pdf = pdfInput.files[0];
 
     const cad = cadInput.files[0];
-
-    const technicalAssignment = (
-      technicalAssignmentInput.files[0]
-    );
 
     if (pdf) {
       body.append(
@@ -418,12 +501,9 @@ export function createAnalysisForm({
       );
     }
 
-    if (technicalAssignment) {
-      body.append(
-        "technical_assignment",
-        technicalAssignment,
-      );
-    }
+    appendTechnicalAssignment(
+      body,
+    );
 
     if (
       !pagesInput.disabled

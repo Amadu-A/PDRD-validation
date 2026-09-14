@@ -10,7 +10,11 @@ from pdrd_api_gateway.application.ports.artifacts import (
 
 
 class AnalysisOrchestrationError(RuntimeError):
-    """Ошибка внешнего orchestration pipeline."""
+    """Терминальная ошибка внешнего orchestration pipeline."""
+
+
+class AnalysisOrchestrationTransientError(AnalysisOrchestrationError):
+    """Временная transport/infrastructure ошибка orchestration."""
 
 
 class AnalysisOrchestrator(Protocol):

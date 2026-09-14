@@ -11,12 +11,22 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Response,
     UploadFile,
     status,
 )
 from pydantic import BaseModel
 
+from pdrd_knowledge_service.application.ports.technical_assignment_requirement_reader import (
+    TechnicalAssignmentRequirementReaderError,
+)
+from pdrd_knowledge_service.application.use_cases.technical_assignment_requirements import (
+    TECHNICAL_ASSIGNMENT_REQUIREMENT_DEFAULT_PAGE_SIZE,
+    TECHNICAL_ASSIGNMENT_REQUIREMENT_MAX_PAGE_SIZE,
+    ListTechnicalAssignmentRequirements,
+    TechnicalAssignmentRequirementsConflictError,
+)
 from pdrd_knowledge_service.application.use_cases.technical_assignments import (
     GetTechnicalAssignment,
     GetTechnicalAssignmentContent,
@@ -66,6 +76,54 @@ class TechnicalAssignmentResponse(
     index_status: str
 
     index_error: str | None
+
+
+class TechnicalAssignmentRequirementResponse(
+    BaseModel,
+):
+    """HTTP representation одного atomic T requirement."""
+
+    point_id: str
+
+    requirement_id: str
+
+    requirement_index: int
+
+    page: int
+
+    requirement_strength: str
+
+    scopes: list[str]
+
+    normative_refs: list[str]
+
+    source_text: str
+
+    text: str
+
+
+class TechnicalAssignmentRequirementListResponse(
+    BaseModel,
+):
+    """Bounded deterministic page atomic requirements."""
+
+    technical_assignment_id: UUID
+
+    analysis_document_id: UUID
+
+    section_id: UUID
+
+    source_file: str
+
+    source_sha256: str
+
+    total: int
+
+    offset: int
+
+    limit: int
+
+    requirements: list[TechnicalAssignmentRequirementResponse]
 
 
 def _response(
@@ -119,6 +177,18 @@ def _require_content(
         )
 
     return container.get_technical_assignment_content
+
+
+def _require_requirements(
+    container: ApplicationContainer,
+) -> ListTechnicalAssignmentRequirements:
+    """Возвращает configured T-first requirement feed."""
+    if container.list_technical_assignment_requirements is None:
+        raise RuntimeError(
+            "ListTechnicalAssignmentRequirements is not configured.",
+        )
+
+    return container.list_technical_assignment_requirements
 
 
 @router.post(
@@ -212,6 +282,98 @@ async def register_technical_assignment(
 
     return _response(
         assignment,
+    )
+
+
+@router.get(
+    "/{technical_assignment_id}/requirements",
+    response_model=TechnicalAssignmentRequirementListResponse,
+)
+async def list_technical_assignment_requirements(
+    technical_assignment_id: UUID,
+    container: Annotated[
+        ApplicationContainer,
+        Depends(
+            get_container,
+        ),
+    ],
+    offset: Annotated[
+        int,
+        Query(
+            ge=0,
+        ),
+    ] = 0,
+    limit: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=(TECHNICAL_ASSIGNMENT_REQUIREMENT_MAX_PAGE_SIZE),
+        ),
+    ] = TECHNICAL_ASSIGNMENT_REQUIREMENT_DEFAULT_PAGE_SIZE,
+) -> TechnicalAssignmentRequirementListResponse:
+    """Возвращает atomic T-R feed для independent validation."""
+    use_case = _require_requirements(
+        container,
+    )
+
+    try:
+        result = await use_case.execute(
+            technical_assignment_id=technical_assignment_id,
+            offset=offset,
+            limit=limit,
+        )
+
+    except TechnicalAssignmentNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    except TechnicalAssignmentRequirementsConflictError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    except TechnicalAssignmentRequirementReaderError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    return TechnicalAssignmentRequirementListResponse(
+        technical_assignment_id=(result.technical_assignment_id),
+        analysis_document_id=(result.analysis_document_id),
+        section_id=result.section_id,
+        source_file=result.source_file,
+        source_sha256=result.source_sha256,
+        total=result.total,
+        offset=result.offset,
+        limit=result.limit,
+        requirements=[
+            TechnicalAssignmentRequirementResponse(
+                point_id=requirement.point_id,
+                requirement_id=(requirement.requirement_id),
+                requirement_index=(requirement.requirement_index),
+                page=requirement.page,
+                requirement_strength=(requirement.strength),
+                scopes=list(
+                    requirement.scopes,
+                ),
+                normative_refs=list(
+                    requirement.normative_refs,
+                ),
+                source_text=(requirement.source_text),
+                text=requirement.text,
+            )
+            for requirement in result.requirements
+        ],
     )
 
 

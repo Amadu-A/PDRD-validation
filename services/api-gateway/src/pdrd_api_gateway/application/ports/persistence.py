@@ -3,6 +3,7 @@
 """Порты persistence-слоя API Gateway."""
 
 from collections.abc import Callable
+from datetime import datetime
 from types import TracebackType
 from typing import Protocol, Self
 from uuid import UUID
@@ -26,6 +27,23 @@ class AnalysisJobRepository(Protocol):
         job_id: UUID,
     ) -> AnalysisJob | None:
         """Возвращает задание по идентификатору."""
+        ...
+
+    async def get_for_update(
+        self,
+        job_id: UUID,
+    ) -> AnalysisJob | None:
+        """Возвращает job с PostgreSQL row lock."""
+        ...
+
+    async def get_recoverable(
+        self,
+        *,
+        stale_processing_before: datetime,
+        deadline_before: datetime,
+        limit: int,
+    ) -> list[AnalysisJob]:
+        """Возвращает stale processing и просроченные active jobs."""
         ...
 
     async def update(

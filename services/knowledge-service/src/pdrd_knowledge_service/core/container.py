@@ -54,6 +54,9 @@ from pdrd_knowledge_service.application.use_cases.project_context import (
     DeleteProjectContext,
     SearchProjectContext,
 )
+from pdrd_knowledge_service.application.use_cases.technical_assignment_requirements import (
+    ListTechnicalAssignmentRequirements,
+)
 from pdrd_knowledge_service.application.use_cases.technical_assignment_retrieval import (
     SearchTechnicalAssignment,
     SearchTechnicalAssignmentGuidedNormative,
@@ -98,6 +101,9 @@ from pdrd_knowledge_service.infrastructure.storage.filesystem import (
 from pdrd_knowledge_service.infrastructure.vector_store.qdrant import (
     QdrantVectorStore,
 )
+from pdrd_knowledge_service.infrastructure.vector_store.technical_assignment_requirements import (
+    QdrantTechnicalAssignmentRequirementReader,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +135,10 @@ class ApplicationContainer:
     get_technical_assignment: GetTechnicalAssignment | None = None
 
     get_technical_assignment_content: GetTechnicalAssignmentContent | None = None
+
+    list_technical_assignment_requirements: (
+        ListTechnicalAssignmentRequirements | None
+    ) = None
 
     search_technical_assignment_guided: (
         SearchTechnicalAssignmentGuidedNormative | None
@@ -179,6 +189,14 @@ def build_container() -> ApplicationContainer:
         base_url=settings.qdrant.base_url,
         request_timeout_seconds=(settings.qdrant.request_timeout_seconds),
         health_timeout_seconds=(settings.qdrant.health_timeout_seconds),
+    )
+
+    technical_assignment_requirement_reader = (
+        QdrantTechnicalAssignmentRequirementReader(
+            base_url=settings.qdrant.base_url,
+            request_timeout_seconds=(settings.qdrant.request_timeout_seconds),
+            collection=(settings.qdrant.multimodal_collection),
+        )
     )
 
     embedding_provider = HttpTextEmbeddingProvider(
@@ -315,6 +333,11 @@ def build_container() -> ApplicationContainer:
         unit_of_work_factory=(technical_assignment_uow_factory),
     )
 
+    list_technical_assignment_requirements = ListTechnicalAssignmentRequirements(
+        unit_of_work_factory=(technical_assignment_uow_factory),
+        reader=technical_assignment_requirement_reader,
+    )
+
     project_settings = settings.project_context
 
     return ApplicationContainer(
@@ -345,6 +368,7 @@ def build_container() -> ApplicationContainer:
                 office_converter=office_converter,
             )
         ),
+        list_technical_assignment_requirements=(list_technical_assignment_requirements),
         search_technical_assignment_guided=(search_technical_assignment_guided),
         create_project_context=CreateProjectContext(
             embedding_provider=embedding_provider,

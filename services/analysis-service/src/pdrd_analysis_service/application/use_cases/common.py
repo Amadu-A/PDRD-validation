@@ -3,6 +3,7 @@
 """Общие pure helpers Analysis application use cases."""
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from pdrd_analysis_service.application.json_schemas import (
@@ -18,44 +19,64 @@ from pdrd_analysis_service.domain.analysis import (
     NormativeSource,
 )
 
-_POSITIVE_COMPLIANCE_MARKERS = (
-    "соответствует требован",
-    "соответствует рекоменда",
-    "соответствует норм",
-    "выполнено в соответствии",
-    "выполнено правильно",
-    "требование выполнено",
-    "требования выполнены",
-    "требование соблюдено",
-    "требования соблюдены",
-    "нарушений не выявлено",
-    "нарушение отсутствует",
-    "как это сделано на листе",
-    "что соответствует",
-)
 
-_NEGATIVE_VIOLATION_MARKERS = (
-    "не соответствует",
-    "не выполн",
-    "не указан",
-    "не указана",
-    "не указаны",
-    "не соблюд",
-    "отсутств",
-    "противореч",
-    "недостаточ",
-    "ошиб",
-    "невер",
-    "некоррект",
-    "требуется исправ",
-    "необходимо исправ",
-    "необходимо добавить",
-    "требуется добавить",
-    "нарушено",
-    "нарушены",
-    "выявлено нарушение",
-    "выявлены нарушения",
-)
+@dataclass(frozen=True, slots=True)
+class ViolationCandidateSelection:
+    """Результат lossless передачи generated finding candidates."""
+
+    candidates: tuple[
+        dict[str, Any],
+        ...,
+    ]
+
+    generated_count: int
+
+    rejected_reasons: tuple[
+        str,
+        ...,
+    ] = ()
+
+    @property
+    def preserved_count(
+        self,
+    ) -> int:
+        """Возвращает количество сохранённых candidates."""
+        return len(
+            self.candidates,
+        )
+
+    @property
+    def rejected_count(
+        self,
+    ) -> int:
+        """Возвращает количество structural rejection."""
+        return len(
+            self.rejected_reasons,
+        )
+
+    @property
+    def rejection_counts(
+        self,
+    ) -> dict[
+        str,
+        int,
+    ]:
+        """Группирует диагностические причины structural rejection."""
+        result: dict[
+            str,
+            int,
+        ] = {}
+
+        for reason in self.rejected_reasons:
+            result[reason] = (
+                result.get(
+                    reason,
+                    0,
+                )
+                + 1
+            )
+
+        return result
 
 
 def zero_metrics(
@@ -112,7 +133,7 @@ def string_tuple(
 def normalize_text(
     value: Any,
 ) -> str:
-    """Нормализует строку для comparison/filtering."""
+    """Нормализует строку для comparison без semantic filtering."""
     return re.sub(
         r"\s+",
         " ",
@@ -122,84 +143,60 @@ def normalize_text(
     ).strip()
 
 
-def filter_violations(
+def select_violation_candidates(
     violations: Any,
-) -> list[dict[str, Any]]:
-    """Удаляет compliance confirmations и дубли."""
+) -> ViolationCandidateSelection:
+    """Передаёт каждый schema-valid generated candidate без semantic filtering."""
+    if violations is None:
+        return ViolationCandidateSelection(
+            candidates=(),
+            generated_count=0,
+        )
+
     if not isinstance(
         violations,
         list,
     ):
-        return []
+        raise ValueError(
+            "Поле violations должно быть JSON array.",
+        )
 
-    result: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
 
-    seen: set[str] = set()
-
-    for violation in violations:
+    for index, violation in enumerate(
+        violations,
+    ):
         if not isinstance(
             violation,
             dict,
         ):
-            continue
-
-        combined = " ".join(
-            (
-                normalize_text(
-                    violation.get(
-                        "comment",
-                    )
-                ),
-                normalize_text(
-                    violation.get(
-                        "evidence",
-                    )
-                ),
-                normalize_text(
-                    violation.get(
-                        "recommendation_draft",
-                    )
-                ),
+            raise ValueError(
+                f"Каждый элемент violations должен быть JSON object; index={index}.",
             )
-        )
 
-        has_positive = any(
-            marker in combined for marker in _POSITIVE_COMPLIANCE_MARKERS
-        )
-
-        has_negative = any(marker in combined for marker in _NEGATIVE_VIOLATION_MARKERS)
-
-        if has_positive and not has_negative:
-            continue
-
-        comment = normalize_text(
-            violation.get(
-                "comment",
-            )
-        )
-
-        if not comment:
-            continue
-
-        dedupe_key = re.sub(
-            r"[^a-zа-яё0-9]+",
-            " ",
-            comment,
-            flags=re.IGNORECASE,
-        ).strip()
-
-        if dedupe_key in seen:
-            continue
-
-        seen.add(
-            dedupe_key,
-        )
-
-        result.append(
+        candidates.append(
             violation,
         )
 
-    return result
+    return ViolationCandidateSelection(
+        candidates=tuple(
+            candidates,
+        ),
+        generated_count=len(
+            violations,
+        ),
+    )
+
+
+def filter_violations(
+    violations: Any,
+) -> list[dict[str, Any]]:
+    """Возвращает backward-compatible lossless список candidates."""
+    return list(
+        select_violation_candidates(
+            violations,
+        ).candidates
+    )
 
 
 def build_basis(
@@ -220,7 +217,9 @@ def build_basis(
                 source.source_file,
             )
         else:
-            parts.append(f"{source.source_file}, PDF стр. {source.page}")
+            parts.append(
+                f"{source.source_file}, PDF стр. {source.page}",
+            )
 
     return "; ".join(
         parts,
@@ -277,6 +276,7 @@ def confidence(
         result = float(
             value,
         )
+
     except (
         TypeError,
         ValueError,

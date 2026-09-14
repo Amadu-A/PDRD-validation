@@ -4,6 +4,7 @@
 
 import asyncio
 import logging
+import threading
 from uuid import UUID
 
 from celery import Task
@@ -19,6 +20,7 @@ from pdrd_knowledge_service.infrastructure.messaging.celery_app import (
 )
 from pdrd_knowledge_service.infrastructure.messaging.technical_assignment_worker_runtime import (
     execute_technical_assignment_indexing,
+    touch_technical_assignment_indexing,
 )
 from pdrd_knowledge_service.infrastructure.messaging.worker_runtime import (
     execute_normative_indexing,
@@ -77,6 +79,35 @@ def normative_index(
     )
 
 
+def _technical_assignment_heartbeat_loop(
+    *,
+    technical_assignment_id: UUID,
+    celery_task_id: str,
+    stop_event: threading.Event,
+    interval_seconds: int,
+) -> None:
+    """Поддерживает DB heartbeat активного T-indexing."""
+    while not stop_event.wait(
+        interval_seconds,
+    ):
+        try:
+            asyncio.run(
+                touch_technical_assignment_indexing(
+                    technical_assignment_id=technical_assignment_id,
+                )
+            )
+
+        except Exception as error:
+            LOGGER.warning(
+                "technical_assignment_heartbeat_failed id=%s celery_task_id=%s "
+                "error_type=%s error=%s",
+                technical_assignment_id,
+                celery_task_id,
+                type(error).__name__,
+                error,
+            )
+
+
 @celery_app.task(
     bind=True,
     name=("pdrd.knowledge.technical_assignment.index"),
@@ -86,7 +117,7 @@ def technical_assignment_index(
     task: Task,
     technical_assignment_id: str,
 ) -> None:
-    """Индексирует одно ТЗ с bounded retry."""
+    """Индексирует одно ТЗ с bounded retry и heartbeat."""
     try:
         parsed_id = UUID(
             technical_assignment_id,
@@ -103,15 +134,40 @@ def technical_assignment_index(
     settings = get_settings()
 
     max_retries = settings.technical_assignment.max_retries
-
-    allow_retry = task.request.retries < max_retries
+    retry_number = int(
+        task.request.retries,
+    )
+    allow_retry = retry_number < max_retries
+    celery_task_id = str(
+        task.request.id or "unknown",
+    )
 
     LOGGER.info(
-        "technical_assignment_index_started id=%s retry=%s/%s",
+        "technical_assignment_index_started id=%s celery_task_id=%s "
+        "attempt=%s max_retries=%s state=indexing",
         parsed_id,
-        task.request.retries,
+        celery_task_id,
+        retry_number + 1,
         max_retries,
     )
+
+    stop_event = threading.Event()
+
+    heartbeat_thread = threading.Thread(
+        target=_technical_assignment_heartbeat_loop,
+        kwargs={
+            "technical_assignment_id": parsed_id,
+            "celery_task_id": celery_task_id,
+            "stop_event": stop_event,
+            "interval_seconds": (
+                settings.technical_assignment_queue.heartbeat_interval_seconds
+            ),
+        },
+        name=f"technical-assignment-heartbeat-{parsed_id}",
+        daemon=True,
+    )
+
+    heartbeat_thread.start()
 
     try:
         assignment = asyncio.run(
@@ -123,9 +179,12 @@ def technical_assignment_index(
 
     except TechnicalAssignmentRetryableIndexingError as error:
         LOGGER.warning(
-            "technical_assignment_index_retry id=%s retry=%s error=%s",
+            "technical_assignment_index_retry id=%s celery_task_id=%s "
+            "attempt=%s error_type=%s error=%s",
             parsed_id,
-            task.request.retries,
+            celery_task_id,
+            retry_number + 1,
+            type(error).__name__,
             error,
         )
 
@@ -137,14 +196,25 @@ def technical_assignment_index(
 
     except Exception:
         LOGGER.exception(
-            "technical_assignment_index_failed id=%s",
+            "technical_assignment_index_failed id=%s celery_task_id=%s attempt=%s",
             parsed_id,
+            celery_task_id,
+            retry_number + 1,
         )
 
         raise
 
+    finally:
+        stop_event.set()
+        heartbeat_thread.join(
+            timeout=5.0,
+        )
+
     LOGGER.info(
-        "technical_assignment_index_completed id=%s status=%s",
+        "technical_assignment_index_completed id=%s celery_task_id=%s "
+        "attempt=%s state=%s",
         parsed_id,
+        celery_task_id,
+        retry_number + 1,
         assignment.index_status.value,
     )

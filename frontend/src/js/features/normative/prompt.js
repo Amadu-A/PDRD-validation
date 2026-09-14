@@ -37,13 +37,51 @@ export function createNormativePromptEditor(
     "[data-normative-prompt-status]",
   );
 
+  const openButton = requireElementWithin(
+    root,
+    "[data-normative-prompt-open]",
+  );
+
+  const dialog = requireElementWithin(
+    root,
+    "[data-normative-prompt-dialog]",
+  );
+
+  const dialogTextarea = requireElementWithin(
+    dialog,
+    "[data-normative-prompt-dialog-textarea]",
+  );
+
+  const dialogSaveButton = requireElementWithin(
+    dialog,
+    "[data-normative-prompt-dialog-save]",
+  );
+
+  const dialogRestoreButton = requireElementWithin(
+    dialog,
+    "[data-normative-prompt-dialog-restore]",
+  );
+
+  const dialogStatusElement = requireElementWithin(
+    dialog,
+    "[data-normative-prompt-dialog-status]",
+  );
+
+  const dialogCloseButtons = dialog.querySelectorAll(
+    "[data-normative-prompt-dialog-close]",
+  );
+
 
   const state = {
     sectionId: null,
 
+    readySectionId: null,
+
     workingBySection: new Map(),
 
     systemBySection: new Map(),
+
+    dirtySections: new Set(),
 
     requestToken: 0,
   };
@@ -56,6 +94,10 @@ export function createNormativePromptEditor(
     statusElement.textContent = message;
 
     statusElement.dataset.state = stateName;
+
+    dialogStatusElement.textContent = message;
+
+    dialogStatusElement.dataset.state = stateName;
   }
 
 
@@ -67,6 +109,32 @@ export function createNormativePromptEditor(
     saveButton.disabled = disabled;
 
     restoreButton.disabled = disabled;
+
+    dialogTextarea.disabled = disabled;
+
+    dialogSaveButton.disabled = disabled;
+
+    dialogRestoreButton.disabled = disabled;
+  }
+
+
+  function syncPromptValues(
+    value,
+    source = null,
+  ) {
+    if (
+      source !== textarea
+      && textarea.value !== value
+    ) {
+      textarea.value = value;
+    }
+
+    if (
+      source !== dialogTextarea
+      && dialogTextarea.value !== value
+    ) {
+      dialogTextarea.value = value;
+    }
   }
 
 
@@ -98,6 +166,16 @@ export function createNormativePromptEditor(
   }
 
 
+  function isCurrentSectionDirty() {
+    return Boolean(
+      state.sectionId
+      && state.dirtySections.has(
+        state.sectionId,
+      )
+    );
+  }
+
+
   function renderDirtyState() {
     if (!state.sectionId) {
       setStatus(
@@ -107,10 +185,7 @@ export function createNormativePromptEditor(
       return;
     }
 
-    if (
-      currentWorkingPrompt()
-      === currentSystemPrompt()
-    ) {
+    if (!isCurrentSectionDirty()) {
       setStatus(
         "Используется сохранённый системный prompt.",
       );
@@ -122,6 +197,113 @@ export function createNormativePromptEditor(
       "Рабочий prompt изменён, но не сохранён.",
       "dirty",
     );
+  }
+
+
+  function updateDirtyState(
+    sectionId,
+  ) {
+    const workingPrompt = (
+      state.workingBySection.get(
+        sectionId,
+      )
+      ?? ""
+    );
+
+    const systemPrompt = (
+      state.systemBySection.get(
+        sectionId,
+      )
+      ?? ""
+    );
+
+    if (workingPrompt === systemPrompt) {
+      state.dirtySections.delete(
+        sectionId,
+      );
+
+      return;
+    }
+
+    state.dirtySections.add(
+      sectionId,
+    );
+  }
+
+
+  function updateWorkingPrompt(
+    source,
+  ) {
+    if (!state.sectionId) {
+      return;
+    }
+
+    const sectionId = state.sectionId;
+
+    state.workingBySection.set(
+      sectionId,
+      source.value,
+    );
+
+    updateDirtyState(
+      sectionId,
+    );
+
+    syncPromptValues(
+      source.value,
+      source,
+    );
+
+    renderDirtyState();
+  }
+
+
+  function openDialog() {
+    syncPromptValues(
+      textarea.value,
+    );
+
+    if (dialog.open) {
+      return;
+    }
+
+    if (
+      typeof dialog.showModal === "function"
+    ) {
+      dialog.showModal();
+
+    } else {
+      dialog.setAttribute(
+        "open",
+        "",
+      );
+    }
+
+    window.requestAnimationFrame(
+      () => {
+        if (!dialogTextarea.disabled) {
+          dialogTextarea.focus();
+        }
+      },
+    );
+  }
+
+
+  function closeDialog() {
+    if (!dialog.open) {
+      return;
+    }
+
+    if (
+      typeof dialog.close === "function"
+    ) {
+      dialog.close();
+
+    } else {
+      dialog.removeAttribute(
+        "open",
+      );
+    }
   }
 
 
@@ -140,8 +322,12 @@ export function createNormativePromptEditor(
 
     state.sectionId = sectionId;
 
+    state.readySectionId = null;
+
     if (!sectionId) {
-      textarea.value = "";
+      syncPromptValues(
+        "",
+      );
 
       setDisabled(
         true,
@@ -151,7 +337,7 @@ export function createNormativePromptEditor(
         "Выберите нормативный раздел.",
       );
 
-      return;
+      return false;
     }
 
     setDisabled(
@@ -171,7 +357,7 @@ export function createNormativePromptEditor(
         token
         !== state.requestToken
       ) {
-        return;
+        return false;
       }
 
       state.systemBySection.set(
@@ -181,7 +367,7 @@ export function createNormativePromptEditor(
 
       if (
         replaceWorking
-        || !state.workingBySection.has(
+        || !state.dirtySections.has(
           sectionId,
         )
       ) {
@@ -189,14 +375,24 @@ export function createNormativePromptEditor(
           sectionId,
           section.system_prompt,
         );
+
+        state.dirtySections.delete(
+          sectionId,
+        );
+      } else {
+        updateDirtyState(
+          sectionId,
+        );
       }
 
-      textarea.value = (
+      syncPromptValues(
         state.workingBySection.get(
           sectionId,
         )
-        ?? ""
+        ?? "",
       );
+
+      state.readySectionId = sectionId;
 
       setDisabled(
         false,
@@ -204,15 +400,21 @@ export function createNormativePromptEditor(
 
       renderDirtyState();
 
+      return true;
+
     } catch (error) {
       if (
         token
         !== state.requestToken
       ) {
-        return;
+        return false;
       }
 
-      textarea.value = "";
+      state.readySectionId = null;
+
+      syncPromptValues(
+        "",
+      );
 
       setDisabled(
         true,
@@ -224,18 +426,23 @@ export function createNormativePromptEditor(
           : String(error),
         "error",
       );
+
+      return false;
     }
   }
 
 
   async function saveSystemPrompt() {
-    if (!state.sectionId) {
+    if (
+      !state.sectionId
+      || state.readySectionId !== state.sectionId
+    ) {
       return;
     }
 
     const sectionId = state.sectionId;
 
-    const workingPrompt = textarea.value;
+    const workingPrompt = currentWorkingPrompt();
 
     setDisabled(
       true,
@@ -270,8 +477,14 @@ export function createNormativePromptEditor(
         section.system_prompt,
       );
 
-      textarea.value = (
-        section.system_prompt
+      state.dirtySections.delete(
+        sectionId,
+      );
+
+      state.readySectionId = sectionId;
+
+      syncPromptValues(
+        section.system_prompt,
       );
 
       setStatus(
@@ -306,7 +519,7 @@ export function createNormativePromptEditor(
 
     const sectionId = state.sectionId;
 
-    await loadSection(
+    const restored = await loadSection(
       sectionId,
       {
         replaceWorking: true,
@@ -314,8 +527,9 @@ export function createNormativePromptEditor(
     );
 
     if (
-      state.sectionId
-      === sectionId
+      restored
+      && state.sectionId === sectionId
+      && state.readySectionId === sectionId
     ) {
       setStatus(
         "Рабочий prompt восстановлен из системного.",
@@ -327,16 +541,19 @@ export function createNormativePromptEditor(
   textarea.addEventListener(
     "input",
     () => {
-      if (!state.sectionId) {
-        return;
-      }
-
-      state.workingBySection.set(
-        state.sectionId,
-        textarea.value,
+      updateWorkingPrompt(
+        textarea,
       );
+    },
+  );
 
-      renderDirtyState();
+
+  dialogTextarea.addEventListener(
+    "input",
+    () => {
+      updateWorkingPrompt(
+        dialogTextarea,
+      );
     },
   );
 
@@ -357,28 +574,87 @@ export function createNormativePromptEditor(
   );
 
 
+  dialogSaveButton.addEventListener(
+    "click",
+    async () => {
+      await saveSystemPrompt();
+    },
+  );
+
+
+  dialogRestoreButton.addEventListener(
+    "click",
+    async () => {
+      await restoreSystemPrompt();
+    },
+  );
+
+
+  openButton.addEventListener(
+    "click",
+    openDialog,
+  );
+
+
+  dialogCloseButtons.forEach(
+    (button) => {
+      button.addEventListener(
+        "click",
+        closeDialog,
+      );
+    },
+  );
+
+
+  dialog.addEventListener(
+    "click",
+    (event) => {
+      if (event.target === dialog) {
+        closeDialog();
+      }
+    },
+  );
+
+
   function getOverride(
     sectionId,
   ) {
+    const canUseWorkingPrompt = (
+      Boolean(
+        sectionId,
+      )
+      && sectionId === state.sectionId
+      && sectionId === state.readySectionId
+      && state.workingBySection.has(
+        sectionId,
+      )
+      && state.systemBySection.has(
+        sectionId,
+      )
+    );
+
     if (
-      !sectionId
-      || sectionId !== state.sectionId
-      || !state.workingBySection.has(
+      !canUseWorkingPrompt
+      || !state.dirtySections.has(
         sectionId,
       )
     ) {
       return {
+        /*
+         * Если пользователь prompt не менял, frontend не подменяет
+         * серверный system prompt его локальной копией. Gateway сам
+         * возьмёт актуальный section.system_prompt при создании snapshot.
+         */
         promptOverrideEnabled: false,
+
         promptOverride: "",
       };
     }
 
     return {
       /*
-       * Всегда передаём рабочий текст как snapshot override.
-       *
-       * Это гарантирует, что между нажатием "Запустить анализ"
-       * и чтением DB другим процессом prompt не изменится.
+       * Override передаётся только для реального несохранённого
+       * пользовательского изменения рабочего prompt.
        */
       promptOverrideEnabled: true,
 

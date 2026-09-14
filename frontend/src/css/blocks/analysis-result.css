@@ -4,6 +4,8 @@
  * BEM-блок структурированного результата анализа.
  *
  * Финальные findings отображаются карточками.
+ * Визуальные замечания размещаются полупрозрачными callout-блоками
+ * непосредственно поверх rendered PDF page.
  * Managed normative citations открывают PDF/Word-preview
  * через публичный API Gateway.
  */
@@ -50,6 +52,8 @@
 
 
 .analysis-result__summary,
+.analysis-result__visualization,
+.analysis-result__page-visualization,
 .analysis-result__findings,
 .analysis-result__limitations {
   display: grid;
@@ -117,6 +121,513 @@
   font-weight: var(--font-weight-normal);
 
   user-select: text;
+}
+
+
+.analysis-result__visualization {
+  gap: var(--space-6);
+}
+
+
+.analysis-result__page-visualization {
+  gap: var(--space-3);
+
+  padding: var(--space-4);
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+
+  background: var(--color-surface);
+}
+
+
+.analysis-result__page-title {
+  margin: 0;
+
+  font-size: 0.95rem;
+}
+
+
+.analysis-result__page-stage {
+  position: relative;
+
+  width: 100%;
+
+  overflow: visible;
+}
+
+
+.analysis-result__page-image-pane {
+  position: relative;
+
+  width: 100%;
+  min-width: 0;
+
+  isolation: isolate;
+}
+
+
+.analysis-result__page-image {
+  position: relative;
+
+  z-index: 1;
+
+  display: block;
+
+  width: 100%;
+  height: auto;
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+
+  background: var(--color-surface);
+}
+
+
+.analysis-result__bbox {
+  position: absolute;
+
+  z-index: 4;
+
+  box-sizing: border-box;
+
+  min-width: 4px;
+  min-height: 4px;
+
+  border:
+    0.6px
+    solid
+    color-mix(
+      in srgb,
+      var(--color-danger) 78%,
+      transparent
+    );
+
+  background:
+    color-mix(
+      in srgb,
+      var(--color-danger) 10%,
+      transparent
+    );
+
+  box-shadow:
+    inset 0 0 0 0.5px
+    color-mix(
+      in srgb,
+      var(--color-surface) 22%,
+      transparent
+    );
+
+  cursor: pointer;
+
+  pointer-events: auto;
+
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease;
+}
+
+
+.analysis-result__bbox--active,
+.analysis-result__bbox:hover {
+  border-color: var(--color-danger);
+
+  box-shadow:
+    0 0 0 1px
+    color-mix(
+      in srgb,
+      var(--color-danger) 16%,
+      transparent
+    );
+
+  background:
+    color-mix(
+      in srgb,
+      var(--color-danger) 18%,
+      transparent
+    );
+}
+
+
+.analysis-result__bbox-number {
+  position: absolute;
+  top: -0.5rem;
+  left: -0.08rem;
+
+  display: inline-flex;
+
+  min-width: 0.68rem;
+  height: 0.68rem;
+
+  align-items: center;
+  justify-content: center;
+
+  padding: 0 0.16rem;
+
+  border-radius: 999px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(--color-danger) 90%,
+      transparent
+    );
+
+  color: var(--color-surface);
+
+  font-size: 0.52rem;
+  font-weight: var(--font-weight-semibold);
+
+  line-height: 1;
+}
+
+
+.analysis-result__annotation-list {
+  position: absolute;
+  inset: 0;
+
+  z-index: 6;
+
+  overflow: visible;
+
+  pointer-events: none;
+}
+
+
+.analysis-result__annotation {
+  position: absolute;
+
+  display: grid;
+
+  width: clamp(
+    150px,
+    22%,
+    235px
+  );
+  max-width: calc(100% - 20px);
+
+  gap: 0.28rem;
+
+  box-sizing: border-box;
+
+  padding:
+    0.42rem
+    0.5rem;
+
+  border:
+    0.6px
+    solid
+    color-mix(
+      in srgb,
+      var(--color-danger) 78%,
+      transparent
+    );
+  border-radius: var(--radius-control);
+
+  background:
+    color-mix(
+      in srgb,
+      var(--color-danger) 10%,
+      transparent
+    );
+
+  color: var(--color-text-primary);
+
+  box-shadow:
+    0
+    0.16rem
+    0.45rem
+    rgb(0 0 0 / 10%);
+
+  backdrop-filter: blur(1px);
+
+  font-size: 0.68rem;
+  line-height: 1.22;
+
+  pointer-events: auto;
+
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease;
+}
+
+
+.analysis-result__annotation:hover,
+.analysis-result__annotation:focus-visible,
+.analysis-result__annotation--active {
+  border-color: var(--color-danger);
+
+  background:
+    color-mix(
+      in srgb,
+      var(--color-danger) 18%,
+      transparent
+    );
+
+  box-shadow:
+    0
+    0.28rem
+    0.75rem
+    rgb(0 0 0 / 14%);
+}
+
+
+.analysis-result__annotation:focus-visible {
+  outline: 2px solid var(--color-danger);
+  outline-offset: 2px;
+}
+
+
+.analysis-result__annotation-header {
+  display: flex;
+
+  align-items: flex-start;
+
+  gap: 0.34rem;
+}
+
+
+.analysis-result__annotation-number {
+  display: inline-flex;
+
+  flex: 0 0 auto;
+
+  min-width: 0.84rem;
+  height: 0.84rem;
+
+  align-items: center;
+  justify-content: center;
+
+  padding: 0 0.14rem;
+
+  border-radius: 999px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(--color-danger) 92%,
+      transparent
+    );
+
+  color: var(--color-surface);
+
+  font-size: 0.56rem;
+  font-weight: var(--font-weight-semibold);
+
+  line-height: 1;
+}
+
+
+.analysis-result__annotation-title {
+  display: -webkit-box;
+
+  min-width: 0;
+
+  overflow: hidden;
+
+  font-weight: var(--font-weight-semibold);
+
+  overflow-wrap: anywhere;
+
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+
+.analysis-result__annotation-sources {
+  display: flex;
+
+  min-width: 0;
+
+  flex-wrap: wrap;
+
+  align-items: baseline;
+
+  gap:
+    0.12rem
+    0.32rem;
+}
+
+
+.analysis-result__annotation-source-label {
+  font-size: 0.61rem;
+  font-weight: var(--font-weight-semibold);
+}
+
+
+.analysis-result__annotation-source {
+  position: relative;
+
+  display: inline-block;
+
+  min-width: 0;
+}
+
+
+.analysis-result__annotation-source
+.analysis-result__source-link {
+  display: inline-block;
+
+  max-width: 100%;
+
+  overflow: hidden;
+
+  font-size: 0.61rem;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  vertical-align: bottom;
+}
+
+
+.analysis-result__annotation-source-more {
+  color: var(--color-text-secondary);
+
+  font-size: 0.6rem;
+  font-weight: var(--font-weight-semibold);
+}
+
+
+.analysis-result__annotation-tooltip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + var(--space-2));
+
+  z-index: 50;
+
+  display: grid;
+
+  width: min(32rem, 75vw);
+  max-height: 18rem;
+
+  gap: var(--space-2);
+
+  padding: var(--space-3);
+
+  overflow: auto;
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+
+  background: var(--color-surface);
+
+  color: var(--color-text-primary);
+
+  box-shadow:
+    0
+    0.5rem
+    1.5rem
+    rgb(0 0 0 / 18%);
+
+  font-size: 0.78rem;
+  line-height: 1.4;
+
+  opacity: 0;
+  visibility: hidden;
+
+  pointer-events: none;
+
+  transform: translateY(
+    var(--space-1)
+  );
+
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 120ms ease;
+}
+
+
+.analysis-result__annotation-source:hover
+.analysis-result__annotation-tooltip,
+.analysis-result__annotation-source:focus-within
+.analysis-result__annotation-tooltip {
+  opacity: 1;
+  visibility: visible;
+
+  pointer-events: auto;
+
+  transform: translateY(
+    0
+  );
+}
+
+
+.analysis-result__annotation-tooltip-title,
+.analysis-result__annotation-tooltip-text {
+  display: block;
+
+  white-space: pre-wrap;
+}
+
+
+.analysis-result__annotation-unlocated,
+.analysis-result__page-empty,
+.analysis-result__visualization-warning {
+  margin: 0;
+
+  color: var(--color-text-secondary);
+
+  font-size: 0.68rem;
+}
+
+
+.analysis-result__page-empty {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+
+  padding: var(--space-2);
+
+  border-radius: var(--radius-control);
+
+  background:
+    color-mix(
+      in srgb,
+      var(--color-surface) 78%,
+      transparent
+    );
+}
+
+
+.analysis-result__connectors {
+  position: absolute;
+  inset: 0;
+
+  z-index: 5;
+
+  width: 100%;
+  height: 100%;
+
+  overflow: visible;
+
+  pointer-events: none;
+}
+
+
+.analysis-result__connector {
+  fill: none;
+
+  stroke: var(--color-danger);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-opacity: 0.58;
+  stroke-width: 1.35;
+
+  vector-effect: non-scaling-stroke;
+
+  transition:
+    stroke-opacity 120ms ease,
+    stroke-width 120ms ease;
+}
+
+
+.analysis-result__connector--active {
+  stroke-opacity: 1;
+  stroke-width: 2.1;
 }
 
 
@@ -262,6 +773,30 @@
 }
 
 
+@media (max-width: 900px) {
+  .analysis-result__page-stage {
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
+
+  .analysis-result__page-image-pane {
+    min-width: 680px;
+  }
+
+
+  .analysis-result__annotation {
+    width: clamp(
+      140px,
+      24%,
+      210px
+    );
+
+    font-size: 0.64rem;
+  }
+}
+
+
 @media (max-width: 640px) {
   .analysis-result {
     padding: var(--space-4);
@@ -281,4 +816,34 @@
   .analysis-result__meta {
     grid-template-columns: 1fr;
   }
+}
+
+.analysis-result__annotation,
+.analysis-result__bbox,
+.analysis-result__connector {
+  transition:
+    opacity 1s ease,
+    background 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease;
+}
+
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__annotation,
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__bbox,
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__connector,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__annotation,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__bbox,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__connector {
+  opacity: 0.01;
+}
+
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__annotation:hover,
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__annotation--active,
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__bbox--active,
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__connector--active,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__annotation:focus-visible,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__annotation--active,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__bbox--active,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__connector--active {
+  opacity: 1;
 }

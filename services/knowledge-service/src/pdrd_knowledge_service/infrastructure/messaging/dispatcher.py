@@ -1,16 +1,20 @@
 # services/knowledge-service/src/pdrd_knowledge_service/infrastructure/messaging/dispatcher.py
 
-"""Фоновый dispatcher обоих Knowledge transactional outboxes."""
+"""Фоновый dispatcher Knowledge outboxes и T reconciliation."""
 
 import asyncio
 import logging
 from functools import partial
+from time import monotonic
 
 from pdrd_knowledge_service.application.use_cases.dispatch_normative_outbox import (
     DispatchNormativeOutbox,
 )
 from pdrd_knowledge_service.application.use_cases.dispatch_technical_assignment_outbox import (
     DispatchTechnicalAssignmentOutbox,
+)
+from pdrd_knowledge_service.application.use_cases.recover_stale_technical_assignments import (
+    RecoverStaleTechnicalAssignments,
 )
 from pdrd_knowledge_service.core.settings import (
     get_settings,
@@ -39,7 +43,7 @@ LOGGER = logging.getLogger(
 
 
 async def run_dispatcher() -> None:
-    """Публикует normative и T outbox events."""
+    """Публикует outbox events и восстанавливает stale T-indexing."""
     settings = get_settings()
 
     engine = build_async_engine(
@@ -78,8 +82,37 @@ async def run_dispatcher() -> None:
         ),
     )
 
+    recovery = RecoverStaleTechnicalAssignments(
+        unit_of_work_factory=technical_uow_factory,
+        max_runtime_seconds=(settings.technical_assignment_queue.max_runtime_seconds),
+        stale_indexing_seconds=(
+            settings.technical_assignment_queue.stale_indexing_seconds
+        ),
+    )
+
+    next_recovery_at = 0.0
+
     try:
         while True:
+            now = monotonic()
+
+            if now >= next_recovery_at:
+                recovery_report = await recovery.execute(
+                    limit=(settings.technical_assignment_queue.recovery_batch_size),
+                )
+
+                if recovery_report.selected:
+                    LOGGER.info(
+                        "technical_assignment_recovery selected=%s requeued=%s failed=%s",
+                        recovery_report.selected,
+                        recovery_report.requeued,
+                        recovery_report.failed,
+                    )
+
+                next_recovery_at = now + (
+                    settings.technical_assignment_queue.recovery_interval_seconds
+                )
+
             normative_report = await normative_dispatcher.execute(
                 limit=settings.outbox.batch_size,
             )
@@ -129,7 +162,7 @@ async def run_dispatcher() -> None:
 
 
 def main() -> None:
-    """Запускает Knowledge outbox dispatcher."""
+    """Запускает Knowledge outbox/reconciliation process."""
     logging.basicConfig(
         level=logging.INFO,
         format=("%(asctime)s %(levelname)s %(name)s %(message)s"),

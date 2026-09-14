@@ -34,6 +34,12 @@ from pdrd_api_gateway.application.use_cases.get_analysis_result import (
     AnalysisResultUnavailableError,
     GetAnalysisResult,
 )
+from pdrd_api_gateway.application.use_cases.get_analysis_visualization import (
+    AnalysisVisualizationJobNotFoundError,
+    AnalysisVisualizationNotReadyError,
+    AnalysisVisualizationUnavailableError,
+    GetAnalysisVisualization,
+)
 from pdrd_api_gateway.application.use_cases.resolve_normative_snapshot import (
     InvalidNormativeSelectionError,
     NormativeSelectionConflictError,
@@ -68,7 +74,9 @@ from pdrd_api_gateway.transport.http.schemas.analyses import (
 
 router = APIRouter(
     prefix="/api/v1/analyses",
-    tags=["analyses"],
+    tags=[
+        "analyses",
+    ],
 )
 
 
@@ -106,6 +114,18 @@ def require_get_analysis_result(
         )
 
     return container.get_analysis_result
+
+
+def require_get_analysis_visualization(
+    container: ApplicationContainer,
+) -> GetAnalysisVisualization:
+    """Возвращает настроенный visualization use case."""
+    if container.get_analysis_visualization is None:
+        raise RuntimeError(
+            "GetAnalysisVisualization is not configured.",
+        )
+
+    return container.get_analysis_visualization
 
 
 async def read_upload(
@@ -225,7 +245,7 @@ def parse_normative_document_ids(
     """Разбирает normative_document_ids."""
     return _parse_document_ids(
         raw_value,
-        field_name="normative_document_ids",
+        field_name=("normative_document_ids"),
     )
 
 
@@ -241,12 +261,12 @@ def parse_user_package_document_ids(
     """Разбирает user_package_document_ids."""
     return _parse_document_ids(
         raw_value,
-        field_name="user_package_document_ids",
+        field_name=("user_package_document_ids"),
     )
 
 
 def build_technical_assignment_response(
-    snapshot: (NormativeAnalysisSnapshot | None),
+    snapshot: NormativeAnalysisSnapshot | None,
 ) -> TechnicalAssignmentSnapshotResponse | None:
     """Преобразует domain snapshot ТЗ в HTTP schema."""
     if snapshot is None or snapshot.technical_assignment is None:
@@ -325,16 +345,30 @@ async def create_analysis(
         str,
         Form(),
     ] = "",
+    technical_assignment_id: Annotated[
+        UUID | None,
+        Form(),
+    ] = None,
+    technical_assignment_analysis_document_id: Annotated[
+        UUID | None,
+        Form(),
+    ] = None,
 ) -> AnalysisAcceptedResponse:
     """Принимает документы и создаёт asynchronous analysis job."""
     max_upload_bytes = container.settings.storage.max_upload_bytes
 
-    pdf_content, pdf_file_name = await read_upload(
+    (
+        pdf_content,
+        pdf_file_name,
+    ) = await read_upload(
         upload=pdf,
         max_upload_bytes=max_upload_bytes,
     )
 
-    cad_content, cad_file_name = await read_upload(
+    (
+        cad_content,
+        cad_file_name,
+    ) = await read_upload(
         upload=cad,
         max_upload_bytes=max_upload_bytes,
     )
@@ -369,8 +403,8 @@ async def create_analysis(
         "cad_file_name": cad_file_name,
         "pages": pages,
         "use_explanatory_note": (use_explanatory_note),
-        "note_start_page": note_start_page,
-        "note_end_page": note_end_page,
+        "note_start_page": (note_start_page),
+        "note_end_page": (note_end_page),
         "normative_section_id": (normative_section_id),
         "normative_document_ids": (parsed_normative_document_ids),
         "user_package_document_ids": (parsed_user_package_document_ids),
@@ -383,6 +417,14 @@ async def create_analysis(
 
         execute_kwargs["technical_assignment_file_name"] = (
             technical_assignment_file_name
+        )
+
+    if technical_assignment_id is not None:
+        execute_kwargs["technical_assignment_id"] = technical_assignment_id
+
+    if technical_assignment_analysis_document_id is not None:
+        execute_kwargs["technical_assignment_analysis_document_id"] = (
+            technical_assignment_analysis_document_id
         )
 
     try:
@@ -518,6 +560,60 @@ async def get_analysis_result(
     except AnalysisResultUnavailableError as error:
         raise HTTPException(
             status_code=(status.HTTP_500_INTERNAL_SERVER_ERROR),
+            detail=str(
+                error,
+            ),
+        ) from error
+
+
+@router.get(
+    "/{job_id}/visualization",
+    response_model=dict[
+        str,
+        Any,
+    ],
+)
+async def get_analysis_visualization(
+    job_id: UUID,
+    container: Annotated[
+        ApplicationContainer,
+        Depends(
+            get_container,
+        ),
+    ],
+) -> dict[
+    str,
+    Any,
+]:
+    """Возвращает rendered PDF pages и lazy bbox locations."""
+    use_case = require_get_analysis_visualization(
+        container,
+    )
+
+    try:
+        return await use_case.execute(
+            job_id=job_id,
+        )
+
+    except AnalysisVisualizationJobNotFoundError as error:
+        raise HTTPException(
+            status_code=(status.HTTP_404_NOT_FOUND),
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    except AnalysisVisualizationNotReadyError as error:
+        raise HTTPException(
+            status_code=(status.HTTP_409_CONFLICT),
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    except AnalysisVisualizationUnavailableError as error:
+        raise HTTPException(
+            status_code=(status.HTTP_502_BAD_GATEWAY),
             detail=str(
                 error,
             ),

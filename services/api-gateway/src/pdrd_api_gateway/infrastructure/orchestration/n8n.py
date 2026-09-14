@@ -13,6 +13,7 @@ from pdrd_api_gateway.application.ports.artifacts import (
 )
 from pdrd_api_gateway.application.ports.orchestration import (
     AnalysisOrchestrationError,
+    AnalysisOrchestrationTransientError,
 )
 from pdrd_api_gateway.core.settings import (
     OrchestrationSettings,
@@ -20,6 +21,24 @@ from pdrd_api_gateway.core.settings import (
 from pdrd_api_gateway.domain.analysis_submission import (
     AnalysisSourceMode,
 )
+
+_RETRYABLE_HTTP_STATUSES = frozenset(
+    {
+        408,
+        425,
+        429,
+        502,
+        503,
+        504,
+    }
+)
+
+
+def _is_retryable_http_status(
+    status_code: int,
+) -> bool:
+    """Отличает недоступность n8n ingress от ошибки уже запущенного workflow."""
+    return status_code in _RETRYABLE_HTTP_STATUSES
 
 
 class N8nAnalysisOrchestrator:
@@ -64,8 +83,8 @@ class N8nAnalysisOrchestrator:
         )
 
         timeout = httpx.Timeout(
-            timeout=self._settings.request_timeout_seconds,
-            connect=self._settings.connect_timeout_seconds,
+            timeout=(self._settings.request_timeout_seconds),
+            connect=(self._settings.connect_timeout_seconds),
         )
 
         try:
@@ -83,15 +102,39 @@ class N8nAnalysisOrchestrator:
         except httpx.HTTPStatusError as error:
             response_text = error.response.text[:1000]
 
-            raise AnalysisOrchestrationError(
-                "n8n workflow завершился HTTP ошибкой: "
+            error_type = (
+                AnalysisOrchestrationTransientError
+                if _is_retryable_http_status(
+                    error.response.status_code,
+                )
+                else AnalysisOrchestrationError
+            )
+
+            raise error_type(
+                "n8n workflow завершился "
+                "HTTP ошибкой: "
                 f"{error.response.status_code}. "
                 f"Ответ: {response_text}",
             ) from error
 
+        except (
+            httpx.TimeoutException,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+        ) as error:
+            raise (
+                AnalysisOrchestrationTransientError(
+                    "Временная transport-ошибка "
+                    "HTTP-запроса к n8n: "
+                    f"{type(error).__name__}: "
+                    f"{error}",
+                )
+            ) from error
+
         except httpx.HTTPError as error:
             raise AnalysisOrchestrationError(
-                "Не удалось выполнить HTTP-запрос к n8n: "
+                "Не удалось выполнить "
+                "HTTP-запрос к n8n: "
                 f"{type(error).__name__}: {error}",
             ) from error
 
@@ -188,7 +231,7 @@ class N8nAnalysisOrchestrator:
                     str(
                         document_id,
                     )
-                    for document_id in snapshot.user_package_document_ids
+                    for document_id in (snapshot.user_package_document_ids)
                 ],
                 ensure_ascii=False,
                 separators=(
@@ -235,7 +278,7 @@ class N8nAnalysisOrchestrator:
             str,
         ],
     ]:
-        """Формирует multipart files для n8n."""
+        """Формирует multipart files для orchestration."""
         submission = artifacts.submission
 
         files: dict[
@@ -262,8 +305,10 @@ class N8nAnalysisOrchestrator:
             files["cad"] = (
                 cad_file_name,
                 artifacts.cad_content,
-                N8nAnalysisOrchestrator._cad_mime_type(
-                    cad_file_name,
+                (
+                    N8nAnalysisOrchestrator._cad_mime_type(
+                        cad_file_name,
+                    )
                 ),
             )
 

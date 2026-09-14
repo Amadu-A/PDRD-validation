@@ -38,13 +38,17 @@ from pdrd_document_service.transport.http.dependencies import (
 from pdrd_document_service.transport.http.schemas.pdf import (
     ExplanatoryNoteContextResponse,
     PdfExtractionResponse,
+    PdfNormalizedBoundingBoxResponse,
     PdfPageResponse,
+    PdfTextWordResponse,
     ProjectContextTextPageResponse,
 )
 
 router = APIRouter(
     prefix="/internal/v1/pdf",
-    tags=["pdf"],
+    tags=[
+        "pdf",
+    ],
 )
 
 
@@ -74,17 +78,25 @@ def _project_context_response(
 async def extract_pdf(
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
     file: Annotated[
         UploadFile,
-        File(...),
+        File(
+            ...,
+        ),
     ],
     pages: Annotated[
         str | None,
         Form(),
     ] = None,
     use_explanatory_note: Annotated[
+        bool,
+        Form(),
+    ] = False,
+    include_text_geometry: Annotated[
         bool,
         Form(),
     ] = False,
@@ -119,6 +131,7 @@ async def extract_pdf(
                     )
 
                 project_context = ExplanatoryNoteContext.disabled()
+
             else:
                 project_context = container.extract_pdf_project_context.execute(
                     content=content,
@@ -184,6 +197,27 @@ async def extract_pdf(
                     ).decode(
                         "ascii",
                     )
+                ),
+                text_words=(
+                    [
+                        PdfTextWordResponse(
+                            text=word.text,
+                            bbox=(
+                                PdfNormalizedBoundingBoxResponse(
+                                    x_min=word.bbox.x_min,
+                                    y_min=word.bbox.y_min,
+                                    x_max=word.bbox.x_max,
+                                    y_max=word.bbox.y_max,
+                                )
+                            ),
+                            block_no=word.block_no,
+                            line_no=word.line_no,
+                            word_no=word.word_no,
+                        )
+                        for word in page.text_words
+                    ]
+                    if include_text_geometry
+                    else []
                 ),
             )
             for page in document.pages

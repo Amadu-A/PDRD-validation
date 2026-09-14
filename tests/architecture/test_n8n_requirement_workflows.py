@@ -67,7 +67,7 @@ def _nodes_by_name(
 
 
 def test_every_analysis_workflow_supports_t_guided_requirements() -> None:
-    """PDF, CAD и PDF+CAD одинаково учитывают техническое задание."""
+    """PDF, CAD и PDF+CAD одинаково учитывают T-guided retrieval."""
     for path in WORKFLOW_PATHS:
         workflow = _workflow(
             path,
@@ -121,7 +121,7 @@ def test_every_analysis_workflow_passes_n_t_u_separately() -> None:
 
 
 def test_every_analysis_workflow_has_finding_local_normative_enrichment() -> None:
-    """TZ-5.2 enrichment не должен существовать только в PDF workflow."""
+    """Normative enrichment существует во всех analysis workflow."""
     required = {
         "Prepare Finding Normative Queries",
         "Search Finding Norms",
@@ -155,19 +155,21 @@ def test_every_analysis_workflow_has_finding_local_normative_enrichment() -> Non
         assert "normative_candidates_by_finding" in serialized, path
 
 
-def test_gpu_dependent_requirement_nodes_retry_transient_errors() -> None:
-    """Search Requirements делает bounded retry поверх backend wait policy."""
+def test_requirement_retrieval_retries_transient_errors() -> None:
+    """I/O retrieval сохраняет bounded n8n retry."""
     for path in WORKFLOW_PATHS:
         workflow = _workflow(
             path,
         )
 
-        search = _nodes_by_name(
+        nodes = _nodes_by_name(
             workflow,
-        )["Search Requirements"]
+        )
+
+        node = nodes["Search Requirements"]
 
         assert (
-            search.get(
+            node.get(
                 "retryOnFail",
             )
             is True
@@ -175,7 +177,7 @@ def test_gpu_dependent_requirement_nodes_retry_transient_errors() -> None:
 
         assert (
             int(
-                search.get(
+                node.get(
                     "maxTries",
                     0,
                 )
@@ -185,7 +187,7 @@ def test_gpu_dependent_requirement_nodes_retry_transient_errors() -> None:
 
         assert (
             int(
-                search.get(
+                node.get(
                     "waitBetweenTries",
                     0,
                 )
@@ -194,8 +196,61 @@ def test_gpu_dependent_requirement_nodes_retry_transient_errors() -> None:
         ), path
 
 
+def test_t_first_vlm_has_no_n8n_level_retry() -> None:
+    """T-first VLM не повторяется orchestration-слоем n8n."""
+    for path in WORKFLOW_PATHS:
+        workflow = _workflow(
+            path,
+        )
+
+        nodes = _nodes_by_name(
+            workflow,
+        )
+
+        node = nodes["Check Technical Assignment"]
+
+        assert (
+            node.get(
+                "retryOnFail",
+                False,
+            )
+            is False
+        ), path
+
+        assert "maxTries" not in node, path
+
+        assert "waitBetweenTries" not in node, path
+
+        parameters = node.get(
+            "parameters",
+            {},
+        )
+
+        assert isinstance(
+            parameters,
+            dict,
+        )
+
+        options = parameters.get(
+            "options",
+            {},
+        )
+
+        assert isinstance(
+            options,
+            dict,
+        )
+
+        assert (
+            options.get(
+                "timeout",
+            )
+            == 600000
+        ), path
+
+
 def test_requirement_flow_order_is_consistent() -> None:
-    """Connections сохраняют одинаковый N/T/U sequence."""
+    """Connections сохраняют общий flow после lossless merge."""
     expected_pairs = (
         (
             "Build Normative Queries",
@@ -215,6 +270,10 @@ def test_requirement_flow_order_is_consistent() -> None:
         ),
         (
             "Check Norms",
+            "Merge Finding Candidates",
+        ),
+        (
+            "Merge Finding Candidates",
             "Prepare Finding Normative Queries",
         ),
         (

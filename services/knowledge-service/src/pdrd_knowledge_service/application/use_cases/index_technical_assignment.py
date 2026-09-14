@@ -56,7 +56,10 @@ from pdrd_knowledge_service.domain.technical_assignment import (
     TechnicalAssignmentIndexStatus,
 )
 from pdrd_knowledge_service.domain.technical_assignment_indexing import (
+    TechnicalAssignmentPage,
+    TechnicalAssignmentRequirement,
     extract_normative_references,
+    extract_technical_assignment_requirements,
 )
 
 Clock = Callable[
@@ -64,11 +67,18 @@ Clock = Callable[
     datetime,
 ]
 
-_T_EMBEDDING_INSTRUCTION = (
+_T_PAGE_EMBEDDING_INSTRUCTION = (
     "Represent this technical assignment page for retrieval "
     "against Russian engineering project drawings, "
     "project requirements, equipment requirements and "
     "referenced normative documents."
+)
+
+_T_REQUIREMENT_EMBEDDING_INSTRUCTION = (
+    "Represent this atomic technical assignment requirement "
+    "for retrieval against Russian engineering project drawings "
+    "and compliance checks. Preserve equipment, parameters, "
+    "constraints, mandatory actions and referenced standards."
 )
 
 
@@ -93,7 +103,7 @@ def utc_now() -> datetime:
 
 @dataclass(frozen=True, slots=True)
 class IndexTechnicalAssignment:
-    """Индексирует один T-document постранично."""
+    """Индексирует page и atomic requirement representations ТЗ."""
 
     unit_of_work_factory: TechnicalAssignmentUnitOfWorkFactory
 
@@ -179,87 +189,29 @@ class IndexTechnicalAssignment:
                     vector_size=self.output_dimension,
                 )
 
+            requirement_index = 0
+
             for page in pages:
-                vectors = await self.embedding_provider.embed(
-                    (
-                        MultimodalEmbeddingInput(
-                            text=page.text,
-                            image_bytes=page.image_bytes,
-                            instruction=(_T_EMBEDDING_INSTRUCTION),
-                        ),
-                    )
+                page_point_id = await self._index_page(
+                    assignment=assignment,
+                    page=page,
                 )
 
-                if (
-                    len(
-                        vectors,
-                    )
-                    != 1
-                ):
-                    raise MultimodalEmbeddingProviderError(
-                        "T page должна получить ровно один embedding.",
-                    )
-
-                vector = vectors[0]
-
-                if (
-                    len(
-                        vector,
-                    )
-                    != self.output_dimension
-                ):
-                    raise MultimodalEmbeddingProviderError(
-                        "T embedding имеет неправильную dimension.",
-                    )
-
-                point_id = str(
-                    uuid5(
-                        NAMESPACE_URL,
-                        (
-                            "pdrd:technical-assignment:"
-                            f"{technical_assignment_id}:"
-                            f"page:{page.page_number}"
-                        ),
-                    )
+                requirements = extract_technical_assignment_requirements(
+                    page_number=page.page_number,
+                    text=page.text,
                 )
 
-                await self.vector_store.upsert(
-                    collection=self.collection,
-                    records=(
-                        VectorRecord(
-                            point_id=point_id,
-                            vector=vector,
-                            payload={
-                                "source_type": ("technical_assignment"),
-                                "representation": ("page_multimodal"),
-                                "technical_assignment_id": str(
-                                    assignment.technical_assignment_id,
-                                ),
-                                "analysis_document_id": str(
-                                    assignment.analysis_document_id,
-                                ),
-                                "section_id": str(
-                                    assignment.section_id,
-                                ),
-                                "source_file": (assignment.original_name),
-                                "source_sha256": (assignment.sha256),
-                                "page": (page.page_number),
-                                "pixel_width": (page.pixel_width),
-                                "pixel_height": (page.pixel_height),
-                                "normative_refs": list(
-                                    extract_normative_references(
-                                        page.text,
-                                    )
-                                ),
-                                "text": page.text[: self.page_text_limit],
-                            },
-                        ),
-                    ),
+                requirement_index = await self._index_requirements(
+                    assignment=assignment,
+                    page_point_id=page_point_id,
+                    requirements=requirements,
+                    start_index=requirement_index,
                 )
 
             # Критический GPU barrier:
             # READY становится видимым только после освобождения
-            # multimodal checkpoint из VRAM.
+            # unified embedding checkpoint из VRAM.
             await self.embedding_provider.release()
 
             model_released = True
@@ -337,6 +289,221 @@ class IndexTechnicalAssignment:
                     MultimodalEmbeddingProviderError,
                 ):
                     await self.embedding_provider.release()
+
+    async def _index_page(
+        self,
+        *,
+        assignment: TechnicalAssignment,
+        page: TechnicalAssignmentPage,
+    ) -> str:
+        """Индексирует исходное multimodal представление страницы."""
+        vectors = await self.embedding_provider.embed(
+            (
+                MultimodalEmbeddingInput(
+                    text=page.text,
+                    image_bytes=page.image_bytes,
+                    instruction=(_T_PAGE_EMBEDDING_INSTRUCTION),
+                ),
+            )
+        )
+
+        if (
+            len(
+                vectors,
+            )
+            != 1
+        ):
+            raise MultimodalEmbeddingProviderError(
+                "T page должна получить ровно один embedding.",
+            )
+
+        vector = vectors[0]
+
+        self._validate_vector(
+            vector,
+            representation="T page",
+        )
+
+        point_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                (
+                    "pdrd:technical-assignment:"
+                    f"{assignment.technical_assignment_id}:"
+                    f"page:{page.page_number}"
+                ),
+            )
+        )
+
+        await self.vector_store.upsert(
+            collection=self.collection,
+            records=(
+                VectorRecord(
+                    point_id=point_id,
+                    vector=vector,
+                    payload={
+                        "source_type": "technical_assignment",
+                        "representation": "page_multimodal",
+                        "technical_assignment_id": str(
+                            assignment.technical_assignment_id,
+                        ),
+                        "analysis_document_id": str(
+                            assignment.analysis_document_id,
+                        ),
+                        "section_id": str(
+                            assignment.section_id,
+                        ),
+                        "source_file": assignment.original_name,
+                        "source_sha256": assignment.sha256,
+                        "page": page.page_number,
+                        "pixel_width": page.pixel_width,
+                        "pixel_height": page.pixel_height,
+                        "normative_refs": list(
+                            extract_normative_references(
+                                page.text,
+                            )
+                        ),
+                        "text": page.text[: self.page_text_limit],
+                    },
+                ),
+            ),
+        )
+
+        return point_id
+
+    async def _index_requirements(
+        self,
+        *,
+        assignment: TechnicalAssignment,
+        page_point_id: str,
+        requirements: tuple[
+            TechnicalAssignmentRequirement,
+            ...,
+        ],
+        start_index: int,
+    ) -> int:
+        """Индексирует text-only atomic T requirements."""
+        if not requirements:
+            return start_index
+
+        inputs = tuple(
+            MultimodalEmbeddingInput(
+                text=requirement.text,
+                instruction=(_T_REQUIREMENT_EMBEDDING_INSTRUCTION),
+            )
+            for requirement in requirements
+        )
+
+        vectors = await self.embedding_provider.embed(
+            inputs,
+        )
+
+        if len(
+            vectors,
+        ) != len(
+            requirements,
+        ):
+            raise MultimodalEmbeddingProviderError(
+                "Количество T requirement embeddings "
+                "не совпадает с количеством requirements.",
+            )
+
+        records: list[VectorRecord] = []
+
+        for offset, (
+            requirement,
+            vector,
+        ) in enumerate(
+            zip(
+                requirements,
+                vectors,
+                strict=True,
+            ),
+            start=1,
+        ):
+            self._validate_vector(
+                vector,
+                representation="T requirement",
+            )
+
+            requirement_index = start_index + offset
+
+            requirement_id = f"T-R{requirement_index}"
+
+            point_id = str(
+                uuid5(
+                    NAMESPACE_URL,
+                    (
+                        "pdrd:technical-assignment:"
+                        f"{assignment.technical_assignment_id}:"
+                        f"requirement:{requirement_id}"
+                    ),
+                )
+            )
+
+            records.append(
+                VectorRecord(
+                    point_id=point_id,
+                    vector=vector,
+                    payload={
+                        "source_type": "technical_assignment",
+                        "representation": "requirement_text",
+                        "technical_assignment_id": str(
+                            assignment.technical_assignment_id,
+                        ),
+                        "analysis_document_id": str(
+                            assignment.analysis_document_id,
+                        ),
+                        "section_id": str(
+                            assignment.section_id,
+                        ),
+                        "source_file": assignment.original_name,
+                        "source_sha256": assignment.sha256,
+                        "page": requirement.page_number,
+                        "parent_page_point_id": page_point_id,
+                        "requirement_id": requirement_id,
+                        "requirement_index": requirement_index,
+                        "requirement_local_key": (requirement.local_key),
+                        "requirement_strength": (requirement.strength),
+                        "scopes": list(
+                            requirement.scopes,
+                        ),
+                        "normative_refs": list(
+                            requirement.normative_refs,
+                        ),
+                        "source_text": requirement.source_text,
+                        "text": requirement.text,
+                    },
+                )
+            )
+
+        await self.vector_store.upsert(
+            collection=self.collection,
+            records=tuple(
+                records,
+            ),
+        )
+
+        return start_index + len(
+            requirements,
+        )
+
+    def _validate_vector(
+        self,
+        vector: list[float],
+        *,
+        representation: str,
+    ) -> None:
+        """Проверяет dimension одного unified embedding."""
+        if (
+            len(
+                vector,
+            )
+            != self.output_dimension
+        ):
+            raise MultimodalEmbeddingProviderError(
+                f"{representation} embedding имеет неправильную dimension.",
+            )
 
     async def _prepare_pdf(
         self,

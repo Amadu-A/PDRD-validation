@@ -11,8 +11,12 @@ from pdrd_analysis_service.application.use_cases import (
     CheckPageAgainstNorms,
     CheckReadiness,
     FinalizeFindings,
+    LocalizeFindings,
     UnderstandPage,
     ValidateProjectContext,
+)
+from pdrd_analysis_service.application.use_cases.technical_assignment_validation import (
+    CheckPageAgainstTechnicalAssignment,
 )
 from pdrd_analysis_service.core.settings import (
     Settings,
@@ -40,7 +44,11 @@ class ApplicationContainer:
 
     check_page_against_norms: CheckPageAgainstNorms
 
+    check_page_against_technical_assignment: CheckPageAgainstTechnicalAssignment
+
     finalize_findings: FinalizeFindings
+
+    localize_findings: LocalizeFindings
 
     check_readiness: CheckReadiness
 
@@ -103,12 +111,26 @@ def build_container() -> ApplicationContainer:
             max_issues=settings.pipeline.max_issues,
             normative_text_limit=(settings.pipeline.normative_text_limit),
         ),
+        check_page_against_technical_assignment=(
+            CheckPageAgainstTechnicalAssignment(
+                vision_model=vision_model,
+                num_predict=(settings.pipeline.technical_assignment_num_predict),
+                batch_size=(settings.pipeline.technical_assignment_batch_size),
+                requirement_text_limit=(
+                    settings.pipeline.technical_assignment_requirement_text_limit
+                ),
+            )
+        ),
         finalize_findings=FinalizeFindings(
             vision_model=vision_model,
-            num_predict=settings.pipeline.final_num_predict,
-            batch_size=settings.pipeline.final_batch_size,
+            num_predict=(settings.pipeline.final_num_predict),
+            batch_size=(settings.pipeline.final_batch_size),
             experience_context_limit=(settings.pipeline.experience_context_limit),
             experience_min_score=(settings.pipeline.experience_min_score),
+        ),
+        localize_findings=LocalizeFindings(
+            vision_model=vision_model,
+            num_predict=(settings.pipeline.finding_location_num_predict),
         ),
         check_readiness=CheckReadiness(
             vision_model=vision_model,

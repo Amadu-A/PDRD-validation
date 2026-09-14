@@ -65,6 +65,7 @@ class CeleryOutboxPublisher:
                 exchange=self._broker_settings.exchange_name,
                 routing_key=self._broker_settings.routing_key,
                 retry=True,
+                expires=self._broker_settings.task_expires_seconds,
             )
         except (
             OSError,

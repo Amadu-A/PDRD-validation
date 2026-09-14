@@ -2,6 +2,7 @@
 
 """Use cases retrieval preparation и инженерной проверки листа."""
 
+import logging
 from dataclasses import dataclass
 
 from pdrd_analysis_service.application.json_schemas import (
@@ -18,8 +19,8 @@ from pdrd_analysis_service.application.use_cases.common import (
     build_basis,
     category,
     confidence,
-    filter_violations,
     finding_status,
+    select_violation_candidates,
     severity,
     string_tuple,
 )
@@ -32,6 +33,61 @@ from pdrd_analysis_service.domain.analysis import (
     TechnicalAssignmentSource,
     UserPackageSource,
 )
+
+logger = logging.getLogger(
+    __name__,
+)
+
+_HIGH_RECALL_FINDING_POLICY = """
+--- HIGH-RECALL FINDING POLICY ---
+
+Массив violations — это полный набор конкретных
+candidate findings текущего листа, а не shortlist.
+
+Перед формированием JSON сделай полный проход по листу
+и перечисли КАЖДУЮ различимую проблему, для которой
+есть конкретный визуальный или текстовый факт.
+
+НЕ выбирай только самые важные замечания.
+НЕ ограничивай ответ несколькими примерами.
+НЕ сокращай количество candidate findings ради более
+короткого JSON. Компактность достигается только
+краткостью полей каждого candidate.
+НЕ удаляй candidate только потому, что:
+
+- у него ниже confidence, чем у другого candidate;
+- для него не найден N/T/U source;
+- он требует инженерной проверки;
+- рядом уже есть похожее, но относящееся
+  к другому объекту, обозначению или участку;
+- нормативное основание пока не удалось подтвердить.
+
+Если конкретный факт существует, но уверенности
+недостаточно, сохрани candidate со status=needs_review.
+
+При этом НЕ добавляй в violations подтверждения
+соответствия и положительные результаты проверки.
+Если проблемы нет, candidate не создавай.
+
+Один физически различимый объект/участок/несоответствие
+не объединяй с другим только ради сокращения ответа.
+
+Формируй каждый candidate максимально компактно:
+- comment: не более 160 символов, одна конкретная фраза;
+- evidence: не более 180 символов, только наблюдаемый факт;
+- recommendation_draft="" всегда; рекомендация будет
+  сформирована отдельным этапом finalization;
+- не повторяй один и тот же нормативный текст одновременно
+  в comment и evidence;
+- source IDs перечисляй только в соответствующих массивах.
+
+После генерации backend не будет выполнять
+semantic filtering массива violations:
+ответственность за то, что в массив попадают именно
+реальные candidate findings, находится на этом этапе.
+
+--- END HIGH-RECALL FINDING POLICY ---
+""".strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +177,9 @@ class CheckPageAgainstNorms:
     vision_model: StructuredVisionModel
 
     num_predict: int
+
     max_issues: int
+
     normative_text_limit: int
 
     async def execute(
@@ -135,7 +193,7 @@ class CheckPageAgainstNorms:
             ...,
         ],
         image_bytes: bytes,
-        normative_system_prompt: str | None = None,
+        normative_system_prompt: (str | None) = None,
         technical_assignment_sources: tuple[
             TechnicalAssignmentSource,
             ...,
@@ -171,27 +229,29 @@ class CheckPageAgainstNorms:
             source.source_id for source in user_package_sources if source.source_id
         )
 
+        prompt = build_normative_check_prompt(
+            page_number=page_number,
+            extracted_text=extracted_text,
+            page_facts=page_facts,
+            normative_sources=normative_sources,
+            technical_assignment_sources=(technical_assignment_sources),
+            conflict_candidates=(conflict_candidates),
+            user_package_sources=(user_package_sources),
+            normative_text_limit=(self.normative_text_limit),
+            normative_system_prompt=(normative_system_prompt),
+        )
+
         result = await self.vision_model.generate_json(
-            prompt=build_normative_check_prompt(
-                page_number=page_number,
-                extracted_text=extracted_text,
-                page_facts=page_facts,
-                normative_sources=normative_sources,
-                technical_assignment_sources=technical_assignment_sources,
-                conflict_candidates=conflict_candidates,
-                user_package_sources=user_package_sources,
-                normative_text_limit=self.normative_text_limit,
-                normative_system_prompt=normative_system_prompt,
-            ),
+            prompt=(f"{prompt}\n\n{_HIGH_RECALL_FINDING_POLICY}"),
             schema=build_normative_check_schema(
-                source_ids=normative_source_ids,
+                source_ids=(normative_source_ids),
                 technical_assignment_source_ids=(technical_assignment_source_ids),
-                user_package_source_ids=user_package_source_ids,
+                user_package_source_ids=(user_package_source_ids),
                 max_issues=self.max_issues,
             ),
             num_predict=self.num_predict,
             seed=200,
-            stage=f"normative_check:{page_number}",
+            stage=(f"normative_check:{page_number}"),
             image_bytes=image_bytes,
         )
 
@@ -205,14 +265,30 @@ class CheckPageAgainstNorms:
             source.source_id: source for source in user_package_sources
         }
 
-        findings: list[FindingDraft] = []
-
-        for violation in filter_violations(
+        candidate_selection = select_violation_candidates(
             result.payload.get(
                 "violations",
                 [],
             )
-        ):
+        )
+
+        logger.info(
+            (
+                "normative_candidate_selection "
+                "page=%s generated=%s preserved=%s "
+                "rejected=%s rejection_reasons=%s "
+                "lossless=true"
+            ),
+            page_number,
+            candidate_selection.generated_count,
+            candidate_selection.preserved_count,
+            candidate_selection.rejected_count,
+            candidate_selection.rejection_counts,
+        )
+
+        findings: list[FindingDraft] = []
+
+        for violation in candidate_selection.candidates:
             requested_normative_ids = string_tuple(
                 violation.get(
                     "normative_source_ids",
@@ -252,23 +328,53 @@ class CheckPageAgainstNorms:
                 if source_id in user_package_by_id
             )
 
-            requested_any_source = bool(
-                requested_normative_ids
-                or requested_technical_assignment_ids
-                or requested_user_package_ids
+            detached_normative_ids = tuple(
+                source_id
+                for source_id in requested_normative_ids
+                if source_id not in source_by_id
             )
+
+            detached_technical_assignment_ids = tuple(
+                source_id
+                for source_id in requested_technical_assignment_ids
+                if source_id not in technical_assignment_by_id
+            )
+
+            detached_user_package_ids = tuple(
+                source_id
+                for source_id in requested_user_package_ids
+                if source_id not in user_package_by_id
+            )
+
+            if (
+                detached_normative_ids
+                or detached_technical_assignment_ids
+                or detached_user_package_ids
+            ):
+                logger.info(
+                    (
+                        "normative_candidate_source_ids_"
+                        "detached "
+                        "page=%s candidate=%s "
+                        "normative=%s "
+                        "technical_assignment=%s "
+                        "user_package=%s"
+                    ),
+                    page_number,
+                    len(
+                        findings,
+                    )
+                    + 1,
+                    detached_normative_ids,
+                    (detached_technical_assignment_ids),
+                    detached_user_package_ids,
+                )
 
             selected_any_source = bool(
                 selected_normative_sources
-                or selected_technical_assignment_sources
+                or (selected_technical_assignment_sources)
                 or selected_user_package_sources
             )
-
-            # Если модель запросила source-id, которого ей
-            # фактически не передавали, не превращаем такой
-            # hallucinated reference в source-less finding.
-            if requested_any_source and not selected_any_source:
-                continue
 
             comment = str(
                 violation.get(
@@ -328,7 +434,7 @@ class CheckPageAgainstNorms:
                 FindingDraft(
                     finding_id=finding_id,
                     page=page_number,
-                    page_type=page_facts.page_type,
+                    page_type=(page_facts.page_type),
                     category=finding_category,
                     severity=severity(
                         violation.get(
@@ -338,7 +444,7 @@ class CheckPageAgainstNorms:
                     status=normalized_status,
                     comment=comment,
                     evidence=evidence,
-                    recommendation_draft=recommendation_draft,
+                    recommendation_draft=(recommendation_draft),
                     confidence=confidence(
                         violation.get(
                             "confidence",
@@ -350,16 +456,20 @@ class CheckPageAgainstNorms:
                     basis=build_basis(
                         selected_normative_sources,
                     ),
-                    basis_sources=selected_normative_sources,
-                    experience_query=build_experience_query(
-                        category=finding_category,
-                        comment=comment,
-                        evidence=evidence,
-                        recommendation_draft=recommendation_draft,
+                    basis_sources=(selected_normative_sources),
+                    experience_query=(
+                        build_experience_query(
+                            category=(finding_category),
+                            comment=comment,
+                            evidence=evidence,
+                            recommendation_draft=(recommendation_draft),
+                        )
                     ),
-                    technical_assignment_source_ids=tuple(
-                        source.source_id
-                        for source in selected_technical_assignment_sources
+                    technical_assignment_source_ids=(
+                        tuple(
+                            source.source_id
+                            for source in (selected_technical_assignment_sources)
+                        )
                     ),
                     technical_assignment_basis_sources=(
                         selected_technical_assignment_sources
@@ -370,6 +480,25 @@ class CheckPageAgainstNorms:
                     user_package_basis_sources=(selected_user_package_sources),
                 )
             )
+
+        logger.info(
+            (
+                "normative_findings_preserved "
+                "page=%s candidates=%s "
+                "findings=%s lossless=%s"
+            ),
+            page_number,
+            candidate_selection.preserved_count,
+            len(
+                findings,
+            ),
+            (
+                candidate_selection.preserved_count
+                == len(
+                    findings,
+                )
+            ),
+        )
 
         return (
             str(
