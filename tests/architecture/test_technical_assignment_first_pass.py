@@ -132,7 +132,7 @@ def test_t_first_batch_policy_balances_recall_and_round_trips() -> None:
 
 
 def test_t_first_schema_separates_compact_decisions_from_issue_details() -> None:
-    """Не-finding decisions не заставляют VLM генерировать prose."""
+    """Status хранится только в decisions, а issues содержат prose details."""
     path = (
         ROOT
         / "services"
@@ -149,6 +149,20 @@ def test_t_first_schema_separates_compact_decisions_from_issue_details() -> None
 
     assert '"decisions"' in source
     assert '"issues"' in source
-    assert "TECHNICAL_ASSIGNMENT_FINDING_STATUSES" in source
+
+    # Итоговый status имеет единственный source of truth:
+    # decisions[requirement_id].status.
+    #
+    # Старый TECHNICAL_ASSIGNMENT_FINDING_STATUSES существовал
+    # только ради дублирующего issue.status и больше не нужен.
+    assert "TECHNICAL_ASSIGNMENT_FINDING_STATUSES" not in source
+
+    # В schema должен остаться ровно один generated status:
+    # внутри compact decision.
+    assert source.count('"status": {') == 1
+
+    # Prose генерируется только для finding details.
+    assert '"severity"' in source
     assert '"comment"' in source
     assert '"evidence"' in source
+    assert '"recommendation_draft"' in source

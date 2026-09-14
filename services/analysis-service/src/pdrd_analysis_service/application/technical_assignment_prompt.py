@@ -99,14 +99,16 @@ insufficient_evidence:
 
 В объекте decisions ОБЯЗАТЕЛЬНО верни
 ровно все переданные requirement_id.
+
 Для каждого requirement_id в decisions нужны
 ТОЛЬКО два поля:
 
 - status;
 - confidence.
 
-Не добавляй comment/evidence/recommendation
-в decisions.
+decisions[requirement_id].status является
+ЕДИНСТВЕННЫМ источником итогового статуса
+проверки requirement.
 
 Если status = satisfied или not_applicable,
 этого достаточно: НЕ добавляй requirement в issues.
@@ -115,9 +117,13 @@ insufficient_evidence:
 обязательно добавь РОВНО один объект
 для этого requirement_id в массив issues.
 
+Массив issues содержит ТОЛЬКО подробности
+замечаний и НЕ содержит поле status.
+
 Для каждого объекта issues:
 
-- status должен совпадать со status в decisions;
+- requirement_id должен точно указывать requirement;
+- status в issues НЕ возвращай;
 - severity должен отражать значимость проблемы;
 - comment должен кратко описывать несоответствие
   или причину инженерной проверки;
@@ -238,6 +244,9 @@ PAGE TEXT:
 
 В decisions должны присутствовать
 ровно все переданные requirement_id.
-В issues должны присутствовать только
-violated/insufficient_evidence requirements.
+
+В issues должны присутствовать подробности
+только для requirement_id,
+у которых decisions[requirement_id].status равен
+violated или insufficient_evidence.
 """.strip()

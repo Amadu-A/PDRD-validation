@@ -107,6 +107,7 @@ class CheckPageAgainstTechnicalAssignment:
         )
 
         decisions: list[TechnicalAssignmentDecision] = []
+
         metrics: list[GenerationMetrics] = []
 
         for batch_number, start in enumerate(
@@ -303,6 +304,7 @@ class CheckPageAgainstTechnicalAssignment:
             )
 
         compact_mode = "issues" in payload
+
         issues_by_requirement = cls._parse_issues(
             raw_issues=payload.get(
                 "issues",
@@ -319,8 +321,10 @@ class CheckPageAgainstTechnicalAssignment:
                 requirement_id=(requirement.requirement_id),
                 raw=raw_decisions[requirement.requirement_id],
                 compact_mode=compact_mode,
-                raw_issue=issues_by_requirement.get(
-                    requirement.requirement_id,
+                raw_issue=(
+                    issues_by_requirement.get(
+                        requirement.requirement_id,
+                    )
                 ),
             )
             for requirement in requirements
@@ -330,7 +334,7 @@ class CheckPageAgainstTechnicalAssignment:
             finding_ids = {
                 decision.requirement_id
                 for decision in decisions
-                if decision.status in _FINDING_DECISION_STATUSES
+                if (decision.status in _FINDING_DECISION_STATUSES)
             }
 
             issue_ids = set(
@@ -340,7 +344,8 @@ class CheckPageAgainstTechnicalAssignment:
             if issue_ids != finding_ids:
                 raise TechnicalAssignmentValidationError(
                     "T-first issues должны содержать "
-                    "ровно violated/insufficient_evidence decisions.",
+                    "ровно violated/insufficient_evidence "
+                    "decisions.",
                 )
 
         return decisions
@@ -358,7 +363,11 @@ class CheckPageAgainstTechnicalAssignment:
             Any,
         ],
     ]:
-        """Строит карту compact issue details без дублей."""
+        """Строит карту compact issue details без дублей.
+
+        Итоговый статус intentionally не читается из issue:
+        единственный source of truth находится в decisions.
+        """
         if not enabled:
             return {}
 
@@ -402,15 +411,6 @@ class CheckPageAgainstTechnicalAssignment:
             if requirement_id in result:
                 raise TechnicalAssignmentValidationError(
                     "T-first issues содержат повторяющийся requirement_id.",
-                )
-
-            raw_status = raw_issue.get(
-                "status",
-            )
-
-            if raw_status not in _FINDING_DECISION_STATUSES:
-                raise TechnicalAssignmentValidationError(
-                    "T-first issue содержит недопустимый status.",
                 )
 
             result[requirement_id] = raw_issue
@@ -462,21 +462,18 @@ class CheckPageAgainstTechnicalAssignment:
                         "обязательного issue details.",
                     )
 
-                if (
-                    raw_issue.get(
-                        "status",
-                    )
-                    != raw_status
-                ):
-                    raise TechnicalAssignmentValidationError(
-                        "T-first issue status не совпадает с decisions status.",
-                    )
-
+                # decisions[requirement_id].status является
+                # единственным authoritative status.
+                #
+                # issue содержит только текстовые подробности.
+                # Это исключает redundant generated state,
+                # который раньше мог логически расходиться
+                # между decisions и issues.
                 detail = raw_issue
 
             else:
-                # Legacy fallback нужен для совместимости внутренних
-                # тестовых doubles и старых persisted payload.
+                # Legacy fallback нужен для совместимости
+                # внутренних test doubles и старых payload.
                 detail = raw
 
             severity = cls._parse_severity(
@@ -513,6 +510,7 @@ class CheckPageAgainstTechnicalAssignment:
                 FindingSeverity,
                 "info",
             )
+
             comment = ""
             evidence = ""
             recommendation_draft = ""

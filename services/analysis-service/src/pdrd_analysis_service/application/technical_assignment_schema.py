@@ -15,11 +15,6 @@ TECHNICAL_ASSIGNMENT_DECISION_STATUSES = (
     "insufficient_evidence",
 )
 
-TECHNICAL_ASSIGNMENT_FINDING_STATUSES = (
-    "violated",
-    "insufficient_evidence",
-)
-
 
 def build_technical_assignment_check_schema(
     requirement_ids: tuple[
@@ -76,12 +71,6 @@ def build_technical_assignment_check_schema(
                     requirement_ids,
                 ),
             },
-            "status": {
-                "type": "string",
-                "enum": list(
-                    TECHNICAL_ASSIGNMENT_FINDING_STATUSES,
-                ),
-            },
             "severity": {
                 "type": "string",
                 "enum": list(
@@ -105,7 +94,6 @@ def build_technical_assignment_check_schema(
         },
         "required": [
             "requirement_id",
-            "status",
             "severity",
             "comment",
             "evidence",
@@ -120,7 +108,10 @@ def build_technical_assignment_check_schema(
             "decisions": {
                 "type": "object",
                 "additionalProperties": False,
-                "properties": dict.fromkeys(requirement_ids, decision_schema),
+                "properties": dict.fromkeys(
+                    requirement_ids,
+                    decision_schema,
+                ),
                 "required": list(
                     requirement_ids,
                 ),
