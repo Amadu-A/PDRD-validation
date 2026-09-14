@@ -4,6 +4,8 @@
  * BEM-блок структурированного результата анализа.
  *
  * Финальные findings отображаются карточками.
+ * Визуальные замечания размещаются полупрозрачными callout-блоками
+ * непосредственно поверх rendered PDF page.
  * Managed normative citations открывают PDF/Word-preview
  * через публичный API Gateway.
  */
@@ -149,26 +151,27 @@
 .analysis-result__page-stage {
   position: relative;
 
-  display: grid;
+  width: 100%;
 
-  grid-template-columns:
-    minmax(0, 2fr)
-    minmax(260px, 0.8fr);
-
-  align-items: start;
-
-  gap: var(--space-4);
+  overflow: visible;
 }
 
 
 .analysis-result__page-image-pane {
   position: relative;
 
+  width: 100%;
   min-width: 0;
+
+  isolation: isolate;
 }
 
 
 .analysis-result__page-image {
+  position: relative;
+
+  z-index: 1;
+
   display: block;
 
   width: 100%;
@@ -184,77 +187,196 @@
 .analysis-result__bbox {
   position: absolute;
 
-  z-index: 2;
+  z-index: 4;
 
   box-sizing: border-box;
 
   min-width: 4px;
   min-height: 4px;
 
-  border: 2px solid var(--color-danger);
+  border:
+    1.5px
+    solid
+    color-mix(
+      in srgb,
+      var(--color-danger) 85%,
+      transparent
+    );
 
   background:
     color-mix(
       in srgb,
-      var(--color-danger) 10%,
+      var(--color-danger) 30%,
       transparent
     );
 
-  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px
+    color-mix(
+      in srgb,
+      var(--color-surface) 30%,
+      transparent
+    );
+
+  cursor: pointer;
+
+  pointer-events: auto;
+
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease;
+}
+
+
+.analysis-result__bbox--active,
+.analysis-result__bbox:hover {
+  border-color: var(--color-danger);
+
+  box-shadow:
+    0 0 0 2px
+    color-mix(
+      in srgb,
+      var(--color-danger) 24%,
+      transparent
+    );
+
+  background:
+    color-mix(
+      in srgb,
+      var(--color-danger) 46%,
+      transparent
+    );
 }
 
 
 .analysis-result__bbox-number {
   position: absolute;
-  top: -1.35rem;
-  left: -2px;
+  top: -0.95rem;
+  left: -0.25rem;
 
   display: inline-flex;
 
-  min-width: 1.2rem;
-  height: 1.2rem;
+  min-width: 1.05rem;
+  height: 1.05rem;
 
   align-items: center;
   justify-content: center;
 
-  padding: 0 0.25rem;
+  padding: 0 0.2rem;
 
   border-radius: 999px;
 
-  background: var(--color-danger);
+  background:
+    color-mix(
+      in srgb,
+      var(--color-danger) 88%,
+      transparent
+    );
 
   color: var(--color-surface);
 
-  font-size: 0.7rem;
+  font-size: 0.62rem;
   font-weight: var(--font-weight-semibold);
+
+  line-height: 1;
 }
 
 
 .analysis-result__annotation-list {
-  position: relative;
+  position: absolute;
+  inset: 0;
 
-  z-index: 3;
+  z-index: 6;
 
-  display: grid;
+  overflow: visible;
 
-  gap: var(--space-3);
+  pointer-events: none;
 }
 
 
 .analysis-result__annotation {
+  position: absolute;
+
   display: grid;
 
-  gap: var(--space-2);
+  width: clamp(
+    150px,
+    22%,
+    235px
+  );
+  max-width: calc(100% - 20px);
 
-  padding: var(--space-3);
+  gap: 0.28rem;
 
-  border: 1px solid var(--color-danger);
+  box-sizing: border-box;
+
+  padding:
+    0.42rem
+    0.5rem;
+
+  border:
+    1px
+    solid
+    color-mix(
+      in srgb,
+      var(--color-danger) 82%,
+      transparent
+    );
   border-radius: var(--radius-control);
 
-  background: var(--color-danger-soft);
+  background:
+    color-mix(
+      in srgb,
+      var(--color-danger) 30%,
+      transparent
+    );
 
-  font-size: 0.78rem;
-  line-height: 1.35;
+  color: var(--color-text-primary);
+
+  box-shadow:
+    0
+    0.2rem
+    0.65rem
+    rgb(0 0 0 / 12%);
+
+  backdrop-filter: blur(1px);
+
+  font-size: 0.68rem;
+  line-height: 1.22;
+
+  pointer-events: auto;
+
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease;
+}
+
+
+.analysis-result__annotation:hover,
+.analysis-result__annotation:focus-visible,
+.analysis-result__annotation--active {
+  border-color: var(--color-danger);
+
+  background:
+    color-mix(
+      in srgb,
+      var(--color-danger) 46%,
+      transparent
+    );
+
+  box-shadow:
+    0
+    0.35rem
+    1rem
+    rgb(0 0 0 / 20%);
+}
+
+
+.analysis-result__annotation:focus-visible {
+  outline: 2px solid var(--color-danger);
+  outline-offset: 2px;
 }
 
 
@@ -263,7 +385,7 @@
 
   align-items: flex-start;
 
-  gap: var(--space-2);
+  gap: 0.34rem;
 }
 
 
@@ -272,46 +394,65 @@
 
   flex: 0 0 auto;
 
-  min-width: 1.25rem;
-  height: 1.25rem;
+  min-width: 1.05rem;
+  height: 1.05rem;
 
   align-items: center;
   justify-content: center;
 
+  padding: 0 0.2rem;
+
   border-radius: 999px;
 
-  background: var(--color-danger);
+  background:
+    color-mix(
+      in srgb,
+      var(--color-danger) 92%,
+      transparent
+    );
 
   color: var(--color-surface);
 
-  font-size: 0.7rem;
+  font-size: 0.61rem;
   font-weight: var(--font-weight-semibold);
+
+  line-height: 1;
 }
 
 
 .analysis-result__annotation-title {
+  display: -webkit-box;
+
   min-width: 0;
+
+  overflow: hidden;
 
   font-weight: var(--font-weight-semibold);
 
   overflow-wrap: anywhere;
+
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 
 .analysis-result__annotation-sources {
   display: flex;
 
+  min-width: 0;
+
   flex-wrap: wrap;
 
   align-items: baseline;
 
   gap:
-    var(--space-1)
-    var(--space-2);
+    0.12rem
+    0.32rem;
 }
 
 
 .analysis-result__annotation-source-label {
+  font-size: 0.61rem;
   font-weight: var(--font-weight-semibold);
 }
 
@@ -320,12 +461,33 @@
   position: relative;
 
   display: inline-block;
+
+  min-width: 0;
 }
 
 
 .analysis-result__annotation-source
 .analysis-result__source-link {
-  font-size: inherit;
+  display: inline-block;
+
+  max-width: 100%;
+
+  overflow: hidden;
+
+  font-size: 0.61rem;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  vertical-align: bottom;
+}
+
+
+.analysis-result__annotation-source-more {
+  color: var(--color-text-secondary);
+
+  font-size: 0.6rem;
+  font-weight: var(--font-weight-semibold);
 }
 
 
@@ -334,7 +496,7 @@
   left: 0;
   bottom: calc(100% + var(--space-2));
 
-  z-index: 20;
+  z-index: 50;
 
   display: grid;
 
@@ -409,7 +571,25 @@
 
   color: var(--color-text-secondary);
 
-  font-size: 0.78rem;
+  font-size: 0.68rem;
+}
+
+
+.analysis-result__page-empty {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+
+  padding: var(--space-2);
+
+  border-radius: var(--radius-control);
+
+  background:
+    color-mix(
+      in srgb,
+      var(--color-surface) 78%,
+      transparent
+    );
 }
 
 
@@ -417,7 +597,7 @@
   position: absolute;
   inset: 0;
 
-  z-index: 2;
+  z-index: 5;
 
   width: 100%;
   height: 100%;
@@ -432,9 +612,22 @@
   fill: none;
 
   stroke: var(--color-danger);
-  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-opacity: 0.58;
+  stroke-width: 1.35;
 
   vector-effect: non-scaling-stroke;
+
+  transition:
+    stroke-opacity 120ms ease,
+    stroke-width 120ms ease;
+}
+
+
+.analysis-result__connector--active {
+  stroke-opacity: 1;
+  stroke-width: 2.1;
 }
 
 
@@ -582,12 +775,24 @@
 
 @media (max-width: 900px) {
   .analysis-result__page-stage {
-    grid-template-columns: 1fr;
+    overflow-x: auto;
+    overflow-y: visible;
   }
 
 
-  .analysis-result__connectors {
-    display: none;
+  .analysis-result__page-image-pane {
+    min-width: 680px;
+  }
+
+
+  .analysis-result__annotation {
+    width: clamp(
+      140px,
+      24%,
+      210px
+    );
+
+    font-size: 0.64rem;
   }
 }
 

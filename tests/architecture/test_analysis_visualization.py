@@ -24,6 +24,10 @@ CONTROLLER_JS = FRONTEND_DIR / "controller.js"
 
 API_JS = FRONTEND_DIR / "api.js"
 
+ANALYSIS_RESULT_CSS = (
+    ROOT / "frontend" / "src" / "css" / "blocks" / "analysis-result.css"
+)
+
 DOCUMENT_PYMUPDF = (
     ROOT
     / "services"
@@ -199,8 +203,8 @@ def test_document_service_preserves_pdf_text_geometry() -> None:
     assert "page.text_words" in router
 
 
-def test_frontend_visualization_supports_multiple_regions() -> None:
-    """Frontend рисует несколько bbox одного finding безопасно."""
+def test_frontend_visualization_supports_inline_overlay_regions() -> None:
+    """Frontend рисует multi-region findings и callout прямо поверх PDF-листа."""
     visualization = _read(
         VISUALIZATION_JS,
     )
@@ -217,6 +221,10 @@ def test_frontend_visualization_supports_multiple_regions() -> None:
         API_JS,
     )
 
+    css = _read(
+        ANALYSIS_RESULT_CSS,
+    )
+
     required = (
         "page.locations",
         "location.regions",
@@ -225,8 +233,13 @@ def test_frontend_visualization_supports_multiple_regions() -> None:
         "y_min",
         "x_max",
         "y_max",
+        "layoutOverlayAnnotations",
+        "candidateRects",
+        "candidateScore",
+        "nearestConnectorPoints",
         "createElementNS",
         "polyline",
+        "connectorEntries",
         "analysis-result__bbox",
         "analysis-result__annotation",
         "analysis-result__annotation-tooltip",
@@ -251,6 +264,18 @@ def test_frontend_visualization_supports_multiple_regions() -> None:
     assert "getAnalysisVisualization" in api
 
     assert "/visualization" in api
+
+    assert ".analysis-result__annotation-list" in css
+
+    assert "position: absolute;" in css
+
+    assert "inset: 0;" in css
+
+    assert "var(--color-danger) 30%" in css
+
+    assert ".analysis-result__connector--active" in css
+
+    assert ".analysis-result__bbox--active" in css
 
 
 def test_gateway_uses_pdf_geometry_before_vlm_fallback() -> None:

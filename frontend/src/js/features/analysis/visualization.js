@@ -5,8 +5,16 @@
  *
  * BBox приходит в нормализованных координатах 0..1000.
  * Один finding может содержать несколько visual regions.
+ * Карточки замечаний размещаются поверх листа автоматически,
+ * а каждая region соединяется с одной общей карточкой finding.
  * Текст и source data вставляются только через textContent.
  */
+
+const CALLOUT_MARGIN_PX = 10;
+const CALLOUT_GAP_PX = 14;
+const CARD_OVERLAP_WEIGHT = 12;
+const REGION_OVERLAP_WEIGHT = 5;
+const DISTANCE_WEIGHT = 0.015;
 
 let tooltipSequence = 0;
 
@@ -305,7 +313,12 @@ function appendNormativeLinks(
     ),
   );
 
-  sources.forEach(
+  const visibleSources = sources.slice(
+    0,
+    2,
+  );
+
+  visibleSources.forEach(
     (source) => {
       const wrapper = createElement(
         "span",
@@ -393,6 +406,19 @@ function appendNormativeLinks(
     },
   );
 
+  if (
+    sources.length
+    > visibleSources.length
+  ) {
+    sourcesBlock.append(
+      createElement(
+        "span",
+        "analysis-result__annotation-source-more",
+        `+${sources.length - visibleSources.length}`,
+      ),
+    );
+  }
+
   parent.append(
     sourcesBlock,
   );
@@ -408,6 +434,19 @@ function createCallout(
     "article",
     "analysis-result__annotation",
   );
+
+  callout.tabIndex = 0;
+
+  const findingId = String(
+    finding.finding_id
+    ?? "",
+  );
+
+  if (findingId) {
+    callout.dataset.findingId = (
+      findingId
+    );
+  }
 
   const header = createElement(
     "div",
@@ -512,14 +551,671 @@ function createBoundingBoxes(
         ),
       );
 
-      return node;
+      return {
+        box,
+        node,
+      };
     },
   );
 }
 
 
+function clamp(
+  value,
+  minimum,
+  maximum,
+) {
+  return Math.min(
+    Math.max(
+      value,
+      minimum,
+    ),
+    maximum,
+  );
+}
+
+
+function normalizedBoxToPixels(
+  box,
+  paneWidth,
+  paneHeight,
+) {
+  return {
+    left: (
+      box.xMin
+      / 1000
+      * paneWidth
+    ),
+    top: (
+      box.yMin
+      / 1000
+      * paneHeight
+    ),
+    right: (
+      box.xMax
+      / 1000
+      * paneWidth
+    ),
+    bottom: (
+      box.yMax
+      / 1000
+      * paneHeight
+    ),
+  };
+}
+
+
+function unionRect(
+  rects,
+  paneWidth,
+  paneHeight,
+) {
+  if (!rects.length) {
+    const centerX = (
+      paneWidth
+      / 2
+    );
+
+    const centerY = (
+      paneHeight
+      / 2
+    );
+
+    return {
+      left: centerX,
+      top: centerY,
+      right: centerX,
+      bottom: centerY,
+    };
+  }
+
+  return {
+    left: Math.min(
+      ...rects.map(
+        (rect) => rect.left,
+      ),
+    ),
+    top: Math.min(
+      ...rects.map(
+        (rect) => rect.top,
+      ),
+    ),
+    right: Math.max(
+      ...rects.map(
+        (rect) => rect.right,
+      ),
+    ),
+    bottom: Math.max(
+      ...rects.map(
+        (rect) => rect.bottom,
+      ),
+    ),
+  };
+}
+
+
+function rectangleArea(
+  rect,
+) {
+  return Math.max(
+    0,
+    rect.right - rect.left,
+  ) * Math.max(
+    0,
+    rect.bottom - rect.top,
+  );
+}
+
+
+function intersectionArea(
+  first,
+  second,
+) {
+  return rectangleArea(
+    {
+      left: Math.max(
+        first.left,
+        second.left,
+      ),
+      top: Math.max(
+        first.top,
+        second.top,
+      ),
+      right: Math.min(
+        first.right,
+        second.right,
+      ),
+      bottom: Math.min(
+        first.bottom,
+        second.bottom,
+      ),
+    },
+  );
+}
+
+
+function distanceBetweenCenters(
+  first,
+  second,
+) {
+  const firstX = (
+    first.left
+    + first.right
+  ) / 2;
+
+  const firstY = (
+    first.top
+    + first.bottom
+  ) / 2;
+
+  const secondX = (
+    second.left
+    + second.right
+  ) / 2;
+
+  const secondY = (
+    second.top
+    + second.bottom
+  ) / 2;
+
+  return Math.hypot(
+    firstX - secondX,
+    firstY - secondY,
+  );
+}
+
+
+function createCandidateRect(
+  left,
+  top,
+  width,
+  height,
+  paneWidth,
+  paneHeight,
+) {
+  const safeRight = Math.max(
+    CALLOUT_MARGIN_PX,
+    paneWidth
+    - width
+    - CALLOUT_MARGIN_PX,
+  );
+
+  const safeBottom = Math.max(
+    CALLOUT_MARGIN_PX,
+    paneHeight
+    - height
+    - CALLOUT_MARGIN_PX,
+  );
+
+  const clampedLeft = clamp(
+    left,
+    CALLOUT_MARGIN_PX,
+    safeRight,
+  );
+
+  const clampedTop = clamp(
+    top,
+    CALLOUT_MARGIN_PX,
+    safeBottom,
+  );
+
+  return {
+    left: clampedLeft,
+    top: clampedTop,
+    right: clampedLeft + width,
+    bottom: clampedTop + height,
+  };
+}
+
+
+function candidateRects(
+  anchor,
+  width,
+  height,
+  paneWidth,
+  paneHeight,
+) {
+  const centerX = (
+    anchor.left
+    + anchor.right
+  ) / 2;
+
+  const centerY = (
+    anchor.top
+    + anchor.bottom
+  ) / 2;
+
+  const candidates = [
+    [
+      anchor.right + CALLOUT_GAP_PX,
+      centerY - height / 2,
+    ],
+    [
+      anchor.left - width - CALLOUT_GAP_PX,
+      centerY - height / 2,
+    ],
+    [
+      centerX - width / 2,
+      anchor.bottom + CALLOUT_GAP_PX,
+    ],
+    [
+      centerX - width / 2,
+      anchor.top - height - CALLOUT_GAP_PX,
+    ],
+    [
+      anchor.right + CALLOUT_GAP_PX,
+      anchor.top - height - CALLOUT_GAP_PX,
+    ],
+    [
+      anchor.right + CALLOUT_GAP_PX,
+      anchor.bottom + CALLOUT_GAP_PX,
+    ],
+    [
+      anchor.left - width - CALLOUT_GAP_PX,
+      anchor.top - height - CALLOUT_GAP_PX,
+    ],
+    [
+      anchor.left - width - CALLOUT_GAP_PX,
+      anchor.bottom + CALLOUT_GAP_PX,
+    ],
+  ];
+
+  const verticalOffsets = [
+    -1.35,
+    -0.7,
+    0,
+    0.7,
+    1.35,
+  ];
+
+  verticalOffsets.forEach(
+    (factor) => {
+      candidates.push(
+        [
+          paneWidth
+          - width
+          - CALLOUT_MARGIN_PX,
+          centerY
+          - height / 2
+          + factor
+          * (
+            height
+            + CALLOUT_GAP_PX
+          ),
+        ],
+      );
+
+      candidates.push(
+        [
+          CALLOUT_MARGIN_PX,
+          centerY
+          - height / 2
+          + factor
+          * (
+            height
+            + CALLOUT_GAP_PX
+          ),
+        ],
+      );
+    },
+  );
+
+  const horizontalStep = Math.max(
+    width + CALLOUT_GAP_PX,
+    1,
+  );
+
+  const verticalStep = Math.max(
+    height + CALLOUT_GAP_PX,
+    1,
+  );
+
+  for (
+    let top = CALLOUT_MARGIN_PX;
+    top <= paneHeight - height - CALLOUT_MARGIN_PX;
+    top += verticalStep
+  ) {
+    for (
+      let left = CALLOUT_MARGIN_PX;
+      left <= paneWidth - width - CALLOUT_MARGIN_PX;
+      left += horizontalStep
+    ) {
+      candidates.push(
+        [
+          left,
+          top,
+        ],
+      );
+    }
+  }
+
+  const unique = new Map();
+
+  candidates.forEach(
+    ([
+      left,
+      top,
+    ]) => {
+      const rect = createCandidateRect(
+        left,
+        top,
+        width,
+        height,
+        paneWidth,
+        paneHeight,
+      );
+
+      const key = (
+        `${Math.round(rect.left)}:${Math.round(rect.top)}`
+      );
+
+      if (!unique.has(
+        key,
+      )) {
+        unique.set(
+          key,
+          rect,
+        );
+      }
+    },
+  );
+
+  return Array.from(
+    unique.values(),
+  );
+}
+
+
+function candidateScore(
+  candidate,
+  anchor,
+  occupiedCards,
+  allRegions,
+) {
+  const cardOverlap = occupiedCards.reduce(
+    (
+      total,
+      occupied,
+    ) => (
+      total
+      + intersectionArea(
+        candidate,
+        occupied,
+      )
+    ),
+    0,
+  );
+
+  const regionOverlap = allRegions.reduce(
+    (
+      total,
+      region,
+    ) => (
+      total
+      + intersectionArea(
+        candidate,
+        region,
+      )
+    ),
+    0,
+  );
+
+  const distance = distanceBetweenCenters(
+    candidate,
+    anchor,
+  );
+
+  return (
+    cardOverlap
+    * CARD_OVERLAP_WEIGHT
+    + regionOverlap
+    * REGION_OVERLAP_WEIGHT
+    + distance
+    * DISTANCE_WEIGHT
+  );
+}
+
+
+function layoutOverlayAnnotations(
+  imagePane,
+  items,
+) {
+  const paneWidth = Math.max(
+    imagePane.clientWidth,
+    1,
+  );
+
+  const paneHeight = Math.max(
+    imagePane.clientHeight,
+    1,
+  );
+
+  const allRegions = items.flatMap(
+    (item) => (
+      item.bboxEntries.map(
+        ({
+          box,
+        }) => (
+          normalizedBoxToPixels(
+            box,
+            paneWidth,
+            paneHeight,
+          )
+        ),
+      )
+    ),
+  );
+
+  const occupiedCards = [];
+
+  const orderedItems = items
+    .map(
+      (item) => {
+        const regionRects = item.bboxEntries.map(
+          ({
+            box,
+          }) => (
+            normalizedBoxToPixels(
+              box,
+              paneWidth,
+              paneHeight,
+            )
+          ),
+        );
+
+        const anchor = unionRect(
+          regionRects,
+          paneWidth,
+          paneHeight,
+        );
+
+        return {
+          ...item,
+          anchor,
+        };
+      },
+    )
+    .sort(
+      (
+        left,
+        right,
+      ) => (
+        left.anchor.top
+        - right.anchor.top
+        || left.anchor.left
+        - right.anchor.left
+        || left.findingIndex
+        - right.findingIndex
+      ),
+    );
+
+  orderedItems.forEach(
+    (item) => {
+      const calloutWidth = Math.max(
+        item.callout.offsetWidth,
+        1,
+      );
+
+      const calloutHeight = Math.max(
+        item.callout.offsetHeight,
+        1,
+      );
+
+      const candidates = candidateRects(
+        item.anchor,
+        calloutWidth,
+        calloutHeight,
+        paneWidth,
+        paneHeight,
+      );
+
+      const best = candidates.reduce(
+        (
+          currentBest,
+          candidate,
+        ) => {
+          const score = candidateScore(
+            candidate,
+            item.anchor,
+            occupiedCards,
+            allRegions,
+          );
+
+          if (
+            currentBest === null
+            || score < currentBest.score
+          ) {
+            return {
+              rect: candidate,
+              score,
+            };
+          }
+
+          return currentBest;
+        },
+        null,
+      );
+
+      if (!best) {
+        return;
+      }
+
+      item.callout.style.left = (
+        `${best.rect.left}px`
+      );
+
+      item.callout.style.top = (
+        `${best.rect.top}px`
+      );
+
+      item.callout.style.visibility = (
+        "visible"
+      );
+
+      occupiedCards.push(
+        best.rect,
+      );
+    },
+  );
+}
+
+
+function nearestConnectorPoints(
+  bboxRect,
+  calloutRect,
+  paneRect,
+) {
+  const box = {
+    left: bboxRect.left - paneRect.left,
+    top: bboxRect.top - paneRect.top,
+    right: bboxRect.right - paneRect.left,
+    bottom: bboxRect.bottom - paneRect.top,
+  };
+
+  const callout = {
+    left: calloutRect.left - paneRect.left,
+    top: calloutRect.top - paneRect.top,
+    right: calloutRect.right - paneRect.left,
+    bottom: calloutRect.bottom - paneRect.top,
+  };
+
+  const boxCenterX = (
+    box.left + box.right
+  ) / 2;
+
+  const boxCenterY = (
+    box.top + box.bottom
+  ) / 2;
+
+  const calloutCenterX = (
+    callout.left + callout.right
+  ) / 2;
+
+  const calloutCenterY = (
+    callout.top + callout.bottom
+  ) / 2;
+
+  const horizontalDelta = (
+    calloutCenterX - boxCenterX
+  );
+
+  const verticalDelta = (
+    calloutCenterY - boxCenterY
+  );
+
+  if (
+    Math.abs(
+      horizontalDelta,
+    )
+    >= Math.abs(
+      verticalDelta,
+    )
+  ) {
+    return {
+      start: {
+        x: (
+          horizontalDelta >= 0
+            ? box.right
+            : box.left
+        ),
+        y: boxCenterY,
+      },
+      end: {
+        x: (
+          horizontalDelta >= 0
+            ? callout.left
+            : callout.right
+        ),
+        y: calloutCenterY,
+      },
+      axis: "horizontal",
+    };
+  }
+
+  return {
+    start: {
+      x: boxCenterX,
+      y: (
+        verticalDelta >= 0
+          ? box.bottom
+          : box.top
+      ),
+    },
+    end: {
+      x: calloutCenterX,
+      y: (
+        verticalDelta >= 0
+          ? callout.top
+          : callout.bottom
+      ),
+    },
+    axis: "vertical",
+  };
+}
+
+
 function drawConnector(
-  stage,
+  imagePane,
   svg,
   polyline,
   bboxNode,
@@ -527,9 +1223,7 @@ function drawConnector(
 ) {
   if (
     !bboxNode
-    || window.matchMedia(
-      "(max-width: 900px)",
-    ).matches
+    || !callout
   ) {
     polyline.setAttribute(
       "points",
@@ -539,8 +1233,8 @@ function drawConnector(
     return;
   }
 
-  const stageRect = (
-    stage.getBoundingClientRect()
+  const paneRect = (
+    imagePane.getBoundingClientRect()
   );
 
   const bboxRect = (
@@ -552,12 +1246,12 @@ function drawConnector(
   );
 
   const width = Math.max(
-    stage.clientWidth,
+    imagePane.clientWidth,
     1,
   );
 
   const height = Math.max(
-    stage.clientHeight,
+    imagePane.clientHeight,
     1,
   );
 
@@ -566,52 +1260,155 @@ function drawConnector(
     `0 0 ${width} ${height}`,
   );
 
-  const x1 = (
-    bboxRect.right
-    - stageRect.left
+  const points = nearestConnectorPoints(
+    bboxRect,
+    calloutRect,
+    paneRect,
   );
 
-  const y1 = (
-    bboxRect.top
-    - stageRect.top
-    + bboxRect.height / 2
-  );
+  if (
+    points.axis === "horizontal"
+  ) {
+    const elbowX = (
+      points.start.x
+      + (
+        points.end.x
+        - points.start.x
+      ) / 2
+    );
 
-  const x2 = (
-    calloutRect.left
-    - stageRect.left
-  );
+    polyline.setAttribute(
+      "points",
+      [
+        `${points.start.x},${points.start.y}`,
+        `${elbowX},${points.start.y}`,
+        `${elbowX},${points.end.y}`,
+        `${points.end.x},${points.end.y}`,
+      ].join(
+        " ",
+      ),
+    );
 
-  const y2 = (
-    calloutRect.top
-    - stageRect.top
-    + Math.min(
-      calloutRect.height / 2,
-      36,
-    )
-  );
+    return;
+  }
 
-  const elbow = (
-    x1
-    + Math.max(
-      12,
-      (
-        x2
-        - x1
-      ) * 0.45,
-    )
+  const elbowY = (
+    points.start.y
+    + (
+      points.end.y
+      - points.start.y
+    ) / 2
   );
 
   polyline.setAttribute(
     "points",
     [
-      `${x1},${y1}`,
-      `${elbow},${y1}`,
-      `${elbow},${y2}`,
-      `${x2},${y2}`,
+      `${points.start.x},${points.start.y}`,
+      `${points.start.x},${elbowY}`,
+      `${points.end.x},${elbowY}`,
+      `${points.end.x},${points.end.y}`,
     ].join(
       " ",
     ),
+  );
+}
+
+
+function setFindingActive(
+  item,
+  active,
+) {
+  item.callout.classList.toggle(
+    "analysis-result__annotation--active",
+    active,
+  );
+
+  item.bboxEntries.forEach(
+    ({
+      node,
+    }) => {
+      node.classList.toggle(
+        "analysis-result__bbox--active",
+        active,
+      );
+    },
+  );
+
+  item.connectorEntries.forEach(
+    ({
+      polyline,
+    }) => {
+      polyline.classList.toggle(
+        "analysis-result__connector--active",
+        active,
+      );
+    },
+  );
+}
+
+
+function bindFindingInteractions(
+  item,
+) {
+  const activate = () => {
+    setFindingActive(
+      item,
+      true,
+    );
+  };
+
+  const deactivate = () => {
+    setFindingActive(
+      item,
+      false,
+    );
+  };
+
+  item.callout.addEventListener(
+    "pointerenter",
+    activate,
+  );
+
+  item.callout.addEventListener(
+    "pointerleave",
+    deactivate,
+  );
+
+  item.callout.addEventListener(
+    "focusin",
+    activate,
+  );
+
+  item.callout.addEventListener(
+    "focusout",
+    (event) => {
+      if (
+        event.relatedTarget
+        && item.callout.contains(
+          event.relatedTarget,
+        )
+      ) {
+        return;
+      }
+
+      deactivate();
+    },
+  );
+
+  item.bboxEntries.forEach(
+    ({
+      node,
+    }) => {
+      node.addEventListener(
+        "pointerenter",
+        activate,
+      );
+
+      node.addEventListener(
+        "pointerleave",
+        deactivate,
+      );
+    },
   );
 }
 
@@ -643,6 +1440,18 @@ function appendPageVisualization(
       `Лист/страница ${pageNumber}`,
     ),
   );
+
+  if (
+    page.localization_warning
+  ) {
+    section.append(
+      createElement(
+        "p",
+        "analysis-result__visualization-warning",
+        page.localization_warning,
+      ),
+    );
+  }
 
   const stage = createElement(
     "div",
@@ -677,27 +1486,6 @@ function appendPageVisualization(
     )
   );
 
-  imagePane.append(
-    image,
-  );
-
-  const calloutPane = createElement(
-    "div",
-    "analysis-result__annotation-list",
-  );
-
-  if (
-    page.localization_warning
-  ) {
-    calloutPane.append(
-      createElement(
-        "p",
-        "analysis-result__visualization-warning",
-        page.localization_warning,
-      ),
-    );
-  }
-
   const svg = (
     document.createElementNS(
       "http://www.w3.org/2000/svg",
@@ -714,29 +1502,36 @@ function appendPageVisualization(
     "true",
   );
 
+  const annotationOverlay = createElement(
+    "div",
+    "analysis-result__annotation-list",
+  );
+
   const findings = findingsForPage(
     payload,
     page,
   );
 
-  const connectorPairs = [];
+  const items = [];
 
   findings.forEach(
     ({
       finding,
       findingIndex,
     }) => {
-      const bboxNodes = (
+      const bboxEntries = (
         createBoundingBoxes(
           finding,
           findingIndex,
         )
       );
 
-      bboxNodes.forEach(
-        (bboxNode) => {
+      bboxEntries.forEach(
+        ({
+          node,
+        }) => {
           imagePane.append(
-            bboxNode,
+            node,
           );
         },
       );
@@ -747,41 +1542,64 @@ function appendPageVisualization(
         dependencies,
       );
 
-      calloutPane.append(
+      callout.style.left = "0";
+      callout.style.top = "0";
+      callout.style.visibility = (
+        "hidden"
+      );
+
+      annotationOverlay.append(
         callout,
       );
 
-      bboxNodes.forEach(
-        (bboxNode) => {
-          const polyline = (
-            document.createElementNS(
-              "http://www.w3.org/2000/svg",
-              "polyline",
-            )
-          );
+      const connectorEntries = (
+        bboxEntries.map(
+          ({
+            node,
+          }) => {
+            const polyline = (
+              document.createElementNS(
+                "http://www.w3.org/2000/svg",
+                "polyline",
+              )
+            );
 
-          polyline.classList.add(
-            "analysis-result__connector",
-          );
+            polyline.classList.add(
+              "analysis-result__connector",
+            );
 
-          svg.append(
-            polyline,
-          );
-
-          connectorPairs.push(
-            {
-              bboxNode,
-              callout,
+            svg.append(
               polyline,
-            },
-          );
-        },
+            );
+
+            return {
+              bboxNode: node,
+              polyline,
+            };
+          },
+        )
+      );
+
+      const item = {
+        finding,
+        findingIndex,
+        bboxEntries,
+        callout,
+        connectorEntries,
+      };
+
+      bindFindingInteractions(
+        item,
+      );
+
+      items.push(
+        item,
       );
     },
   );
 
   if (!findings.length) {
-    calloutPane.append(
+    annotationOverlay.append(
       createElement(
         "p",
         "analysis-result__page-empty",
@@ -790,10 +1608,14 @@ function appendPageVisualization(
     );
   }
 
+  imagePane.append(
+    image,
+    svg,
+    annotationOverlay,
+  );
+
   stage.append(
     imagePane,
-    calloutPane,
-    svg,
   );
 
   section.append(
@@ -805,30 +1627,55 @@ function appendPageVisualization(
   );
 
   const redraw = () => {
-    connectorPairs.forEach(
-      ({
-        bboxNode,
-        callout,
-        polyline,
-      }) => {
-        drawConnector(
-          stage,
-          svg,
-          polyline,
-          bboxNode,
-          callout,
+    if (
+      imagePane.clientWidth <= 0
+      || imagePane.clientHeight <= 0
+    ) {
+      return;
+    }
+
+    layoutOverlayAnnotations(
+      imagePane,
+      items,
+    );
+
+    items.forEach(
+      (item) => {
+        item.connectorEntries.forEach(
+          ({
+            bboxNode,
+            polyline,
+          }) => {
+            drawConnector(
+              imagePane,
+              svg,
+              polyline,
+              bboxNode,
+              item.callout,
+            );
+          },
         );
       },
     );
   };
 
+  const scheduleRedraw = () => {
+    window.requestAnimationFrame(
+      redraw,
+    );
+  };
+
   image.addEventListener(
     "load",
-    redraw,
+    scheduleRedraw,
     {
       once: true,
     },
   );
+
+  if (image.complete) {
+    scheduleRedraw();
+  }
 
   if (
     typeof ResizeObserver
@@ -836,18 +1683,18 @@ function appendPageVisualization(
   ) {
     const observer = (
       new ResizeObserver(
-        redraw,
+        scheduleRedraw,
       )
     );
 
     observer.observe(
-      stage,
+      imagePane,
     );
 
   } else {
     window.addEventListener(
       "resize",
-      redraw,
+      scheduleRedraw,
       {
         passive: true,
       },
