@@ -195,26 +195,26 @@
   min-height: 4px;
 
   border:
-    1.5px
+    0.6px
     solid
     color-mix(
       in srgb,
-      var(--color-danger) 85%,
+      var(--color-danger) 78%,
       transparent
     );
 
   background:
     color-mix(
       in srgb,
-      var(--color-danger) 30%,
+      var(--color-danger) 10%,
       transparent
     );
 
   box-shadow:
-    inset 0 0 0 1px
+    inset 0 0 0 0.5px
     color-mix(
       in srgb,
-      var(--color-surface) 30%,
+      var(--color-surface) 22%,
       transparent
     );
 
@@ -234,17 +234,17 @@
   border-color: var(--color-danger);
 
   box-shadow:
-    0 0 0 2px
+    0 0 0 1px
     color-mix(
       in srgb,
-      var(--color-danger) 24%,
+      var(--color-danger) 16%,
       transparent
     );
 
   background:
     color-mix(
       in srgb,
-      var(--color-danger) 46%,
+      var(--color-danger) 18%,
       transparent
     );
 }
@@ -252,31 +252,31 @@
 
 .analysis-result__bbox-number {
   position: absolute;
-  top: -0.95rem;
-  left: -0.25rem;
+  top: -0.45rem;
+  left: -0.08rem;
 
   display: inline-flex;
 
-  min-width: 1.05rem;
-  height: 1.05rem;
+  min-width: 0.34rem;
+  height: 0.34rem;
 
   align-items: center;
   justify-content: center;
 
-  padding: 0 0.2rem;
+  padding: 0 0.08rem;
 
   border-radius: 999px;
 
   background:
     color-mix(
       in srgb,
-      var(--color-danger) 88%,
+      var(--color-danger) 90%,
       transparent
     );
 
   color: var(--color-surface);
 
-  font-size: 0.62rem;
+  font-size: 0.26rem;
   font-weight: var(--font-weight-semibold);
 
   line-height: 1;
@@ -316,11 +316,11 @@
     0.5rem;
 
   border:
-    1px
+    0.6px
     solid
     color-mix(
       in srgb,
-      var(--color-danger) 82%,
+      var(--color-danger) 78%,
       transparent
     );
   border-radius: var(--radius-control);
@@ -328,7 +328,7 @@
   background:
     color-mix(
       in srgb,
-      var(--color-danger) 30%,
+      var(--color-danger) 10%,
       transparent
     );
 
@@ -336,9 +336,9 @@
 
   box-shadow:
     0
-    0.2rem
-    0.65rem
-    rgb(0 0 0 / 12%);
+    0.16rem
+    0.45rem
+    rgb(0 0 0 / 10%);
 
   backdrop-filter: blur(1px);
 
@@ -362,15 +362,15 @@
   background:
     color-mix(
       in srgb,
-      var(--color-danger) 46%,
+      var(--color-danger) 18%,
       transparent
     );
 
   box-shadow:
     0
-    0.35rem
-    1rem
-    rgb(0 0 0 / 20%);
+    0.28rem
+    0.75rem
+    rgb(0 0 0 / 14%);
 }
 
 
@@ -394,13 +394,13 @@
 
   flex: 0 0 auto;
 
-  min-width: 1.05rem;
-  height: 1.05rem;
+  min-width: 0.42rem;
+  height: 0.42rem;
 
   align-items: center;
   justify-content: center;
 
-  padding: 0 0.2rem;
+  padding: 0 0.08rem;
 
   border-radius: 999px;
 
@@ -413,7 +413,7 @@
 
   color: var(--color-surface);
 
-  font-size: 0.61rem;
+  font-size: 0.28rem;
   font-weight: var(--font-weight-semibold);
 
   line-height: 1;
