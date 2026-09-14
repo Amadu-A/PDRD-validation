@@ -334,7 +334,7 @@ def test_analysis_transport_passes_candidate_map() -> None:
 
 
 def test_knowledge_service_has_grouped_normative_contract() -> None:
-    """Knowledge Service возвращает отдельный result на каждый query."""
+    """Knowledge Service batch-ищет N и возвращает result на каждый query."""
     schema_text = KNOWLEDGE_SEARCH_SCHEMA_PATH.read_text(
         encoding="utf-8",
     )
@@ -349,8 +349,6 @@ def test_knowledge_service_has_grouped_normative_contract() -> None:
 
     assert '"/normative-grouped"' in router_text
 
-    assert "for query in request.queries" in router_text
-
-    assert "container.search_normative.execute(" in router_text
+    assert "container.search_normative.execute_grouped(" in router_text
 
     assert "NormativeGroupedSearchItemResponse(" in router_text
