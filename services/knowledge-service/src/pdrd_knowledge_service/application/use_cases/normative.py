@@ -3,12 +3,14 @@
 """Поиск нормативных требований."""
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 from pdrd_knowledge_service.application.ports.embedding import (
     EmbeddingProvider,
+    EmbeddingProviderError,
 )
 from pdrd_knowledge_service.application.ports.persistence import (
     NormativeCatalogUnitOfWorkFactory,
@@ -30,6 +32,10 @@ from pdrd_knowledge_service.domain.search import (
     VectorPoint,
     VectorSearchCondition,
     VectorSearchFilter,
+)
+
+logger = logging.getLogger(
+    __name__,
 )
 
 NORMATIVE_QUERY_INSTRUCTION = (
@@ -111,6 +117,12 @@ class SearchNormative:
             instruction=query_instruction,
         )
 
+        if len(vectors) != len(normalized_queries):
+            raise EmbeddingProviderError(
+                "Embedding provider вернул неверное количество "
+                "vectors для нормативного поиска.",
+            )
+
         search_filter = None
 
         if scope is not None:
@@ -137,6 +149,183 @@ class SearchNormative:
                 ready_document_ids,
             )
 
+        groups = await self._search_vectors(
+            vectors=vectors,
+            search_filter=search_filter,
+        )
+
+        merged = self._merge_points(
+            groups,
+        )
+
+        sources = self._build_sources(
+            points=merged,
+            source_prefix=source_prefix,
+        )
+
+        return NormativeSearchResult(
+            queries=normalized_queries,
+            sources=sources,
+            embedding_model=self.embedding_model,
+        )
+
+    async def execute_grouped(
+        self,
+        queries: list[str],
+        *,
+        section_id: UUID | None = None,
+        document_ids: list[UUID] | None = None,
+        expected_area: CatalogArea = CatalogArea.NORMATIVE,
+        source_prefix: str = "N",
+        query_instruction: str = NORMATIVE_QUERY_INSTRUCTION,
+        allow_unscoped: bool = True,
+    ) -> tuple[
+        NormativeSearchResult,
+        ...,
+    ]:
+        """Ищет группы N за один embedding lifecycle.
+
+        Порядок непустых входных queries сохраняется.
+
+        Одинаковые query вычисляются только один раз,
+        но результат возвращается в каждую исходную позицию.
+
+        Источники разных queries никогда не объединяются:
+        каждый result содержит только собственную Qdrant group.
+        """
+        normalized_queries = self._normalize_grouped_queries(
+            queries,
+        )
+
+        if not normalized_queries:
+            return ()
+
+        started_at = asyncio.get_running_loop().time()
+
+        scope = await self._resolve_scope(
+            section_id=section_id,
+            document_ids=document_ids,
+            expected_area=expected_area,
+            allow_unscoped=allow_unscoped,
+        )
+
+        if not allow_unscoped and scope is None:
+            return self._empty_grouped_results(
+                normalized_queries,
+            )
+
+        if scope is not None and not scope.document_ids:
+            return self._empty_grouped_results(
+                normalized_queries,
+            )
+
+        search_filter: VectorSearchFilter | None = None
+
+        if scope is not None:
+            search_filter = self._build_scope_filter(
+                scope,
+            )
+
+        elif (
+            expected_area is CatalogArea.NORMATIVE
+            and self.unit_of_work_factory is not None
+        ):
+            ready_document_ids = await self._list_ready_document_ids(
+                area=CatalogArea.NORMATIVE,
+            )
+
+            if not ready_document_ids:
+                return self._empty_grouped_results(
+                    normalized_queries,
+                )
+
+            search_filter = self._build_document_filter(
+                ready_document_ids,
+            )
+
+        unique_queries = tuple(
+            dict.fromkeys(
+                normalized_queries,
+            )
+        )
+
+        embedding_started_at = asyncio.get_running_loop().time()
+
+        vectors = await self.embedding_provider.embed(
+            unique_queries,
+            instruction=query_instruction,
+        )
+
+        embedding_finished_at = asyncio.get_running_loop().time()
+
+        if len(vectors) != len(unique_queries):
+            raise EmbeddingProviderError(
+                "Embedding provider вернул неверное количество "
+                "vectors для grouped нормативного поиска.",
+            )
+
+        vector_started_at = asyncio.get_running_loop().time()
+
+        groups = await self._search_vectors(
+            vectors=vectors,
+            search_filter=search_filter,
+        )
+
+        vector_finished_at = asyncio.get_running_loop().time()
+
+        groups_by_query = dict(
+            zip(
+                unique_queries,
+                groups,
+                strict=True,
+            )
+        )
+
+        results = tuple(
+            NormativeSearchResult(
+                queries=(query,),
+                sources=self._build_sources(
+                    points=self._merge_points((groups_by_query[query],)),
+                    source_prefix=source_prefix,
+                ),
+                embedding_model=self.embedding_model,
+            )
+            for query in normalized_queries
+        )
+
+        finished_at = asyncio.get_running_loop().time()
+
+        logger.info(
+            (
+                "normative_grouped_search "
+                "queries=%s unique_queries=%s "
+                "embedding_ms=%.2f "
+                "qdrant_ms=%.2f "
+                "total_ms=%.2f"
+            ),
+            len(
+                normalized_queries,
+            ),
+            len(
+                unique_queries,
+            ),
+            (embedding_finished_at - embedding_started_at) * 1000,
+            (vector_finished_at - vector_started_at) * 1000,
+            (finished_at - started_at) * 1000,
+        )
+
+        return results
+
+    async def _search_vectors(
+        self,
+        *,
+        vectors: list[list[float,]],
+        search_filter: VectorSearchFilter | None,
+    ) -> tuple[
+        list[VectorPoint,],
+        ...,
+    ]:
+        """Выполняет independent Qdrant search для каждого vector."""
         if search_filter is None:
             groups = await asyncio.gather(
                 *(
@@ -162,26 +351,8 @@ class SearchNormative:
                 )
             )
 
-        merged = self._merge_points(
+        return tuple(
             groups,
-        )
-
-        sources = tuple(
-            self._build_source(
-                point,
-                index=index,
-                source_prefix=source_prefix,
-            )
-            for index, point in enumerate(
-                merged,
-                start=1,
-            )
-        )
-
-        return NormativeSearchResult(
-            queries=normalized_queries,
-            sources=sources,
-            embedding_model=self.embedding_model,
         )
 
     async def _resolve_scope(
@@ -268,12 +439,14 @@ class SearchNormative:
 
             if expected_area is CatalogArea.NORMATIVE:
                 raise NormativeSearchScopeError(
-                    "Документы принадлежат другому нормативному разделу: "
+                    "Документы принадлежат другому "
+                    "нормативному разделу: "
                     f"{foreign_text}.",
                 )
 
             raise NormativeSearchScopeError(
-                "Пользовательские документы принадлежат другому разделу: "
+                "Пользовательские документы принадлежат "
+                "другому разделу: "
                 f"{foreign_text}.",
             )
 
@@ -311,13 +484,14 @@ class SearchNormative:
 
             if expected_area is CatalogArea.NORMATIVE:
                 raise NormativeSearchScopeConflictError(
-                    "Документы ещё не готовы к нормативному поиску: "
+                    "Документы ещё не готовы "
+                    "к нормативному поиску: "
                     f"{unavailable_text}.",
                 )
 
             raise NormativeSearchScopeConflictError(
-                "Пользовательские документы ещё не готовы к поиску: "
-                f"{unavailable_text}.",
+                "Пользовательские документы ещё не готовы "
+                f"к поиску: {unavailable_text}.",
             )
 
         return NormativeSearchScope(
@@ -466,6 +640,33 @@ class SearchNormative:
             result,
         )
 
+    @staticmethod
+    def _normalize_grouped_queries(
+        queries: list[str],
+    ) -> tuple[str, ...]:
+        """Нормализует grouped queries без потери позиций и дублей."""
+        return tuple(normalized for query in queries if (normalized := query.strip()))
+
+    def _empty_grouped_results(
+        self,
+        queries: tuple[
+            str,
+            ...,
+        ],
+    ) -> tuple[
+        NormativeSearchResult,
+        ...,
+    ]:
+        """Возвращает пустую source group для каждого исходного query."""
+        return tuple(
+            NormativeSearchResult(
+                queries=(query,),
+                sources=(),
+                embedding_model=self.embedding_model,
+            )
+            for query in queries
+        )
+
     def _merge_points(
         self,
         groups: tuple[
@@ -496,6 +697,28 @@ class SearchNormative:
             key=lambda point: point.score,
             reverse=True,
         )[: self.max_sources]
+
+    def _build_sources(
+        self,
+        *,
+        points: list[VectorPoint,],
+        source_prefix: str,
+    ) -> tuple[
+        NormativeSource,
+        ...,
+    ]:
+        """Преобразует независимую point group в sources."""
+        return tuple(
+            self._build_source(
+                point,
+                index=index,
+                source_prefix=source_prefix,
+            )
+            for index, point in enumerate(
+                points,
+                start=1,
+            )
+        )
 
     @staticmethod
     def _build_source(

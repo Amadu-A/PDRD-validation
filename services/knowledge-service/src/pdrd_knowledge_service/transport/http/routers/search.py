@@ -205,36 +205,13 @@ async def search_normative_grouped(
         ),
     ],
 ) -> NormativeGroupedSearchResponse:
-    """Ищет N отдельно для каждого query без объединения source groups."""
-    results: list[NormativeGroupedSearchItemResponse] = []
-
+    """Ищет N groups одним embedding lifecycle без их объединения."""
     try:
-        for query in request.queries:
-            normalized_query = query.strip()
-
-            if not normalized_query:
-                continue
-
-            result = await container.search_normative.execute(
-                [
-                    normalized_query,
-                ],
-                section_id=request.section_id,
-                document_ids=request.document_ids,
-            )
-
-            results.append(
-                NormativeGroupedSearchItemResponse(
-                    query=normalized_query,
-                    sources=[
-                        _normative_source_response(
-                            source,
-                        )
-                        for source in result.sources
-                    ],
-                    embedding_model=result.embedding_model,
-                )
-            )
+        results = await container.search_normative.execute_grouped(
+            request.queries,
+            section_id=request.section_id,
+            document_ids=request.document_ids,
+        )
 
     except (
         NormativeSectionNotFoundError,
@@ -248,7 +225,19 @@ async def search_normative_grouped(
         ) from error
 
     return NormativeGroupedSearchResponse(
-        results=results,
+        results=[
+            NormativeGroupedSearchItemResponse(
+                query=result.queries[0],
+                sources=[
+                    _normative_source_response(
+                        source,
+                    )
+                    for source in result.sources
+                ],
+                embedding_model=result.embedding_model,
+            )
+            for result in results
+        ],
     )
 
 
