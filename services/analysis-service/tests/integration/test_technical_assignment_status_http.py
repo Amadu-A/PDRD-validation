@@ -1,6 +1,6 @@
 # services/analysis-service/tests/integration/test_technical_assignment_status_http.py
 
-"""HTTP regression tests T-first single status source."""
+"""HTTP regression tests устойчивого T-first status/details contract."""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -38,8 +38,12 @@ class _ResidentVisionModel:
 
     def __init__(
         self,
+        *,
+        payload: dict[str, Any],
     ) -> None:
-        """Инициализирует counters."""
+        """Сохраняет ответ модели и counters."""
+        self.payload = payload
+
         self.scope_enters = 0
         self.scope_exits = 0
         self.calls = 0
@@ -67,34 +71,20 @@ class _ResidentVisionModel:
         stage: str,
         image_bytes: bytes | None = None,
     ) -> GenerationResult:
-        """Возвращает schema-conformant T-first response."""
+        """Возвращает configured T-first response."""
         assert prompt
         assert schema
         assert num_predict > 0
         assert seed > 0
+
         assert stage == ("technical_assignment_check:19:1")
+
         assert image_bytes is not None
 
         self.calls += 1
 
         return GenerationResult(
-            payload={
-                "decisions": {
-                    "T-R1": {
-                        "status": "violated",
-                        "confidence": 0.94,
-                    },
-                },
-                "issues": [
-                    {
-                        "requirement_id": "T-R1",
-                        "severity": "error",
-                        "comment": ("Требование ТЗ нарушено."),
-                        "evidence": ("На принципиальной схеме показано иное решение."),
-                        "recommendation_draft": ("Скорректировать проектное решение."),
-                    },
-                ],
-            },
+            payload=self.payload,
             metrics=GenerationMetrics(
                 attempt=1,
                 done_reason="stop",
@@ -170,10 +160,57 @@ def _build_app(
     )
 
 
-async def test_t_first_http_accepts_issue_without_duplicate_status() -> None:
-    """T-first route не превращает корректный model output в 503."""
-    model = _ResidentVisionModel()
+def _request_payload() -> dict[str, Any]:
+    """Возвращает valid T-first HTTP request."""
+    return {
+        "page_number": 19,
+        "extracted_text": ("Принципиальная схема котельной."),
+        "page_facts": {
+            "discipline": ("Тепломеханические решения"),
+            "page_type": ("Принципиальная схема котельной"),
+            "summary": ("Схема котельной."),
+            "objects": [
+                "Котёл",
+                "Циркуляционный насос",
+            ],
+            "connections": [
+                "Котёл → тепловая сеть",
+            ],
+            "labels": [
+                "PG",
+                "TG",
+            ],
+            "normative_queries": [],
+        },
+        "image_base64": "aW1hZ2U=",
+        "technical_assignment_id": ("11111111-1111-4111-8111-111111111111"),
+        "analysis_document_id": ("22222222-2222-4222-8222-222222222222"),
+        "section_id": ("33333333-3333-4333-8333-333333333333"),
+        "source_file": "ТЗ.docx",
+        "source_sha256": "a" * 64,
+        "requirements": [
+            {
+                "point_id": "point-1",
+                "requirement_id": "T-R1",
+                "requirement_index": 1,
+                "page": 4,
+                "requirement_strength": ("explicit"),
+                "scopes": [
+                    "heating",
+                ],
+                "normative_refs": [],
+                "source_text": ("Исходный текст требования ТЗ."),
+                "text": ("На схеме должен быть предусмотрен элемент."),
+            },
+        ],
+    }
 
+
+async def _post(
+    *,
+    model: _ResidentVisionModel,
+) -> httpx.Response:
+    """Выполняет один T-first HTTP request."""
     app = _build_app(
         model,
     )
@@ -186,51 +223,37 @@ async def test_t_first_http_accepts_issue_without_duplicate_status() -> None:
         transport=transport,
         base_url="http://test",
     ) as client:
-        response = await client.post(
+        return await client.post(
             "/internal/v1/pages/check-technical-assignment",
-            json={
-                "page_number": 19,
-                "extracted_text": ("Принципиальная схема котельной."),
-                "page_facts": {
-                    "discipline": ("Тепломеханические решения"),
-                    "page_type": ("Принципиальная схема котельной"),
-                    "summary": ("Схема котельной."),
-                    "objects": [
-                        "Котёл",
-                        "Циркуляционный насос",
-                    ],
-                    "connections": [
-                        "Котёл → тепловая сеть",
-                    ],
-                    "labels": [
-                        "PG",
-                        "TG",
-                    ],
-                    "normative_queries": [],
-                },
-                "image_base64": "aW1hZ2U=",
-                "technical_assignment_id": ("11111111-1111-4111-8111-111111111111"),
-                "analysis_document_id": ("22222222-2222-4222-8222-222222222222"),
-                "section_id": ("33333333-3333-4333-8333-333333333333"),
-                "source_file": "ТЗ.docx",
-                "source_sha256": "a" * 64,
-                "requirements": [
-                    {
-                        "point_id": "point-1",
-                        "requirement_id": "T-R1",
-                        "requirement_index": 1,
-                        "page": 4,
-                        "requirement_strength": ("explicit"),
-                        "scopes": [
-                            "heating",
-                        ],
-                        "normative_refs": [],
-                        "source_text": ("Исходный текст требования ТЗ."),
-                        "text": ("На схеме должен быть предусмотрен элемент."),
-                    },
-                ],
-            },
+            json=_request_payload(),
         )
+
+
+async def test_t_first_http_accepts_issue_without_duplicate_status() -> None:
+    """Корректный issue/details response остаётся confirmed."""
+    model = _ResidentVisionModel(
+        payload={
+            "decisions": {
+                "T-R1": {
+                    "status": "violated",
+                    "confidence": 0.94,
+                },
+            },
+            "issues": [
+                {
+                    "requirement_id": "T-R1",
+                    "severity": "error",
+                    "comment": ("Требование ТЗ нарушено."),
+                    "evidence": ("На принципиальной схеме показано иное решение."),
+                    "recommendation_draft": ("Скорректировать проектное решение."),
+                },
+            ],
+        },
+    )
+
+    response = await _post(
+        model=model,
+    )
 
     assert response.status_code == 200, response.text
 
@@ -255,6 +278,65 @@ async def test_t_first_http_accepts_issue_without_duplicate_status() -> None:
     assert payload["findings"][0]["status"] == "confirmed"
 
     assert model.calls == 1
+    assert model.scope_enters == 1
+    assert model.scope_exits == 1
 
+
+async def test_t_first_http_repairs_missing_issue_instead_of_503() -> None:
+    """Production regression: violated без issue становится needs_review."""
+    model = _ResidentVisionModel(
+        payload={
+            "decisions": {
+                "T-R1": {
+                    "status": "violated",
+                    "confidence": 0.96,
+                },
+            },
+            "issues": [],
+        },
+    )
+
+    response = await _post(
+        model=model,
+    )
+
+    assert response.status_code == 200, response.text
+
+    payload = response.json()
+
+    assert (
+        len(
+            payload["decisions"],
+        )
+        == 1
+    )
+
+    decision = payload["decisions"][0]
+
+    assert decision["status"] == "insufficient_evidence"
+
+    assert decision["severity"] == "warning"
+
+    assert (
+        decision["comment"] == "Требование ТЗ требует дополнительной "
+        "инженерной проверки."
+    )
+
+    assert (
+        len(
+            payload["findings"],
+        )
+        == 1
+    )
+
+    finding = payload["findings"][0]
+
+    assert finding["status"] == "needs_review"
+
+    assert finding["technical_assignment_source_ids"] == [
+        "T-R1",
+    ]
+
+    assert model.calls == 1
     assert model.scope_enters == 1
     assert model.scope_exits == 1
