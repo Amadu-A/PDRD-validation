@@ -18,6 +18,20 @@ ROOT = (
 
 ENV_EXAMPLE = ROOT / ".env.example"
 
+ANALYSIS_MAIN = (
+    ROOT / "services" / "analysis-service" / "src" / "pdrd_analysis_service" / "main.py"
+)
+
+OLLAMA_ADAPTER = (
+    ROOT
+    / "services"
+    / "analysis-service"
+    / "src"
+    / "pdrd_analysis_service"
+    / "infrastructure"
+    / "ollama.py"
+)
+
 
 def _env_value(
     key: str,
@@ -45,7 +59,7 @@ def _env_value(
 
 
 def test_finalization_default_deployment_uses_one_batch_for_ten_findings() -> None:
-    """Deployment baseline должен объединять до 10 findings в один VLM call."""
+    """Deployment baseline объединяет до 10 findings в один VLM call."""
     assert (
         _env_value(
             "ANALYSIS_SERVICE_PIPELINE__FINAL_BATCH_SIZE",
@@ -74,3 +88,49 @@ def test_finalization_output_budget_is_sufficient_for_large_batch() -> None:
     )
 
     assert settings.final_num_predict == 4000
+
+
+def test_vlm_keep_alive_supports_bounded_residency() -> None:
+    """Ollama не unloads model между calls одного bounded stage."""
+    assert (
+        _env_value(
+            "ANALYSIS_SERVICE_VISION__KEEP_ALIVE",
+        )
+        == "60s"
+    )
+
+    source = OLLAMA_ADAPTER.read_text(
+        encoding="utf-8",
+    )
+
+    assert "async def residency_scope(" in source
+
+    assert "self._residency_depth" in source
+
+    assert "await self._unload_model()" in source
+
+    assert '"keep_alive": self._keep_alive' in source
+
+
+def test_all_vlm_http_stages_are_request_scoped() -> None:
+    """Каждый VLM HTTP stage проходит через bounded residency middleware."""
+    source = ANALYSIS_MAIN.read_text(
+        encoding="utf-8",
+    )
+
+    required_paths = (
+        "/internal/v1/pages/understand",
+        "/internal/v1/pages/check-norms",
+        "/internal/v1/pages/check-technical-assignment",
+        "/internal/v1/project-context/validate",
+        "/internal/v1/findings/finalize",
+        "/internal/v1/findings/localize",
+    )
+
+    missing = [path for path in required_paths if path not in source]
+
+    assert not missing, "\n".join(
+        missing,
+    )
+
+    assert "vision_model_residency(" in source
