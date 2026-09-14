@@ -252,18 +252,18 @@
 
 .analysis-result__bbox-number {
   position: absolute;
-  top: -0.45rem;
+  top: -0.5rem;
   left: -0.08rem;
 
   display: inline-flex;
 
-  min-width: 0.34rem;
-  height: 0.34rem;
+  min-width: 0.68rem;
+  height: 0.68rem;
 
   align-items: center;
   justify-content: center;
 
-  padding: 0 0.08rem;
+  padding: 0 0.16rem;
 
   border-radius: 999px;
 
@@ -276,7 +276,7 @@
 
   color: var(--color-surface);
 
-  font-size: 0.26rem;
+  font-size: 0.52rem;
   font-weight: var(--font-weight-semibold);
 
   line-height: 1;
@@ -394,13 +394,13 @@
 
   flex: 0 0 auto;
 
-  min-width: 0.42rem;
-  height: 0.42rem;
+  min-width: 0.84rem;
+  height: 0.84rem;
 
   align-items: center;
   justify-content: center;
 
-  padding: 0 0.08rem;
+  padding: 0 0.14rem;
 
   border-radius: 999px;
 
@@ -413,7 +413,7 @@
 
   color: var(--color-surface);
 
-  font-size: 0.28rem;
+  font-size: 0.56rem;
   font-weight: var(--font-weight-semibold);
 
   line-height: 1;
@@ -816,4 +816,34 @@
   .analysis-result__meta {
     grid-template-columns: 1fr;
   }
+}
+
+.analysis-result__annotation,
+.analysis-result__bbox,
+.analysis-result__connector {
+  transition:
+    opacity 1s ease,
+    background 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease;
+}
+
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__annotation,
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__bbox,
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__connector,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__annotation,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__bbox,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__connector {
+  opacity: 0.01;
+}
+
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__annotation:hover,
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__annotation--active,
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__bbox--active,
+.analysis-result__page-stage:has(.analysis-result__annotation:hover) .analysis-result__connector--active,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__annotation:focus-visible,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__annotation--active,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__bbox--active,
+.analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__connector--active {
+  opacity: 1;
 }
