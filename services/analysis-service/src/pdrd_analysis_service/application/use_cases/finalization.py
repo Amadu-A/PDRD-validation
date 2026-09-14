@@ -2,6 +2,7 @@
 
 """Use case финализации findings."""
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -31,6 +32,35 @@ _NORMATIVE_REFERENCE_PATTERN = re.compile(
     r"\b(?:ГОСТ|GOST|ПУЭ|PUE|СНиП|SNIP|СП)\b",
     flags=re.IGNORECASE,
 )
+
+_SPLITTABLE_FINALIZATION_ERROR_MARKERS = (
+    "Контекст Ollama исчерпан",
+    "Ollama исчерпал output budget",
+    "Модель не смогла сформировать корректный JSON",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _BatchOutcome:
+    """Результат одного batch с возможным безопасным split."""
+
+    findings: tuple[
+        FinalFinding,
+        ...,
+    ]
+
+    metrics: tuple[
+        dict[str, Any],
+        ...,
+    ]
+
+    fallback_count: int
+
+    vlm_call_count: int
+    successful_vlm_call_count: int
+    failed_vlm_call_count: int
+
+    split_count: int
 
 
 def _dedupe_normative_sources(
@@ -220,6 +250,127 @@ def _candidate_groups(
     return result
 
 
+def _normative_candidate_payload(
+    source: NormativeSource,
+    *,
+    text_limit: int,
+) -> dict[str, object]:
+    """Сериализует finding-local N candidate для VLM prompt."""
+    return {
+        "source_id": source.source_id,
+        "score": source.score,
+        "document_id": source.document_id,
+        "section_id": source.section_id,
+        "source_sha256": source.source_sha256,
+        "source_file": source.source_file,
+        "page": source.page,
+        "chunk_index": source.chunk_index,
+        "text": source.text[:text_limit],
+    }
+
+
+def _finding_local_candidate_context(
+    *,
+    findings: tuple[
+        FindingDraft,
+        ...,
+    ],
+    candidate_groups: dict[
+        str,
+        tuple[
+            NormativeSource,
+            ...,
+        ],
+    ],
+    text_limit: int,
+) -> str:
+    """Строит явное соответствие finding_id -> разрешённые N candidates."""
+    payload = [
+        {
+            "finding_id": finding.finding_id,
+            "normative_candidates": [
+                _normative_candidate_payload(
+                    source,
+                    text_limit=text_limit,
+                )
+                for source in candidate_groups.get(
+                    finding.finding_id,
+                    (),
+                )
+            ],
+        }
+        for finding in findings
+    ]
+
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(
+            ",",
+            ":",
+        ),
+    )
+
+
+def _allowed_normative_ids(
+    *,
+    findings: tuple[
+        FindingDraft,
+        ...,
+    ],
+    candidate_groups: dict[
+        str,
+        tuple[
+            NormativeSource,
+            ...,
+        ],
+    ],
+) -> tuple[
+    str,
+    ...,
+]:
+    """Собирает union разрешённых N IDs для JSON Schema batch."""
+    result: list[str] = []
+
+    seen: set[str] = set()
+
+    for finding in findings:
+        for source in (
+            *finding.basis_sources,
+            *candidate_groups.get(
+                finding.finding_id,
+                (),
+            ),
+        ):
+            source_id = source.source_id.strip()
+
+            if not source_id or source_id in seen:
+                continue
+
+            seen.add(
+                source_id,
+            )
+
+            result.append(
+                source_id,
+            )
+
+    return tuple(
+        result,
+    )
+
+
+def _can_split_finalization_error(
+    error: VisionModelError,
+) -> bool:
+    """Разрешает split только для ошибок, зависящих от размера batch."""
+    message = str(
+        error,
+    )
+
+    return any(marker in message for marker in _SPLITTABLE_FINALIZATION_ERROR_MARKERS)
+
+
 @dataclass(frozen=True, slots=True)
 class FinalizeFindings:
     """Финализирует findings и non-destructive N enrichment."""
@@ -267,6 +418,11 @@ class FinalizeFindings:
         dict[str, Any],
     ]:
         """Оформляет findings, не позволяя enrichment их удалить или смешать."""
+        if self.batch_size < 1:
+            raise ValueError(
+                "finalization batch_size должен быть положительным.",
+            )
+
         if not findings:
             return (
                 "",
@@ -276,7 +432,13 @@ class FinalizeFindings:
                     "done_reason": "no_findings",
                     "batch_size": self.batch_size,
                     "effective_batch_size": self.batch_size,
+                    "initial_batch_count": 0,
+                    "batch_execution_count": 0,
                     "fallback_count": 0,
+                    "vlm_call_count": 0,
+                    "successful_vlm_call_count": 0,
+                    "failed_vlm_call_count": 0,
+                    "split_count": 0,
                     "batches": [],
                 },
             )
@@ -314,13 +476,32 @@ class FinalizeFindings:
             )
         )
 
-        effective_batch_size = 1 if isolated_enrichment else self.batch_size
+        effective_batch_size = self.batch_size
+
+        initial_batch_count = (
+            len(
+                findings,
+            )
+            + effective_batch_size
+            - 1
+        ) // effective_batch_size
 
         final_items: list[FinalFinding] = []
 
-        batch_metrics: list[dict[str, Any]] = []
+        batch_metrics: list[
+            dict[
+                str,
+                Any,
+            ]
+        ] = []
 
         fallback_count = 0
+
+        vlm_call_count = 0
+        successful_vlm_call_count = 0
+        failed_vlm_call_count = 0
+
+        split_count = 0
 
         for start in range(
             0,
@@ -331,186 +512,33 @@ class FinalizeFindings:
         ):
             batch = findings[start : start + effective_batch_size]
 
-            finding_ids = tuple(finding.finding_id for finding in batch)
+            outcome = await self._finalize_batch(
+                batch=batch,
+                eligible_experience=eligible_experience,
+                normalized_candidate_groups=(normalized_candidate_groups),
+                legacy_candidates=legacy_candidates,
+                isolated_enrichment=isolated_enrichment,
+                seed=300 + start,
+                depth=0,
+            )
 
-            if isolated_enrichment:
-                batch_candidates = normalized_candidate_groups.get(
-                    batch[0].finding_id,
-                    (),
-                )
-            else:
-                batch_candidates = legacy_candidates
+            final_items.extend(
+                outcome.findings,
+            )
 
-            allowed_normative_ids: list[str] = []
+            batch_metrics.extend(
+                outcome.metrics,
+            )
 
-            seen_normative_ids: set[str] = set()
+            fallback_count += outcome.fallback_count
 
-            for finding in batch:
-                for source in (
-                    *finding.basis_sources,
-                    *batch_candidates,
-                ):
-                    source_id = source.source_id.strip()
+            vlm_call_count += outcome.vlm_call_count
 
-                    if not source_id or source_id in seen_normative_ids:
-                        continue
+            successful_vlm_call_count += outcome.successful_vlm_call_count
 
-                    seen_normative_ids.add(
-                        source_id,
-                    )
+            failed_vlm_call_count += outcome.failed_vlm_call_count
 
-                    allowed_normative_ids.append(
-                        source_id,
-                    )
-
-            try:
-                prompt = build_finalization_prompt(
-                    findings=batch,
-                    experience_by_finding=eligible_experience,
-                    experience_context_limit=(self.experience_context_limit),
-                    normative_candidates=batch_candidates,
-                )
-
-                if isolated_enrichment:
-                    prompt += """
-
-ВАЖНО ДЛЯ FINDING-LOCAL ENRICHMENT:
-
-- NORMATIVE CANDIDATES относятся только
-  к текущему finding;
-
-- не используй N-source из другого finding;
-
-- названия и номера ГОСТ, СП, ПУЭ, СНиП
-  НЕ пиши в comment и recommendation;
-
-- подтверждённый норматив показывается пользователю
-  отдельно через выбранный normative_source_id,
-  basis и basis_sources;
-
-- comment описывает проблему,
-  recommendation описывает действие;
-
-- если подходящего N нет,
-  finding всё равно возвращается.
-""".rstrip()
-
-                generation = await self.vision_model.generate_json(
-                    prompt=prompt,
-                    schema=build_finalization_schema(
-                        finding_ids,
-                        normative_source_ids=tuple(
-                            allowed_normative_ids,
-                        ),
-                    ),
-                    num_predict=self.num_predict,
-                    seed=300 + start,
-                    stage=(
-                        "finalization:"
-                        + ",".join(
-                            finding_ids,
-                        )
-                    ),
-                    image_bytes=None,
-                )
-
-                returned = {
-                    str(
-                        item.get(
-                            "finding_id",
-                            "",
-                        )
-                    ): item
-                    for item in generation.payload.get(
-                        "findings",
-                        [],
-                    )
-                    if isinstance(
-                        item,
-                        dict,
-                    )
-                }
-
-                batch_fallback_count = 0
-
-                for finding in batch:
-                    item = returned.get(
-                        finding.finding_id,
-                    )
-
-                    if item is None:
-                        final_items.append(
-                            self._fallback(
-                                finding,
-                            )
-                        )
-
-                        fallback_count += 1
-                        batch_fallback_count += 1
-
-                        continue
-
-                    finding_candidates = (
-                        normalized_candidate_groups.get(
-                            finding.finding_id,
-                            (),
-                        )
-                        if isolated_enrichment
-                        else legacy_candidates
-                    )
-
-                    final_items.append(
-                        self._build_final(
-                            finding=finding,
-                            item=item,
-                            available_experience=(
-                                eligible_experience.get(
-                                    finding.finding_id,
-                                    (),
-                                )
-                            ),
-                            normative_candidates=(finding_candidates),
-                            guard_normative_free_text=(isolated_enrichment),
-                        )
-                    )
-
-                batch_metrics.append(
-                    {
-                        "finding_ids": list(
-                            finding_ids,
-                        ),
-                        "fallback": (batch_fallback_count > 0),
-                        "fallback_count": (batch_fallback_count),
-                        **generation.metrics.as_dict(),
-                    }
-                )
-
-            except VisionModelError as error:
-                fallback_count += len(
-                    batch,
-                )
-
-                final_items.extend(
-                    self._fallback(
-                        finding,
-                    )
-                    for finding in batch
-                )
-
-                batch_metrics.append(
-                    {
-                        "finding_ids": list(
-                            finding_ids,
-                        ),
-                        "fallback": True,
-                        "fallback_count": len(
-                            batch,
-                        ),
-                        "error": str(
-                            error,
-                        )[:1200],
-                    }
-                )
+            split_count += outcome.split_count
 
         if isolated_enrichment:
             normative_candidates_count = sum(
@@ -549,13 +577,326 @@ class FinalizeFindings:
                 ),
                 "batch_size": self.batch_size,
                 "effective_batch_size": effective_batch_size,
+                "initial_batch_count": initial_batch_count,
+                "batch_execution_count": len(
+                    batch_metrics,
+                ),
                 "fallback_count": fallback_count,
                 "experience_min_score": (self.experience_min_score),
                 "isolated_normative_enrichment": (isolated_enrichment),
                 "normative_candidates_count": (normative_candidates_count),
                 "normative_candidate_groups_count": (normative_candidate_groups_count),
+                "vlm_call_count": vlm_call_count,
+                "successful_vlm_call_count": (successful_vlm_call_count),
+                "failed_vlm_call_count": (failed_vlm_call_count),
+                "split_count": split_count,
                 "batches": batch_metrics,
             },
+        )
+
+    async def _finalize_batch(
+        self,
+        *,
+        batch: tuple[
+            FindingDraft,
+            ...,
+        ],
+        eligible_experience: dict[
+            str,
+            tuple[
+                ExperienceSource,
+                ...,
+            ],
+        ],
+        normalized_candidate_groups: dict[
+            str,
+            tuple[
+                NormativeSource,
+                ...,
+            ],
+        ],
+        legacy_candidates: tuple[
+            NormativeSource,
+            ...,
+        ],
+        isolated_enrichment: bool,
+        seed: int,
+        depth: int,
+    ) -> _BatchOutcome:
+        """Финализирует batch и безопасно делит его при size-related ошибке."""
+        finding_ids = tuple(finding.finding_id for finding in batch)
+
+        candidate_groups = {
+            finding.finding_id: (
+                normalized_candidate_groups.get(
+                    finding.finding_id,
+                    (),
+                )
+                if isolated_enrichment
+                else legacy_candidates
+            )
+            for finding in batch
+        }
+
+        allowed_normative_ids = _allowed_normative_ids(
+            findings=batch,
+            candidate_groups=candidate_groups,
+        )
+
+        try:
+            prompt = build_finalization_prompt(
+                findings=batch,
+                experience_by_finding=eligible_experience,
+                experience_context_limit=(self.experience_context_limit),
+                normative_candidates=(() if isolated_enrichment else legacy_candidates),
+            )
+
+            if isolated_enrichment:
+                local_candidates_json = _finding_local_candidate_context(
+                    findings=batch,
+                    candidate_groups=candidate_groups,
+                    text_limit=(self.experience_context_limit),
+                )
+
+                prompt += f"""
+
+FINDING-LOCAL NORMATIVE CANDIDATES:
+{local_candidates_json}
+
+КРИТИЧЕСКИ ВАЖНО ДЛЯ FINDING-LOCAL ENRICHMENT:
+
+- в этом batch обрабатывается несколько независимых findings;
+
+- массив normative_candidates внутри каждого объекта
+  FINDING-LOCAL NORMATIVE CANDIDATES относится ТОЛЬКО
+  к finding_id этого же объекта;
+
+- N-source одного finding запрещено использовать
+  для другого finding;
+
+- top-level NORMATIVE CANDIDATES из основной DATA
+  для этого режима намеренно пуст;
+
+- существующие normative_basis внутри finding
+  также относятся только к этому finding;
+
+- названия и номера ГОСТ, СП, ПУЭ, СНиП
+  НЕ пиши в comment и recommendation;
+
+- подтверждённый норматив показывается пользователю
+  отдельно через normative_source_ids,
+  basis и basis_sources;
+
+- comment описывает проблему,
+  recommendation описывает действие;
+
+- если подходящего N нет,
+  finding всё равно обязательно возвращается.
+""".rstrip()
+
+            generation = await self.vision_model.generate_json(
+                prompt=prompt,
+                schema=build_finalization_schema(
+                    finding_ids,
+                    normative_source_ids=(allowed_normative_ids),
+                ),
+                num_predict=self.num_predict,
+                seed=seed,
+                stage=(
+                    "finalization:"
+                    + ",".join(
+                        finding_ids,
+                    )
+                ),
+                image_bytes=None,
+            )
+
+        except VisionModelError as error:
+            if len(
+                batch,
+            ) > 1 and _can_split_finalization_error(
+                error,
+            ):
+                split_at = (
+                    len(
+                        batch,
+                    )
+                    // 2
+                )
+
+                left = await self._finalize_batch(
+                    batch=batch[:split_at],
+                    eligible_experience=eligible_experience,
+                    normalized_candidate_groups=(normalized_candidate_groups),
+                    legacy_candidates=legacy_candidates,
+                    isolated_enrichment=(isolated_enrichment),
+                    seed=seed + 1,
+                    depth=depth + 1,
+                )
+
+                right = await self._finalize_batch(
+                    batch=batch[split_at:],
+                    eligible_experience=eligible_experience,
+                    normalized_candidate_groups=(normalized_candidate_groups),
+                    legacy_candidates=legacy_candidates,
+                    isolated_enrichment=(isolated_enrichment),
+                    seed=seed + 2,
+                    depth=depth + 1,
+                )
+
+                return _BatchOutcome(
+                    findings=(
+                        *left.findings,
+                        *right.findings,
+                    ),
+                    metrics=(
+                        {
+                            "finding_ids": list(
+                                finding_ids,
+                            ),
+                            "batch_depth": depth,
+                            "batch_size": len(
+                                batch,
+                            ),
+                            "outcome": "split_retry",
+                            "fallback": False,
+                            "fallback_count": 0,
+                            "error": str(
+                                error,
+                            )[:1200],
+                        },
+                        *left.metrics,
+                        *right.metrics,
+                    ),
+                    fallback_count=(left.fallback_count + right.fallback_count),
+                    vlm_call_count=(1 + left.vlm_call_count + right.vlm_call_count),
+                    successful_vlm_call_count=(
+                        left.successful_vlm_call_count + right.successful_vlm_call_count
+                    ),
+                    failed_vlm_call_count=(
+                        1 + left.failed_vlm_call_count + right.failed_vlm_call_count
+                    ),
+                    split_count=(1 + left.split_count + right.split_count),
+                )
+
+            fallback_findings = tuple(
+                self._fallback(
+                    finding,
+                )
+                for finding in batch
+            )
+
+            return _BatchOutcome(
+                findings=fallback_findings,
+                metrics=(
+                    {
+                        "finding_ids": list(
+                            finding_ids,
+                        ),
+                        "batch_depth": depth,
+                        "batch_size": len(
+                            batch,
+                        ),
+                        "outcome": "fallback",
+                        "fallback": True,
+                        "fallback_count": len(
+                            batch,
+                        ),
+                        "error": str(
+                            error,
+                        )[:1200],
+                    },
+                ),
+                fallback_count=len(
+                    batch,
+                ),
+                vlm_call_count=1,
+                successful_vlm_call_count=0,
+                failed_vlm_call_count=1,
+                split_count=0,
+            )
+
+        returned = {
+            str(
+                item.get(
+                    "finding_id",
+                    "",
+                )
+            ): item
+            for item in generation.payload.get(
+                "findings",
+                [],
+            )
+            if isinstance(
+                item,
+                dict,
+            )
+        }
+
+        final_items: list[FinalFinding] = []
+
+        batch_fallback_count = 0
+
+        for finding in batch:
+            item = returned.get(
+                finding.finding_id,
+            )
+
+            if item is None:
+                final_items.append(
+                    self._fallback(
+                        finding,
+                    )
+                )
+
+                batch_fallback_count += 1
+
+                continue
+
+            final_items.append(
+                self._build_final(
+                    finding=finding,
+                    item=item,
+                    available_experience=(
+                        eligible_experience.get(
+                            finding.finding_id,
+                            (),
+                        )
+                    ),
+                    normative_candidates=(
+                        candidate_groups.get(
+                            finding.finding_id,
+                            (),
+                        )
+                    ),
+                    guard_normative_free_text=(isolated_enrichment),
+                )
+            )
+
+        return _BatchOutcome(
+            findings=tuple(
+                final_items,
+            ),
+            metrics=(
+                {
+                    "finding_ids": list(
+                        finding_ids,
+                    ),
+                    "batch_depth": depth,
+                    "batch_size": len(
+                        batch,
+                    ),
+                    "outcome": "success",
+                    "fallback": (batch_fallback_count > 0),
+                    "fallback_count": (batch_fallback_count),
+                    **generation.metrics.as_dict(),
+                },
+            ),
+            fallback_count=batch_fallback_count,
+            vlm_call_count=1,
+            successful_vlm_call_count=1,
+            failed_vlm_call_count=0,
+            split_count=0,
         )
 
     @staticmethod
