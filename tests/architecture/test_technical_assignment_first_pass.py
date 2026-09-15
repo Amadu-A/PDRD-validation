@@ -86,7 +86,7 @@ def test_t_first_validation_has_dedicated_http_route() -> None:
 
 
 def test_t_first_batch_policy_balances_recall_and_round_trips() -> None:
-    """96 atomic requirements помещаются в один configured batch."""
+    """96 atomic requirements разбиваются на два configured batch."""
     settings_path = (
         ROOT
         / "services"
@@ -112,12 +112,12 @@ def test_t_first_batch_policy_balances_recall_and_round_trips() -> None:
 
     assert (
         "ANALYSIS_SERVICE_PIPELINE__"
-        "TECHNICAL_ASSIGNMENT_NUM_PREDICT=7000" in environment_source
+        "TECHNICAL_ASSIGNMENT_NUM_PREDICT=4000" in environment_source
     )
 
     assert (
         "ANALYSIS_SERVICE_PIPELINE__"
-        "TECHNICAL_ASSIGNMENT_BATCH_SIZE=96" in environment_source
+        "TECHNICAL_ASSIGNMENT_BATCH_SIZE=48" in environment_source
     )
 
     assert (
