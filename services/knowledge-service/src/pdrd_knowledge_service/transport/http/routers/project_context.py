@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/transport/http/routers/project_context.py
 
-"""Internal HTTP API temporary Project Context."""
+"""Internal HTTP API reusable Project Context."""
 
 from typing import Annotated
 from uuid import UUID
@@ -32,14 +32,80 @@ from pdrd_knowledge_service.transport.http.schemas.project_context import (
     CreateProjectContextResponse,
     DeleteProjectContextResponse,
     ProjectContextSourcePayload,
+    ProjectContextValidationSnapshotPayload,
+    ResolveProjectContextCacheRequest,
+    ResolveProjectContextCacheResponse,
     SearchProjectContextRequest,
     SearchProjectContextResponse,
 )
 
 router = APIRouter(
     prefix="/internal/v1/project-contexts",
-    tags=["project-context"],
+    tags=[
+        "project-context",
+    ],
 )
+
+
+@router.post(
+    "/resolve-cache",
+    response_model=(ResolveProjectContextCacheResponse),
+)
+async def resolve_project_context_cache(
+    request: ResolveProjectContextCacheRequest,
+    container: Annotated[
+        ApplicationContainer,
+        Depends(
+            get_container,
+        ),
+    ],
+) -> ResolveProjectContextCacheResponse:
+    """Разрешает content-addressed PZ cache до VLM validation."""
+    use_case = container.resolve_project_context_cache
+
+    if use_case is None:
+        raise HTTPException(
+            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+            detail=("Project Context cache resolver не настроен."),
+        )
+
+    try:
+        result = await use_case.execute(
+            context_id=request.context_id,
+            enabled=request.enabled,
+            pages=tuple(page.to_domain() for page in request.pages),
+        )
+
+    except (
+        ProjectContextError,
+        VectorStoreError,
+    ) as error:
+        raise HTTPException(
+            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
+            detail=str(
+                error,
+            ),
+        ) from error
+
+    validation = (
+        ProjectContextValidationSnapshotPayload.from_domain(
+            result.validation,
+        )
+        if result.validation is not None
+        else None
+    )
+
+    return ResolveProjectContextCacheResponse(
+        context_id=result.context_id,
+        enabled=result.enabled,
+        cache_key=result.cache_key,
+        cache_hit=result.cache_hit,
+        collection_name=(result.collection_name),
+        pages_count=result.pages_count,
+        chunks_count=result.chunks_count,
+        vector_size=result.vector_size,
+        validation=validation,
+    )
 
 
 @router.post(
@@ -50,10 +116,12 @@ async def create_project_context(
     request: CreateProjectContextRequest,
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
 ) -> CreateProjectContextResponse:
-    """Создаёт временный индекс ПЗ."""
+    """Создаёт либо переиспользует persistent PZ cache."""
     use_case = container.create_project_context
 
     if use_case is None:
@@ -64,9 +132,15 @@ async def create_project_context(
 
     try:
         result = await use_case.execute(
-            context_id=(request.context_id),
+            context_id=request.context_id,
             enabled=request.enabled,
             pages=tuple(page.to_domain() for page in request.pages),
+            cache_key=request.cache_key,
+            validation=(
+                request.validation.to_domain()
+                if request.validation is not None
+                else None
+            ),
         )
 
     except ProjectContextError as error:
@@ -88,13 +162,24 @@ async def create_project_context(
             ),
         ) from error
 
+    validation = (
+        ProjectContextValidationSnapshotPayload.from_domain(
+            result.validation,
+        )
+        if result.validation is not None
+        else None
+    )
+
     return CreateProjectContextResponse(
         context_id=result.context_id,
         enabled=result.enabled,
         collection_name=(result.collection_name),
-        pages_count=(result.pages_count),
-        chunks_count=(result.chunks_count),
-        vector_size=(result.vector_size),
+        pages_count=result.pages_count,
+        chunks_count=result.chunks_count,
+        vector_size=result.vector_size,
+        cache_key=result.cache_key,
+        cache_hit=result.cache_hit,
+        validation=validation,
     )
 
 
@@ -106,7 +191,9 @@ async def search_project_context(
     request: SearchProjectContextRequest,
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
 ) -> SearchProjectContextResponse:
     """Ищет релевантный контекст ПЗ."""
@@ -120,7 +207,7 @@ async def search_project_context(
 
     try:
         result = await use_case.execute(
-            context_id=(request.context_id),
+            context_id=request.context_id,
             enabled=request.enabled,
             query=request.query,
         )
@@ -142,8 +229,8 @@ async def search_project_context(
         query=result.query,
         sources=[
             ProjectContextSourcePayload(
-                source_id=(source.source_id),
-                point_id=(source.point_id),
+                source_id=source.source_id,
+                point_id=source.point_id,
                 score=source.score,
                 page=source.page,
                 chunk_index=(source.chunk_index),
@@ -163,10 +250,12 @@ async def delete_project_context(
     context_id: UUID,
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
 ) -> DeleteProjectContextResponse:
-    """Идемпотентно удаляет временный индекс ПЗ."""
+    """Явно удаляет persistent PZ cache."""
     use_case = container.delete_project_context
 
     if use_case is None:

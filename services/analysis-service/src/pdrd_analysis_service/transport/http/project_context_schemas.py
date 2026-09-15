@@ -11,8 +11,11 @@ from pydantic import (
 )
 
 from pdrd_analysis_service.domain.project_context import (
+    ProjectContextClassification,
     ProjectContextPage,
+    ProjectContextPageKind,
     ProjectContextSource,
+    ProjectContextValidation,
 )
 from pdrd_analysis_service.transport.http.schemas import (
     PageFactsPayload,
@@ -45,13 +48,76 @@ class ProjectContextPagePayload(BaseModel):
 class ProjectContextClassificationPayload(BaseModel):
     """Классификация одной страницы."""
 
-    page_number: int
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    page_number: int = Field(
+        ge=1,
+    )
 
     kind: str
 
-    confidence: float
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+    )
 
     reason: str
+
+    def to_domain(
+        self,
+    ) -> ProjectContextClassification:
+        """Преобразует wire classification в Domain."""
+        try:
+            kind = ProjectContextPageKind(
+                self.kind,
+            )
+
+        except ValueError:
+            kind = ProjectContextPageKind.OTHER
+
+        return ProjectContextClassification(
+            page_number=self.page_number,
+            kind=kind,
+            confidence=self.confidence,
+            reason=self.reason,
+        )
+
+
+class CachedProjectContextValidationPayload(
+    BaseModel,
+):
+    """Validation snapshot, полученный из reusable PZ cache."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    enabled: bool
+
+    pages_count: int = Field(
+        ge=0,
+    )
+
+    classifications: list[ProjectContextClassificationPayload] = Field(
+        default_factory=list,
+    )
+
+    warnings: list[ProjectContextClassificationPayload] = Field(
+        default_factory=list,
+    )
+
+    def to_domain(
+        self,
+    ) -> ProjectContextValidation:
+        """Преобразует cached validation в Domain."""
+        return ProjectContextValidation(
+            enabled=self.enabled,
+            pages_count=self.pages_count,
+            classifications=tuple(item.to_domain() for item in self.classifications),
+            warnings=tuple(item.to_domain() for item in self.warnings),
+        )
 
 
 class ValidateProjectContextRequest(BaseModel):
@@ -67,6 +133,8 @@ class ValidateProjectContextRequest(BaseModel):
         default_factory=list,
     )
 
+    cached_validation: CachedProjectContextValidationPayload | None = None
+
 
 class ValidateProjectContextResponse(BaseModel):
     """Результат проверки диапазона ПЗ."""
@@ -79,7 +147,12 @@ class ValidateProjectContextResponse(BaseModel):
 
     warnings: list[ProjectContextClassificationPayload]
 
-    metrics: list[dict[str, Any]]
+    metrics: list[
+        dict[
+            str,
+            Any,
+        ]
+    ]
 
 
 class BuildProjectContextQueryRequest(BaseModel):

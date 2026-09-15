@@ -2,6 +2,7 @@
 
 """Application use cases Project Context / Пояснительной записки."""
 
+import logging
 import re
 from dataclasses import dataclass
 
@@ -26,6 +27,10 @@ from pdrd_analysis_service.domain.project_context import (
     ProjectContextPageKind,
     ProjectContextSource,
     ProjectContextValidation,
+)
+
+logger = logging.getLogger(
+    __name__,
 )
 
 
@@ -73,6 +78,7 @@ class ValidateProjectContext:
             ProjectContextPage,
             ...,
         ],
+        cached_validation: (ProjectContextValidation | None) = None,
     ) -> tuple[
         ProjectContextValidation,
         tuple[
@@ -80,7 +86,7 @@ class ValidateProjectContext:
             ...,
         ],
     ]:
-        """Классифицирует диапазон до временной индексации."""
+        """Классифицирует ПЗ либо безопасно переиспользует cache."""
         if not enabled:
             return (
                 ProjectContextValidation(
@@ -92,48 +98,24 @@ class ValidateProjectContext:
                 (),
             )
 
-        if not pages:
-            raise InvalidProjectContextError(
-                "Диапазон ПЗ не содержит страниц.",
-            )
-
-        normalized_pages = tuple(
-            ProjectContextPage(
-                page_number=(page.page_number),
-                text=(
-                    _normalize_context_text(
-                        page.text,
-                    )
-                ),
-            )
-            for page in pages
+        normalized_pages = self._normalize_and_validate_pages(
+            pages,
         )
 
-        too_short = tuple(
-            page.page_number
-            for page in normalized_pages
-            if (
-                len(
-                    page.text,
-                )
-                < self.min_text_length
-            )
-        )
-
-        if too_short:
-            page_text = ", ".join(
-                str(
-                    page_number,
-                )
-                for page_number in too_short
+        if cached_validation is not None:
+            validation = self._reuse_cached_validation(
+                pages=normalized_pages,
+                cached_validation=(cached_validation),
             )
 
-            raise InvalidProjectContextError(
-                "На страницах ПЗ недостаточно "
-                "извлекаемого текста: "
-                f"{page_text}. "
-                "Проверьте диапазон. "
-                "Для сканированной ПЗ потребуется OCR.",
+            logger.info(
+                ("project_context_validation_cache hit=true pages=%s"),
+                validation.pages_count,
+            )
+
+            return (
+                validation,
+                (),
             )
 
         classifications: list[ProjectContextClassification] = []
@@ -166,7 +148,12 @@ class ValidateProjectContext:
                 seed=(400 + start),
                 stage=(
                     "project_context_validation:"
-                    + ",".join(str(page_number) for page_number in page_numbers)
+                    + ",".join(
+                        str(
+                            page_number,
+                        )
+                        for page_number in page_numbers
+                    )
                 ),
                 image_bytes=None,
             )
@@ -195,70 +182,188 @@ class ValidateProjectContext:
                 ):
                     continue
 
-                try:
-                    page_number = int(
-                        item.get(
-                            "page",
-                        )
-                    )
-                except (
-                    TypeError,
-                    ValueError,
-                ):
-                    continue
-
-                kind_text = str(
-                    item.get(
-                        "kind",
-                        "other",
-                    )
+                classification = self._classification_from_model(
+                    item,
                 )
 
-                try:
-                    kind = ProjectContextPageKind(
-                        kind_text,
+                if classification is not None:
+                    classifications.append(
+                        classification,
                     )
-                except ValueError:
-                    kind = ProjectContextPageKind.OTHER
 
-                try:
-                    score = float(
-                        item.get(
-                            "confidence",
-                            0.0,
-                        )
+        validation = self._build_validation(
+            pages=normalized_pages,
+            classifications=tuple(
+                classifications,
+            ),
+        )
+
+        logger.info(
+            ("project_context_validation_cache hit=false pages=%s vlm_calls=%s"),
+            validation.pages_count,
+            len(
+                metrics,
+            ),
+        )
+
+        return (
+            validation,
+            tuple(
+                metrics,
+            ),
+        )
+
+    def _normalize_and_validate_pages(
+        self,
+        pages: tuple[
+            ProjectContextPage,
+            ...,
+        ],
+    ) -> tuple[
+        ProjectContextPage,
+        ...,
+    ]:
+        """Нормализует диапазон и выполняет дешёвые deterministic checks."""
+        if not pages:
+            raise InvalidProjectContextError(
+                "Диапазон ПЗ не содержит страниц.",
+            )
+
+        normalized_pages = tuple(
+            ProjectContextPage(
+                page_number=(page.page_number),
+                text=(
+                    _normalize_context_text(
+                        page.text,
                     )
-                except (
-                    TypeError,
-                    ValueError,
-                ):
-                    score = 0.0
+                ),
+            )
+            for page in pages
+        )
 
-                score = min(
-                    max(
-                        score,
-                        0.0,
-                    ),
-                    1.0,
+        page_numbers = tuple(page.page_number for page in normalized_pages)
+
+        if len(
+            set(
+                page_numbers,
+            )
+        ) != len(
+            page_numbers,
+        ):
+            raise InvalidProjectContextError(
+                "Диапазон ПЗ содержит повторяющиеся номера страниц.",
+            )
+
+        too_short = tuple(
+            page.page_number
+            for page in normalized_pages
+            if (
+                len(
+                    page.text,
+                )
+                < self.min_text_length
+            )
+        )
+
+        if too_short:
+            page_text = ", ".join(
+                str(
+                    page_number,
+                )
+                for page_number in too_short
+            )
+
+            raise InvalidProjectContextError(
+                "На страницах ПЗ недостаточно "
+                "извлекаемого текста: "
+                f"{page_text}. "
+                "Проверьте диапазон. "
+                "Для сканированной ПЗ потребуется OCR.",
+            )
+
+        return normalized_pages
+
+    def _reuse_cached_validation(
+        self,
+        *,
+        pages: tuple[
+            ProjectContextPage,
+            ...,
+        ],
+        cached_validation: ProjectContextValidation,
+    ) -> ProjectContextValidation:
+        """Проверяет cached snapshot без повторного обращения к VLM."""
+        if not cached_validation.enabled:
+            raise InvalidProjectContextError(
+                "Reusable PZ cache содержит disabled validation.",
+            )
+
+        if cached_validation.pages_count != len(
+            pages,
+        ):
+            raise InvalidProjectContextError(
+                "Reusable PZ cache содержит validation для другого количества страниц.",
+            )
+
+        expected_pages = tuple(page.page_number for page in pages)
+
+        actual_pages = tuple(
+            item.page_number for item in cached_validation.classifications
+        )
+
+        if actual_pages != expected_pages:
+            raise InvalidProjectContextError(
+                "Reusable PZ cache содержит validation для другого диапазона страниц.",
+            )
+
+        return self._build_validation(
+            pages=pages,
+            classifications=(cached_validation.classifications),
+        )
+
+    def _build_validation(
+        self,
+        *,
+        pages: tuple[
+            ProjectContextPage,
+            ...,
+        ],
+        classifications: tuple[
+            ProjectContextClassification,
+            ...,
+        ],
+    ) -> ProjectContextValidation:
+        """Проверяет полноту classification и применяет reject policy."""
+        by_page: dict[
+            int,
+            ProjectContextClassification,
+        ] = {}
+
+        duplicate_pages: set[int] = set()
+
+        for item in classifications:
+            if item.page_number in by_page:
+                duplicate_pages.add(
+                    item.page_number,
                 )
 
-                classifications.append(
-                    ProjectContextClassification(
-                        page_number=(page_number),
-                        kind=kind,
-                        confidence=score,
-                        reason=str(
-                            item.get(
-                                "reason",
-                                "",
-                            )
-                        ).strip(),
-                    )
+            by_page[item.page_number] = item
+
+        if duplicate_pages:
+            duplicate_text = ", ".join(
+                str(
+                    page_number,
                 )
+                for page_number in sorted(
+                    duplicate_pages,
+                )
+            )
 
-        by_page = {item.page_number: item for item in classifications}
+            raise InvalidProjectContextError(
+                f"Модель вернула повторную классификацию страниц ПЗ: {duplicate_text}.",
+            )
 
-        expected_pages = tuple(page.page_number for page in normalized_pages)
+        expected_pages = tuple(page.page_number for page in pages)
 
         missing_pages = tuple(
             page_number for page_number in expected_pages if page_number not in by_page
@@ -276,13 +381,31 @@ class ValidateProjectContext:
                 f"Модель не вернула классификацию страниц ПЗ: {missing_text}.",
             )
 
+        unexpected_pages = tuple(
+            page_number for page_number in by_page if page_number not in expected_pages
+        )
+
+        if unexpected_pages:
+            unexpected_text = ", ".join(
+                str(
+                    page_number,
+                )
+                for page_number in sorted(
+                    unexpected_pages,
+                )
+            )
+
+            raise InvalidProjectContextError(
+                f"Validation содержит лишние страницы ПЗ: {unexpected_text}.",
+            )
+
         ordered = tuple(by_page[page_number] for page_number in expected_pages)
 
         rejected = tuple(
             item
             for item in ordered
             if (
-                item.kind is not (ProjectContextPageKind.EXPLANATORY_NOTE)
+                item.kind is not ProjectContextPageKind.EXPLANATORY_NOTE
                 and item.confidence >= self.reject_confidence
             )
         )
@@ -303,23 +426,88 @@ class ValidateProjectContext:
             item
             for item in ordered
             if (
-                item.kind is not (ProjectContextPageKind.EXPLANATORY_NOTE)
+                item.kind is not ProjectContextPageKind.EXPLANATORY_NOTE
                 and item.confidence < self.reject_confidence
             )
         )
 
-        return (
-            ProjectContextValidation(
-                enabled=True,
-                pages_count=len(
-                    normalized_pages,
-                ),
-                classifications=ordered,
-                warnings=warnings,
+        return ProjectContextValidation(
+            enabled=True,
+            pages_count=len(
+                pages,
             ),
-            tuple(
-                metrics,
+            classifications=ordered,
+            warnings=warnings,
+        )
+
+    @staticmethod
+    def _classification_from_model(
+        item: dict[
+            object,
+            object,
+        ],
+    ) -> ProjectContextClassification | None:
+        """Преобразует одну VLM classification в Domain."""
+        try:
+            page_number = int(
+                item.get(
+                    "page",
+                )
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            return None
+
+        kind_text = str(
+            item.get(
+                "kind",
+                "other",
+            )
+        )
+
+        try:
+            kind = ProjectContextPageKind(
+                kind_text,
+            )
+
+        except ValueError:
+            kind = ProjectContextPageKind.OTHER
+
+        try:
+            confidence = float(
+                item.get(
+                    "confidence",
+                    0.0,
+                )
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            confidence = 0.0
+
+        confidence = min(
+            max(
+                confidence,
+                0.0,
             ),
+            1.0,
+        )
+
+        return ProjectContextClassification(
+            page_number=page_number,
+            kind=kind,
+            confidence=confidence,
+            reason=str(
+                item.get(
+                    "reason",
+                    "",
+                )
+            ).strip(),
         )
 
 
