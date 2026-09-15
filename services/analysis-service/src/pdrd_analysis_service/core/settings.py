@@ -136,13 +136,13 @@ class PipelineSettings(BaseModel):
     )
 
     technical_assignment_num_predict: int = Field(
-        default=4000,
+        default=7000,
         ge=1,
         le=10000,
     )
 
     technical_assignment_batch_size: int = Field(
-        default=48,
+        default=96,
         ge=1,
         le=100,
     )
