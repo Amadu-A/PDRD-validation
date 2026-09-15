@@ -542,6 +542,15 @@ class SearchSettings(BaseModel):
         le=500,
     )
 
+    experience_enabled: bool = Field(
+        default=False,
+        description=(
+            "Включает retrieval по Базе опыта E. "
+            "До реализации feedback loop и trusted experience ingestion "
+            "должен оставаться выключенным."
+        ),
+    )
+
     experience_top_k: int = Field(
         default=3,
         ge=1,

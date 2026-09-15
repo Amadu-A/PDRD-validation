@@ -316,6 +316,7 @@ def build_container() -> ApplicationContainer:
         collection=settings.qdrant.experience_collection,
         embedding_model=settings.embedding_model,
         top_k=settings.search.experience_top_k,
+        enabled=settings.search.experience_enabled,
     )
 
     check_readiness = CheckReadiness(

@@ -42,6 +42,8 @@ class SearchExperience:
 
     top_k: int
 
+    enabled: bool = True
+
     async def execute(
         self,
         queries: list[str],
@@ -58,6 +60,23 @@ class SearchExperience:
         if any(not query for query in normalized):
             raise ValueError(
                 "Запрос к Базе Опыта не может быть пустым.",
+            )
+
+        if not self.enabled:
+            logger.info(
+                "experience_search_disabled queries=%s",
+                len(
+                    normalized,
+                ),
+            )
+
+            return tuple(
+                ExperienceSearchResult(
+                    query=query,
+                    sources=(),
+                    embedding_model=self.embedding_model,
+                )
+                for query in normalized
             )
 
         started_at = asyncio.get_running_loop().time()
