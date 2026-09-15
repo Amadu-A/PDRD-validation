@@ -262,9 +262,11 @@ def build_container() -> ApplicationContainer:
             storage=document_storage,
             max_upload_bytes=(settings.storage.max_upload_bytes),
         ),
-        get_document_content=GetNormativeDocumentContent(
-            unit_of_work_factory=(normative_catalog_uow_factory),
-            storage=document_storage,
+        get_document_content=(
+            GetNormativeDocumentContent(
+                unit_of_work_factory=(normative_catalog_uow_factory),
+                storage=document_storage,
+            )
         ),
         move_document=MoveNormativeDocument(
             unit_of_work_factory=(normative_catalog_uow_factory),
@@ -282,7 +284,7 @@ def build_container() -> ApplicationContainer:
     search_normative = SearchNormative(
         embedding_provider=embedding_provider,
         vector_store=vector_store,
-        collection=settings.qdrant.normative_collection,
+        collection=(settings.qdrant.normative_collection),
         embedding_model=settings.embedding_model,
         top_k=settings.search.normative_top_k,
         max_sources=(settings.search.normative_max_sources),
@@ -294,7 +296,7 @@ def build_container() -> ApplicationContainer:
         vector_store=vector_store,
         unit_of_work_factory=(technical_assignment_uow_factory),
         collection=(settings.qdrant.multimodal_collection),
-        embedding_model=settings.embedding_model,
+        embedding_model=(settings.embedding_model),
         top_k=(settings.technical_assignment.retrieval_top_k),
         max_sources=(settings.technical_assignment.max_sources),
     )
@@ -313,10 +315,10 @@ def build_container() -> ApplicationContainer:
     search_experience = SearchExperience(
         embedding_provider=embedding_provider,
         vector_store=vector_store,
-        collection=settings.qdrant.experience_collection,
+        collection=(settings.qdrant.experience_collection),
         embedding_model=settings.embedding_model,
         top_k=settings.search.experience_top_k,
-        enabled=settings.search.experience_enabled,
+        enabled=(settings.search.experience_enabled),
     )
 
     check_readiness = CheckReadiness(
@@ -336,7 +338,7 @@ def build_container() -> ApplicationContainer:
 
     list_technical_assignment_requirements = ListTechnicalAssignmentRequirements(
         unit_of_work_factory=(technical_assignment_uow_factory),
-        reader=technical_assignment_requirement_reader,
+        reader=(technical_assignment_requirement_reader),
     )
 
     project_settings = settings.project_context
@@ -344,52 +346,62 @@ def build_container() -> ApplicationContainer:
     return ApplicationContainer(
         settings=settings,
         search_normative=search_normative,
-        search_user_packages=search_user_packages,
+        search_user_packages=(search_user_packages),
         search_experience=search_experience,
         check_readiness=check_readiness,
         normative_catalog_uow_factory=(normative_catalog_uow_factory),
         normative_sections=normative_sections,
-        normative_categories=normative_categories,
+        normative_categories=(normative_categories),
         normative_documents=normative_documents,
-        queue_normative_document=QueueNormativeDocument(
-            unit_of_work_factory=(normative_catalog_uow_factory),
+        queue_normative_document=(
+            QueueNormativeDocument(
+                unit_of_work_factory=(normative_catalog_uow_factory),
+            )
         ),
         register_technical_assignment=(
             RegisterTechnicalAssignment(
                 unit_of_work_factory=(technical_assignment_uow_factory),
-                storage=technical_assignment_storage,
+                storage=(technical_assignment_storage),
                 max_upload_bytes=(settings.technical_assignment.max_upload_bytes),
             )
         ),
-        get_technical_assignment=get_technical_assignment,
+        get_technical_assignment=(get_technical_assignment),
         get_technical_assignment_content=(
             GetTechnicalAssignmentContent(
                 get_technical_assignment=(get_technical_assignment),
-                storage=technical_assignment_storage,
-                office_converter=office_converter,
+                storage=(technical_assignment_storage),
+                office_converter=(office_converter),
             )
         ),
         list_technical_assignment_requirements=(list_technical_assignment_requirements),
         search_technical_assignment_guided=(search_technical_assignment_guided),
-        create_project_context=CreateProjectContext(
-            embedding_provider=embedding_provider,
-            vector_store=vector_store,
-            collection_prefix=(project_settings.collection_prefix),
-            embedding_model=settings.embedding_model,
-            chunk_size=project_settings.chunk_size,
-            chunk_overlap=project_settings.chunk_overlap,
-            embed_batch_size=(project_settings.embed_batch_size),
-            upsert_batch_size=(project_settings.upsert_batch_size),
+        create_project_context=(
+            CreateProjectContext(
+                embedding_provider=(embedding_provider),
+                vector_store=vector_store,
+                collection_prefix=(project_settings.collection_prefix),
+                embedding_model=(settings.embedding_model),
+                embedding_dimension=(settings.embedding_dimension),
+                embedding_schema_version=(settings.embedding_schema_version),
+                chunk_size=(project_settings.chunk_size),
+                chunk_overlap=(project_settings.chunk_overlap),
+                embed_batch_size=(project_settings.embed_batch_size),
+                upsert_batch_size=(project_settings.upsert_batch_size),
+            )
         ),
-        search_project_context=SearchProjectContext(
-            embedding_provider=embedding_provider,
-            vector_store=vector_store,
-            collection_prefix=(project_settings.collection_prefix),
-            embedding_model=settings.embedding_model,
-            top_k=project_settings.top_k,
+        search_project_context=(
+            SearchProjectContext(
+                embedding_provider=(embedding_provider),
+                vector_store=vector_store,
+                collection_prefix=(project_settings.collection_prefix),
+                embedding_model=(settings.embedding_model),
+                top_k=(project_settings.top_k),
+            )
         ),
-        delete_project_context=DeleteProjectContext(
-            vector_store=vector_store,
-            collection_prefix=(project_settings.collection_prefix),
+        delete_project_context=(
+            DeleteProjectContext(
+                vector_store=vector_store,
+                collection_prefix=(project_settings.collection_prefix),
+            )
         ),
     )
