@@ -48,6 +48,17 @@ def test_startup_provisions_project_rabbitmq_namespace() -> None:
     )
 
 
+def test_startup_knows_real_shared_repository_locations() -> None:
+    """Startup знает фактические варианты расположения shared repository."""
+    source = UP_SCRIPT.read_text(
+        encoding="utf-8",
+    )
+
+    assert "/projects/shared-infrastructure" in source
+
+    assert "${HOME}/projects/shared-infrastructure" in source
+
+
 def test_startup_runs_shared_bootstrap_and_database_migrations() -> None:
     """One-command startup поднимает shared stack и применяет migrations."""
     source = UP_SCRIPT.read_text(
@@ -123,3 +134,17 @@ def test_operational_shell_scripts_have_real_shebang() -> None:
         ).splitlines()[0]
 
         assert first_line == "#!/usr/bin/env bash"
+
+
+def test_operational_shell_scripts_avoid_invalid_multiline_if_subshells() -> None:
+    """Guard запрещает конструкцию, сломавшую Bash в commit 41aa770."""
+    for path in (
+        UP_SCRIPT,
+        CHECK_STACK_SCRIPT,
+    ):
+        source = path.read_text(
+            encoding="utf-8",
+        )
+
+        assert "\n    if (\n" not in source
+        assert "\n        if (\n" not in source
