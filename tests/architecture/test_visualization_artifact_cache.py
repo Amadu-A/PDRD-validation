@@ -321,3 +321,32 @@ def test_combined_extract_can_return_pdf_text_geometry() -> None:
     assert "PdfNormalizedBoundingBoxResponse" in source
 
     assert "page.text_words" in source
+
+
+def test_pdf_cad_result_does_not_persist_transient_visualization_images() -> None:
+    """PDF+CAD result не дублирует transient images внутри result.json."""
+    workflow = _workflow(
+        WORKFLOW_ROOT / "analysis-v2-pdf-cad.json",
+    )
+
+    nodes = _nodes_by_name(
+        workflow,
+    )
+
+    prepare_code = str(
+        nodes["Prepare Combined Context"]["parameters"]["jsCode"],
+    )
+
+    result_code = str(
+        nodes["Build PDF CAD Result"]["parameters"]["jsCode"],
+    )
+
+    assert "render:" in prepare_code
+    assert "image_base64:" in prepare_code
+    assert "pdf_image_base64:" in prepare_code
+    assert "cad_image_base64:" in prepare_code
+
+    assert "prepared.render" not in result_code
+    assert "image_base64" not in result_code
+    assert "pdf_image_base64" not in result_code
+    assert "cad_image_base64" not in result_code
