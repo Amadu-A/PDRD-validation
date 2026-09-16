@@ -374,6 +374,22 @@ class ProjectContextCleanupSettings(BaseModel):
     )
 
 
+class ProjectContextPreflightSettings(BaseModel):
+    """Bounded HTTP lifecycle проверки ПЗ до создания analysis job."""
+
+    request_timeout_seconds: float = Field(
+        default=900.0,
+        gt=0,
+        le=1800,
+    )
+
+    connect_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=120,
+    )
+
+
 class DocumentServiceSettings(BaseModel):
     """Internal Document Service для PDF-preview."""
 
@@ -411,7 +427,7 @@ class AnalysisServiceSettings(BaseModel):
 
 
 class Settings(BaseSettings):
-    """Runtime API Gateway settings."""
+    """Runtime settings API Gateway."""
 
     model_config = SettingsConfigDict(
         env_file=(
@@ -474,6 +490,10 @@ class Settings(BaseSettings):
 
     project_context_cleanup: ProjectContextCleanupSettings = Field(
         default_factory=ProjectContextCleanupSettings,
+    )
+
+    project_context_preflight: ProjectContextPreflightSettings = Field(
+        default_factory=ProjectContextPreflightSettings,
     )
 
     document_service: DocumentServiceSettings = Field(

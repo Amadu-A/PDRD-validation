@@ -8,9 +8,11 @@
  */
 
 import {
+  ApiError,
   getAnalysisResult,
   getAnalysisVisualization,
   submitAnalysis,
+  submitProjectContextPreflight,
 } from "./api.js";
 
 import {
@@ -62,6 +64,79 @@ export function createAnalysisController({
   }
 
 
+  async function ensureProjectContextReady() {
+    if (
+      analysisForm.isProjectContextConfirmationPending()
+    ) {
+      resultView.show(
+        "Проверьте предупреждение над диапазоном ПЗ "
+        + "и выберите, изменить страницы или продолжить анализ.",
+      );
+
+      return false;
+    }
+
+    if (
+      !analysisForm.needsProjectContextPreflight()
+    ) {
+      return true;
+    }
+
+    modal.show(
+      "Проверяем выбранный диапазон ПЗ и готовим контекст проекта…",
+    );
+
+    resultView.show(
+      "Проверяем страницы пояснительной записки. "
+      + "Основной анализ ещё не запущен.",
+    );
+
+    try {
+      const preflight = (
+        await submitProjectContextPreflight(
+          analysisForm.toProjectContextPreflightFormData(),
+        )
+      );
+
+      const accepted = (
+        analysisForm.applyProjectContextPreflight(
+          preflight,
+        )
+      );
+
+      if (!accepted) {
+        resultView.show(
+          "Автоматическая проверка ПЗ нашла спорные страницы. "
+          + "Подтвердите диапазон или измените его в форме.",
+        );
+
+        return false;
+      }
+
+      return true;
+
+    } catch (error) {
+      if (
+        error instanceof ApiError
+        && error.status === 422
+      ) {
+        analysisForm.showProjectContextValidationError(
+          error.detail,
+        );
+
+        resultView.show(
+          "Проверьте диапазон пояснительной записки "
+          + "и повторите запуск.",
+        );
+
+        return false;
+      }
+
+      throw error;
+    }
+  }
+
+
   async function submit(
     event,
   ) {
@@ -83,15 +158,23 @@ export function createAnalysisController({
 
     modal.clearJobId();
 
-    modal.show(
-      "Документы загружаются в API Gateway…",
-    );
-
-    resultView.show(
-      "Отправляем документы в API Gateway…",
-    );
-
     try {
+      const projectContextReady = (
+        await ensureProjectContextReady()
+      );
+
+      if (!projectContextReady) {
+        return;
+      }
+
+      modal.show(
+        "Документы загружаются в API Gateway…",
+      );
+
+      resultView.show(
+        "Отправляем документы в API Gateway…",
+      );
+
       const accepted = await submitAnalysis(
         analysisForm.toFormData(),
       );

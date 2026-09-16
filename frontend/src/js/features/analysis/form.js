@@ -14,7 +14,15 @@ const TECHNICAL_ASSIGNMENT_FILE_PATTERN = (
 );
 
 
+const PROJECT_CONTEXT_KIND_LABELS = {
+  drawing: "чертёж",
+  specification: "спецификация",
+  other: "другой тип документа",
+};
+
+
 export function createAnalysisForm({
+  formElement,
   pdfInput,
   cadInput,
   technicalAssignmentInput,
@@ -25,6 +33,147 @@ export function createAnalysisForm({
   noteEndPageInput,
   getNormativeSelection = () => null,
 }) {
+  let projectContextPreflightState = null;
+
+  const projectContextFeedback = (
+    createProjectContextFeedback()
+  );
+
+
+  function createProjectContextFeedback() {
+    const startField = (
+      noteStartPageInput.parentElement
+    );
+
+    const noteRange = (
+      startField?.parentElement
+    );
+
+    if (!noteRange) {
+      throw new Error(
+        "Не найден контейнер диапазона ПЗ.",
+      );
+    }
+
+    const root = document.createElement(
+      "div",
+    );
+
+    root.className = (
+      "analysis-form__context-feedback"
+    );
+
+    root.dataset.state = "warning";
+
+    root.hidden = true;
+
+    root.setAttribute(
+      "role",
+      "status",
+    );
+
+    root.setAttribute(
+      "aria-live",
+      "polite",
+    );
+
+    const title = document.createElement(
+      "strong",
+    );
+
+    title.className = (
+      "analysis-form__context-feedback-title"
+    );
+
+    const summary = document.createElement(
+      "p",
+    );
+
+    summary.className = (
+      "analysis-form__context-feedback-text"
+    );
+
+    const list = document.createElement(
+      "ul",
+    );
+
+    list.className = (
+      "analysis-form__context-feedback-list"
+    );
+
+    const hint = document.createElement(
+      "p",
+    );
+
+    hint.className = (
+      "analysis-form__context-feedback-hint"
+    );
+
+    const actions = document.createElement(
+      "div",
+    );
+
+    actions.className = (
+      "analysis-form__context-feedback-actions"
+    );
+
+    const changeButton = document.createElement(
+      "button",
+    );
+
+    changeButton.className = (
+      "analysis-form__context-feedback-button"
+    );
+
+    changeButton.type = "button";
+
+    changeButton.textContent = "Изменить диапазон";
+
+    const confirmButton = document.createElement(
+      "button",
+    );
+
+    confirmButton.className = (
+      "analysis-form__context-feedback-button "
+      + "analysis-form__context-feedback-button--primary"
+    );
+
+    confirmButton.type = "button";
+
+    confirmButton.textContent = (
+      "Всё верно — продолжить анализ"
+    );
+
+    actions.append(
+      changeButton,
+      confirmButton,
+    );
+
+    root.append(
+      title,
+      summary,
+      list,
+      hint,
+      actions,
+    );
+
+    noteRange.prepend(
+      root,
+    );
+
+    return {
+      root,
+      title,
+      summary,
+      list,
+      hint,
+      actions,
+      changeButton,
+      confirmButton,
+    };
+  }
+
+
   function hasPdf() {
     return Boolean(
       pdfInput.files[0],
@@ -59,6 +208,53 @@ export function createAnalysisForm({
   }
 
 
+  function isProjectContextEnabled() {
+    return (
+      EXPLANATORY_NOTE_ENABLED
+      && useExplanatoryNoteInput.checked
+      && !useExplanatoryNoteInput.disabled
+      && hasPdf()
+    );
+  }
+
+
+  function projectContextFingerprint() {
+    if (!isProjectContextEnabled()) {
+      return null;
+    }
+
+    const pdf = pdfInput.files[0];
+
+    if (!pdf) {
+      return null;
+    }
+
+    return [
+      pdf.name,
+      pdf.size,
+      pdf.lastModified,
+      noteStartPageInput.value.trim(),
+      noteEndPageInput.value.trim(),
+    ].join(
+      ":",
+    );
+  }
+
+
+  function hideProjectContextFeedback() {
+    projectContextFeedback.root.hidden = true;
+
+    projectContextFeedback.list.replaceChildren();
+  }
+
+
+  function resetProjectContextPreflight() {
+    projectContextPreflightState = null;
+
+    hideProjectContextFeedback();
+  }
+
+
   function syncExplanatoryNote() {
     const mode = getMode();
 
@@ -88,6 +284,10 @@ export function createAnalysisForm({
     noteStartPageInput.required = enabled;
 
     noteEndPageInput.required = enabled;
+
+    if (!enabled) {
+      resetProjectContextPreflight();
+    }
   }
 
 
@@ -543,10 +743,296 @@ export function createAnalysisForm({
   }
 
 
+  function toProjectContextPreflightFormData() {
+    if (!isProjectContextEnabled()) {
+      throw new Error(
+        "Preflight ПЗ запрошен для выключенного контекста.",
+      );
+    }
+
+    const pdf = pdfInput.files[0];
+
+    if (!pdf) {
+      throw new Error(
+        "Для preflight ПЗ отсутствует PDF.",
+      );
+    }
+
+    const body = new FormData();
+
+    body.append(
+      "pdf",
+      pdf,
+    );
+
+    body.append(
+      "note_start_page",
+      noteStartPageInput.value.trim(),
+    );
+
+    body.append(
+      "note_end_page",
+      noteEndPageInput.value.trim(),
+    );
+
+    return body;
+  }
+
+
+  function needsProjectContextPreflight() {
+    if (!isProjectContextEnabled()) {
+      return false;
+    }
+
+    const fingerprint = (
+      projectContextFingerprint()
+    );
+
+    if (!fingerprint) {
+      return true;
+    }
+
+    return (
+      projectContextPreflightState?.fingerprint
+      !== fingerprint
+      || (
+        projectContextPreflightState?.accepted
+        !== true
+      )
+    );
+  }
+
+
+  function isProjectContextConfirmationPending() {
+    const fingerprint = (
+      projectContextFingerprint()
+    );
+
+    return Boolean(
+      fingerprint
+      && projectContextPreflightState
+      && (
+        projectContextPreflightState.fingerprint
+        === fingerprint
+      )
+      && (
+        projectContextPreflightState.requiresConfirmation
+        === true
+      )
+      && (
+        projectContextPreflightState.accepted
+        !== true
+      ),
+    );
+  }
+
+
+  function applyProjectContextPreflight(
+    payload,
+  ) {
+    const fingerprint = (
+      projectContextFingerprint()
+    );
+
+    if (!fingerprint) {
+      throw new Error(
+        "Не удалось определить fingerprint выбранной ПЗ.",
+      );
+    }
+
+    const warnings = (
+      Array.isArray(
+        payload?.warnings,
+      )
+        ? payload.warnings
+        : []
+    );
+
+    const requiresConfirmation = Boolean(
+      payload?.requires_confirmation
+      && warnings.length > 0,
+    );
+
+    projectContextPreflightState = {
+      fingerprint,
+      accepted: !requiresConfirmation,
+      requiresConfirmation,
+      warnings,
+      cacheHit: Boolean(
+        payload?.cache_hit,
+      ),
+    };
+
+    if (!requiresConfirmation) {
+      hideProjectContextFeedback();
+
+      return true;
+    }
+
+    renderProjectContextWarnings(
+      warnings,
+    );
+
+    return false;
+  }
+
+
+  function renderProjectContextWarnings(
+    warnings,
+  ) {
+    projectContextFeedback.root.dataset.state = (
+      "warning"
+    );
+
+    projectContextFeedback.title.textContent = (
+      "Проверьте выбранные страницы ПЗ"
+    );
+
+    projectContextFeedback.summary.textContent = (
+      "Автоматическая проверка считает, что некоторые страницы "
+      + "могут относиться к другому типу документа."
+    );
+
+    projectContextFeedback.list.replaceChildren();
+
+    for (const warning of warnings) {
+      const item = document.createElement(
+        "li",
+      );
+
+      const kind = (
+        PROJECT_CONTEXT_KIND_LABELS[
+          warning?.kind
+        ]
+        ?? "другой тип документа"
+      );
+
+      const confidence = Math.round(
+        Number(
+          warning?.confidence
+          ?? 0,
+        ) * 100,
+      );
+
+      const reason = String(
+        warning?.reason
+        ?? "",
+      ).trim();
+
+      item.textContent = (
+        `Стр. ${warning?.page_number ?? "?"} — ${kind}`
+        + `, уверенность ${confidence}%`
+        + (
+          reason
+            ? `: ${reason}`
+            : "."
+        )
+      );
+
+      projectContextFeedback.list.append(
+        item,
+      );
+    }
+
+    projectContextFeedback.hint.textContent = (
+      "Автоматическая классификация может ошибаться. "
+      + "Измените диапазон либо подтвердите, что выбранные "
+      + "страницы действительно относятся к пояснительной записке."
+    );
+
+    projectContextFeedback.actions.hidden = false;
+
+    projectContextFeedback.changeButton.hidden = false;
+
+    projectContextFeedback.confirmButton.hidden = false;
+
+    projectContextFeedback.root.hidden = false;
+  }
+
+
+  function showProjectContextValidationError(
+    message,
+  ) {
+    resetProjectContextPreflight();
+
+    projectContextFeedback.root.dataset.state = (
+      "error"
+    );
+
+    projectContextFeedback.title.textContent = (
+      "Проверьте диапазон пояснительной записки"
+    );
+
+    projectContextFeedback.summary.textContent = (
+      String(
+        message
+        || "Не удалось проверить выбранные страницы ПЗ.",
+      )
+    );
+
+    projectContextFeedback.list.replaceChildren();
+
+    projectContextFeedback.hint.textContent = (
+      "Исправьте диапазон и повторите запуск анализа."
+    );
+
+    projectContextFeedback.actions.hidden = false;
+
+    projectContextFeedback.changeButton.hidden = false;
+
+    projectContextFeedback.confirmButton.hidden = true;
+
+    projectContextFeedback.root.hidden = false;
+  }
+
+
+  function confirmProjectContextPreflight() {
+    const fingerprint = (
+      projectContextFingerprint()
+    );
+
+    if (
+      !fingerprint
+      || !projectContextPreflightState
+      || (
+        projectContextPreflightState.fingerprint
+        !== fingerprint
+      )
+      || (
+        projectContextPreflightState.requiresConfirmation
+        !== true
+      )
+    ) {
+      resetProjectContextPreflight();
+
+      return false;
+    }
+
+    projectContextPreflightState.accepted = true;
+
+    hideProjectContextFeedback();
+
+    return true;
+  }
+
+
+  function focusProjectContextRange() {
+    projectContextPreflightState = null;
+
+    hideProjectContextFeedback();
+
+    noteStartPageInput.focus();
+  }
+
+
   function bind() {
     pdfInput.addEventListener(
       "change",
-      sync,
+      () => {
+        resetProjectContextPreflight();
+
+        sync();
+      },
     );
 
     cadInput.addEventListener(
@@ -563,13 +1049,19 @@ export function createAnalysisForm({
 
     useExplanatoryNoteInput.addEventListener(
       "change",
-      syncExplanatoryNote,
+      () => {
+        resetProjectContextPreflight();
+
+        syncExplanatoryNote();
+      },
     );
 
     noteStartPageInput.addEventListener(
       "input",
       () => {
         noteStartPageInput.setCustomValidity("");
+
+        resetProjectContextPreflight();
       },
     );
 
@@ -577,6 +1069,24 @@ export function createAnalysisForm({
       "input",
       () => {
         noteEndPageInput.setCustomValidity("");
+
+        resetProjectContextPreflight();
+      },
+    );
+
+    projectContextFeedback.changeButton.addEventListener(
+      "click",
+      focusProjectContextRange,
+    );
+
+    projectContextFeedback.confirmButton.addEventListener(
+      "click",
+      () => {
+        if (
+          confirmProjectContextPreflight()
+        ) {
+          formElement.requestSubmit();
+        }
       },
     );
 
@@ -585,10 +1095,15 @@ export function createAnalysisForm({
 
 
   return {
+    applyProjectContextPreflight,
     bind,
     getMode,
+    isProjectContextConfirmationPending,
+    needsProjectContextPreflight,
+    showProjectContextValidationError,
     sync,
     toFormData,
+    toProjectContextPreflightFormData,
     validate,
   };
 }

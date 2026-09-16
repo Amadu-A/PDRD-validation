@@ -119,6 +119,7 @@ async def validate_project_context(
         pages_count=(validation.pages_count),
         classifications=(classifications),
         warnings=warnings,
+        requires_confirmation=(validation.requires_confirmation),
         metrics=[item.as_dict() for item in metrics],
     )
 

@@ -13,6 +13,9 @@ from pathlib import Path
 from pdrd_api_gateway.application.finding_anchor_matcher import (
     FindingAnchorMatcher,
 )
+from pdrd_api_gateway.application.ports.project_context_preflight import (
+    ProjectContextPreflightCoordinator,
+)
 from pdrd_api_gateway.application.ports.technical_assignment_content import (
     TechnicalAssignmentContentReader,
 )
@@ -79,6 +82,9 @@ from pdrd_api_gateway.infrastructure.messaging.broker import (
     RabbitMqReadinessProbe,
     build_broker_url,
 )
+from pdrd_api_gateway.infrastructure.project_context_preflight import (
+    HttpProjectContextPreflightCoordinator,
+)
 from pdrd_api_gateway.infrastructure.storage.filesystem import (
     LocalFilesystemAnalysisArtifactStore,
 )
@@ -122,6 +128,8 @@ class ApplicationContainer:
     technical_assignment_index_coordinator: (
         TechnicalAssignmentIndexCoordinator | None
     ) = None
+
+    project_context_preflight: ProjectContextPreflightCoordinator | None = None
 
     async def close(
         self,
@@ -257,6 +265,13 @@ def build_container() -> ApplicationContainer:
         anchor_matcher=(anchor_matcher),
     )
 
+    project_context_preflight = HttpProjectContextPreflightCoordinator(
+        document_service=(settings.document_service),
+        analysis_service=(settings.analysis_service),
+        knowledge_service=(settings.knowledge_service),
+        settings=(settings.project_context_preflight),
+    )
+
     async def _shutdown_database() -> None:
         await engine.dispose()
 
@@ -273,4 +288,5 @@ def build_container() -> ApplicationContainer:
         user_package_catalog=(user_package_catalog),
         technical_assignment_content_reader=(technical_assignment_content_reader),
         technical_assignment_index_coordinator=(technical_assignment_index_coordinator),
+        project_context_preflight=(project_context_preflight),
     )

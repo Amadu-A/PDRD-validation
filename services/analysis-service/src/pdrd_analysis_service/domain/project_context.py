@@ -59,6 +59,8 @@ class ProjectContextValidation:
         ...,
     ]
 
+    requires_confirmation: bool = False
+
 
 @dataclass(frozen=True, slots=True)
 class ProjectContextSource:

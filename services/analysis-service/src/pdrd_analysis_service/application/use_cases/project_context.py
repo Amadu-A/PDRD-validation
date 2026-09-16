@@ -30,7 +30,7 @@ from pdrd_analysis_service.domain.project_context import (
 )
 
 logger = logging.getLogger(
-    __name__,
+    "uvicorn.error",
 )
 
 
@@ -60,7 +60,7 @@ def _normalize_context_text(
 
 @dataclass(frozen=True, slots=True)
 class ValidateProjectContext:
-    """Проверяет, что выбранный диапазон действительно похож на ПЗ."""
+    """Проверяет выбранный диапазон ПЗ и возвращает semantic warnings."""
 
     vision_model: StructuredVisionModel
 
@@ -94,6 +94,7 @@ class ValidateProjectContext:
                     pages_count=0,
                     classifications=(),
                     warnings=(),
+                    requires_confirmation=False,
                 ),
                 (),
             )
@@ -109,8 +110,11 @@ class ValidateProjectContext:
             )
 
             logger.info(
-                ("project_context_validation_cache hit=true pages=%s"),
+                ("project_context_validation_cache hit=true pages=%s warnings=%s"),
                 validation.pages_count,
+                len(
+                    validation.warnings,
+                ),
             )
 
             return (
@@ -199,10 +203,16 @@ class ValidateProjectContext:
         )
 
         logger.info(
-            ("project_context_validation_cache hit=false pages=%s vlm_calls=%s"),
+            (
+                "project_context_validation_cache "
+                "hit=false pages=%s vlm_calls=%s warnings=%s"
+            ),
             validation.pages_count,
             len(
                 metrics,
+            ),
+            len(
+                validation.warnings,
             ),
         )
 
@@ -333,7 +343,7 @@ class ValidateProjectContext:
             ...,
         ],
     ) -> ProjectContextValidation:
-        """Проверяет полноту classification и применяет reject policy."""
+        """Проверяет полноту classification и формирует advisory warnings."""
         by_page: dict[
             int,
             ProjectContextClassification,
@@ -401,35 +411,44 @@ class ValidateProjectContext:
 
         ordered = tuple(by_page[page_number] for page_number in expected_pages)
 
-        rejected = tuple(
-            item
-            for item in ordered
-            if (
-                item.kind is not ProjectContextPageKind.EXPLANATORY_NOTE
-                and item.confidence >= self.reject_confidence
-            )
-        )
-
-        if rejected:
-            details = "; ".join(
-                (f"стр. {item.page_number}: {item.kind.value} ({item.reason})")
-                for item in rejected
-            )
-
-            raise InvalidProjectContextError(
-                "Выбранный диапазон похож "
-                "не только на пояснительную записку. "
-                f"Проверьте страницы: {details}",
-            )
-
         warnings = tuple(
             item
             for item in ordered
-            if (
-                item.kind is not ProjectContextPageKind.EXPLANATORY_NOTE
-                and item.confidence < self.reject_confidence
-            )
+            if (item.kind is not ProjectContextPageKind.EXPLANATORY_NOTE)
         )
+
+        confirmation_warnings = tuple(
+            item for item in warnings if item.confidence >= self.reject_confidence
+        )
+
+        requires_confirmation = bool(
+            confirmation_warnings,
+        )
+
+        if warnings:
+            logger.warning(
+                (
+                    "project_context_validation "
+                    "semantic_warning=true "
+                    "warnings=%s "
+                    "confirmation_candidates=%s "
+                    "threshold=%s "
+                    "pages=%s"
+                ),
+                len(
+                    warnings,
+                ),
+                len(
+                    confirmation_warnings,
+                ),
+                self.reject_confidence,
+                ",".join(
+                    str(
+                        item.page_number,
+                    )
+                    for item in warnings
+                ),
+            )
 
         return ProjectContextValidation(
             enabled=True,
@@ -438,6 +457,7 @@ class ValidateProjectContext:
             ),
             classifications=ordered,
             warnings=warnings,
+            requires_confirmation=(requires_confirmation),
         )
 
     @staticmethod

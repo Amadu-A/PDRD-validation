@@ -147,6 +147,8 @@ class ValidateProjectContextResponse(BaseModel):
 
     warnings: list[ProjectContextClassificationPayload]
 
+    requires_confirmation: bool
+
     metrics: list[
         dict[
             str,

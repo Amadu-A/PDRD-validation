@@ -182,6 +182,8 @@ async def test_validate_project_context_accepts_note() -> None:
 
     assert result.warnings == ()
 
+    assert result.requires_confirmation is False
+
     assert (
         len(
             metrics,
@@ -193,8 +195,8 @@ async def test_validate_project_context_accepts_note() -> None:
 
 
 @pytest.mark.asyncio
-async def test_validate_project_context_rejects_drawing() -> None:
-    """Отклоняет уверенно определённый drawing."""
+async def test_validate_project_context_returns_drawing_warning() -> None:
+    """Semantic VLM classification не обрывает анализ и требует confirmation."""
     vision_model = FakeVisionModel(
         kind="drawing",
         confidence=0.95,
@@ -208,16 +210,108 @@ async def test_validate_project_context_rejects_drawing() -> None:
         reject_confidence=0.75,
     )
 
+    (
+        result,
+        metrics,
+    ) = await use_case.execute(
+        enabled=True,
+        pages=pages(),
+    )
+
+    assert result.enabled is True
+
+    assert (
+        len(
+            result.warnings,
+        )
+        == 2
+    )
+
+    assert all(
+        warning.kind is ProjectContextPageKind.DRAWING for warning in result.warnings
+    )
+
+    assert result.requires_confirmation is True
+
+    assert (
+        len(
+            metrics,
+        )
+        == 1
+    )
+
+    assert vision_model.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_low_confidence_semantic_warning_does_not_require_confirmation() -> None:
+    """Неуверенный semantic warning сохраняется, но не блокирует UX."""
+    vision_model = FakeVisionModel(
+        kind="specification",
+        confidence=0.4,
+    )
+
+    use_case = ValidateProjectContext(
+        vision_model=vision_model,
+        classify_batch_size=8,
+        classify_num_predict=1200,
+        min_text_length=80,
+        reject_confidence=0.75,
+    )
+
+    (
+        result,
+        metrics,
+    ) = await use_case.execute(
+        enabled=True,
+        pages=pages(),
+    )
+
+    assert (
+        len(
+            result.warnings,
+        )
+        == 2
+    )
+
+    assert result.requires_confirmation is False
+
+    assert (
+        len(
+            metrics,
+        )
+        == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_structural_short_text_still_rejects_range() -> None:
+    """Deterministic invalidity остаётся blocking validation error."""
+    vision_model = FakeVisionModel()
+
+    use_case = ValidateProjectContext(
+        vision_model=vision_model,
+        classify_batch_size=8,
+        classify_num_predict=1200,
+        min_text_length=80,
+        reject_confidence=0.75,
+    )
+
     with pytest.raises(
         InvalidProjectContextError,
-        match="не только",
+        match="недостаточно извлекаемого текста",
     ):
         await use_case.execute(
             enabled=True,
-            pages=pages(),
+            pages=(
+                ProjectContextPage(
+                    page_number=2,
+                    text="короткий текст",
+                ),
+            ),
         )
 
-    assert vision_model.calls == 1
+    assert vision_model.calls == 0
 
 
 @pytest.mark.asyncio
@@ -248,14 +342,16 @@ async def test_cached_validation_skips_vlm() -> None:
 
     assert result.warnings == ()
 
+    assert result.requires_confirmation is False
+
     assert metrics == ()
 
     assert vision_model.calls == 0
 
 
 @pytest.mark.asyncio
-async def test_cached_validation_reapplies_reject_policy() -> None:
-    """Cached classification проходит текущую reject policy."""
+async def test_cached_validation_reapplies_warning_policy() -> None:
+    """Cached semantic classification тоже превращается в advisory warning."""
     vision_model = FakeVisionModel()
 
     use_case = ValidateProjectContext(
@@ -266,20 +362,30 @@ async def test_cached_validation_reapplies_reject_policy() -> None:
         reject_confidence=0.75,
     )
 
-    with pytest.raises(
-        InvalidProjectContextError,
-        match="не только",
-    ):
-        await use_case.execute(
-            enabled=True,
-            pages=pages(),
-            cached_validation=(
-                cached_validation(
-                    kind=(ProjectContextPageKind.DRAWING),
-                    confidence=0.95,
-                )
-            ),
+    (
+        result,
+        metrics,
+    ) = await use_case.execute(
+        enabled=True,
+        pages=pages(),
+        cached_validation=(
+            cached_validation(
+                kind=(ProjectContextPageKind.DRAWING),
+                confidence=0.95,
+            )
+        ),
+    )
+
+    assert (
+        len(
+            result.warnings,
         )
+        == 2
+    )
+
+    assert result.requires_confirmation is True
+
+    assert metrics == ()
 
     assert vision_model.calls == 0
 

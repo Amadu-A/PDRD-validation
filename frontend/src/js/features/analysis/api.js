@@ -9,6 +9,28 @@ import {
 } from "../../config.js";
 
 
+export class ApiError extends Error {
+  /**
+   * @param {number} status HTTP status.
+   * @param {string} detail Человекочитаемый detail.
+   */
+  constructor(
+    status,
+    detail,
+  ) {
+    super(
+      `HTTP ${status}\n${detail}`,
+    );
+
+    this.name = "ApiError";
+
+    this.status = status;
+
+    this.detail = detail;
+  }
+}
+
+
 async function fetchJson(
   url,
   options = {},
@@ -58,12 +80,26 @@ async function fetchJson(
       );
     }
 
-    throw new Error(
-      `HTTP ${response.status}\n${detail}`,
+    throw new ApiError(
+      response.status,
+      detail,
     );
   }
 
   return payload;
+}
+
+
+export async function submitProjectContextPreflight(
+  formData,
+) {
+  return fetchJson(
+    `${ANALYSES_ENDPOINT}/project-context/preflight`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
 }
 
 

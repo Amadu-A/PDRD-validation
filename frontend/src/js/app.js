@@ -180,6 +180,8 @@ function getNormativeSelection() {
 
 
 const analysisForm = createAnalysisForm({
+  formElement: analysisFormElement,
+
   pdfInput: requireElement(
     "[data-pdf-input]",
   ),
