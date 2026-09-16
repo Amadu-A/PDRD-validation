@@ -60,7 +60,9 @@ from pdrd_document_service.transport.http.schemas.combined import (
 )
 from pdrd_document_service.transport.http.schemas.pdf import (
     ExplanatoryNoteContextResponse,
+    PdfNormalizedBoundingBoxResponse,
     PdfPageResponse,
+    PdfTextWordResponse,
     ProjectContextTextPageResponse,
 )
 
@@ -111,6 +113,10 @@ async def extract_combined(
         Form(),
     ] = None,
     use_explanatory_note: Annotated[
+        bool,
+        Form(),
+    ] = False,
+    include_text_geometry: Annotated[
         bool,
         Form(),
     ] = False,
@@ -249,6 +255,27 @@ async def extract_combined(
                 ).decode(
                     "ascii",
                 )
+            ),
+            text_words=(
+                [
+                    PdfTextWordResponse(
+                        text=word.text,
+                        bbox=(
+                            PdfNormalizedBoundingBoxResponse(
+                                x_min=word.bbox.x_min,
+                                y_min=word.bbox.y_min,
+                                x_max=word.bbox.x_max,
+                                y_max=word.bbox.y_max,
+                            )
+                        ),
+                        block_no=word.block_no,
+                        line_no=word.line_no,
+                        word_no=word.word_no,
+                    )
+                    for word in page.text_words
+                ]
+                if include_text_geometry
+                else []
             ),
         ),
         cad=CadExtractionResponse(

@@ -139,7 +139,7 @@ def _serialized_node(
 
 
 def test_pdf_workflows_resolve_cache_before_vlm_validation() -> None:
-    """PZ cache разрешается до potentially expensive VLM validation."""
+    """Stage 7 artifact не нарушает PZ cache-before-VLM invariant."""
     for (
         path,
         extract_name,
@@ -155,6 +155,8 @@ def test_pdf_workflows_resolve_cache_before_vlm_validation() -> None:
             workflow,
         )
 
+        assert "Persist Visualization Artifact" in nodes, path
+
         assert "Resolve Project Context Cache" in nodes, path
 
         resolve = _serialized_node(
@@ -168,6 +170,14 @@ def test_pdf_workflows_resolve_cache_before_vlm_validation() -> None:
             _next_node(
                 workflow,
                 extract_name,
+            )
+            == "Persist Visualization Artifact"
+        ), path
+
+        assert (
+            _next_node(
+                workflow,
+                "Persist Visualization Artifact",
             )
             == "Resolve Project Context Cache"
         ), path

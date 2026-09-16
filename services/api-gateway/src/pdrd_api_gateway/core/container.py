@@ -13,6 +13,9 @@ from pathlib import Path
 from pdrd_api_gateway.application.finding_anchor_matcher import (
     FindingAnchorMatcher,
 )
+from pdrd_api_gateway.application.ports.artifacts import (
+    AnalysisArtifactStore,
+)
 from pdrd_api_gateway.application.ports.project_context_preflight import (
     ProjectContextPreflightCoordinator,
 )
@@ -118,6 +121,8 @@ class ApplicationContainer:
     get_analysis_visualization: GetAnalysisVisualization | None = None
 
     submit_analysis: SubmitAnalysis | None = None
+
+    artifact_store: AnalysisArtifactStore | None = None
 
     normative_catalog: NormativeCatalogFacade | None = None
 
@@ -284,6 +289,7 @@ def build_container() -> ApplicationContainer:
         get_analysis_result=(get_analysis_result),
         get_analysis_visualization=(get_analysis_visualization),
         submit_analysis=(submit_analysis),
+        artifact_store=(artifact_store),
         normative_catalog=(normative_catalog),
         user_package_catalog=(user_package_catalog),
         technical_assignment_content_reader=(technical_assignment_content_reader),

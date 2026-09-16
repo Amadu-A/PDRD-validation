@@ -46,6 +46,10 @@
             {
               "name": "note_end_page",
               "value": "={{ $json.body?.note_end_page ?? '' }}"
+            },
+            {
+              "name": "include_text_geometry",
+              "value": "true"
             }
           ]
         },
@@ -61,6 +65,31 @@
         -2180,
         800
       ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-artifacts/' + $('POST /analysis/v2/pdf').first().json.body.document_id + '/visualization' }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ pages: ($('Document Extract PDF').first().json.pages ?? []).map((page) => ({ page_number: page.page_number, width_points: page.width_points, height_points: page.height_points, image_base64: page.image_base64, extracted_text: page.text ?? '', text_words: page.text_words ?? [] })) }) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "7f700000-0000-4000-8000-000000000001",
+      "name": "Persist Visualization Artifact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1960,
+        1040
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -518,7 +547,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\n\nconst normativeQueryItems = findings\n  .map((finding) => {\n    const findingQuery = String(finding.experience_query ?? '').trim();\n    if (!findingQuery) {\n      return null;\n    }\n\n    return {\n      finding_id: String(finding.finding_id ?? ''),\n      query: [\n        'Найти нормативное основание для уже обнаруженного инженерного замечания.',\n        'Нужен фрагмент нормативного документа, который прямо относится к указанному факту и типу проектного документа.',\n        'Не считать тематически похожий норматив достаточным подтверждением.',\n        findingQuery,\n      ].join('\\n'),\n    };\n  })\n  .filter((item) => item?.finding_id && item?.query);\n\nreturn {\n  json: {\n    findings,\n    normative_query_items: normativeQueryItems,\n    normative_queries: normativeQueryItems.map((item) => item.query),\n  },\n};",
+        "jsCode": "const findings = Array.isArray($json.findings) ? $json.findings : [];\n\nconst normativeQueryItems = findings\n  .map((finding) => {\n    const findingQuery = String(finding.experience_query ?? '').trim();\n    if (!findingQuery) {\n      return null;\n    }\n\n    return {\n      finding_id: String(finding.finding_id ?? ''),\n      query: [\n        'Найти нормативное основание для уже обнаруженного инженерного замечания.',\n        'Нужен фрагмент нормативного документа, который прямо относится к указанному факту и типу проектного документа.',\n        'Не считать тематически похожий норматив достаточным подтверждением.',\n        findingQuery,\n      ].join('\\\\n'),\n    };\n  })\n  .filter((item) => item?.finding_id && item?.query);\n\nreturn {\n  json: {\n    findings,\n    normative_query_items: normativeQueryItems,\n    normative_queries: normativeQueryItems.map((item) => item.query),\n  },\n};",
         "mode": "runOnceForEachItem"
       },
       "id": "774b9b80-21d6-4b98-97d4-79f3aec10101",
@@ -683,6 +712,17 @@
       ]
     },
     "Document Extract PDF": {
+      "main": [
+        [
+          {
+            "node": "Persist Visualization Artifact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Visualization Artifact": {
       "main": [
         [
           {
