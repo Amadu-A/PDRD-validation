@@ -208,7 +208,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_facts: $json.facts, extracted_text: $('Prepare Combined Context').item.json.page.text }) }}",
+        "body": "={{ JSON.stringify({ page_facts: $('Understand Combined Page').item.json.facts, extracted_text: $('Prepare Combined Context').item.json.page.text }) }}",
         "options": {
           "timeout": 1800000
         }

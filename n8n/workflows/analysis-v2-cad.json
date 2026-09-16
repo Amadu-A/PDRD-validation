@@ -88,7 +88,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_facts: $json.facts, extracted_text: $('Prepare CAD Context').item.json.page.text, project_context_texts: [] }) }}",
+        "body": "={{ JSON.stringify({ page_facts: $('Understand CAD').item.json.facts, extracted_text: $('Prepare CAD Context').item.json.page.text, project_context_texts: [] }) }}",
         "options": {
           "timeout": 1800000
         }
