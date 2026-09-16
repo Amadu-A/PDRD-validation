@@ -181,6 +181,10 @@ check_http \
     "http://127.0.0.1:${FRONTEND_PORT:-8080}/"
 
 check_http \
+    "Frontend -> API Gateway proxy" \
+    "http://127.0.0.1:${FRONTEND_PORT:-8080}/api/v1/normative/sections"
+
+check_http \
     "API Gateway ready" \
     "http://127.0.0.1:${API_GATEWAY_HOST_PORT:-8200}/health/ready"
 

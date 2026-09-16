@@ -230,6 +230,15 @@ echo "=== Application stack ==="
 docker compose up -d
 
 echo
+echo "=== Frontend proxy refresh ==="
+
+docker compose up \
+    -d \
+    --no-deps \
+    --force-recreate \
+    frontend
+
+echo
 echo "=== Stack readiness ==="
 
 deadline=$((SECONDS + PDRD_STARTUP_TIMEOUT_SECONDS))
