@@ -128,19 +128,21 @@ def _nodes_by_name(
             node["name"],
         ): node
         for node in nodes
-        if isinstance(
-            node,
-            dict,
+        if (
+            isinstance(
+                node,
+                dict,
+            )
+            and "name" in node
         )
-        and "name" in node
     }
 
 
-def _next_node(
+def _next_nodes(
     workflow: dict[str, Any],
     source_name: str,
-) -> str:
-    """Возвращает первый main successor node."""
+) -> list[str]:
+    """Возвращает direct main successors с сохранением порядка."""
     connections = workflow.get(
         "connections",
         {},
@@ -153,9 +155,40 @@ def _next_node(
 
     source = connections[source_name]
 
-    return str(
-        source["main"][0][0]["node"],
+    assert isinstance(
+        source,
+        dict,
     )
+
+    main = source["main"]
+
+    assert isinstance(
+        main,
+        list,
+    )
+
+    assert main
+
+    output = main[0]
+
+    assert isinstance(
+        output,
+        list,
+    )
+
+    return [
+        str(
+            connection["node"],
+        )
+        for connection in output
+        if (
+            isinstance(
+                connection,
+                dict,
+            )
+            and "node" in connection
+        )
+    ]
 
 
 def test_pdf_workflows_persist_initial_visualization_artifact() -> None:
@@ -209,21 +242,22 @@ def test_pdf_workflows_persist_initial_visualization_artifact() -> None:
             is True
         ), path
 
-        assert (
-            _next_node(
-                workflow,
-                extract_name,
-            )
-            == "Persist Visualization Artifact"
-        ), path
+        extraction_successors = _next_nodes(
+            workflow,
+            extract_name,
+        )
 
-        assert (
-            _next_node(
-                workflow,
-                "Persist Visualization Artifact",
-            )
-            == "Resolve Project Context Cache"
-        ), path
+        assert "Persist Visualization Artifact" in extraction_successors, (
+            path,
+            extraction_successors,
+        )
+
+        assert _next_nodes(
+            workflow,
+            "Persist Visualization Artifact",
+        ) == [
+            "Resolve Project Context Cache",
+        ], path
 
 
 def test_cad_only_workflow_does_not_create_pdf_visualization_artifact() -> None:
@@ -342,11 +376,17 @@ def test_pdf_cad_result_does_not_persist_transient_visualization_images() -> Non
     )
 
     assert "render:" in prepare_code
+
     assert "image_base64:" in prepare_code
+
     assert "pdf_image_base64:" in prepare_code
+
     assert "cad_image_base64:" in prepare_code
 
     assert "prepared.render" not in result_code
+
     assert "image_base64" not in result_code
+
     assert "pdf_image_base64" not in result_code
+
     assert "cad_image_base64" not in result_code

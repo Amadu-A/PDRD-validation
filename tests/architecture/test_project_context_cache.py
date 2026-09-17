@@ -96,13 +96,13 @@ def _nodes_by_name(
     }
 
 
-def _next_node(
+def _functional_successor(
     workflow: dict[str, Any],
     source_name: str,
     *,
     branch: int = 0,
 ) -> str:
-    """Возвращает первый main successor указанной ветки."""
+    """Возвращает единственный non-progress successor ветки."""
     connections = workflow.get(
         "connections",
         {},
@@ -115,16 +115,54 @@ def _next_node(
 
     source = connections[source_name]
 
-    main = source["main"]
-
-    result = main[branch][0]["node"]
-
     assert isinstance(
-        result,
-        str,
+        source,
+        dict,
     )
 
-    return result
+    main = source["main"]
+
+    assert isinstance(
+        main,
+        list,
+    )
+
+    output = main[branch]
+
+    assert isinstance(
+        output,
+        list,
+    )
+
+    successors = [
+        str(
+            connection["node"],
+        )
+        for connection in output
+        if (
+            isinstance(
+                connection,
+                dict,
+            )
+            and "node" in connection
+        )
+    ]
+
+    functional = [
+        node_name
+        for node_name in successors
+        if not node_name.startswith(
+            "Progress ",
+        )
+    ]
+
+    assert len(functional) == 1, (
+        source_name,
+        successors,
+        functional,
+    )
+
+    return functional[0]
 
 
 def _serialized_node(
@@ -167,7 +205,7 @@ def test_pdf_workflows_resolve_cache_before_vlm_validation() -> None:
         assert "/internal/v1/project-contexts/resolve-cache" in resolve, path
 
         assert (
-            _next_node(
+            _functional_successor(
                 workflow,
                 extract_name,
             )
@@ -175,7 +213,7 @@ def test_pdf_workflows_resolve_cache_before_vlm_validation() -> None:
         ), path
 
         assert (
-            _next_node(
+            _functional_successor(
                 workflow,
                 "Persist Visualization Artifact",
             )
@@ -183,7 +221,7 @@ def test_pdf_workflows_resolve_cache_before_vlm_validation() -> None:
         ), path
 
         assert (
-            _next_node(
+            _functional_successor(
                 workflow,
                 "Resolve Project Context Cache",
             )
@@ -191,7 +229,7 @@ def test_pdf_workflows_resolve_cache_before_vlm_validation() -> None:
         ), path
 
         assert (
-            _next_node(
+            _functional_successor(
                 workflow,
                 "Validate Project Context",
             )
@@ -268,7 +306,7 @@ def test_pdf_workflows_do_not_delete_persistent_cache_after_job() -> None:
         assert "Cleanup Project Context" not in nodes, path
 
         assert (
-            _next_node(
+            _functional_successor(
                 workflow,
                 result_name,
             )

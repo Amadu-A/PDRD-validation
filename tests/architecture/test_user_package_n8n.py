@@ -54,11 +54,11 @@ def _nodes_by_name(
     }
 
 
-def _next_node(
+def _functional_successor(
     workflow: dict[str, object],
     source_name: str,
 ) -> str:
-    """Возвращает единственный main successor."""
+    """Возвращает единственный non-progress successor."""
     connections = workflow["connections"]
 
     assert isinstance(
@@ -91,21 +91,35 @@ def _next_node(
 
     assert branch
 
-    connection = branch[0]
+    successors = [
+        str(
+            connection["node"],
+        )
+        for connection in branch
+        if (
+            isinstance(
+                connection,
+                dict,
+            )
+            and "node" in connection
+        )
+    ]
 
-    assert isinstance(
-        connection,
-        dict,
+    functional = [
+        node_name
+        for node_name in successors
+        if not node_name.startswith(
+            "Progress ",
+        )
+    ]
+
+    assert len(functional) == 1, (
+        source_name,
+        successors,
+        functional,
     )
 
-    node = connection["node"]
-
-    assert isinstance(
-        node,
-        str,
-    )
-
-    return node
+    return functional[0]
 
 
 def _requirement_search_name(
@@ -194,7 +208,7 @@ def test_n8n_keeps_requirement_and_package_sources_separate() -> None:
 
 
 def test_user_package_search_is_between_requirement_search_and_check() -> None:
-    """Закрепляет deterministic requirement → U → check chain."""
+    """Закрепляет requirement → U → check functional chain."""
     for file_name in WORKFLOW_FILES:
         workflow = _load_workflow(
             file_name,
@@ -210,7 +224,7 @@ def test_user_package_search_is_between_requirement_search_and_check() -> None:
 
         if search_name == "Search Requirements":
             assert (
-                _next_node(
+                _functional_successor(
                     workflow,
                     "Search Requirements",
                 )
@@ -218,7 +232,7 @@ def test_user_package_search_is_between_requirement_search_and_check() -> None:
             )
 
             assert (
-                _next_node(
+                _functional_successor(
                     workflow,
                     "Normalize Requirement Search",
                 )
@@ -226,7 +240,7 @@ def test_user_package_search_is_between_requirement_search_and_check() -> None:
             )
         else:
             assert (
-                _next_node(
+                _functional_successor(
                     workflow,
                     "Search Normative",
                 )
@@ -234,7 +248,7 @@ def test_user_package_search_is_between_requirement_search_and_check() -> None:
             )
 
         assert (
-            _next_node(
+            _functional_successor(
                 workflow,
                 "Search User Packages",
             )

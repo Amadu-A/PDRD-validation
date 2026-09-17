@@ -5,7 +5,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "analysis/v2/pdf",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {}
       },
       "id": "db9de01f-6e4d-43b8-91d0-877e49989f5f",
@@ -706,7 +706,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'extracting_sources' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8a200000-0000-4000-8000-000000000001",
@@ -717,9 +717,7 @@
         -1780,
         1180
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -731,7 +729,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'preparing_context' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8a200000-0000-4000-8000-000000000002",
@@ -742,9 +740,7 @@
         -1360,
         1180
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -756,7 +752,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'understanding_sheet' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8a200000-0000-4000-8000-000000000003",
@@ -767,9 +763,7 @@
         -940,
         1180
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -781,7 +775,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'retrieving_requirements' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8a200000-0000-4000-8000-000000000004",
@@ -792,9 +786,7 @@
         -520,
         1180
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -806,7 +798,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'checking_requirements' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8a200000-0000-4000-8000-000000000005",
@@ -817,9 +809,7 @@
         -100,
         1180
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -831,7 +821,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'enriching_findings' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8a200000-0000-4000-8000-000000000006",
@@ -842,9 +832,7 @@
         320,
         1180
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -856,7 +844,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'finalizing_findings' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8a200000-0000-4000-8000-000000000007",
@@ -867,9 +855,7 @@
         740,
         1180
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -881,7 +867,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'building_result' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8a200000-0000-4000-8000-000000000008",
@@ -892,10 +878,22 @@
         1160,
         1180
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "8a200000-0000-4000-8000-000000000009",
+      "name": "Respond PDF Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        4440,
+        800
+      ]
     }
   ],
   "pinData": {},
@@ -904,12 +902,12 @@
       "main": [
         [
           {
-            "node": "Document Extract PDF",
+            "node": "Progress Extract Sources",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Extract Sources",
+            "node": "Document Extract PDF",
             "type": "main",
             "index": 0
           }
@@ -920,12 +918,12 @@
       "main": [
         [
           {
-            "node": "Persist Visualization Artifact",
+            "node": "Progress Prepare Context",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Prepare Context",
+            "node": "Persist Visualization Artifact",
             "type": "main",
             "index": 0
           }
@@ -969,12 +967,12 @@
       "main": [
         [
           {
-            "node": "Understand Page",
+            "node": "Progress Understand Sheet",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Understand Sheet",
+            "node": "Understand Page",
             "type": "main",
             "index": 0
           }
@@ -1062,12 +1060,12 @@
       "main": [
         [
           {
-            "node": "Check Norms",
+            "node": "Progress Check Requirements",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Check Requirements",
+            "node": "Check Norms",
             "type": "main",
             "index": 0
           }
@@ -1133,12 +1131,12 @@
       "main": [
         [
           {
-            "node": "Finalize Findings",
+            "node": "Progress Finalize Findings",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Finalize Findings",
+            "node": "Finalize Findings",
             "type": "main",
             "index": 0
           }
@@ -1149,12 +1147,12 @@
       "main": [
         [
           {
-            "node": "Build Page Result",
+            "node": "Progress Build Result",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Build Result",
+            "node": "Build Page Result",
             "type": "main",
             "index": 0
           }
@@ -1256,12 +1254,12 @@
       "main": [
         [
           {
-            "node": "Build Project Context Query",
+            "node": "Progress Retrieve Requirements",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Retrieve Requirements",
+            "node": "Build Project Context Query",
             "type": "main",
             "index": 0
           }
@@ -1272,12 +1270,12 @@
       "main": [
         [
           {
-            "node": "Prepare Finding Normative Queries",
+            "node": "Progress Enrich Findings",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Enrich Findings",
+            "node": "Prepare Finding Normative Queries",
             "type": "main",
             "index": 0
           }
@@ -1289,6 +1287,17 @@
         [
           {
             "node": "Validate Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return PDF Result": {
+      "main": [
+        [
+          {
+            "node": "Respond PDF Result",
             "type": "main",
             "index": 0
           }

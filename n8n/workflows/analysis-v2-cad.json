@@ -5,7 +5,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "analysis/v2/cad",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {}
       },
       "id": "ba404c67-f2ba-46bd-b89e-445805543802",
@@ -499,7 +499,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'extracting_sources' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8b200000-0000-4000-8000-000000000001",
@@ -510,9 +510,7 @@
         -1780,
         420
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -524,7 +522,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'preparing_context' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8b200000-0000-4000-8000-000000000002",
@@ -535,9 +533,7 @@
         -1360,
         420
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -549,7 +545,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'understanding_sheet' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8b200000-0000-4000-8000-000000000003",
@@ -560,9 +556,7 @@
         -940,
         420
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -574,7 +568,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'retrieving_requirements' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8b200000-0000-4000-8000-000000000004",
@@ -585,9 +579,7 @@
         -520,
         420
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -599,7 +591,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'checking_requirements' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8b200000-0000-4000-8000-000000000005",
@@ -610,9 +602,7 @@
         -100,
         420
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -624,7 +614,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'enriching_findings' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8b200000-0000-4000-8000-000000000006",
@@ -635,9 +625,7 @@
         320,
         420
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -649,7 +637,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'finalizing_findings' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8b200000-0000-4000-8000-000000000007",
@@ -660,9 +648,7 @@
         740,
         420
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
     },
     {
@@ -674,7 +660,7 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ stage: 'building_result' }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 3000
         }
       },
       "id": "8b200000-0000-4000-8000-000000000008",
@@ -685,10 +671,22 @@
         1160,
         420
       ],
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 500,
+      "retryOnFail": false,
       "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "8b200000-0000-4000-8000-000000000009",
+      "name": "Respond CAD Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2560,
+        0
+      ]
     }
   ],
   "pinData": {},
@@ -697,12 +695,12 @@
       "main": [
         [
           {
-            "node": "Document Extract CAD",
+            "node": "Progress Extract Sources",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Extract Sources",
+            "node": "Document Extract CAD",
             "type": "main",
             "index": 0
           }
@@ -713,12 +711,12 @@
       "main": [
         [
           {
-            "node": "Has Technical Assignment",
+            "node": "Progress Prepare Context",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Prepare Context",
+            "node": "Has Technical Assignment",
             "type": "main",
             "index": 0
           }
@@ -729,12 +727,12 @@
       "main": [
         [
           {
-            "node": "Understand CAD",
+            "node": "Progress Understand Sheet",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Understand Sheet",
+            "node": "Understand CAD",
             "type": "main",
             "index": 0
           }
@@ -789,12 +787,12 @@
       "main": [
         [
           {
-            "node": "Check Norms",
+            "node": "Progress Check Requirements",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Check Requirements",
+            "node": "Check Norms",
             "type": "main",
             "index": 0
           }
@@ -860,12 +858,12 @@
       "main": [
         [
           {
-            "node": "Finalize Findings",
+            "node": "Progress Finalize Findings",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Finalize Findings",
+            "node": "Finalize Findings",
             "type": "main",
             "index": 0
           }
@@ -876,12 +874,12 @@
       "main": [
         [
           {
-            "node": "Build CAD Result",
+            "node": "Progress Build Result",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Build Result",
+            "node": "Build CAD Result",
             "type": "main",
             "index": 0
           }
@@ -961,12 +959,12 @@
       "main": [
         [
           {
-            "node": "Build Normative Queries",
+            "node": "Progress Retrieve Requirements",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Retrieve Requirements",
+            "node": "Build Normative Queries",
             "type": "main",
             "index": 0
           }
@@ -977,12 +975,23 @@
       "main": [
         [
           {
-            "node": "Prepare Finding Normative Queries",
+            "node": "Progress Enrich Findings",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Progress Enrich Findings",
+            "node": "Prepare Finding Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build CAD Result": {
+      "main": [
+        [
+          {
+            "node": "Respond CAD Result",
             "type": "main",
             "index": 0
           }

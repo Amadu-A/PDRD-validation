@@ -66,6 +66,77 @@ def _nodes_by_name(
     }
 
 
+def _functional_successor(
+    workflow: dict[str, Any],
+    source_name: str,
+) -> str:
+    """Возвращает единственный non-progress successor."""
+    connections = workflow.get(
+        "connections",
+        {},
+    )
+
+    assert isinstance(
+        connections,
+        dict,
+    )
+
+    source = connections[source_name]
+
+    assert isinstance(
+        source,
+        dict,
+    )
+
+    main = source.get(
+        "main",
+        [],
+    )
+
+    assert isinstance(
+        main,
+        list,
+    )
+    assert main
+
+    output = main[0]
+
+    assert isinstance(
+        output,
+        list,
+    )
+
+    successors = [
+        str(
+            connection["node"],
+        )
+        for connection in output
+        if (
+            isinstance(
+                connection,
+                dict,
+            )
+            and "node" in connection
+        )
+    ]
+
+    functional = [
+        node_name
+        for node_name in successors
+        if not node_name.startswith(
+            "Progress ",
+        )
+    ]
+
+    assert len(functional) == 1, (
+        source_name,
+        successors,
+        functional,
+    )
+
+    return functional[0]
+
+
 def test_every_analysis_workflow_supports_t_guided_requirements() -> None:
     """PDF, CAD и PDF+CAD одинаково учитывают T-guided retrieval."""
     for path in WORKFLOW_PATHS:
@@ -250,7 +321,7 @@ def test_t_first_vlm_has_no_n8n_level_retry() -> None:
 
 
 def test_requirement_flow_order_is_consistent() -> None:
-    """Connections сохраняют общий flow после lossless merge."""
+    """Progress branches не изменяют основной requirement flow."""
     expected_pairs = (
         (
             "Build Normative Queries",
@@ -291,20 +362,11 @@ def test_requirement_flow_order_is_consistent() -> None:
             path,
         )
 
-        connections = workflow.get(
-            "connections",
-            {},
-        )
-
-        assert isinstance(
-            connections,
-            dict,
-        )
-
         for source, target in expected_pairs:
-            source_connection = connections[source]
-
-            actual = source_connection["main"][0][0]["node"]
+            actual = _functional_successor(
+                workflow,
+                source,
+            )
 
             assert actual == target, (
                 path,

@@ -17,10 +17,12 @@ ROOT = (
 WORKFLOW_ROOT = ROOT / "n8n" / "workflows"
 
 WORKFLOW_CASES = (
-    (
-        WORKFLOW_ROOT / "analysis-v2-pdf.json",
-        "POST /analysis/v2/pdf",
-        (
+    {
+        "path": (WORKFLOW_ROOT / "analysis-v2-pdf.json"),
+        "webhook": "POST /analysis/v2/pdf",
+        "response_source": "Return PDF Result",
+        "response_node": "Respond PDF Result",
+        "cases": (
             (
                 "POST /analysis/v2/pdf",
                 "Progress Extract Sources",
@@ -62,11 +64,13 @@ WORKFLOW_CASES = (
                 "building_result",
             ),
         ),
-    ),
-    (
-        WORKFLOW_ROOT / "analysis-v2-cad.json",
-        "POST /analysis/v2/cad",
-        (
+    },
+    {
+        "path": (WORKFLOW_ROOT / "analysis-v2-cad.json"),
+        "webhook": "POST /analysis/v2/cad",
+        "response_source": "Build CAD Result",
+        "response_node": "Respond CAD Result",
+        "cases": (
             (
                 "POST /analysis/v2/cad",
                 "Progress Extract Sources",
@@ -108,11 +112,13 @@ WORKFLOW_CASES = (
                 "building_result",
             ),
         ),
-    ),
-    (
-        WORKFLOW_ROOT / "analysis-v2-pdf-cad.json",
-        "POST /analysis/v2/pdf-cad",
-        (
+    },
+    {
+        "path": (WORKFLOW_ROOT / "analysis-v2-pdf-cad.json"),
+        "webhook": "POST /analysis/v2/pdf-cad",
+        "response_source": "Return PDF CAD Result",
+        "response_node": "Respond PDF CAD Result",
+        "cases": (
             (
                 "POST /analysis/v2/pdf-cad",
                 "Progress Extract Sources",
@@ -154,7 +160,7 @@ WORKFLOW_CASES = (
                 "building_result",
             ),
         ),
-    ),
+    },
 )
 
 
@@ -195,27 +201,29 @@ def _nodes(
             node["name"],
         ): node
         for node in raw_nodes
-        if isinstance(
-            node,
-            dict,
+        if (
+            isinstance(
+                node,
+                dict,
+            )
+            and "name" in node
         )
-        and "name" in node
     }
 
 
-def _successors(
+def _successors_in_order(
     workflow: dict[str, Any],
     source: str,
-) -> set[str]:
-    """Возвращает main successors указанного node."""
+) -> list[str]:
+    """Возвращает main successors с сохранением execution order."""
     connections = workflow["connections"][source]["main"][0]
 
-    return {
+    return [
         str(
             connection["node"],
         )
         for connection in connections
-    }
+    ]
 
 
 def _parameter(
@@ -244,10 +252,10 @@ def _parameter(
 
 
 def test_workflows_publish_real_progress_stages() -> None:
-    """Все source modes публикуют одинаковую domain stage vocabulary."""
-    for path, webhook_name, cases in WORKFLOW_CASES:
+    """Все source modes публикуют одинаковую stage vocabulary."""
+    for config in WORKFLOW_CASES:
         workflow = _workflow(
-            path,
+            config["path"],
         )
 
         nodes = _nodes(
@@ -258,7 +266,7 @@ def test_workflows_publish_real_progress_stages() -> None:
             source_name,
             progress_name,
             stage,
-        ) in cases:
+        ) in config["cases"]:
             progress_node = nodes[progress_name]
 
             progress_url = _parameter(
@@ -271,47 +279,40 @@ def test_workflows_publish_real_progress_stages() -> None:
                 "body",
             )
 
-            assert "/internal/v1/analysis-progress/" in progress_url, (
-                path,
-                progress_name,
+            assert "/internal/v1/analysis-progress/" in progress_url
+
+            assert config["webhook"] in progress_url
+
+            assert f"stage: '{stage}'" in progress_body
+
+            successors = _successors_in_order(
+                workflow,
+                source_name,
             )
 
-            assert webhook_name in progress_url, (
-                path,
-                progress_name,
-            )
-
-            assert f"stage: '{stage}'" in progress_body, (
-                path,
-                progress_name,
-                progress_body,
+            assert successors[0] == progress_name, (
+                config["path"],
+                source_name,
+                successors,
             )
 
             assert (
-                progress_node.get(
-                    "onError",
+                len(
+                    successors,
                 )
-                == "continueRegularOutput"
+                >= 2
             ), (
-                path,
-                progress_name,
-            )
-
-            assert progress_name in _successors(
-                workflow,
+                config["path"],
                 source_name,
-            ), (
-                path,
-                source_name,
-                progress_name,
+                successors,
             )
 
 
-def test_progress_callbacks_are_best_effort() -> None:
-    """Progress callback не должен останавливать основной analysis pipeline."""
-    for path, _webhook_name, cases in WORKFLOW_CASES:
+def test_progress_callbacks_are_non_blocking_best_effort() -> None:
+    """Progress failure не должен заметно задерживать analysis path."""
+    for config in WORKFLOW_CASES:
         workflow = _workflow(
-            path,
+            config["path"],
         )
 
         nodes = _nodes(
@@ -322,7 +323,7 @@ def test_progress_callbacks_are_best_effort() -> None:
             _source_name,
             progress_name,
             _stage,
-        ) in cases:
+        ) in config["cases"]:
             progress_node = nodes[progress_name]
 
             assert (
@@ -330,27 +331,58 @@ def test_progress_callbacks_are_best_effort() -> None:
                     "onError",
                 )
                 == "continueRegularOutput"
-            ), (
-                path,
-                progress_name,
             )
 
             assert (
                 progress_node.get(
                     "retryOnFail",
                 )
-                is True
-            ), (
-                path,
-                progress_name,
+                is False
             )
 
-            assert (
-                progress_node.get(
-                    "maxTries",
-                )
-                == 2
-            ), (
-                path,
-                progress_name,
-            )
+            parameters = progress_node["parameters"]
+
+            assert parameters["options"]["timeout"] == 3000
+
+
+def test_webhook_response_is_explicit_and_not_last_node_dependent() -> None:
+    """Side-effect progress node не может стать HTTP response workflow."""
+    for config in WORKFLOW_CASES:
+        workflow = _workflow(
+            config["path"],
+        )
+
+        nodes = _nodes(
+            workflow,
+        )
+
+        webhook = nodes[config["webhook"]]
+
+        parameters = webhook["parameters"]
+
+        assert parameters["responseMode"] == "responseNode"
+
+        response_name = config["response_node"]
+
+        response_node = nodes[response_name]
+
+        assert response_node["type"] == "n8n-nodes-base.respondToWebhook"
+
+        assert response_node["parameters"]["respondWith"] == "firstIncomingItem"
+
+        assert _successors_in_order(
+            workflow,
+            config["response_source"],
+        ) == [
+            response_name,
+        ]
+
+
+def test_workflows_use_v1_execution_order() -> None:
+    """Progress-first branch ordering имеет deterministic v1 semantics."""
+    for config in WORKFLOW_CASES:
+        workflow = _workflow(
+            config["path"],
+        )
+
+        assert workflow["settings"]["executionOrder"] == "v1"

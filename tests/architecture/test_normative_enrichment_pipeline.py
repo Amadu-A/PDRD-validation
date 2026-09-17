@@ -92,11 +92,11 @@ def _nodes_by_name(
     }
 
 
-def _next_node(
+def _functional_successor(
     workflow: dict[str, object],
     source_name: str,
 ) -> str:
-    """Возвращает main successor node."""
+    """Возвращает единственный non-progress successor."""
     connections = workflow["connections"]
 
     assert isinstance(
@@ -117,6 +117,7 @@ def _next_node(
         main,
         list,
     )
+    assert main
 
     branch = main[0]
 
@@ -125,21 +126,35 @@ def _next_node(
         list,
     )
 
-    connection = branch[0]
+    successors = [
+        str(
+            connection["node"],
+        )
+        for connection in branch
+        if (
+            isinstance(
+                connection,
+                dict,
+            )
+            and "node" in connection
+        )
+    ]
 
-    assert isinstance(
-        connection,
-        dict,
+    functional = [
+        node_name
+        for node_name in successors
+        if not node_name.startswith(
+            "Progress ",
+        )
+    ]
+
+    assert len(functional) == 1, (
+        source_name,
+        successors,
+        functional,
     )
 
-    node = connection["node"]
-
-    assert isinstance(
-        node,
-        str,
-    )
-
-    return node
+    return functional[0]
 
 
 def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
@@ -155,7 +170,7 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
     assert "Search Finding Norms" in nodes
 
     assert (
-        _next_node(
+        _functional_successor(
             workflow,
             "Check Norms",
         )
@@ -163,7 +178,7 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
     )
 
     assert (
-        _next_node(
+        _functional_successor(
             workflow,
             "Merge Finding Candidates",
         )
@@ -171,7 +186,7 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
     )
 
     assert (
-        _next_node(
+        _functional_successor(
             workflow,
             "Prepare Finding Normative Queries",
         )
@@ -179,7 +194,7 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
     )
 
     assert (
-        _next_node(
+        _functional_successor(
             workflow,
             "Search Finding Norms",
         )
@@ -212,7 +227,9 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
         dict,
     )
 
-    prepare_code = str(prepare_parameters["jsCode"])
+    prepare_code = str(
+        prepare_parameters["jsCode"],
+    )
 
     assert "finding.experience_query" in prepare_code
 
@@ -233,7 +250,9 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
         "http://pdrd-knowledge-service:8401/internal/v1/search/normative-grouped"
     )
 
-    search_body = str(search_parameters["body"])
+    search_body = str(
+        search_parameters["body"],
+    )
 
     assert "normative_section_id" in search_body
 
@@ -246,13 +265,14 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
         dict,
     )
 
-    prepare_experience_code = str(prepare_experience_parameters["jsCode"])
+    prepare_experience_code = str(
+        prepare_experience_parameters["jsCode"],
+    )
 
     assert "normative_candidates_by_finding" in prepare_experience_code
 
     assert "normative_query_items" in prepare_experience_code
 
-    # Candidate ID содержит и query group, и position внутри group.
     assert "NQ${index + 1}_${sourceIndex + 1}" in prepare_experience_code
 
     build_map_parameters = nodes["Build Experience Map"]["parameters"]
@@ -262,7 +282,9 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
         dict,
     )
 
-    build_map_code = str(build_map_parameters["jsCode"])
+    build_map_code = str(
+        build_map_parameters["jsCode"],
+    )
 
     assert "normative_candidates_by_finding" in build_map_code
 
@@ -273,7 +295,9 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
         dict,
     )
 
-    finalize_body = str(finalize_parameters["body"])
+    finalize_body = str(
+        finalize_parameters["body"],
+    )
 
     assert "normative_candidates_by_finding" in finalize_body
 
@@ -286,7 +310,9 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
         dict,
     )
 
-    page_code = str(page_parameters["jsCode"])
+    page_code = str(
+        page_parameters["jsCode"],
+    )
 
     assert "Normalize Requirement Search" in page_code
 
@@ -305,7 +331,9 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
         dict,
     )
 
-    aggregate_code = str(aggregate_parameters["jsCode"])
+    aggregate_code = str(
+        aggregate_parameters["jsCode"],
+    )
 
     assert "technical_assignment_first_pass" in aggregate_code
 
