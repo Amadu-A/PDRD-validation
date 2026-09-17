@@ -4,6 +4,7 @@
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 from pdrd_analysis_service.application.json_schemas import (
     build_normative_check_schema,
@@ -16,6 +17,7 @@ from pdrd_analysis_service.application.prompts import (
     build_normative_check_prompt,
 )
 from pdrd_analysis_service.application.use_cases.common import (
+    ViolationCandidateSelection,
     build_basis,
     category,
     confidence,
@@ -38,21 +40,59 @@ logger = logging.getLogger(
     "uvicorn.error",
 )
 
+# Первый вызов VLM intentionally небольшой.
+#
+# Для типичного листа это не даёт модели заполнить все 50 slots
+# одним повторяющимся finding и потратить на это весь output budget.
+_NORMATIVE_PROBE_BATCH_SIZE = 10
+
+# Десяти компактным findings достаточно существенно меньшего output
+# budget, чем прежние 14k tokens.
+_NORMATIVE_PROBE_NUM_PREDICT = 4000
+
+# Если модель зацикливается на похожих candidates, разрешаем несколько
+# continuation probes с явным exclusion уже найденных findings.
+_NORMATIVE_MAX_PROBE_ROUNDS = 3
+
+# Если probe заполнен в основном действительно distinct findings,
+# лист считаем dense и разрешаем один большой continuation до MAX_ISSUES.
+_NORMATIVE_DENSE_UNIQUE_RATIO = 0.70
+
 _HIGH_RECALL_FINDING_POLICY = """
 --- HIGH-RECALL FINDING POLICY ---
 
-Массив violations — это полный набор конкретных
-candidate findings текущего листа, а не shortlist.
+Проверка может выполняться несколькими последовательными
+candidate batches.
+
+Каждый текущий batch должен содержать только НОВЫЕ
+различимые candidate findings.
 
 Перед формированием JSON сделай полный проход по листу
-и перечисли КАЖДУЮ различимую проблему, для которой
+и перечисляй каждую различимую проблему, для которой
 есть конкретный визуальный или текстовый факт.
+
+Если JSON Schema текущего вызова ограничивает размер массива,
+это означает ёмкость ТЕКУЩЕГО batch, а не общий лимит анализа.
+
+Если distinct candidates больше ёмкости текущего batch:
+- заполни batch различимыми candidates;
+- не повторяй один candidate несколько раз ради заполнения массива;
+- следующие candidates будут запрошены continuation-вызовом.
+
+Если новых distinct candidates меньше ёмкости batch,
+верни только фактически найденные candidates.
+
+Если новых distinct candidates нет:
+violations=[].
 
 НЕ выбирай только самые важные замечания.
 НЕ ограничивай ответ несколькими примерами.
 НЕ сокращай количество candidate findings ради более
-короткого JSON. Компактность достигается только
-краткостью полей каждого candidate.
+короткого JSON, если в текущем batch ещё есть реальные
+различимые проблемы.
+
+Компактность достигается краткостью полей каждого candidate.
+
 НЕ удаляй candidate только потому, что:
 
 - у него ниже confidence, чем у другого candidate;
@@ -67,17 +107,29 @@ candidate findings текущего листа, а не shortlist.
 
 При этом НЕ добавляй в violations подтверждения
 соответствия и положительные результаты проверки.
+
 Если проблемы нет, candidate не создавай.
 
 Один физически различимый объект/участок/несоответствие
 не объединяй с другим только ради сокращения ответа.
 
+КРИТИЧЕСКИ ВАЖНО:
+
 Не создавай несколько полностью одинаковых candidates
-с одинаковыми comment и evidence. Backend может
-объединить только exact text duplicates, но не будет
-использовать это как semantic filter.
+с одинаковыми comment и evidence.
+
+Не перефразируй уже найденную проблему только для того,
+чтобы она выглядела как новый candidate.
+
+Если ниже передан список ALREADY FOUND DISTINCT CANDIDATES,
+не возвращай ни один из них повторно.
+
+Backend выполняет только безопасное exact consolidation
+по normalized comment + evidence.
+Semantic filtering после VLM не используется.
 
 Формируй каждый candidate максимально компактно:
+
 - comment: не более 160 символов, одна конкретная фраза;
 - evidence: не более 180 символов, только наблюдаемый факт;
 - recommendation_draft="" всегда; рекомендация будет
@@ -86,15 +138,109 @@ candidate findings текущего листа, а не shortlist.
   в comment и evidence;
 - source IDs перечисляй только в соответствующих массивах.
 
-После генерации backend не будет выполнять semantic
-filtering массива violations. Он может объединить только
-точные normalized duplicates с одинаковыми comment и evidence.
-
 Ответственность за то, что в массив попадают именно
-реальные candidate findings, остаётся на этом этапе.
+реальные distinct candidate findings, остаётся на этом этапе.
 
 --- END HIGH-RECALL FINDING POLICY ---
 """.strip()
+
+
+def _candidate_batch_instruction(
+    *,
+    capacity: int,
+    existing_candidates: tuple[
+        dict[str, Any],
+        ...,
+    ],
+) -> str:
+    """Строит continuation instruction без semantic backend filtering."""
+    if existing_candidates:
+        existing_lines = [
+            (
+                f"{index}. "
+                f"comment={str(candidate.get('comment', '')).strip()!r}; "
+                f"evidence={str(candidate.get('evidence', '')).strip()!r}"
+            )
+            for index, candidate in enumerate(
+                existing_candidates,
+                start=1,
+            )
+        ]
+
+        existing_text = "\n".join(
+            existing_lines,
+        )
+
+    else:
+        existing_text = "Список пуст: это первый candidate batch."
+
+    return f"""
+--- DISTINCT CANDIDATE BATCH ---
+
+Ёмкость текущего batch: {capacity}.
+
+Верни ТОЛЬКО новые distinct findings.
+
+Уже найденные distinct candidates:
+
+{existing_text}
+
+Не повторяй их дословно.
+Не перефразируй их как новые findings.
+Не заполняй свободные места дублями.
+
+Если после исключения уже найденных candidates
+новых проблем меньше {capacity}, верни меньше.
+
+Если новых проблем нет:
+violations=[].
+
+--- END DISTINCT CANDIDATE BATCH ---
+""".strip()
+
+
+def _sum_optional_ints(
+    values: tuple[
+        int | None,
+        ...,
+    ],
+) -> int | None:
+    """Суммирует available token counters нескольких VLM calls."""
+    present = tuple(value for value in values if value is not None)
+
+    if not present:
+        return None
+
+    return sum(
+        present,
+    )
+
+
+def _combine_generation_metrics(
+    metrics: list[GenerationMetrics,],
+) -> GenerationMetrics:
+    """Объединяет метрики adaptive VLM calls одного logical stage."""
+    if not metrics:
+        raise RuntimeError(
+            "Adaptive normative discovery не выполнил ни одного VLM call.",
+        )
+
+    if len(metrics) == 1:
+        return metrics[0]
+
+    return GenerationMetrics(
+        attempt=max(metric.attempt for metric in metrics),
+        done_reason=metrics[-1].done_reason,
+        requested_num_predict=sum(metric.requested_num_predict for metric in metrics),
+        total_duration_ms=sum(metric.total_duration_ms for metric in metrics),
+        load_duration_ms=sum(metric.load_duration_ms for metric in metrics),
+        prompt_eval_count=_sum_optional_ints(
+            tuple(metric.prompt_eval_count for metric in metrics)
+        ),
+        eval_count=_sum_optional_ints(tuple(metric.eval_count for metric in metrics)),
+        content_length=sum(metric.content_length for metric in metrics),
+        thinking_length=sum(metric.thinking_length for metric in metrics),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +335,291 @@ class CheckPageAgainstNorms:
 
     normative_text_limit: int
 
+    async def _discover_candidates(
+        self,
+        *,
+        page_number: int,
+        prompt: str,
+        normative_source_ids: tuple[
+            str,
+            ...,
+        ],
+        technical_assignment_source_ids: tuple[
+            str,
+            ...,
+        ],
+        user_package_source_ids: tuple[
+            str,
+            ...,
+        ],
+        image_bytes: bytes,
+    ) -> tuple[
+        str,
+        ViolationCandidateSelection,
+        GenerationMetrics,
+    ]:
+        """Adaptive discovery не даёт дублям занять весь output budget."""
+        raw_candidates: list[
+            dict[
+                str,
+                Any,
+            ]
+        ] = []
+
+        all_metrics: list[GenerationMetrics,] = []
+
+        summary = ""
+
+        candidate_selection = select_violation_candidates(
+            [],
+        )
+
+        mode = "probe"
+        probe_round = 0
+        call_index = 0
+
+        while candidate_selection.consolidated_count < self.max_issues:
+            remaining_capacity = (
+                self.max_issues - candidate_selection.consolidated_count
+            )
+
+            if mode == "bulk":
+                current_capacity = remaining_capacity
+
+                current_num_predict = self.num_predict
+
+                stage_suffix = "bulk"
+
+            else:
+                probe_round += 1
+
+                current_capacity = min(
+                    _NORMATIVE_PROBE_BATCH_SIZE,
+                    remaining_capacity,
+                )
+
+                current_num_predict = min(
+                    _NORMATIVE_PROBE_NUM_PREDICT,
+                    self.num_predict,
+                )
+
+                stage_suffix = f"probe{probe_round}"
+
+            existing_candidates = candidate_selection.candidates
+
+            batch_prompt = (
+                f"{prompt}\n\n"
+                f"{_HIGH_RECALL_FINDING_POLICY}\n\n"
+                f"{
+                    _candidate_batch_instruction(
+                        capacity=current_capacity,
+                        existing_candidates=existing_candidates,
+                    )
+                }"
+            )
+
+            generation = await self.vision_model.generate_json(
+                prompt=batch_prompt,
+                schema=build_normative_check_schema(
+                    source_ids=(normative_source_ids),
+                    technical_assignment_source_ids=(technical_assignment_source_ids),
+                    user_package_source_ids=(user_package_source_ids),
+                    max_issues=current_capacity,
+                ),
+                num_predict=(current_num_predict),
+                seed=200 + call_index,
+                stage=(f"normative_check:{page_number}:{stage_suffix}"),
+                image_bytes=image_bytes,
+            )
+
+            call_index += 1
+
+            all_metrics.append(
+                generation.metrics,
+            )
+
+            if not summary:
+                summary = str(
+                    generation.payload.get(
+                        "summary",
+                        "",
+                    )
+                ).strip()
+
+            violations = generation.payload.get(
+                "violations",
+                [],
+            )
+
+            round_selection = select_violation_candidates(
+                violations,
+            )
+
+            if not isinstance(
+                violations,
+                list,
+            ):
+                raise ValueError(
+                    "Поле violations должно быть JSON array.",
+                )
+
+            before_unique = candidate_selection.consolidated_count
+
+            raw_candidates.extend(
+                dict(
+                    candidate,
+                )
+                for candidate in violations
+            )
+
+            candidate_selection = select_violation_candidates(
+                raw_candidates,
+            )
+
+            new_unique = candidate_selection.consolidated_count - before_unique
+
+            generated = round_selection.generated_count
+
+            unique_ratio = (new_unique / generated) if generated > 0 else 0.0
+
+            duplicate_ratio = 1.0 - unique_ratio if generated > 0 else 0.0
+
+            logger.info(
+                (
+                    "normative_discovery_round "
+                    "page=%s mode=%s "
+                    "round=%s capacity=%s "
+                    "num_predict=%s "
+                    "generated=%s "
+                    "round_distinct=%s "
+                    "new_unique=%s "
+                    "total_unique=%s "
+                    "unique_ratio=%.3f "
+                    "duplicate_ratio=%.3f"
+                ),
+                page_number,
+                mode,
+                probe_round,
+                current_capacity,
+                current_num_predict,
+                generated,
+                round_selection.consolidated_count,
+                new_unique,
+                (candidate_selection.consolidated_count),
+                unique_ratio,
+                duplicate_ratio,
+            )
+
+            if candidate_selection.consolidated_count >= self.max_issues:
+                logger.info(
+                    (
+                        "normative_discovery_stop "
+                        "page=%s reason=max_issues "
+                        "unique=%s raw=%s"
+                    ),
+                    page_number,
+                    (candidate_selection.consolidated_count),
+                    len(
+                        raw_candidates,
+                    ),
+                )
+
+                break
+
+            if generated < current_capacity:
+                logger.info(
+                    (
+                        "normative_discovery_stop "
+                        "page=%s reason=batch_not_full "
+                        "generated=%s capacity=%s "
+                        "unique=%s raw=%s"
+                    ),
+                    page_number,
+                    generated,
+                    current_capacity,
+                    (candidate_selection.consolidated_count),
+                    len(
+                        raw_candidates,
+                    ),
+                )
+
+                break
+
+            if new_unique == 0:
+                logger.info(
+                    (
+                        "normative_discovery_stop "
+                        "page=%s reason=no_new_distinct "
+                        "unique=%s raw=%s"
+                    ),
+                    page_number,
+                    (candidate_selection.consolidated_count),
+                    len(
+                        raw_candidates,
+                    ),
+                )
+
+                break
+
+            if mode == "bulk":
+                logger.info(
+                    (
+                        "normative_discovery_stop "
+                        "page=%s reason=bulk_complete "
+                        "unique=%s raw=%s"
+                    ),
+                    page_number,
+                    (candidate_selection.consolidated_count),
+                    len(
+                        raw_candidates,
+                    ),
+                )
+
+                break
+
+            if unique_ratio >= _NORMATIVE_DENSE_UNIQUE_RATIO:
+                mode = "bulk"
+
+                logger.info(
+                    (
+                        "normative_discovery_expand "
+                        "page=%s reason=dense_probe "
+                        "unique_ratio=%.3f "
+                        "unique=%s"
+                    ),
+                    page_number,
+                    unique_ratio,
+                    (candidate_selection.consolidated_count),
+                )
+
+                continue
+
+            if probe_round >= _NORMATIVE_MAX_PROBE_ROUNDS:
+                logger.info(
+                    (
+                        "normative_discovery_stop "
+                        "page=%s reason=duplicate_saturation "
+                        "probe_rounds=%s "
+                        "unique=%s raw=%s"
+                    ),
+                    page_number,
+                    probe_round,
+                    (candidate_selection.consolidated_count),
+                    len(
+                        raw_candidates,
+                    ),
+                )
+
+                break
+
+        return (
+            summary,
+            candidate_selection,
+            _combine_generation_metrics(
+                all_metrics,
+            ),
+        )
+
     async def execute(
         self,
         *,
@@ -240,7 +671,7 @@ class CheckPageAgainstNorms:
             page_number=page_number,
             extracted_text=extracted_text,
             page_facts=page_facts,
-            normative_sources=normative_sources,
+            normative_sources=(normative_sources),
             technical_assignment_sources=(technical_assignment_sources),
             conflict_candidates=(conflict_candidates),
             user_package_sources=(user_package_sources),
@@ -248,17 +679,16 @@ class CheckPageAgainstNorms:
             normative_system_prompt=(normative_system_prompt),
         )
 
-        result = await self.vision_model.generate_json(
-            prompt=(f"{prompt}\n\n{_HIGH_RECALL_FINDING_POLICY}"),
-            schema=build_normative_check_schema(
-                source_ids=normative_source_ids,
-                technical_assignment_source_ids=(technical_assignment_source_ids),
-                user_package_source_ids=(user_package_source_ids),
-                max_issues=self.max_issues,
-            ),
-            num_predict=self.num_predict,
-            seed=200,
-            stage=(f"normative_check:{page_number}"),
+        (
+            summary,
+            candidate_selection,
+            metrics,
+        ) = await self._discover_candidates(
+            page_number=page_number,
+            prompt=prompt,
+            normative_source_ids=(normative_source_ids),
+            technical_assignment_source_ids=(technical_assignment_source_ids),
+            user_package_source_ids=(user_package_source_ids),
             image_bytes=image_bytes,
         )
 
@@ -272,24 +702,19 @@ class CheckPageAgainstNorms:
             source.source_id: source for source in user_package_sources
         }
 
-        candidate_selection = select_violation_candidates(
-            result.payload.get(
-                "violations",
-                [],
-            )
-        )
-
-        provenance_lossless = (
-            candidate_selection.represented_count
-            == candidate_selection.generated_count - candidate_selection.rejected_count
+        provenance_lossless = candidate_selection.represented_count == (
+            candidate_selection.generated_count - candidate_selection.rejected_count
         )
 
         logger.info(
             (
                 "normative_candidate_selection "
-                "page=%s generated=%s consolidated=%s "
-                "duplicates=%s represented=%s rejected=%s "
-                "rejection_reasons=%s provenance_lossless=%s"
+                "page=%s generated=%s "
+                "consolidated=%s "
+                "duplicates=%s represented=%s "
+                "rejected=%s "
+                "rejection_reasons=%s "
+                "provenance_lossless=%s"
             ),
             page_number,
             candidate_selection.generated_count,
@@ -308,17 +733,23 @@ class CheckPageAgainstNorms:
             source_indexes,
         ) in zip(
             candidate_selection.candidates,
-            candidate_selection.source_indexes_by_candidate,
+            (candidate_selection.source_indexes_by_candidate),
             strict=True,
         ):
             representative_index = source_indexes[0]
 
             finding_id = f"p{page_number}-f{representative_index}"
 
-            if len(source_indexes) > 1:
+            if (
+                len(
+                    source_indexes,
+                )
+                > 1
+            ):
                 logger.info(
                     (
-                        "normative_candidate_exact_duplicates_"
+                        "normative_candidate_"
+                        "exact_duplicates_"
                         "consolidated "
                         "page=%s finding_id=%s "
                         "raw_candidate_indexes=%s "
@@ -362,13 +793,13 @@ class CheckPageAgainstNorms:
             selected_technical_assignment_sources = tuple(
                 technical_assignment_by_id[source_id]
                 for source_id in requested_technical_assignment_ids
-                if source_id in technical_assignment_by_id
+                if (source_id in technical_assignment_by_id)
             )
 
             selected_user_package_sources = tuple(
                 user_package_by_id[source_id]
                 for source_id in requested_user_package_ids
-                if source_id in user_package_by_id
+                if (source_id in user_package_by_id)
             )
 
             detached_normative_ids = tuple(
@@ -380,13 +811,13 @@ class CheckPageAgainstNorms:
             detached_technical_assignment_ids = tuple(
                 source_id
                 for source_id in requested_technical_assignment_ids
-                if source_id not in technical_assignment_by_id
+                if (source_id not in technical_assignment_by_id)
             )
 
             detached_user_package_ids = tuple(
                 source_id
                 for source_id in requested_user_package_ids
-                if source_id not in user_package_by_id
+                if (source_id not in user_package_by_id)
             )
 
             if (
@@ -396,8 +827,8 @@ class CheckPageAgainstNorms:
             ):
                 logger.info(
                     (
-                        "normative_candidate_source_ids_"
-                        "detached "
+                        "normative_candidate_"
+                        "source_ids_detached "
                         "page=%s finding_id=%s "
                         "raw_candidate_indexes=%s "
                         "normative=%s "
@@ -408,13 +839,13 @@ class CheckPageAgainstNorms:
                     finding_id,
                     source_indexes,
                     detached_normative_ids,
-                    detached_technical_assignment_ids,
+                    (detached_technical_assignment_ids),
                     detached_user_package_ids,
                 )
 
             selected_any_source = bool(
                 selected_normative_sources
-                or selected_technical_assignment_sources
+                or (selected_technical_assignment_sources)
                 or selected_user_package_sources
             )
 
@@ -474,7 +905,7 @@ class CheckPageAgainstNorms:
                 FindingDraft(
                     finding_id=finding_id,
                     page=page_number,
-                    page_type=page_facts.page_type,
+                    page_type=(page_facts.page_type),
                     category=finding_category,
                     severity=severity(
                         violation.get(
@@ -499,7 +930,7 @@ class CheckPageAgainstNorms:
                     basis_sources=(selected_normative_sources),
                     experience_query=(
                         build_experience_query(
-                            category=finding_category,
+                            category=(finding_category),
                             comment=comment,
                             evidence=evidence,
                             recommendation_draft=(recommendation_draft),
@@ -524,7 +955,8 @@ class CheckPageAgainstNorms:
         logger.info(
             (
                 "normative_findings_consolidated "
-                "page=%s raw_candidates=%s findings=%s "
+                "page=%s raw_candidates=%s "
+                "findings=%s "
                 "duplicates=%s represented=%s "
                 "provenance_lossless=%s"
             ),
@@ -539,14 +971,9 @@ class CheckPageAgainstNorms:
         )
 
         return (
-            str(
-                result.payload.get(
-                    "summary",
-                    "",
-                )
-            ).strip(),
+            summary,
             tuple(
                 findings,
             ),
-            result.metrics,
+            metrics,
         )
