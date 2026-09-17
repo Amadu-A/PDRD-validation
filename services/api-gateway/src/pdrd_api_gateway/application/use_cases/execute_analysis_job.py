@@ -51,6 +51,12 @@ class AnalysisJobNotExecutableError(
     """Analysis job находится в terminal state."""
 
 
+class AnalysisJobCancelledError(
+    AnalysisJobNotExecutableError,
+):
+    """Analysis job был отменён пользователем."""
+
+
 class AnalysisExecutionError(
     RuntimeError,
 ):
@@ -164,8 +170,12 @@ class ExecuteAnalysisJob:
             ):
                 result = await self._execute_pipeline(
                     job=job,
+                    job_id=job_id,
                     document_id=document_id,
                 )
+
+        except AnalysisJobCancelledError:
+            raise
 
         except TimeoutError as error:
             await self._mark_failed(
@@ -222,6 +232,10 @@ class ExecuteAnalysisJob:
                 context_id=document_id,
             )
 
+        await self._ensure_not_cancelled(
+            job_id=job_id,
+        )
+
         await self._mark_completed(
             job_id=job_id,
         )
@@ -232,6 +246,7 @@ class ExecuteAnalysisJob:
         self,
         *,
         job: AnalysisJob,
+        job_id: UUID,
         document_id: UUID,
     ) -> dict[str, Any]:
         """Выполняет idempotent pipeline внутри lifecycle deadline."""
@@ -240,6 +255,10 @@ class ExecuteAnalysisJob:
         )
 
         if existing_result is not None:
+            await self._ensure_not_cancelled(
+                job_id=job_id,
+            )
+
             return existing_result
 
         artifacts = await self.artifact_store.load_request(
@@ -251,6 +270,10 @@ class ExecuteAnalysisJob:
             document_id=document_id,
         )
 
+        await self._ensure_not_cancelled(
+            job_id=job_id,
+        )
+
         artifacts = replace(
             artifacts,
             normative_snapshot=job.normative_snapshot,
@@ -258,6 +281,10 @@ class ExecuteAnalysisJob:
 
         result = await self.orchestrator.execute(
             artifacts=artifacts,
+        )
+
+        await self._ensure_not_cancelled(
+            job_id=job_id,
         )
 
         await self.artifact_store.save_result(
@@ -380,10 +407,12 @@ class ExecuteAnalysisJob:
             if job.status is AnalysisJobStatus.COMPLETED:
                 return job
 
-            if job.status in {
-                AnalysisJobStatus.FAILED,
-                AnalysisJobStatus.CANCELLED,
-            }:
+            if job.status is AnalysisJobStatus.CANCELLED:
+                raise AnalysisJobCancelledError(
+                    f"Analysis job {job_id} был отменён.",
+                )
+
+            if job.status is AnalysisJobStatus.FAILED:
                 raise AnalysisJobNotExecutableError(
                     "Нельзя выполнить analysis job "
                     f"{job_id} в состоянии "
@@ -413,6 +442,27 @@ class ExecuteAnalysisJob:
                 await unit_of_work.commit()
 
             return job
+
+    async def _ensure_not_cancelled(
+        self,
+        *,
+        job_id: UUID,
+    ) -> None:
+        """Не позволяет pipeline продолжиться после durable cancellation."""
+        async with self.unit_of_work_factory() as unit_of_work:
+            job = await unit_of_work.analysis_jobs.get_for_update(
+                job_id,
+            )
+
+            if job is None:
+                raise AnalysisJobNotFoundError(
+                    f"Analysis job {job_id} не найден.",
+                )
+
+            if job.status is AnalysisJobStatus.CANCELLED:
+                raise AnalysisJobCancelledError(
+                    f"Analysis job {job_id} был отменён.",
+                )
 
     async def _load_completed_result(
         self,
@@ -458,6 +508,11 @@ class ExecuteAnalysisJob:
             if job.status is AnalysisJobStatus.COMPLETED:
                 return
 
+            if job.status is AnalysisJobStatus.CANCELLED:
+                raise AnalysisJobCancelledError(
+                    f"Analysis job {job_id} был отменён.",
+                )
+
             if job.status is not AnalysisJobStatus.PROCESSING:
                 raise AnalysisJobNotExecutableError(
                     "Нельзя завершить analysis job "
@@ -487,6 +542,11 @@ class ExecuteAnalysisJob:
 
             if job is None:
                 return
+
+            if job.status is AnalysisJobStatus.CANCELLED:
+                raise AnalysisJobCancelledError(
+                    f"Analysis job {job_id} был отменён.",
+                )
 
             if job.status is not AnalysisJobStatus.PROCESSING:
                 return
@@ -518,10 +578,14 @@ class ExecuteAnalysisJob:
             if job is None:
                 return
 
+            if job.status is AnalysisJobStatus.CANCELLED:
+                raise AnalysisJobCancelledError(
+                    f"Analysis job {job_id} был отменён.",
+                )
+
             if job.status in {
                 AnalysisJobStatus.COMPLETED,
                 AnalysisJobStatus.FAILED,
-                AnalysisJobStatus.CANCELLED,
             }:
                 return
 
