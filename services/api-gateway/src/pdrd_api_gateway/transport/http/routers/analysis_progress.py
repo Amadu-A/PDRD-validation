@@ -2,7 +2,10 @@
 
 """HTTP API progress выполнения analysis jobs."""
 
-from typing import Annotated
+from typing import (
+    Annotated,
+    Literal,
+)
 from uuid import UUID
 
 from fastapi import (
@@ -53,6 +56,24 @@ class AnalysisProgressUpdateRequest(
     )
 
     stage: AnalysisProgressStage
+
+
+class AnalysisProgressUpdateResponse(
+    BaseModel,
+):
+    """Ответ orchestration checkpoint с cancellation signal."""
+
+    model_config = ConfigDict(
+        frozen=True,
+    )
+
+    status: Literal["ok"] = "ok"
+
+    stage: AnalysisProgressStage
+
+    changed: bool
+
+    cancelled: bool
 
 
 class AnalysisProgressResponse(
@@ -204,6 +225,7 @@ async def get_analysis_progress(
 
 @router.post(
     "/internal/v1/analysis-progress/{document_id}",
+    response_model=AnalysisProgressUpdateResponse,
 )
 async def update_analysis_progress(
     document_id: UUID,
@@ -214,17 +236,14 @@ async def update_analysis_progress(
             get_container,
         ),
     ],
-) -> dict[
-    str,
-    object,
-]:
-    """Принимает best-effort progress callback от n8n."""
+) -> AnalysisProgressUpdateResponse:
+    """Принимает best-effort progress callback и возвращает cancellation signal."""
     use_case = require_update_analysis_progress(
         container,
     )
 
     try:
-        changed = await use_case.execute(
+        result = await use_case.execute(
             document_id=document_id,
             stage=request.stage,
         )
@@ -237,8 +256,8 @@ async def update_analysis_progress(
             ),
         ) from error
 
-    return {
-        "status": "ok",
-        "stage": request.stage.value,
-        "changed": changed,
-    }
+    return AnalysisProgressUpdateResponse(
+        stage=request.stage,
+        changed=result.changed,
+        cancelled=result.cancelled,
+    )

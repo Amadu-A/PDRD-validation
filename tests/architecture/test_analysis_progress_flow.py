@@ -1,6 +1,6 @@
 # tests/architecture/test_analysis_progress_flow.py
 
-"""Architecture guards Stage 8.2 analysis progress callbacks."""
+"""Architecture guards Stage 8.3 progress and cooperative cancellation."""
 
 import json
 from pathlib import Path
@@ -19,48 +19,56 @@ WORKFLOW_CASES = (
             (
                 "POST /analysis/v2/pdf",
                 "Progress Extract Sources",
+                "Continue Extract Sources",
                 "Gate Extract Sources",
                 "extracting_sources",
             ),
             (
                 "Resolve Project Context Cache",
                 "Progress Prepare Context",
+                "Continue Prepare Context",
                 "Gate Prepare Context",
                 "preparing_context",
             ),
             (
                 "Expand PDF Pages",
                 "Progress Understand Sheet",
+                "Continue Understand Sheet",
                 "Gate Understand Sheet",
                 "understanding_sheet",
             ),
             (
                 "Technical Assignment First Pass",
                 "Progress Retrieve Requirements",
+                "Continue Retrieve Requirements",
                 "Gate Retrieve Requirements",
                 "retrieving_requirements",
             ),
             (
                 "Search User Packages",
                 "Progress Check Requirements",
+                "Continue Check Requirements",
                 "Gate Check Requirements",
                 "checking_requirements",
             ),
             (
                 "Merge Finding Candidates",
                 "Progress Enrich Findings",
+                "Continue Enrich Findings",
                 "Gate Enrich Findings",
                 "enriching_findings",
             ),
             (
                 "Build Experience Map",
                 "Progress Finalize Findings",
+                "Continue Finalize Findings",
                 "Gate Finalize Findings",
                 "finalizing_findings",
             ),
             (
                 "Finalize Findings",
                 "Progress Build Result",
+                "Continue Build Result",
                 "Gate Build Result",
                 "building_result",
             ),
@@ -75,48 +83,56 @@ WORKFLOW_CASES = (
             (
                 "POST /analysis/v2/cad",
                 "Progress Extract Sources",
+                "Continue Extract Sources",
                 "Gate Extract Sources",
                 "extracting_sources",
             ),
             (
                 "Document Extract CAD",
                 "Progress Prepare Context",
+                "Continue Prepare Context",
                 "Gate Prepare Context",
                 "preparing_context",
             ),
             (
                 "Prepare CAD Context",
                 "Progress Understand Sheet",
+                "Continue Understand Sheet",
                 "Gate Understand Sheet",
                 "understanding_sheet",
             ),
             (
                 "Technical Assignment First Pass",
                 "Progress Retrieve Requirements",
+                "Continue Retrieve Requirements",
                 "Gate Retrieve Requirements",
                 "retrieving_requirements",
             ),
             (
                 "Search User Packages",
                 "Progress Check Requirements",
+                "Continue Check Requirements",
                 "Gate Check Requirements",
                 "checking_requirements",
             ),
             (
                 "Merge Finding Candidates",
                 "Progress Enrich Findings",
+                "Continue Enrich Findings",
                 "Gate Enrich Findings",
                 "enriching_findings",
             ),
             (
                 "Build Experience Map",
                 "Progress Finalize Findings",
+                "Continue Finalize Findings",
                 "Gate Finalize Findings",
                 "finalizing_findings",
             ),
             (
                 "Finalize Findings",
                 "Progress Build Result",
+                "Continue Build Result",
                 "Gate Build Result",
                 "building_result",
             ),
@@ -131,48 +147,56 @@ WORKFLOW_CASES = (
             (
                 "POST /analysis/v2/pdf-cad",
                 "Progress Extract Sources",
+                "Continue Extract Sources",
                 "Gate Extract Sources",
                 "extracting_sources",
             ),
             (
                 "Resolve Project Context Cache",
                 "Progress Prepare Context",
+                "Continue Prepare Context",
                 "Gate Prepare Context",
                 "preparing_context",
             ),
             (
                 "Prepare Combined Context",
                 "Progress Understand Sheet",
+                "Continue Understand Sheet",
                 "Gate Understand Sheet",
                 "understanding_sheet",
             ),
             (
                 "Technical Assignment First Pass",
                 "Progress Retrieve Requirements",
+                "Continue Retrieve Requirements",
                 "Gate Retrieve Requirements",
                 "retrieving_requirements",
             ),
             (
                 "Search User Packages",
                 "Progress Check Requirements",
+                "Continue Check Requirements",
                 "Gate Check Requirements",
                 "checking_requirements",
             ),
             (
                 "Merge Finding Candidates",
                 "Progress Enrich Findings",
+                "Continue Enrich Findings",
                 "Gate Enrich Findings",
                 "enriching_findings",
             ),
             (
                 "Build Experience Map",
                 "Progress Finalize Findings",
+                "Continue Finalize Findings",
                 "Gate Finalize Findings",
                 "finalizing_findings",
             ),
             (
                 "Finalize Findings",
                 "Progress Build Result",
+                "Continue Build Result",
                 "Gate Build Result",
                 "building_result",
             ),
@@ -239,12 +263,24 @@ def _nodes(
     }
 
 
-def _main_connections(
+def _main_output_connections(
     workflow: dict[str, Any],
     source: str,
+    output_index: int,
 ) -> list[dict[str, Any]]:
-    """Возвращает первый main output source node."""
-    connections = workflow["connections"][source]["main"][0]
+    """Возвращает указанный main output source node."""
+    main = workflow["connections"][source]["main"]
+
+    assert isinstance(
+        main,
+        list,
+    )
+
+    assert output_index < len(
+        main,
+    )
+
+    connections = main[output_index]
 
     assert isinstance(
         connections,
@@ -260,6 +296,18 @@ def _main_connections(
     )
 
     return connections
+
+
+def _main_connections(
+    workflow: dict[str, Any],
+    source: str,
+) -> list[dict[str, Any]]:
+    """Возвращает первый main output source node."""
+    return _main_output_connections(
+        workflow,
+        source,
+        0,
+    )
 
 
 def _successors_in_order(
@@ -383,8 +431,8 @@ def _parameter(
     )
 
 
-def test_workflows_publish_progress_through_blocking_data_preserving_gate() -> None:
-    """Callback завершается до downstream без подмены source data."""
+def test_workflows_publish_progress_through_cancellation_gate() -> None:
+    """Callback завершает checkpoint до downstream и умеет остановить pipeline."""
     for config in WORKFLOW_CASES:
         workflow = _workflow(
             config["path"],
@@ -397,11 +445,12 @@ def test_workflows_publish_progress_through_blocking_data_preserving_gate() -> N
         for (
             source_name,
             progress_name,
+            continue_name,
             gate_name,
             stage,
         ) in config["cases"]:
             progress_node = nodes[progress_name]
-
+            continue_node = nodes[continue_name]
             gate_node = nodes[gate_name]
 
             progress_url = _parameter(
@@ -415,9 +464,7 @@ def test_workflows_publish_progress_through_blocking_data_preserving_gate() -> N
             )
 
             assert "/internal/v1/analysis-progress/" in progress_url
-
             assert config["webhook"] in progress_url
-
             assert f"stage: '{stage}'" in progress_body
 
             assert _successors_in_order(
@@ -431,30 +478,68 @@ def test_workflows_publish_progress_through_blocking_data_preserving_gate() -> N
                 source_name,
             )
 
-            progress_connections = _main_connections(
+            assert _successors_in_order(
                 workflow,
                 progress_name,
-            )
+            ) == [
+                continue_name,
+            ]
+
+            assert continue_node["type"] == "n8n-nodes-base.if"
+            assert continue_node["typeVersion"] == 2.2
+
+            continue_parameters = continue_node["parameters"]
+            conditions = continue_parameters["conditions"]["conditions"]
 
             assert (
                 len(
-                    progress_connections,
+                    conditions,
                 )
                 == 1
             )
 
-            assert progress_connections[0]["node"] == gate_name
+            condition = conditions[0]
 
-            assert progress_connections[0]["index"] == 1
+            assert condition["leftValue"] == ("={{ String($json.cancelled ?? false) }}")
+            assert condition["rightValue"] == "true"
+            assert condition["operator"] == {
+                "type": "string",
+                "operation": "notEquals",
+            }
+
+            continue_output = _main_output_connections(
+                workflow,
+                continue_name,
+                0,
+            )
+
+            assert continue_output == [
+                {
+                    "node": gate_name,
+                    "type": "main",
+                    "index": 1,
+                }
+            ]
+
+            cancellation_output = _main_output_connections(
+                workflow,
+                continue_name,
+                1,
+            )
+
+            assert cancellation_output == [
+                {
+                    "node": "Build Cancelled Result",
+                    "type": "main",
+                    "index": 0,
+                }
+            ]
 
             gate_parameters = gate_node["parameters"]
 
             assert gate_node["type"] == "n8n-nodes-base.merge"
-
             assert gate_node["typeVersion"] == 3.2
-
             assert gate_parameters["mode"] == "chooseBranch"
-
             assert gate_parameters["useDataOfInput"] == 1
 
             assert _main_connections(
@@ -474,6 +559,16 @@ def test_workflows_publish_progress_through_blocking_data_preserving_gate() -> N
 
             assert _incoming_connections(
                 workflow,
+                continue_name,
+            ) == {
+                (
+                    progress_name,
+                    0,
+                ),
+            }
+
+            assert _incoming_connections(
+                workflow,
                 gate_name,
             ) == {
                 (
@@ -481,14 +576,14 @@ def test_workflows_publish_progress_through_blocking_data_preserving_gate() -> N
                     0,
                 ),
                 (
-                    progress_name,
+                    continue_name,
                     1,
                 ),
             }
 
 
-def test_progress_callbacks_are_single_best_effort_requests() -> None:
-    """Stage callback выполняется один раз и не валит analysis при сбое."""
+def test_progress_callbacks_remain_single_best_effort_requests() -> None:
+    """Infrastructure сбой progress API сам по себе не отменяет analysis."""
     for config in WORKFLOW_CASES:
         workflow = _workflow(
             config["path"],
@@ -501,6 +596,7 @@ def test_progress_callbacks_are_single_best_effort_requests() -> None:
         for (
             _source_name,
             progress_name,
+            _continue_name,
             _gate_name,
             _stage,
         ) in config["cases"]:
@@ -532,8 +628,65 @@ def test_progress_callbacks_are_single_best_effort_requests() -> None:
             assert parameters["options"]["timeout"] == 3000
 
 
+def test_cancelled_checkpoint_returns_explicit_webhook_response() -> None:
+    """Все checkpoint false branches завершаются единым cancelled response."""
+    for config in WORKFLOW_CASES:
+        workflow = _workflow(
+            config["path"],
+        )
+
+        nodes = _nodes(
+            workflow,
+        )
+
+        build_cancelled = nodes["Build Cancelled Result"]
+        respond_cancelled = nodes["Respond Cancelled"]
+
+        assert build_cancelled["type"] == "n8n-nodes-base.code"
+
+        code = _parameter(
+            build_cancelled,
+            "jsCode",
+        )
+
+        assert "status: 'cancelled'" in code
+        assert "reason: 'analysis_cancelled'" in code
+
+        expected_sources = {
+            (
+                continue_name,
+                0,
+            )
+            for (
+                _source_name,
+                _progress_name,
+                continue_name,
+                _gate_name,
+                _stage,
+            ) in config["cases"]
+        }
+
+        assert (
+            _incoming_connections(
+                workflow,
+                "Build Cancelled Result",
+            )
+            == expected_sources
+        )
+
+        assert _successors_in_order(
+            workflow,
+            "Build Cancelled Result",
+        ) == [
+            "Respond Cancelled",
+        ]
+
+        assert respond_cancelled["type"] == "n8n-nodes-base.respondToWebhook"
+        assert respond_cancelled["parameters"]["respondWith"] == ("firstIncomingItem")
+
+
 def test_pdf_progress_keeps_stage7_visualization_persistence_order() -> None:
-    """Progress migration не разрывает Stage 7 extract -> persist -> cache."""
+    """Cancellation migration не разрывает Stage 7 extract -> persist -> cache."""
     for (
         path,
         extract_name,
@@ -557,8 +710,8 @@ def test_pdf_progress_keeps_stage7_visualization_persistence_order() -> None:
         ], path
 
 
-def test_webhook_response_is_explicit_and_not_last_node_dependent() -> None:
-    """Progress/gate nodes не могут стать HTTP response workflow."""
+def test_completed_webhook_response_remains_explicit() -> None:
+    """Cancellation branch не меняет успешный HTTP response workflow."""
     for config in WORKFLOW_CASES:
         workflow = _workflow(
             config["path"],
@@ -575,11 +728,9 @@ def test_webhook_response_is_explicit_and_not_last_node_dependent() -> None:
         assert parameters["responseMode"] == "responseNode"
 
         response_name = config["response_node"]
-
         response_node = nodes[response_name]
 
         assert response_node["type"] == "n8n-nodes-base.respondToWebhook"
-
         assert response_node["parameters"]["respondWith"] == "firstIncomingItem"
 
         assert _successors_in_order(
