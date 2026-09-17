@@ -718,7 +718,8 @@
         1180
       ],
       "retryOnFail": false,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -741,7 +742,8 @@
         1180
       ],
       "retryOnFail": false,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -764,7 +766,8 @@
         1180
       ],
       "retryOnFail": false,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -787,7 +790,8 @@
         1180
       ],
       "retryOnFail": false,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -810,7 +814,8 @@
         1180
       ],
       "retryOnFail": false,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -833,7 +838,8 @@
         1180
       ],
       "retryOnFail": false,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -856,7 +862,8 @@
         1180
       ],
       "retryOnFail": false,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -879,7 +886,8 @@
         1180
       ],
       "retryOnFail": false,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -894,6 +902,118 @@
         4440,
         800
       ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8a200000-0000-4000-8000-000000000101",
+      "name": "Gate Extract Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1570,
+        1340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8a200000-0000-4000-8000-000000000102",
+      "name": "Gate Prepare Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1150,
+        1340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8a200000-0000-4000-8000-000000000103",
+      "name": "Gate Understand Sheet",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -730,
+        1340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8a200000-0000-4000-8000-000000000104",
+      "name": "Gate Retrieve Requirements",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -310,
+        1340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8a200000-0000-4000-8000-000000000105",
+      "name": "Gate Check Requirements",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        110,
+        1340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8a200000-0000-4000-8000-000000000106",
+      "name": "Gate Enrich Findings",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        530,
+        1340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8a200000-0000-4000-8000-000000000107",
+      "name": "Gate Finalize Findings",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        950,
+        1340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8a200000-0000-4000-8000-000000000108",
+      "name": "Gate Build Result",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1370,
+        1340
+      ]
     }
   ],
   "pinData": {},
@@ -907,7 +1027,7 @@
             "index": 0
           },
           {
-            "node": "Document Extract PDF",
+            "node": "Gate Extract Sources",
             "type": "main",
             "index": 0
           }
@@ -917,11 +1037,6 @@
     "Document Extract PDF": {
       "main": [
         [
-          {
-            "node": "Progress Prepare Context",
-            "type": "main",
-            "index": 0
-          },
           {
             "node": "Persist Visualization Artifact",
             "type": "main",
@@ -972,7 +1087,7 @@
             "index": 0
           },
           {
-            "node": "Understand Page",
+            "node": "Gate Understand Sheet",
             "type": "main",
             "index": 0
           }
@@ -1065,7 +1180,7 @@
             "index": 0
           },
           {
-            "node": "Check Norms",
+            "node": "Gate Check Requirements",
             "type": "main",
             "index": 0
           }
@@ -1136,7 +1251,7 @@
             "index": 0
           },
           {
-            "node": "Finalize Findings",
+            "node": "Gate Finalize Findings",
             "type": "main",
             "index": 0
           }
@@ -1152,7 +1267,7 @@
             "index": 0
           },
           {
-            "node": "Build Page Result",
+            "node": "Gate Build Result",
             "type": "main",
             "index": 0
           }
@@ -1259,7 +1374,7 @@
             "index": 0
           },
           {
-            "node": "Build Project Context Query",
+            "node": "Gate Retrieve Requirements",
             "type": "main",
             "index": 0
           }
@@ -1275,7 +1390,7 @@
             "index": 0
           },
           {
-            "node": "Prepare Finding Normative Queries",
+            "node": "Gate Enrich Findings",
             "type": "main",
             "index": 0
           }
@@ -1286,7 +1401,12 @@
       "main": [
         [
           {
-            "node": "Validate Project Context",
+            "node": "Progress Prepare Context",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Prepare Context",
             "type": "main",
             "index": 0
           }
@@ -1300,6 +1420,182 @@
             "node": "Respond PDF Result",
             "type": "main",
             "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Extract Sources": {
+      "main": [
+        [
+          {
+            "node": "Document Extract PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Extract Sources": {
+      "main": [
+        [
+          {
+            "node": "Gate Extract Sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Gate Prepare Context": {
+      "main": [
+        [
+          {
+            "node": "Validate Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Prepare Context": {
+      "main": [
+        [
+          {
+            "node": "Gate Prepare Context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Gate Understand Sheet": {
+      "main": [
+        [
+          {
+            "node": "Understand Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Understand Sheet": {
+      "main": [
+        [
+          {
+            "node": "Gate Understand Sheet",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Gate Retrieve Requirements": {
+      "main": [
+        [
+          {
+            "node": "Build Project Context Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Retrieve Requirements": {
+      "main": [
+        [
+          {
+            "node": "Gate Retrieve Requirements",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Gate Check Requirements": {
+      "main": [
+        [
+          {
+            "node": "Check Norms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Check Requirements": {
+      "main": [
+        [
+          {
+            "node": "Gate Check Requirements",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Gate Enrich Findings": {
+      "main": [
+        [
+          {
+            "node": "Prepare Finding Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Enrich Findings": {
+      "main": [
+        [
+          {
+            "node": "Gate Enrich Findings",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Gate Finalize Findings": {
+      "main": [
+        [
+          {
+            "node": "Finalize Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Finalize Findings": {
+      "main": [
+        [
+          {
+            "node": "Gate Finalize Findings",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Gate Build Result": {
+      "main": [
+        [
+          {
+            "node": "Build Page Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Build Result": {
+      "main": [
+        [
+          {
+            "node": "Gate Build Result",
+            "type": "main",
+            "index": 1
           }
         ]
       ]

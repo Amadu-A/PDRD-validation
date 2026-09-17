@@ -54,11 +54,11 @@ def _nodes_by_name(
     }
 
 
-def _functional_successor(
+def _direct_functional_successor(
     workflow: dict[str, object],
     source_name: str,
 ) -> str:
-    """Возвращает единственный non-progress successor."""
+    """Возвращает единственный прямой non-progress successor."""
     connections = workflow["connections"]
 
     assert isinstance(
@@ -113,13 +113,53 @@ def _functional_successor(
         )
     ]
 
-    assert len(functional) == 1, (
+    assert (
+        len(
+            functional,
+        )
+        == 1
+    ), (
         source_name,
         successors,
         functional,
     )
 
     return functional[0]
+
+
+def _functional_successor(
+    workflow: dict[str, object],
+    source_name: str,
+) -> str:
+    """Возвращает бизнес-successor, прозрачно проходя Progress Gate."""
+    current_name = source_name
+    visited: set[str] = set()
+
+    for _ in range(
+        16,
+    ):
+        successor = _direct_functional_successor(
+            workflow,
+            current_name,
+        )
+
+        if not successor.startswith(
+            "Gate ",
+        ):
+            return successor
+
+        assert successor not in visited, (
+            source_name,
+            successor,
+        )
+
+        visited.add(
+            successor,
+        )
+
+        current_name = successor
+
+    raise AssertionError(f"Превышена глубина progress gate chain: {source_name}")
 
 
 def _requirement_search_name(
@@ -203,6 +243,7 @@ def test_n8n_keeps_requirement_and_package_sources_separate() -> None:
             assert "technical_assignment_sources" in body
 
             assert "conflict_candidates" in body
+
         else:
             assert "Search Normative" in body
 
@@ -238,6 +279,7 @@ def test_user_package_search_is_between_requirement_search_and_check() -> None:
                 )
                 == "Search User Packages"
             )
+
         else:
             assert (
                 _functional_successor(

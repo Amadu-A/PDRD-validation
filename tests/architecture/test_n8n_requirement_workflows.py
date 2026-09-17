@@ -58,19 +58,21 @@ def _nodes_by_name(
             node["name"],
         ): node
         for node in nodes
-        if isinstance(
-            node,
-            dict,
+        if (
+            isinstance(
+                node,
+                dict,
+            )
+            and "name" in node
         )
-        and "name" in node
     }
 
 
-def _functional_successor(
+def _direct_functional_successor(
     workflow: dict[str, Any],
     source_name: str,
 ) -> str:
-    """Возвращает единственный non-progress successor."""
+    """Возвращает единственный прямой non-progress successor."""
     connections = workflow.get(
         "connections",
         {},
@@ -128,13 +130,53 @@ def _functional_successor(
         )
     ]
 
-    assert len(functional) == 1, (
+    assert (
+        len(
+            functional,
+        )
+        == 1
+    ), (
         source_name,
         successors,
         functional,
     )
 
     return functional[0]
+
+
+def _functional_successor(
+    workflow: dict[str, Any],
+    source_name: str,
+) -> str:
+    """Возвращает бизнес-successor, прозрачно проходя Progress Gate."""
+    current_name = source_name
+    visited: set[str] = set()
+
+    for _ in range(
+        16,
+    ):
+        successor = _direct_functional_successor(
+            workflow,
+            current_name,
+        )
+
+        if not successor.startswith(
+            "Gate ",
+        ):
+            return successor
+
+        assert successor not in visited, (
+            source_name,
+            successor,
+        )
+
+        visited.add(
+            successor,
+        )
+
+        current_name = successor
+
+    raise AssertionError(f"Превышена глубина progress gate chain: {source_name}")
 
 
 def test_every_analysis_workflow_supports_t_guided_requirements() -> None:
@@ -321,7 +363,7 @@ def test_t_first_vlm_has_no_n8n_level_retry() -> None:
 
 
 def test_requirement_flow_order_is_consistent() -> None:
-    """Progress branches не изменяют основной requirement flow."""
+    """Progress gates не изменяют основной requirement flow."""
     expected_pairs = (
         (
             "Build Normative Queries",
@@ -362,7 +404,10 @@ def test_requirement_flow_order_is_consistent() -> None:
             path,
         )
 
-        for source, target in expected_pairs:
+        for (
+            source,
+            target,
+        ) in expected_pairs:
             actual = _functional_successor(
                 workflow,
                 source,

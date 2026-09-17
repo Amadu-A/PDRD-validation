@@ -92,11 +92,11 @@ def _nodes_by_name(
     }
 
 
-def _functional_successor(
+def _direct_functional_successor(
     workflow: dict[str, object],
     source_name: str,
 ) -> str:
-    """Возвращает единственный non-progress successor."""
+    """Возвращает единственный прямой non-progress successor."""
     connections = workflow["connections"]
 
     assert isinstance(
@@ -148,13 +148,53 @@ def _functional_successor(
         )
     ]
 
-    assert len(functional) == 1, (
+    assert (
+        len(
+            functional,
+        )
+        == 1
+    ), (
         source_name,
         successors,
         functional,
     )
 
     return functional[0]
+
+
+def _functional_successor(
+    workflow: dict[str, object],
+    source_name: str,
+) -> str:
+    """Возвращает бизнес-successor, прозрачно проходя Progress Gate."""
+    current_name = source_name
+    visited: set[str] = set()
+
+    for _ in range(
+        16,
+    ):
+        successor = _direct_functional_successor(
+            workflow,
+            current_name,
+        )
+
+        if not successor.startswith(
+            "Gate ",
+        ):
+            return successor
+
+        assert successor not in visited, (
+            source_name,
+            successor,
+        )
+
+        visited.add(
+            successor,
+        )
+
+        current_name = successor
+
+    raise AssertionError(f"Превышена глубина progress gate chain: {source_name}")
 
 
 def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
@@ -166,7 +206,9 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
     )
 
     assert "Merge Finding Candidates" in nodes
+
     assert "Prepare Finding Normative Queries" in nodes
+
     assert "Search Finding Norms" in nodes
 
     assert (

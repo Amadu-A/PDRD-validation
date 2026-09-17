@@ -88,21 +88,23 @@ def _nodes_by_name(
             node["name"],
         ): node
         for node in nodes
-        if isinstance(
-            node,
-            dict,
+        if (
+            isinstance(
+                node,
+                dict,
+            )
+            and "name" in node
         )
-        and "name" in node
     }
 
 
-def _functional_successor(
+def _direct_functional_successor(
     workflow: dict[str, Any],
     source_name: str,
     *,
     branch: int = 0,
 ) -> str:
-    """Возвращает единственный non-progress successor ветки."""
+    """Возвращает единственный прямой non-progress successor."""
     connections = workflow.get(
         "connections",
         {},
@@ -156,13 +158,58 @@ def _functional_successor(
         )
     ]
 
-    assert len(functional) == 1, (
+    assert (
+        len(
+            functional,
+        )
+        == 1
+    ), (
         source_name,
         successors,
         functional,
     )
 
     return functional[0]
+
+
+def _functional_successor(
+    workflow: dict[str, Any],
+    source_name: str,
+    *,
+    branch: int = 0,
+) -> str:
+    """Возвращает бизнес-successor, прозрачно проходя Progress Gate."""
+    current_name = source_name
+    current_branch = branch
+    visited: set[str] = set()
+
+    for _ in range(
+        16,
+    ):
+        successor = _direct_functional_successor(
+            workflow,
+            current_name,
+            branch=current_branch,
+        )
+
+        if not successor.startswith(
+            "Gate ",
+        ):
+            return successor
+
+        assert successor not in visited, (
+            source_name,
+            successor,
+        )
+
+        visited.add(
+            successor,
+        )
+
+        current_name = successor
+        current_branch = 0
+
+    raise AssertionError(f"Превышена глубина progress gate chain: {source_name}")
 
 
 def _serialized_node(
