@@ -14,20 +14,14 @@ WORKFLOW_CASES = (
     (
         WORKFLOW_ROOT / "analysis-v2-pdf.json",
         {
-            "Build Project Context Query": (
-                "$('Understand Page').item.json.facts"
-            ),
-            "Build Normative Queries": (
-                "$('Understand Page').item.json.facts"
-            ),
+            "Build Project Context Query": ("$('Understand Page').item.json.facts"),
+            "Build Normative Queries": ("$('Understand Page').item.json.facts"),
         },
     ),
     (
         WORKFLOW_ROOT / "analysis-v2-cad.json",
         {
-            "Build Normative Queries": (
-                "$('Understand CAD').item.json.facts"
-            ),
+            "Build Normative Queries": ("$('Understand CAD').item.json.facts"),
         },
     ),
     (

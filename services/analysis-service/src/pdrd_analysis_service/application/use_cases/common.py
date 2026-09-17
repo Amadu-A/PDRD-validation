@@ -19,13 +19,27 @@ from pdrd_analysis_service.domain.analysis import (
     NormativeSource,
 )
 
+_CANDIDATE_SOURCE_ID_FIELDS = (
+    "normative_source_ids",
+    "technical_assignment_source_ids",
+    "user_package_source_ids",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ViolationCandidateSelection:
-    """Результат lossless передачи generated finding candidates."""
+    """Результат consolidation generated finding candidates."""
 
     candidates: tuple[
         dict[str, Any],
+        ...,
+    ]
+
+    source_indexes_by_candidate: tuple[
+        tuple[
+            int,
+            ...,
+        ],
         ...,
     ]
 
@@ -37,13 +51,42 @@ class ViolationCandidateSelection:
     ] = ()
 
     @property
-    def preserved_count(
+    def consolidated_count(
         self,
     ) -> int:
-        """Возвращает количество сохранённых candidates."""
+        """Возвращает количество distinct candidates после exact dedupe."""
         return len(
             self.candidates,
         )
+
+    @property
+    def represented_count(
+        self,
+    ) -> int:
+        """Возвращает количество raw candidates, сохранённых в provenance."""
+        return sum(
+            len(
+                source_indexes,
+            )
+            for source_indexes in self.source_indexes_by_candidate
+        )
+
+    @property
+    def duplicate_count(
+        self,
+    ) -> int:
+        """Возвращает количество объединённых exact duplicate candidates."""
+        return max(
+            self.represented_count - self.consolidated_count,
+            0,
+        )
+
+    @property
+    def preserved_count(
+        self,
+    ) -> int:
+        """Backward-compatible число raw candidates, сохранённых в provenance."""
+        return self.represented_count
 
     @property
     def rejected_count(
@@ -133,7 +176,7 @@ def string_tuple(
 def normalize_text(
     value: Any,
 ) -> str:
-    """Нормализует строку для comparison без semantic filtering."""
+    """Нормализует строку для deterministic comparison."""
     return re.sub(
         r"\s+",
         " ",
@@ -143,13 +186,133 @@ def normalize_text(
     ).strip()
 
 
+def _candidate_identity(
+    candidate: dict[
+        str,
+        Any,
+    ],
+) -> (
+    tuple[
+        str,
+        str,
+    ]
+    | None
+):
+    """Возвращает безопасный exact-dedupe key candidate."""
+    comment = normalize_text(
+        candidate.get(
+            "comment",
+        )
+    )
+
+    evidence = normalize_text(
+        candidate.get(
+            "evidence",
+        )
+    )
+
+    if not comment or not evidence:
+        return None
+
+    return (
+        comment,
+        evidence,
+    )
+
+
+def _source_id_list(
+    value: Any,
+) -> list[str]:
+    """Возвращает уникальные source IDs с сохранением порядка."""
+    if not isinstance(
+        value,
+        list,
+    ):
+        return []
+
+    result: list[str] = []
+    seen: set[str] = set()
+
+    for item in value:
+        source_id = str(
+            item,
+        ).strip()
+
+        if not source_id or source_id in seen:
+            continue
+
+        seen.add(
+            source_id,
+        )
+
+        result.append(
+            source_id,
+        )
+
+    return result
+
+
+def _merge_candidate_source_ids(
+    *,
+    target: dict[
+        str,
+        Any,
+    ],
+    duplicate: dict[
+        str,
+        Any,
+    ],
+) -> None:
+    """Объединяет N/T/U source IDs exact duplicate candidates."""
+    for field_name in _CANDIDATE_SOURCE_ID_FIELDS:
+        merged: list[str] = []
+        seen: set[str] = set()
+
+        for source_id in (
+            *_source_id_list(
+                target.get(
+                    field_name,
+                )
+            ),
+            *_source_id_list(
+                duplicate.get(
+                    field_name,
+                )
+            ),
+        ):
+            if source_id in seen:
+                continue
+
+            seen.add(
+                source_id,
+            )
+
+            merged.append(
+                source_id,
+            )
+
+        if merged:
+            target[field_name] = merged
+
+
 def select_violation_candidates(
     violations: Any,
 ) -> ViolationCandidateSelection:
-    """Передаёт каждый schema-valid generated candidate без semantic filtering."""
+    """Объединяет только exact duplicates без semantic filtering.
+
+    Два candidate считаются exact duplicate только когда после
+    нормализации совпадают одновременно comment и evidence.
+
+    Один comment с различным evidence остаётся двумя findings.
+    Candidates с пустым comment/evidence также не объединяются.
+
+    Для каждой итоговой записи сохраняются 1-based индексы всех
+    исходных candidates, поэтому consolidation остаётся auditable.
+    """
     if violations is None:
         return ViolationCandidateSelection(
             candidates=(),
+            source_indexes_by_candidate=(),
             generated_count=0,
         )
 
@@ -161,26 +324,96 @@ def select_violation_candidates(
             "Поле violations должно быть JSON array.",
         )
 
-    candidates: list[dict[str, Any]] = []
+    candidates: list[
+        dict[
+            str,
+            Any,
+        ]
+    ] = []
 
-    for index, violation in enumerate(
+    source_indexes_by_candidate: list[list[int]] = []
+
+    candidate_position_by_identity: dict[
+        tuple[
+            str,
+            str,
+        ],
+        int,
+    ] = {}
+
+    for raw_index, violation in enumerate(
         violations,
+        start=1,
     ):
         if not isinstance(
             violation,
             dict,
         ):
             raise ValueError(
-                f"Каждый элемент violations должен быть JSON object; index={index}.",
+                "Каждый элемент violations должен быть JSON object; "
+                f"index={raw_index - 1}.",
             )
 
-        candidates.append(
+        candidate = dict(
             violation,
+        )
+
+        identity = _candidate_identity(
+            candidate,
+        )
+
+        if identity is None:
+            candidates.append(
+                candidate,
+            )
+
+            source_indexes_by_candidate.append(
+                [
+                    raw_index,
+                ]
+            )
+
+            continue
+
+        existing_position = candidate_position_by_identity.get(
+            identity,
+        )
+
+        if existing_position is None:
+            candidate_position_by_identity[identity] = len(
+                candidates,
+            )
+
+            candidates.append(
+                candidate,
+            )
+
+            source_indexes_by_candidate.append(
+                [
+                    raw_index,
+                ]
+            )
+
+            continue
+
+        _merge_candidate_source_ids(
+            target=candidates[existing_position],
+            duplicate=candidate,
+        )
+
+        source_indexes_by_candidate[existing_position].append(
+            raw_index,
         )
 
     return ViolationCandidateSelection(
         candidates=tuple(
             candidates,
+        ),
+        source_indexes_by_candidate=tuple(
+            tuple(
+                source_indexes,
+            )
+            for source_indexes in source_indexes_by_candidate
         ),
         generated_count=len(
             violations,
@@ -191,7 +424,7 @@ def select_violation_candidates(
 def filter_violations(
     violations: Any,
 ) -> list[dict[str, Any]]:
-    """Возвращает backward-compatible lossless список candidates."""
+    """Возвращает backward-compatible consolidated список candidates."""
     return list(
         select_violation_candidates(
             violations,

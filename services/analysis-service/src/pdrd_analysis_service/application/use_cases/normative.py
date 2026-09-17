@@ -72,6 +72,11 @@ candidate findings текущего листа, а не shortlist.
 Один физически различимый объект/участок/несоответствие
 не объединяй с другим только ради сокращения ответа.
 
+Не создавай несколько полностью одинаковых candidates
+с одинаковыми comment и evidence. Backend может
+объединить только exact text duplicates, но не будет
+использовать это как semantic filter.
+
 Формируй каждый candidate максимально компактно:
 - comment: не более 160 символов, одна конкретная фраза;
 - evidence: не более 180 символов, только наблюдаемый факт;
@@ -81,10 +86,12 @@ candidate findings текущего листа, а не shortlist.
   в comment и evidence;
 - source IDs перечисляй только в соответствующих массивах.
 
-После генерации backend не будет выполнять
-semantic filtering массива violations:
-ответственность за то, что в массив попадают именно
-реальные candidate findings, находится на этом этапе.
+После генерации backend не будет выполнять semantic
+filtering массива violations. Он может объединить только
+точные normalized duplicates с одинаковыми comment и evidence.
+
+Ответственность за то, что в массив попадают именно
+реальные candidate findings, остаётся на этом этапе.
 
 --- END HIGH-RECALL FINDING POLICY ---
 """.strip()
@@ -272,23 +279,59 @@ class CheckPageAgainstNorms:
             )
         )
 
+        provenance_lossless = (
+            candidate_selection.represented_count
+            == candidate_selection.generated_count - candidate_selection.rejected_count
+        )
+
         logger.info(
             (
                 "normative_candidate_selection "
-                "page=%s generated=%s preserved=%s "
-                "rejected=%s rejection_reasons=%s "
-                "lossless=true"
+                "page=%s generated=%s consolidated=%s "
+                "duplicates=%s represented=%s rejected=%s "
+                "rejection_reasons=%s provenance_lossless=%s"
             ),
             page_number,
             candidate_selection.generated_count,
-            candidate_selection.preserved_count,
+            candidate_selection.consolidated_count,
+            candidate_selection.duplicate_count,
+            candidate_selection.represented_count,
             candidate_selection.rejected_count,
             candidate_selection.rejection_counts,
+            provenance_lossless,
         )
 
         findings: list[FindingDraft] = []
 
-        for violation in candidate_selection.candidates:
+        for violation, source_indexes in zip(
+            candidate_selection.candidates,
+            candidate_selection.source_indexes_by_candidate,
+            strict=True,
+        ):
+            representative_index = source_indexes[0]
+
+            finding_id = f"p{page_number}-f{representative_index}"
+
+            if (
+                len(
+                    source_indexes,
+                )
+                > 1
+            ):
+                logger.info(
+                    (
+                        "normative_candidate_exact_duplicates_consolidated "
+                        "page=%s finding_id=%s raw_candidate_indexes=%s "
+                        "raw_candidate_count=%s"
+                    ),
+                    page_number,
+                    finding_id,
+                    source_indexes,
+                    len(
+                        source_indexes,
+                    ),
+                )
+
             requested_normative_ids = string_tuple(
                 violation.get(
                     "normative_source_ids",
@@ -355,16 +398,15 @@ class CheckPageAgainstNorms:
                     (
                         "normative_candidate_source_ids_"
                         "detached "
-                        "page=%s candidate=%s "
+                        "page=%s finding_id=%s "
+                        "raw_candidate_indexes=%s "
                         "normative=%s "
                         "technical_assignment=%s "
                         "user_package=%s"
                     ),
                     page_number,
-                    len(
-                        findings,
-                    )
-                    + 1,
+                    finding_id,
+                    source_indexes,
                     detached_normative_ids,
                     (detached_technical_assignment_ids),
                     detached_user_package_ids,
@@ -396,8 +438,6 @@ class CheckPageAgainstNorms:
                     "",
                 )
             ).strip()
-
-            finding_id = f"p{page_number}-f{len(findings) + 1}"
 
             finding_category = category(
                 violation.get(
@@ -483,21 +523,19 @@ class CheckPageAgainstNorms:
 
         logger.info(
             (
-                "normative_findings_preserved "
-                "page=%s candidates=%s "
-                "findings=%s lossless=%s"
+                "normative_findings_consolidated "
+                "page=%s raw_candidates=%s findings=%s "
+                "duplicates=%s represented=%s "
+                "provenance_lossless=%s"
             ),
             page_number,
-            candidate_selection.preserved_count,
+            candidate_selection.generated_count,
             len(
                 findings,
             ),
-            (
-                candidate_selection.preserved_count
-                == len(
-                    findings,
-                )
-            ),
+            candidate_selection.duplicate_count,
+            candidate_selection.represented_count,
+            provenance_lossless,
         )
 
         return (
