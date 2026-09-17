@@ -46,6 +46,19 @@ class AnalysisJobModel(Base):
             name="ck_analysis_jobs_status",
         ),
         CheckConstraint(
+            "progress_stage IS NULL OR progress_stage IN ("
+            "'extracting_sources', "
+            "'preparing_context', "
+            "'understanding_sheet', "
+            "'retrieving_requirements', "
+            "'checking_requirements', "
+            "'enriching_findings', "
+            "'finalizing_findings', "
+            "'building_result'"
+            ")",
+            name="ck_analysis_jobs_progress_stage",
+        ),
+        CheckConstraint(
             "attempt_count >= 0",
             name="ck_analysis_jobs_attempt_count",
         ),
@@ -101,6 +114,13 @@ class AnalysisJobModel(Base):
         server_default=text(
             "'pending'",
         ),
+    )
+
+    progress_stage: Mapped[str | None] = mapped_column(
+        String(
+            64,
+        ),
+        nullable=True,
     )
 
     attempt_count: Mapped[int] = mapped_column(

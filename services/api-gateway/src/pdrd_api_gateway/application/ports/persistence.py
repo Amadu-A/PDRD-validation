@@ -36,6 +36,22 @@ class AnalysisJobRepository(Protocol):
         """Возвращает job с PostgreSQL row lock."""
         ...
 
+    async def get_by_document_id_for_update(
+        self,
+        document_id: UUID,
+    ) -> AnalysisJob | None:
+        """Возвращает job по document_id с PostgreSQL row lock."""
+        ...
+
+    async def count_waiting_before(
+        self,
+        *,
+        created_at: datetime,
+        job_id: UUID,
+    ) -> int:
+        """Считает pending/queued jobs раньше указанного задания."""
+        ...
+
     async def get_recoverable(
         self,
         *,

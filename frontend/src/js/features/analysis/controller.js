@@ -42,23 +42,85 @@ export function createAnalysisController({
   modal,
   resultView,
 }) {
+  function progressDescription(
+    payload,
+  ) {
+    const progress = payload.progress;
+
+    if (!progress) {
+      return statusLabel(
+        payload.status,
+      );
+    }
+
+    if (
+      progress.queue_position !== null
+      && progress.queue_position !== undefined
+    ) {
+      return (
+        `${progress.message} `
+        + `Вы ${progress.queue_position}-й в очереди.`
+      );
+    }
+
+    if (
+      Number(progress.current) > 0
+      && Number(progress.total) > 0
+      && payload.status === "processing"
+    ) {
+      return (
+        `${progress.message} `
+        + `Этап ${progress.current} из ${progress.total}.`
+      );
+    }
+
+    return progress.message;
+  }
+
+
   function renderProgress(
     jobId,
     payload,
     elapsedSeconds,
   ) {
+    const description = progressDescription(
+      payload,
+    );
+
     const status = statusLabel(
       payload.status,
     );
 
     modal.show(
-      `${status}. Прошло ${elapsedSeconds} сек.`,
+      `${description} Прошло ${elapsedSeconds} сек.`,
+    );
+
+    const progress = payload.progress;
+
+    const queueLine = (
+      progress?.queue_position
+        ? `\nМесто в очереди: ${progress.queue_position}`
+        : ""
+    );
+
+    const stageLine = (
+      progress
+      && Number(progress.current) > 0
+      && Number(progress.total) > 0
+        ? (
+          `\nЭтап: ${progress.current}`
+          + ` из ${progress.total}`
+        )
+        : ""
     );
 
     resultView.show(
       `Задание: ${jobId}\n`
       + `Статус: ${status}\n`
-      + `Попытка worker: ${payload.attempt_count ?? 0}\n`
+      + `Сейчас: ${description}`
+      + stageLine
+      + queueLine
+      + `\nПопытка worker: ${payload.attempt_count ?? 0}\n`
       + `Прошло: ${elapsedSeconds} сек.`,
     );
   }

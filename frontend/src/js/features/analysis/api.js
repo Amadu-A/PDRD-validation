@@ -116,12 +116,40 @@ export async function submitAnalysis(
 }
 
 
-export async function getAnalysisStatus(
+export async function getAnalysisProgress(
   jobId,
 ) {
   return fetchJson(
+    `${ANALYSES_ENDPOINT}/${jobId}/progress`,
+  );
+}
+
+
+export async function getAnalysisStatus(
+  jobId,
+) {
+  const statusPayload = await fetchJson(
     `${ANALYSES_ENDPOINT}/${jobId}`,
   );
+
+  let progress = null;
+
+  try {
+    progress = await getAnalysisProgress(
+      jobId,
+    );
+
+  } catch (error) {
+    console.warn(
+      "Не удалось получить analysis progress.",
+      error,
+    );
+  }
+
+  return {
+    ...statusPayload,
+    progress,
+  };
 }
 
 

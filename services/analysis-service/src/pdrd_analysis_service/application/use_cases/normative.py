@@ -35,7 +35,7 @@ from pdrd_analysis_service.domain.analysis import (
 )
 
 logger = logging.getLogger(
-    __name__,
+    "uvicorn.error",
 )
 
 _HIGH_RECALL_FINDING_POLICY = """
@@ -251,7 +251,7 @@ class CheckPageAgainstNorms:
         result = await self.vision_model.generate_json(
             prompt=(f"{prompt}\n\n{_HIGH_RECALL_FINDING_POLICY}"),
             schema=build_normative_check_schema(
-                source_ids=(normative_source_ids),
+                source_ids=normative_source_ids,
                 technical_assignment_source_ids=(technical_assignment_source_ids),
                 user_package_source_ids=(user_package_source_ids),
                 max_issues=self.max_issues,
@@ -303,7 +303,10 @@ class CheckPageAgainstNorms:
 
         findings: list[FindingDraft] = []
 
-        for violation, source_indexes in zip(
+        for (
+            violation,
+            source_indexes,
+        ) in zip(
             candidate_selection.candidates,
             candidate_selection.source_indexes_by_candidate,
             strict=True,
@@ -312,16 +315,13 @@ class CheckPageAgainstNorms:
 
             finding_id = f"p{page_number}-f{representative_index}"
 
-            if (
-                len(
-                    source_indexes,
-                )
-                > 1
-            ):
+            if len(source_indexes) > 1:
                 logger.info(
                     (
-                        "normative_candidate_exact_duplicates_consolidated "
-                        "page=%s finding_id=%s raw_candidate_indexes=%s "
+                        "normative_candidate_exact_duplicates_"
+                        "consolidated "
+                        "page=%s finding_id=%s "
+                        "raw_candidate_indexes=%s "
                         "raw_candidate_count=%s"
                     ),
                     page_number,
@@ -408,13 +408,13 @@ class CheckPageAgainstNorms:
                     finding_id,
                     source_indexes,
                     detached_normative_ids,
-                    (detached_technical_assignment_ids),
+                    detached_technical_assignment_ids,
                     detached_user_package_ids,
                 )
 
             selected_any_source = bool(
                 selected_normative_sources
-                or (selected_technical_assignment_sources)
+                or selected_technical_assignment_sources
                 or selected_user_package_sources
             )
 
@@ -474,7 +474,7 @@ class CheckPageAgainstNorms:
                 FindingDraft(
                     finding_id=finding_id,
                     page=page_number,
-                    page_type=(page_facts.page_type),
+                    page_type=page_facts.page_type,
                     category=finding_category,
                     severity=severity(
                         violation.get(
@@ -499,7 +499,7 @@ class CheckPageAgainstNorms:
                     basis_sources=(selected_normative_sources),
                     experience_query=(
                         build_experience_query(
-                            category=(finding_category),
+                            category=finding_category,
                             comment=comment,
                             evidence=evidence,
                             recommendation_draft=(recommendation_draft),

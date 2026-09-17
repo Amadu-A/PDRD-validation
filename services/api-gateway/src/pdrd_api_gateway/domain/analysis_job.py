@@ -33,6 +33,70 @@ class AnalysisJobStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class AnalysisProgressStage(StrEnum):
+    """Стабильные пользовательские этапы analysis pipeline."""
+
+    EXTRACTING_SOURCES = "extracting_sources"
+    PREPARING_CONTEXT = "preparing_context"
+    UNDERSTANDING_SHEET = "understanding_sheet"
+    RETRIEVING_REQUIREMENTS = "retrieving_requirements"
+    CHECKING_REQUIREMENTS = "checking_requirements"
+    ENRICHING_FINDINGS = "enriching_findings"
+    FINALIZING_FINDINGS = "finalizing_findings"
+    BUILDING_RESULT = "building_result"
+
+    @property
+    def current(
+        self,
+    ) -> int:
+        """Возвращает порядковый номер этапа."""
+        return _PROGRESS_STAGE_ORDER[self]
+
+    @property
+    def message(
+        self,
+    ) -> str:
+        """Возвращает человекочитаемое описание этапа."""
+        return _PROGRESS_STAGE_MESSAGES[self]
+
+
+ANALYSIS_PROGRESS_TOTAL = 8
+
+_PROGRESS_STAGE_ORDER = {
+    AnalysisProgressStage.EXTRACTING_SOURCES: 1,
+    AnalysisProgressStage.PREPARING_CONTEXT: 2,
+    AnalysisProgressStage.UNDERSTANDING_SHEET: 3,
+    AnalysisProgressStage.RETRIEVING_REQUIREMENTS: 4,
+    AnalysisProgressStage.CHECKING_REQUIREMENTS: 5,
+    AnalysisProgressStage.ENRICHING_FINDINGS: 6,
+    AnalysisProgressStage.FINALIZING_FINDINGS: 7,
+    AnalysisProgressStage.BUILDING_RESULT: 8,
+}
+
+_PROGRESS_STAGE_MESSAGES = {
+    AnalysisProgressStage.EXTRACTING_SOURCES: (
+        "Извлекаю данные из загруженных документов…"
+    ),
+    AnalysisProgressStage.PREPARING_CONTEXT: (
+        "Готовлю контекст проекта и исходные данные…"
+    ),
+    AnalysisProgressStage.UNDERSTANDING_SHEET: (
+        "Разбираю структуру, объекты и связи на листе…"
+    ),
+    AnalysisProgressStage.RETRIEVING_REQUIREMENTS: (
+        "Подбираю применимые нормативные требования…"
+    ),
+    AnalysisProgressStage.CHECKING_REQUIREMENTS: (
+        "Сверяю проектное решение с требованиями…"
+    ),
+    AnalysisProgressStage.ENRICHING_FINDINGS: (
+        "Уточняю нормативные основания замечаний…"
+    ),
+    AnalysisProgressStage.FINALIZING_FINDINGS: ("Формирую итоговые замечания…"),
+    AnalysisProgressStage.BUILDING_RESULT: ("Собираю итоговый результат анализа…"),
+}
+
+
 class InvalidAnalysisJobTransitionError(ValueError):
     """Ошибка недопустимого перехода между состояниями задания."""
 
@@ -89,6 +153,8 @@ class AnalysisJob:
 
     status: AnalysisJobStatus = AnalysisJobStatus.PENDING
 
+    progress_stage: AnalysisProgressStage | None = None
+
     attempt_count: int = 0
 
     error_code: str | None = None
@@ -135,6 +201,7 @@ class AnalysisJob:
         self.attempt_count += 1
         self.error_code = None
         self.error_message = None
+        self.progress_stage = None
 
     def resume_processing_attempt(
         self,
@@ -148,7 +215,32 @@ class AnalysisJob:
         self.attempt_count += 1
         self.error_code = None
         self.error_message = None
+        self.progress_stage = None
         self.updated_at = utc_now()
+
+    def update_progress(
+        self,
+        *,
+        stage: AnalysisProgressStage,
+    ) -> bool:
+        """Обновляет progress только вперёд.
+
+        Late callback предыдущего этапа не имеет права откатить
+        пользовательский progress назад.
+        """
+        if self.status is not AnalysisJobStatus.PROCESSING:
+            return False
+
+        if (
+            self.progress_stage is not None
+            and stage.current < self.progress_stage.current
+        ):
+            return False
+
+        self.progress_stage = stage
+        self.updated_at = utc_now()
+
+        return True
 
     def mark_requeued(
         self,
@@ -161,6 +253,7 @@ class AnalysisJob:
             AnalysisJobStatus.QUEUED,
         )
 
+        self.progress_stage = None
         self.error_code = error_code[:128]
         self.error_message = error_message[:2000]
 

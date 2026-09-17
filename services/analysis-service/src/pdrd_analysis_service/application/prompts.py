@@ -14,6 +14,80 @@ from pdrd_analysis_service.domain.analysis import (
     UserPackageSource,
 )
 
+_COMBINED_PDF_MARKER = "[PDF_TEXT]"
+_COMBINED_CAD_MARKER = "[CAD_MACHINE_CONTEXT]"
+
+COMBINED_MODE_SEMANTICS = """
+--- PDF + CAD COMBINED MODE ---
+
+PDF и CAD являются ДВУМЯ ПРЕДСТАВЛЕНИЯМИ
+ОДНОГО И ТОГО ЖЕ логического инженерного листа.
+
+Это НЕ два независимых проектных документа.
+
+PDF:
+- является основным пользовательским представлением листа;
+- задаёт визуальный контекст документа;
+- используется для итоговой локализации замечаний;
+- содержит печатное представление текста и графики.
+
+CAD:
+- является дополнительным machine-readable представлением
+  того же инженерного решения;
+- используется для уточнения геометрии;
+- используется для уточнения линий и соединений;
+- используется для чтения блоков, атрибутов и текстов;
+- помогает понять элементы, которые плохо различимы на PDF.
+
+КРИТИЧЕСКИ ВАЖНО:
+
+- НЕ создавай finding только потому,
+  что PDF-render и CAD-render визуально отличаются;
+
+- различия шрифтов, толщины линий, слоёв,
+  масштаба, цвета, способа рендера и видимости
+  сами по себе НЕ являются ошибкой;
+
+- CAD не является нормативным источником;
+
+- CAD не может создавать N/T/U source_id;
+
+- факт из CAD можно использовать как инженерное evidence
+  того же листа, но нормативное подтверждение нарушения
+  по-прежнему возможно только через N-source;
+
+- сначала сформируй единое понимание инженерного решения
+  по PDF + CAD, затем проверяй это решение;
+
+- если PDF и CAD действительно противоречат друг другу
+  в отношении ОДНОГО И ТОГО ЖЕ объекта, соединения,
+  маркировки или параметра, допустим engineering finding
+  со status=needs_review;
+
+- само противоречие PDF/CAD НЕ является нормативным
+  нарушением без применимого N-source.
+
+На объединённом изображении:
+- слева находится PDF;
+- справа находится CAD-render.
+
+--- END PDF + CAD COMBINED MODE ---
+""".strip()
+
+
+def _combined_mode_instruction(
+    extracted_text: str,
+) -> str:
+    """Возвращает semantics только для combined PDF+CAD context."""
+    if (
+        _COMBINED_PDF_MARKER in extracted_text
+        and _COMBINED_CAD_MARKER in extracted_text
+    ):
+        return COMBINED_MODE_SEMANTICS
+
+    return ""
+
+
 NORMATIVE_SUPER_SYSTEM_PROMPT = """
 Ты — неизменяемый модуль инженерной проверки PDRD.
 
@@ -77,6 +151,23 @@ PAGE TEXT и PAGE FACTS даже в случае,
   или другого обозначения в таблице
   само по себе не является ошибкой только потому,
   что обозначение присутствует на схеме;
+
+- обозначения электрических сетей, потенциалов,
+  сигналов и интерфейсов вроде
+  "24V DC", "AC OK", "GND", "+V", "-V",
+  "A/DATA-", "B/DATA+" НЕ являются автоматически
+  позиционными обозначениями оборудования;
+
+- не требуй наличия таких обозначений
+  в "Перечне элементов", если назначение и колонки
+  этой таблицы не требуют их перечисления;
+
+- перед утверждением, что оборудование отсутствует
+  в таблице, повторно проверь саму таблицу,
+  её строки и позиционное обозначение;
+
+- если элемент уже присутствует в таблице,
+  не создавай finding о его отсутствии;
 
 - сначала убедись, что по назначению,
   заголовкам, колонкам и структуре таблицы
@@ -339,12 +430,18 @@ def build_page_understanding_prompt(
     extracted_text: str,
 ) -> str:
     """Формирует промпт объективного понимания листа."""
+    combined_mode = _combined_mode_instruction(
+        extracted_text,
+    )
+
     return f"""
 Ты анализируешь один лист российской проектной
 или рабочей документации.
 
 Физическая страница: {page_number}
 Предварительный тип листа: {heuristic_page_type}
+
+{combined_mode}
 
 Извлечённый текст:
 
@@ -433,8 +530,8 @@ def build_normative_check_prompt(
         {
             "source_id": source.source_id,
             "score": source.score,
-            "technical_assignment_id": source.technical_assignment_id,
-            "analysis_document_id": source.analysis_document_id,
+            "technical_assignment_id": (source.technical_assignment_id),
+            "analysis_document_id": (source.analysis_document_id),
             "section_id": source.section_id,
             "source_sha256": source.source_sha256,
             "source_file": source.source_file,
@@ -527,8 +624,14 @@ def build_normative_check_prompt(
         else LEGACY_SECTION_SYSTEM_PROMPT
     )
 
+    combined_mode = _combined_mode_instruction(
+        extracted_text,
+    )
+
     return f"""
 {NORMATIVE_SUPER_SYSTEM_PROMPT}
+
+{combined_mode}
 
 --- ACTIVE SECTION SYSTEM PROMPT ---
 {active_section_prompt}
@@ -588,7 +691,7 @@ def build_experience_query(
             f"Категория: {category}",
             f"Замечание: {comment}",
             f"Факт на листе: {evidence}",
-            f"Черновая рекомендация: {recommendation_draft}",
+            (f"Черновая рекомендация: {recommendation_draft}"),
         ]
     ).strip()
 
@@ -631,8 +734,8 @@ def build_finalization_prompt(
                 "verified_fixed": source.verified_fixed,
                 "before_page": source.before_page,
                 "after_page": source.after_page,
-                "before_context": source.before_context[:experience_context_limit],
-                "after_context": source.after_context[:experience_context_limit],
+                "before_context": (source.before_context[:experience_context_limit]),
+                "after_context": (source.after_context[:experience_context_limit]),
             }
             for source in experience_by_finding.get(
                 finding.finding_id,
@@ -655,11 +758,11 @@ def build_finalization_prompt(
         technical_assignment_basis = [
             {
                 "source_id": source.source_id,
-                "technical_assignment_id": source.technical_assignment_id,
+                "technical_assignment_id": (source.technical_assignment_id),
                 "source_file": source.source_file,
                 "page": source.page,
             }
-            for source in finding.technical_assignment_basis_sources
+            for source in (finding.technical_assignment_basis_sources)
         ]
 
         user_package_basis = [
@@ -668,7 +771,7 @@ def build_finalization_prompt(
                 "source_file": source.source_file,
                 "page": source.page,
             }
-            for source in finding.user_package_basis_sources
+            for source in (finding.user_package_basis_sources)
         ]
 
         findings_payload.append(
@@ -679,12 +782,12 @@ def build_finalization_prompt(
                     "status": finding.status,
                     "comment": finding.comment,
                     "evidence": finding.evidence,
-                    "recommendation_draft": finding.recommendation_draft,
-                    "normative_basis": normative_basis,
-                    "technical_assignment_basis": technical_assignment_basis,
-                    "user_package_basis": user_package_basis,
+                    "recommendation_draft": (finding.recommendation_draft),
+                    "normative_basis": (normative_basis),
+                    "technical_assignment_basis": (technical_assignment_basis),
+                    "user_package_basis": (user_package_basis),
                 },
-                "experience_examples": experience_examples,
+                "experience_examples": (experience_examples),
             }
         )
 
@@ -706,7 +809,7 @@ def build_finalization_prompt(
     data_json = json.dumps(
         {
             "findings": findings_payload,
-            "normative_candidates": normative_candidates_payload,
+            "normative_candidates": (normative_candidates_payload),
         },
         ensure_ascii=False,
         separators=(

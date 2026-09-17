@@ -696,6 +696,206 @@
         4200,
         800
       ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'extracting_sources' }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "8a200000-0000-4000-8000-000000000001",
+      "name": "Progress Extract Sources",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1780,
+        1180
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'preparing_context' }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "8a200000-0000-4000-8000-000000000002",
+      "name": "Progress Prepare Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1360,
+        1180
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'understanding_sheet' }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "8a200000-0000-4000-8000-000000000003",
+      "name": "Progress Understand Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -940,
+        1180
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'retrieving_requirements' }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "8a200000-0000-4000-8000-000000000004",
+      "name": "Progress Retrieve Requirements",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -520,
+        1180
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'checking_requirements' }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "8a200000-0000-4000-8000-000000000005",
+      "name": "Progress Check Requirements",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -100,
+        1180
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'enriching_findings' }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "8a200000-0000-4000-8000-000000000006",
+      "name": "Progress Enrich Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        1180
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'finalizing_findings' }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "8a200000-0000-4000-8000-000000000007",
+      "name": "Progress Finalize Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        1180
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'building_result' }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "8a200000-0000-4000-8000-000000000008",
+      "name": "Progress Build Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1160,
+        1180
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 500,
+      "onError": "continueRegularOutput"
     }
   ],
   "pinData": {},
@@ -707,6 +907,11 @@
             "node": "Document Extract PDF",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Progress Extract Sources",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -716,6 +921,11 @@
         [
           {
             "node": "Persist Visualization Artifact",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Progress Prepare Context",
             "type": "main",
             "index": 0
           }
@@ -760,6 +970,11 @@
         [
           {
             "node": "Understand Page",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Progress Understand Sheet",
             "type": "main",
             "index": 0
           }
@@ -850,6 +1065,11 @@
             "node": "Check Norms",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Progress Check Requirements",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -916,6 +1136,11 @@
             "node": "Finalize Findings",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Progress Finalize Findings",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -925,6 +1150,11 @@
         [
           {
             "node": "Build Page Result",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Progress Build Result",
             "type": "main",
             "index": 0
           }
@@ -1029,6 +1259,11 @@
             "node": "Build Project Context Query",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Progress Retrieve Requirements",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -1038,6 +1273,11 @@
         [
           {
             "node": "Prepare Finding Normative Queries",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Progress Enrich Findings",
             "type": "main",
             "index": 0
           }
