@@ -25,6 +25,9 @@ from pdrd_api_gateway.application.ports.technical_assignment_content import (
 from pdrd_api_gateway.application.ports.technical_assignment_index import (
     TechnicalAssignmentIndexCoordinator,
 )
+from pdrd_api_gateway.application.use_cases.cancel_analysis_job import (
+    CancelAnalysisJob,
+)
 from pdrd_api_gateway.application.use_cases.check_readiness import (
     CheckReadiness,
 )
@@ -123,6 +126,8 @@ class ApplicationContainer:
 
     get_analysis_visualization: GetAnalysisVisualization | None = None
 
+    cancel_analysis_job: CancelAnalysisJob | None = None
+
     update_analysis_progress: UpdateAnalysisProgress | None = None
 
     submit_analysis: SubmitAnalysis | None = None
@@ -190,6 +195,10 @@ def build_container() -> ApplicationContainer:
     )
 
     get_analysis_job = GetAnalysisJob(
+        unit_of_work_factory=unit_of_work_factory,
+    )
+
+    cancel_analysis_job = CancelAnalysisJob(
         unit_of_work_factory=unit_of_work_factory,
     )
 
@@ -297,6 +306,7 @@ def build_container() -> ApplicationContainer:
         get_analysis_job=get_analysis_job,
         get_analysis_result=get_analysis_result,
         get_analysis_visualization=(get_analysis_visualization),
+        cancel_analysis_job=cancel_analysis_job,
         update_analysis_progress=(update_analysis_progress),
         submit_analysis=submit_analysis,
         artifact_store=artifact_store,
