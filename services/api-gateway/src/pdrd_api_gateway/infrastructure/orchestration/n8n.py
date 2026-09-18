@@ -231,7 +231,7 @@ class N8nAnalysisOrchestrator:
                     str(
                         document_id,
                     )
-                    for document_id in (snapshot.user_package_document_ids)
+                    for document_id in snapshot.user_package_document_ids
                 ],
                 ensure_ascii=False,
                 separators=(
@@ -242,9 +242,15 @@ class N8nAnalysisOrchestrator:
 
             data["normative_system_prompt"] = snapshot.system_prompt
 
-            if snapshot.technical_assignment is not None:
+            technical_assignment = snapshot.technical_assignment
+
+            if technical_assignment is not None:
                 data["technical_assignment_id"] = str(
-                    snapshot.technical_assignment.technical_assignment_id,
+                    technical_assignment.technical_assignment_id,
+                )
+
+                data["technical_assignment_analysis_document_id"] = str(
+                    technical_assignment.analysis_document_id,
                 )
 
         return data

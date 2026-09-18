@@ -8,7 +8,10 @@ from uuid import UUID
 from pdrd_api_gateway.application.ports.persistence import (
     UnitOfWorkFactory,
 )
-from pdrd_api_gateway.domain.analysis_job import AnalysisJob
+from pdrd_api_gateway.domain.analysis_job import (
+    AnalysisJob,
+    AnalysisJobStatus,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,3 +30,23 @@ class GetAnalysisJob:
             return await unit_of_work.analysis_jobs.get(
                 job_id,
             )
+
+    async def queue_position(
+        self,
+        *,
+        job: AnalysisJob,
+    ) -> int | None:
+        """Возвращает 1-based позицию только для ожидающего job."""
+        if job.status not in {
+            AnalysisJobStatus.PENDING,
+            AnalysisJobStatus.QUEUED,
+        }:
+            return None
+
+        async with self.unit_of_work_factory() as unit_of_work:
+            waiting_before = await unit_of_work.analysis_jobs.count_waiting_before(
+                created_at=job.created_at,
+                job_id=job.id,
+            )
+
+        return waiting_before + 1

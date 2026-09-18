@@ -2,6 +2,7 @@
 
 """Use case lazy-визуализации завершённого анализа."""
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -13,9 +14,11 @@ from pdrd_api_gateway.application.ports.analysis_visualization import (
     AnalysisFindingLocation,
     AnalysisFindingLocator,
     AnalysisFindingTarget,
+    AnalysisPagePreview,
     AnalysisPdfPageRenderer,
 )
 from pdrd_api_gateway.application.ports.artifacts import (
+    AnalysisArtifactStorageError,
     AnalysisArtifactStore,
 )
 from pdrd_api_gateway.application.use_cases.get_analysis_job import (
@@ -23,6 +26,10 @@ from pdrd_api_gateway.application.use_cases.get_analysis_job import (
 )
 from pdrd_api_gateway.domain.analysis_job import (
     AnalysisJobStatus,
+)
+
+logger = logging.getLogger(
+    "uvicorn.error",
 )
 
 
@@ -46,7 +53,7 @@ class AnalysisVisualizationUnavailableError(
 
 @dataclass(frozen=True, slots=True)
 class GetAnalysisVisualization:
-    """Рендерит PDF и гибридно локализует готовые findings."""
+    """Читает reusable preview и гибридно локализует готовые findings."""
 
     get_analysis_job: GetAnalysisJob
 
@@ -117,17 +124,12 @@ class GetAnalysisVisualization:
                 "Completed analysis result отсутствует.",
             )
 
-        try:
-            pages = await self.pdf_page_renderer.render(
-                pdf_content=(artifacts.pdf_content),
-                file_name=(artifacts.submission.pdf_file_name or "document.pdf"),
-                page_spec=(artifacts.submission.pages),
-            )
-
-        except Exception as error:
-            raise AnalysisVisualizationUnavailableError(
-                "Не удалось подготовить PDF-preview.",
-            ) from error
+        pages = await self._load_or_render_pages(
+            document_id=(job.document_id),
+            pdf_content=(artifacts.pdf_content),
+            file_name=(artifacts.submission.pdf_file_name or "document.pdf"),
+            page_spec=(artifacts.submission.pages),
+        )
 
         raw_findings = result.get(
             "findings",
@@ -230,6 +232,99 @@ class GetAnalysisVisualization:
             ),
             "pages": page_payloads,
         }
+
+    async def _load_or_render_pages(
+        self,
+        *,
+        document_id: UUID,
+        pdf_content: bytes,
+        file_name: str,
+        page_spec: str | None,
+    ) -> tuple[
+        AnalysisPagePreview,
+        ...,
+    ]:
+        """Читает Stage 7 artifact, а для legacy/corrupt job делает fallback."""
+        try:
+            pages = await self.artifact_store.load_visualization(
+                document_id=document_id,
+            )
+
+        except AnalysisArtifactStorageError as error:
+            logger.warning(
+                (
+                    "analysis_visualization_artifact "
+                    "cache_hit=false corrupt=true document_id=%s error=%s"
+                ),
+                document_id,
+                error,
+            )
+
+            pages = None
+
+        if pages is not None:
+            logger.info(
+                (
+                    "analysis_visualization_artifact "
+                    "cache_hit=true document_id=%s pages=%s"
+                ),
+                document_id,
+                len(
+                    pages,
+                ),
+            )
+
+            return pages
+
+        try:
+            pages = await self.pdf_page_renderer.render(
+                pdf_content=pdf_content,
+                file_name=file_name,
+                page_spec=page_spec,
+            )
+
+        except Exception as error:
+            raise AnalysisVisualizationUnavailableError(
+                "Не удалось подготовить PDF-preview.",
+            ) from error
+
+        try:
+            await self.artifact_store.save_visualization(
+                document_id=document_id,
+                pages=pages,
+            )
+
+        except AnalysisArtifactStorageError as error:
+            logger.warning(
+                (
+                    "analysis_visualization_artifact "
+                    "fallback_persisted=false document_id=%s error=%s"
+                ),
+                document_id,
+                error,
+            )
+
+        else:
+            logger.info(
+                (
+                    "analysis_visualization_artifact "
+                    "fallback_persisted=true document_id=%s pages=%s"
+                ),
+                document_id,
+                len(
+                    pages,
+                ),
+            )
+
+        logger.info(
+            ("analysis_visualization_artifact cache_hit=false document_id=%s pages=%s"),
+            document_id,
+            len(
+                pages,
+            ),
+        )
+
+        return pages
 
     @staticmethod
     def _merge_location(

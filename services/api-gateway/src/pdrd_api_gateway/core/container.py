@@ -13,11 +13,20 @@ from pathlib import Path
 from pdrd_api_gateway.application.finding_anchor_matcher import (
     FindingAnchorMatcher,
 )
+from pdrd_api_gateway.application.ports.artifacts import (
+    AnalysisArtifactStore,
+)
+from pdrd_api_gateway.application.ports.project_context_preflight import (
+    ProjectContextPreflightCoordinator,
+)
 from pdrd_api_gateway.application.ports.technical_assignment_content import (
     TechnicalAssignmentContentReader,
 )
 from pdrd_api_gateway.application.ports.technical_assignment_index import (
     TechnicalAssignmentIndexCoordinator,
+)
+from pdrd_api_gateway.application.use_cases.cancel_analysis_job import (
+    CancelAnalysisJob,
 )
 from pdrd_api_gateway.application.use_cases.check_readiness import (
     CheckReadiness,
@@ -45,6 +54,9 @@ from pdrd_api_gateway.application.use_cases.resolve_normative_snapshot import (
 )
 from pdrd_api_gateway.application.use_cases.submit_analysis import (
     SubmitAnalysis,
+)
+from pdrd_api_gateway.application.use_cases.update_analysis_progress import (
+    UpdateAnalysisProgress,
 )
 from pdrd_api_gateway.core.settings import (
     Settings,
@@ -79,6 +91,9 @@ from pdrd_api_gateway.infrastructure.messaging.broker import (
     RabbitMqReadinessProbe,
     build_broker_url,
 )
+from pdrd_api_gateway.infrastructure.project_context_preflight import (
+    HttpProjectContextPreflightCoordinator,
+)
 from pdrd_api_gateway.infrastructure.storage.filesystem import (
     LocalFilesystemAnalysisArtifactStore,
 )
@@ -111,7 +126,13 @@ class ApplicationContainer:
 
     get_analysis_visualization: GetAnalysisVisualization | None = None
 
+    cancel_analysis_job: CancelAnalysisJob | None = None
+
+    update_analysis_progress: UpdateAnalysisProgress | None = None
+
     submit_analysis: SubmitAnalysis | None = None
+
+    artifact_store: AnalysisArtifactStore | None = None
 
     normative_catalog: NormativeCatalogFacade | None = None
 
@@ -122,6 +143,8 @@ class ApplicationContainer:
     technical_assignment_index_coordinator: (
         TechnicalAssignmentIndexCoordinator | None
     ) = None
+
+    project_context_preflight: ProjectContextPreflightCoordinator | None = None
 
     async def close(
         self,
@@ -168,11 +191,19 @@ def build_container() -> ApplicationContainer:
     )
 
     create_analysis_job = CreateAnalysisJob(
-        unit_of_work_factory=(unit_of_work_factory),
+        unit_of_work_factory=unit_of_work_factory,
     )
 
     get_analysis_job = GetAnalysisJob(
-        unit_of_work_factory=(unit_of_work_factory),
+        unit_of_work_factory=unit_of_work_factory,
+    )
+
+    cancel_analysis_job = CancelAnalysisJob(
+        unit_of_work_factory=unit_of_work_factory,
+    )
+
+    update_analysis_progress = UpdateAnalysisProgress(
+        unit_of_work_factory=unit_of_work_factory,
     )
 
     artifact_store = LocalFilesystemAnalysisArtifactStore(
@@ -182,27 +213,27 @@ def build_container() -> ApplicationContainer:
     )
 
     normative_catalog_reader = HttpNormativeCatalogReader(
-        settings=(settings.knowledge_service),
+        settings=settings.knowledge_service,
     )
 
     normative_catalog_manager = HttpNormativeCatalogManager(
-        settings=(settings.knowledge_service),
+        settings=settings.knowledge_service,
     )
 
     normative_catalog = NormativeCatalogFacade(
-        manager=(normative_catalog_manager),
+        manager=normative_catalog_manager,
     )
 
     user_package_catalog_manager = HttpUserPackageCatalogManager(
-        settings=(settings.knowledge_service),
+        settings=settings.knowledge_service,
     )
 
     user_package_catalog = UserPackageCatalogFacade(
-        manager=(user_package_catalog_manager),
+        manager=user_package_catalog_manager,
     )
 
     technical_assignment_content_reader = HttpTechnicalAssignmentContentReader(
-        settings=(settings.knowledge_service),
+        settings=settings.knowledge_service,
     )
 
     technical_assignment_index_coordinator = (
@@ -224,37 +255,44 @@ def build_container() -> ApplicationContainer:
     )
 
     resolve_normative_snapshot = ResolveNormativeSnapshot(
-        catalog_reader=(normative_catalog_reader),
-        user_package_reader=(user_package_catalog_manager),
+        catalog_reader=normative_catalog_reader,
+        user_package_reader=user_package_catalog_manager,
     )
 
     submit_analysis = SubmitAnalysis(
         artifact_store=artifact_store,
-        create_analysis_job=(create_analysis_job),
-        resolve_normative_snapshot=(resolve_normative_snapshot),
+        create_analysis_job=create_analysis_job,
+        resolve_normative_snapshot=resolve_normative_snapshot,
     )
 
     get_analysis_result = GetAnalysisResult(
-        get_analysis_job=(get_analysis_job),
-        artifact_store=(artifact_store),
+        get_analysis_job=get_analysis_job,
+        artifact_store=artifact_store,
     )
 
     pdf_page_renderer = DocumentServiceAnalysisPdfPageRenderer(
-        settings=(settings.document_service),
+        settings=settings.document_service,
     )
 
     finding_locator = HttpAnalysisFindingLocator(
-        settings=(settings.analysis_service),
+        settings=settings.analysis_service,
     )
 
     anchor_matcher = FindingAnchorMatcher()
 
     get_analysis_visualization = GetAnalysisVisualization(
-        get_analysis_job=(get_analysis_job),
-        artifact_store=(artifact_store),
-        pdf_page_renderer=(pdf_page_renderer),
-        finding_locator=(finding_locator),
-        anchor_matcher=(anchor_matcher),
+        get_analysis_job=get_analysis_job,
+        artifact_store=artifact_store,
+        pdf_page_renderer=pdf_page_renderer,
+        finding_locator=finding_locator,
+        anchor_matcher=anchor_matcher,
+    )
+
+    project_context_preflight = HttpProjectContextPreflightCoordinator(
+        document_service=settings.document_service,
+        analysis_service=settings.analysis_service,
+        knowledge_service=settings.knowledge_service,
+        settings=settings.project_context_preflight,
     )
 
     async def _shutdown_database() -> None:
@@ -263,14 +301,18 @@ def build_container() -> ApplicationContainer:
     return ApplicationContainer(
         settings=settings,
         check_readiness=check_readiness,
-        shutdown_callback=(_shutdown_database),
-        create_analysis_job=(create_analysis_job),
-        get_analysis_job=(get_analysis_job),
-        get_analysis_result=(get_analysis_result),
+        shutdown_callback=_shutdown_database,
+        create_analysis_job=create_analysis_job,
+        get_analysis_job=get_analysis_job,
+        get_analysis_result=get_analysis_result,
         get_analysis_visualization=(get_analysis_visualization),
-        submit_analysis=(submit_analysis),
-        normative_catalog=(normative_catalog),
-        user_package_catalog=(user_package_catalog),
+        cancel_analysis_job=cancel_analysis_job,
+        update_analysis_progress=(update_analysis_progress),
+        submit_analysis=submit_analysis,
+        artifact_store=artifact_store,
+        normative_catalog=normative_catalog,
+        user_package_catalog=user_package_catalog,
         technical_assignment_content_reader=(technical_assignment_content_reader),
         technical_assignment_index_coordinator=(technical_assignment_index_coordinator),
+        project_context_preflight=(project_context_preflight),
     )

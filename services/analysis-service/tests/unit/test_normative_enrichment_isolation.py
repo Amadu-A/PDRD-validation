@@ -49,6 +49,13 @@ class FakeVisionModel:
 
         self.prompts: list[str] = []
 
+        self.schemas: list[
+            dict[
+                str,
+                Any,
+            ]
+        ] = []
+
     async def generate_json(
         self,
         *,
@@ -68,6 +75,10 @@ class FakeVisionModel:
 
         self.prompts.append(
             prompt,
+        )
+
+        self.schemas.append(
+            schema,
         )
 
         return GenerationResult(
@@ -148,7 +159,7 @@ def build_use_case(
 
 
 async def test_candidate_from_other_finding_cannot_be_attached() -> None:
-    """N соседнего finding физически не может попасть в basis."""
+    """N соседнего finding не может попасть в итоговый basis."""
     first = finding(
         finding_id="p1-f1",
         comment="Первое замечание.",
@@ -179,28 +190,23 @@ async def test_candidate_from_other_finding_cannot_be_attached() -> None:
                     {
                         "finding_id": "p1-f1",
                         "comment": "Первое замечание.",
-                        "recommendation": "Проверить первое замечание.",
+                        "recommendation": ("Проверить первое замечание."),
                         "experience_source_ids": [],
                         "normative_source_ids": [
                             "NQ2_1",
                         ],
-                    }
-                ],
-            },
-            {
-                "summary": "done",
-                "findings": [
+                    },
                     {
                         "finding_id": "p1-f2",
                         "comment": "Второе замечание.",
-                        "recommendation": "Проверить второе замечание.",
+                        "recommendation": ("Проверить второе замечание."),
                         "experience_source_ids": [],
                         "normative_source_ids": [
                             "NQ1_1",
                         ],
-                    }
+                    },
                 ],
-            },
+            }
         ]
     )
 
@@ -233,13 +239,24 @@ async def test_candidate_from_other_finding_cannot_be_attached() -> None:
 
     assert result_metrics["isolated_normative_enrichment"] is True
 
-    assert result_metrics["effective_batch_size"] == 1
+    assert result_metrics["effective_batch_size"] == 2
 
-    assert "NQ1_1" in model.prompts[0]
-    assert "NQ2_1" not in model.prompts[0]
+    assert result_metrics["initial_batch_count"] == 1
 
-    assert "NQ2_1" in model.prompts[1]
-    assert "NQ1_1" not in model.prompts[1]
+    assert result_metrics["vlm_call_count"] == 1
+
+    assert (
+        len(
+            model.prompts,
+        )
+        == 1
+    )
+
+    prompt = model.prompts[0]
+
+    assert '"finding_id":"p1-f1","normative_candidates":[{"source_id":"NQ1_1"' in prompt
+
+    assert '"finding_id":"p1-f2","normative_candidates":[{"source_id":"NQ2_1"' in prompt
 
 
 async def test_each_finding_can_attach_only_its_candidate() -> None:
@@ -274,32 +291,27 @@ async def test_each_finding_can_attach_only_its_candidate() -> None:
                     {
                         "finding_id": "p1-f1",
                         "comment": "Первое замечание.",
-                        "recommendation": "Проверить первое замечание.",
+                        "recommendation": ("Проверить первое замечание."),
                         "experience_source_ids": [],
                         "normative_source_ids": [
                             "NQ1_1",
                         ],
-                    }
-                ],
-            },
-            {
-                "summary": "done",
-                "findings": [
+                    },
                     {
                         "finding_id": "p1-f2",
                         "comment": "Второе замечание.",
-                        "recommendation": "Проверить второе замечание.",
+                        "recommendation": ("Проверить второе замечание."),
                         "experience_source_ids": [],
                         "normative_source_ids": [
                             "NQ2_1",
                         ],
-                    }
+                    },
                 ],
-            },
+            }
         ]
     )
 
-    _, finalized, _ = await build_use_case(
+    _, finalized, result_metrics = await build_use_case(
         model,
     ).execute(
         findings=(
@@ -319,6 +331,10 @@ async def test_each_finding_can_attach_only_its_candidate() -> None:
 
     assert "first.pdf" in finalized[0].basis
     assert "second.pdf" in finalized[1].basis
+
+    assert result_metrics["vlm_call_count"] == 1
+
+    assert result_metrics["fallback_count"] == 0
 
 
 async def test_free_text_cannot_claim_another_normative_document() -> None:
@@ -358,7 +374,9 @@ async def test_free_text_cannot_claim_another_normative_document() -> None:
     ).execute(
         findings=(original,),
         experience_by_finding={},
-        normative_candidates_by_finding={"p1-f1": (gost,)},
+        normative_candidates_by_finding={
+            "p1-f1": (gost,),
+        },
     )
 
     result = finalized[0]
@@ -367,7 +385,7 @@ async def test_free_text_cannot_claim_another_normative_document() -> None:
 
     assert result.comment == original.comment
 
-    assert result.recommendation == original.recommendation_draft
+    assert result.recommendation == (original.recommendation_draft)
 
     assert "PUE" not in result.comment
     assert "ПУЭ" not in result.recommendation

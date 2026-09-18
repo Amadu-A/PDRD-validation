@@ -5,7 +5,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "analysis/v2/cad",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {}
       },
       "id": "ba404c67-f2ba-46bd-b89e-445805543802",
@@ -88,7 +88,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_facts: $json.facts, extracted_text: $('Prepare CAD Context').item.json.page.text, project_context_texts: [] }) }}",
+        "body": "={{ JSON.stringify({ page_facts: $('Understand CAD').item.json.facts, extracted_text: $('Prepare CAD Context').item.json.page.text, project_context_texts: [] }) }}",
         "options": {
           "timeout": 1800000
         }
@@ -396,7 +396,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const technicalAssignmentId = String(\n  $('POST /analysis/v2/cad').first().json.body?.technical_assignment_id ?? '',\n).trim();\n\nif (!technicalAssignmentId) {\n  return [{\n    json: {\n      enabled: false,\n      technical_assignment_id: null,\n      analysis_document_id: null,\n      section_id: null,\n      source_file: '',\n      source_sha256: '',\n      total: 0,\n      requirements: [],\n    },\n  }];\n}\n\nconst pages = $input.all().map((item) => item.json ?? {});\n\nif (pages.length === 0) {\n  throw new Error('T-first requirement feed вернул пустой набор страниц.');\n}\n\nconst first = pages[0];\nconst expectedDocumentId = String(\n  $('POST /analysis/v2/cad').first().json.body?.document_id ?? '',\n).trim();\nconst expectedSectionId = String(\n  $('POST /analysis/v2/cad').first().json.body?.normative_section_id ?? '',\n).trim();\n\nconst total = Number(first.total ?? 0);\n\nif (!Number.isInteger(total) || total < 1) {\n  throw new Error(\n    `T-first requirement feed должен содержать хотя бы одно atomic requirement; total=${first.total}.`,\n  );\n}\n\nif (total > 1000) {\n  throw new Error(\n    `T-first requirement feed превышает configured Analysis limit: total=${total}, limit=1000.`,\n  );\n}\n\nconst requirements = pages\n  .flatMap((page) => Array.isArray(page.requirements) ? page.requirements : [])\n  .sort(\n    (left, right) =>\n      Number(left.requirement_index ?? 0) - Number(right.requirement_index ?? 0),\n  );\n\nfor (const page of pages) {\n  if (String(page.technical_assignment_id ?? '') !== technicalAssignmentId) {\n    throw new Error('T-first requirement feed содержит другой technical_assignment_id.');\n  }\n\n  if (String(page.analysis_document_id ?? '') !== expectedDocumentId) {\n    throw new Error('T-first requirement feed содержит другой analysis_document_id.');\n  }\n\n  if (String(page.section_id ?? '') !== expectedSectionId) {\n    throw new Error('T-first requirement feed содержит другой section_id.');\n  }\n\n  if (Number(page.total ?? -1) !== total) {\n    throw new Error('T-first requirement feed содержит несовместимые total между страницами.');\n  }\n\n  if (\n    String(page.source_file ?? '') !== String(first.source_file ?? '')\n    || String(page.source_sha256 ?? '') !== String(first.source_sha256 ?? '')\n  ) {\n    throw new Error('T-first requirement feed содержит несовместимые source metadata.');\n  }\n}\n\nif (requirements.length !== total) {\n  throw new Error(\n    `T-first requirement feed получен не полностью: expected=${total}, actual=${requirements.length}.`,\n  );\n}\n\nconst requirementIds = requirements.map(\n  (requirement) => String(requirement.requirement_id ?? ''),\n);\n\nif (\n  requirementIds.some((requirementId) => !requirementId)\n  || new Set(requirementIds).size !== requirementIds.length\n) {\n  throw new Error('T-first requirement feed содержит пустые или повторяющиеся requirement_id.');\n}\n\nreturn [{\n  json: {\n    enabled: true,\n    technical_assignment_id: technicalAssignmentId,\n    analysis_document_id: expectedDocumentId,\n    section_id: expectedSectionId,\n    source_file: String(first.source_file ?? ''),\n    source_sha256: String(first.source_sha256 ?? ''),\n    total,\n    requirements,\n  },\n}];"
+        "jsCode": "const technicalAssignmentId = String(\n  $('POST /analysis/v2/cad').first().json.body?.technical_assignment_id ?? '',\n).trim();\n\nif (!technicalAssignmentId) {\n  return [{\n    json: {\n      enabled: false,\n      technical_assignment_id: null,\n      analysis_document_id: null,\n      section_id: null,\n      source_file: '',\n      source_sha256: '',\n      total: 0,\n      requirements: [],\n    },\n  }];\n}\n\nconst pages = $input.all().map((item) => item.json ?? {});\n\nif (pages.length === 0) {\n  throw new Error('T-first requirement feed вернул пустой набор страниц.');\n}\n\nconst first = pages[0];\nconst expectedDocumentId = String(\n  $('POST /analysis/v2/cad').first().json.body?.technical_assignment_analysis_document_id ?? '',\n).trim();\n\nif (!expectedDocumentId) {\n  throw new Error(\n    'T-first orchestration не содержит technical_assignment_analysis_document_id.',\n  );\n}\n\nconst expectedSectionId = String(\n  $('POST /analysis/v2/cad').first().json.body?.normative_section_id ?? '',\n).trim();\n\nconst total = Number(first.total ?? 0);\n\nif (!Number.isInteger(total) || total < 1) {\n  throw new Error(\n    `T-first requirement feed должен содержать хотя бы одно atomic requirement; total=${first.total}.`,\n  );\n}\n\nif (total > 1000) {\n  throw new Error(\n    `T-first requirement feed превышает configured Analysis limit: total=${total}, limit=1000.`,\n  );\n}\n\nconst requirements = pages\n  .flatMap((page) => Array.isArray(page.requirements) ? page.requirements : [])\n  .sort(\n    (left, right) =>\n      Number(left.requirement_index ?? 0) - Number(right.requirement_index ?? 0),\n  );\n\nfor (const page of pages) {\n  if (String(page.technical_assignment_id ?? '') !== technicalAssignmentId) {\n    throw new Error('T-first requirement feed содержит другой technical_assignment_id.');\n  }\n\n  if (String(page.analysis_document_id ?? '') !== expectedDocumentId) {\n    throw new Error('T-first requirement feed содержит другой analysis_document_id.');\n  }\n\n  if (String(page.section_id ?? '') !== expectedSectionId) {\n    throw new Error('T-first requirement feed содержит другой section_id.');\n  }\n\n  if (Number(page.total ?? -1) !== total) {\n    throw new Error('T-first requirement feed содержит несовместимые total между страницами.');\n  }\n\n  if (\n    String(page.source_file ?? '') !== String(first.source_file ?? '')\n    || String(page.source_sha256 ?? '') !== String(first.source_sha256 ?? '')\n  ) {\n    throw new Error('T-first requirement feed содержит несовместимые source metadata.');\n  }\n}\n\nif (requirements.length !== total) {\n  throw new Error(\n    `T-first requirement feed получен не полностью: expected=${total}, actual=${requirements.length}.`,\n  );\n}\n\nconst requirementIds = requirements.map(\n  (requirement) => String(requirement.requirement_id ?? ''),\n);\n\nif (\n  requirementIds.some((requirementId) => !requirementId)\n  || new Set(requirementIds).size !== requirementIds.length\n) {\n  throw new Error('T-first requirement feed содержит пустые или повторяющиеся requirement_id.');\n}\n\nreturn [{\n  json: {\n    enabled: true,\n    technical_assignment_id: technicalAssignmentId,\n    analysis_document_id: expectedDocumentId,\n    section_id: expectedSectionId,\n    source_file: String(first.source_file ?? ''),\n    source_sha256: String(first.source_sha256 ?? ''),\n    total,\n    requirements,\n  },\n}];"
       },
       "id": "5b200000-0000-4000-8000-000000000003",
       "name": "Technical Assignment Requirement Feed",
@@ -489,6 +489,616 @@
         780,
         0
       ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'extracting_sources' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8b200000-0000-4000-8000-000000000001",
+      "name": "Progress Extract Sources",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1780,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'preparing_context' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8b200000-0000-4000-8000-000000000002",
+      "name": "Progress Prepare Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1360,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'understanding_sheet' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8b200000-0000-4000-8000-000000000003",
+      "name": "Progress Understand Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -940,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'retrieving_requirements' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8b200000-0000-4000-8000-000000000004",
+      "name": "Progress Retrieve Requirements",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -520,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'checking_requirements' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8b200000-0000-4000-8000-000000000005",
+      "name": "Progress Check Requirements",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -100,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'enriching_findings' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8b200000-0000-4000-8000-000000000006",
+      "name": "Progress Enrich Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'finalizing_findings' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8b200000-0000-4000-8000-000000000007",
+      "name": "Progress Finalize Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'building_result' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8b200000-0000-4000-8000-000000000008",
+      "name": "Progress Build Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1160,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "8b200000-0000-4000-8000-000000000009",
+      "name": "Respond CAD Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8b200000-0000-4000-8000-000000000101",
+      "name": "Gate Extract Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1570,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8b200000-0000-4000-8000-000000000102",
+      "name": "Gate Prepare Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1150,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8b200000-0000-4000-8000-000000000103",
+      "name": "Gate Understand Sheet",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -730,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8b200000-0000-4000-8000-000000000104",
+      "name": "Gate Retrieve Requirements",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -310,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8b200000-0000-4000-8000-000000000105",
+      "name": "Gate Check Requirements",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        110,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8b200000-0000-4000-8000-000000000106",
+      "name": "Gate Enrich Findings",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        530,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8b200000-0000-4000-8000-000000000107",
+      "name": "Gate Finalize Findings",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        950,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8b200000-0000-4000-8000-000000000108",
+      "name": "Gate Build Result",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1370,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8b300000-0000-4000-8000-000000000901",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8b300000-0000-4000-8000-000000000001",
+      "name": "Continue Extract Sources",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1570,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8b300000-0000-4000-8000-000000000902",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8b300000-0000-4000-8000-000000000002",
+      "name": "Continue Prepare Context",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1150,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8b300000-0000-4000-8000-000000000903",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8b300000-0000-4000-8000-000000000003",
+      "name": "Continue Understand Sheet",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -730,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8b300000-0000-4000-8000-000000000904",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8b300000-0000-4000-8000-000000000004",
+      "name": "Continue Retrieve Requirements",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -310,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8b300000-0000-4000-8000-000000000905",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8b300000-0000-4000-8000-000000000005",
+      "name": "Continue Check Requirements",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        110,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8b300000-0000-4000-8000-000000000906",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8b300000-0000-4000-8000-000000000006",
+      "name": "Continue Enrich Findings",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        530,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8b300000-0000-4000-8000-000000000907",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8b300000-0000-4000-8000-000000000007",
+      "name": "Continue Finalize Findings",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        950,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8b300000-0000-4000-8000-000000000908",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8b300000-0000-4000-8000-000000000008",
+      "name": "Continue Build Result",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1370,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{ json: { status: 'cancelled', reason: 'analysis_cancelled' } }];"
+      },
+      "id": "8b300000-0000-4000-8000-000000000009",
+      "name": "Build Cancelled Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1580,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "8b300000-0000-4000-8000-000000000010",
+      "name": "Respond Cancelled",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1800,
+        780
+      ]
     }
   ],
   "pinData": {},
@@ -497,7 +1107,12 @@
       "main": [
         [
           {
-            "node": "Document Extract CAD",
+            "node": "Progress Extract Sources",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Extract Sources",
             "type": "main",
             "index": 0
           }
@@ -508,7 +1123,12 @@
       "main": [
         [
           {
-            "node": "Has Technical Assignment",
+            "node": "Progress Prepare Context",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Prepare Context",
             "type": "main",
             "index": 0
           }
@@ -519,7 +1139,12 @@
       "main": [
         [
           {
-            "node": "Understand CAD",
+            "node": "Progress Understand Sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Understand Sheet",
             "type": "main",
             "index": 0
           }
@@ -574,7 +1199,12 @@
       "main": [
         [
           {
-            "node": "Check Norms",
+            "node": "Progress Check Requirements",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Check Requirements",
             "type": "main",
             "index": 0
           }
@@ -640,7 +1270,12 @@
       "main": [
         [
           {
-            "node": "Finalize Findings",
+            "node": "Progress Finalize Findings",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Finalize Findings",
             "type": "main",
             "index": 0
           }
@@ -651,7 +1286,12 @@
       "main": [
         [
           {
-            "node": "Build CAD Result",
+            "node": "Progress Build Result",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Build Result",
             "type": "main",
             "index": 0
           }
@@ -731,7 +1371,12 @@
       "main": [
         [
           {
-            "node": "Build Normative Queries",
+            "node": "Progress Retrieve Requirements",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Retrieve Requirements",
             "type": "main",
             "index": 0
           }
@@ -742,7 +1387,354 @@
       "main": [
         [
           {
+            "node": "Progress Enrich Findings",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Enrich Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build CAD Result": {
+      "main": [
+        [
+          {
+            "node": "Respond CAD Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Extract Sources": {
+      "main": [
+        [
+          {
+            "node": "Document Extract CAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Extract Sources": {
+      "main": [
+        [
+          {
+            "node": "Continue Extract Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Prepare Context": {
+      "main": [
+        [
+          {
+            "node": "Has Technical Assignment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Prepare Context": {
+      "main": [
+        [
+          {
+            "node": "Continue Prepare Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Understand Sheet": {
+      "main": [
+        [
+          {
+            "node": "Understand CAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Understand Sheet": {
+      "main": [
+        [
+          {
+            "node": "Continue Understand Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Retrieve Requirements": {
+      "main": [
+        [
+          {
+            "node": "Build Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Retrieve Requirements": {
+      "main": [
+        [
+          {
+            "node": "Continue Retrieve Requirements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Check Requirements": {
+      "main": [
+        [
+          {
+            "node": "Check Norms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Check Requirements": {
+      "main": [
+        [
+          {
+            "node": "Continue Check Requirements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Enrich Findings": {
+      "main": [
+        [
+          {
             "node": "Prepare Finding Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Enrich Findings": {
+      "main": [
+        [
+          {
+            "node": "Continue Enrich Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Finalize Findings": {
+      "main": [
+        [
+          {
+            "node": "Finalize Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Finalize Findings": {
+      "main": [
+        [
+          {
+            "node": "Continue Finalize Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Build Result": {
+      "main": [
+        [
+          {
+            "node": "Build CAD Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Build Result": {
+      "main": [
+        [
+          {
+            "node": "Continue Build Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Extract Sources": {
+      "main": [
+        [
+          {
+            "node": "Gate Extract Sources",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Prepare Context": {
+      "main": [
+        [
+          {
+            "node": "Gate Prepare Context",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Understand Sheet": {
+      "main": [
+        [
+          {
+            "node": "Gate Understand Sheet",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Retrieve Requirements": {
+      "main": [
+        [
+          {
+            "node": "Gate Retrieve Requirements",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Check Requirements": {
+      "main": [
+        [
+          {
+            "node": "Gate Check Requirements",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Enrich Findings": {
+      "main": [
+        [
+          {
+            "node": "Gate Enrich Findings",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Finalize Findings": {
+      "main": [
+        [
+          {
+            "node": "Gate Finalize Findings",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Build Result": {
+      "main": [
+        [
+          {
+            "node": "Gate Build Result",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Cancelled Result": {
+      "main": [
+        [
+          {
+            "node": "Respond Cancelled",
             "type": "main",
             "index": 0
           }

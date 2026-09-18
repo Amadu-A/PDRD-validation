@@ -50,6 +50,19 @@ _FINDING_DECISION_STATUSES = {
     "insufficient_evidence",
 }
 
+_FALLBACK_REVIEW_COMMENT = "Требование ТЗ требует дополнительной инженерной проверки."
+
+_FALLBACK_REVIEW_EVIDENCE = (
+    "Для подтверждения нарушения недостаточно "
+    "конкретного описания факта на анализируемом листе."
+)
+
+_FALLBACK_REVIEW_RECOMMENDATION = (
+    "Проверить выполнение требования ТЗ "
+    "на данном листе и при необходимости "
+    "скорректировать проектное решение."
+)
+
 
 class TechnicalAssignmentValidationError(
     RuntimeError,
@@ -107,6 +120,7 @@ class CheckPageAgainstTechnicalAssignment:
         )
 
         decisions: list[TechnicalAssignmentDecision] = []
+
         metrics: list[GenerationMetrics] = []
 
         for batch_number, start in enumerate(
@@ -267,7 +281,7 @@ class CheckPageAgainstTechnicalAssignment:
         TechnicalAssignmentDecision,
         ...,
     ]:
-        """Проверяет exact coverage compact VLM batch."""
+        """Проверяет exact decisions и best-effort issue details."""
         raw_decisions = payload.get(
             "decisions",
         )
@@ -303,6 +317,7 @@ class CheckPageAgainstTechnicalAssignment:
             )
 
         compact_mode = "issues" in payload
+
         issues_by_requirement = cls._parse_issues(
             raw_issues=payload.get(
                 "issues",
@@ -319,8 +334,10 @@ class CheckPageAgainstTechnicalAssignment:
                 requirement_id=(requirement.requirement_id),
                 raw=raw_decisions[requirement.requirement_id],
                 compact_mode=compact_mode,
-                raw_issue=issues_by_requirement.get(
-                    requirement.requirement_id,
+                raw_issue=(
+                    issues_by_requirement.get(
+                        requirement.requirement_id,
+                    )
                 ),
             )
             for requirement in requirements
@@ -330,17 +347,26 @@ class CheckPageAgainstTechnicalAssignment:
             finding_ids = {
                 decision.requirement_id
                 for decision in decisions
-                if decision.status in _FINDING_DECISION_STATUSES
+                if (decision.status in _FINDING_DECISION_STATUSES)
             }
 
             issue_ids = set(
                 issues_by_requirement,
             )
 
-            if issue_ids != finding_ids:
-                raise TechnicalAssignmentValidationError(
-                    "T-first issues должны содержать "
-                    "ровно violated/insufficient_evidence decisions.",
+            missing_issue_ids = sorted(finding_ids - issue_ids)
+
+            orphan_issue_ids = sorted(issue_ids - finding_ids)
+
+            if missing_issue_ids or orphan_issue_ids:
+                logger.warning(
+                    (
+                        "technical_assignment_issue_alignment_repaired "
+                        "missing_issue_ids=%s "
+                        "orphan_issue_ids=%s"
+                    ),
+                    missing_issue_ids,
+                    orphan_issue_ids,
                 )
 
         return decisions
@@ -358,7 +384,7 @@ class CheckPageAgainstTechnicalAssignment:
             Any,
         ],
     ]:
-        """Строит карту compact issue details без дублей."""
+        """Читает optional issue details без права уронить decisions."""
         if not enabled:
             return {}
 
@@ -366,9 +392,17 @@ class CheckPageAgainstTechnicalAssignment:
             raw_issues,
             list,
         ):
-            raise TechnicalAssignmentValidationError(
-                "T-first VLM должна вернуть массив issues.",
+            logger.warning(
+                (
+                    "technical_assignment_issues_invalid_container "
+                    "type=%s; issue details ignored"
+                ),
+                type(
+                    raw_issues,
+                ).__name__,
             )
+
+            return {}
 
         result: dict[
             str,
@@ -383,9 +417,9 @@ class CheckPageAgainstTechnicalAssignment:
                 raw_issue,
                 dict,
             ):
-                raise TechnicalAssignmentValidationError(
-                    "T-first issue должен быть объектом.",
-                )
+                logger.warning("technical_assignment_issue_ignored reason=not_object")
+
+                continue
 
             requirement_id = str(
                 raw_issue.get(
@@ -395,23 +429,28 @@ class CheckPageAgainstTechnicalAssignment:
             ).strip()
 
             if requirement_id not in expected_ids:
-                raise TechnicalAssignmentValidationError(
-                    "T-first issue содержит неизвестный requirement_id.",
+                logger.warning(
+                    (
+                        "technical_assignment_issue_ignored "
+                        "reason=unknown_requirement_id "
+                        "requirement_id=%s"
+                    ),
+                    requirement_id,
                 )
+
+                continue
 
             if requirement_id in result:
-                raise TechnicalAssignmentValidationError(
-                    "T-first issues содержат повторяющийся requirement_id.",
+                logger.warning(
+                    (
+                        "technical_assignment_issue_ignored "
+                        "reason=duplicate_requirement_id "
+                        "requirement_id=%s"
+                    ),
+                    requirement_id,
                 )
 
-            raw_status = raw_issue.get(
-                "status",
-            )
-
-            if raw_status not in _FINDING_DECISION_STATUSES:
-                raise TechnicalAssignmentValidationError(
-                    "T-first issue содержит недопустимый status.",
-                )
+                continue
 
             result[requirement_id] = raw_issue
 
@@ -430,7 +469,7 @@ class CheckPageAgainstTechnicalAssignment:
         ]
         | None,
     ) -> TechnicalAssignmentDecision:
-        """Строго преобразует один structured decision."""
+        """Строго читает decision, но безопасно ремонтирует issue details."""
         if not isinstance(
             raw,
             dict,
@@ -455,45 +494,53 @@ class CheckPageAgainstTechnicalAssignment:
         )
 
         if raw_status in _FINDING_DECISION_STATUSES:
-            if compact_mode:
-                if raw_issue is None:
-                    raise TechnicalAssignmentValidationError(
-                        "T-first finding decision не имеет "
-                        "обязательного issue details.",
-                    )
-
-                if (
-                    raw_issue.get(
-                        "status",
-                    )
-                    != raw_status
-                ):
-                    raise TechnicalAssignmentValidationError(
-                        "T-first issue status не совпадает с decisions status.",
-                    )
-
-                detail = raw_issue
-
-            else:
-                # Legacy fallback нужен для совместимости внутренних
-                # тестовых doubles и старых persisted payload.
-                detail = raw
-
-            severity = cls._parse_severity(
-                detail.get(
-                    "severity",
+            if compact_mode and raw_issue is None:
+                return cls._fallback_review_decision(
+                    requirement_id=requirement_id,
+                    confidence=normalized_confidence,
+                    original_status=raw_status,
+                    reason="missing_issue_details",
                 )
-            )
 
-            comment = cls._required_text(
-                detail,
-                "comment",
-            )
+            detail = raw_issue if compact_mode else raw
 
-            evidence = cls._required_text(
-                detail,
-                "evidence",
-            )
+            if detail is None:
+                return cls._fallback_review_decision(
+                    requirement_id=requirement_id,
+                    confidence=normalized_confidence,
+                    original_status=raw_status,
+                    reason="missing_issue_details",
+                )
+
+            try:
+                severity = cls._parse_severity(
+                    detail.get(
+                        "severity",
+                    )
+                )
+
+                comment = cls._required_text(
+                    detail,
+                    "comment",
+                )
+
+                evidence = cls._required_text(
+                    detail,
+                    "evidence",
+                )
+
+            except TechnicalAssignmentValidationError as error:
+                if not compact_mode:
+                    raise
+
+                return cls._fallback_review_decision(
+                    requirement_id=requirement_id,
+                    confidence=normalized_confidence,
+                    original_status=raw_status,
+                    reason=str(
+                        error,
+                    ),
+                )
 
             recommendation_draft = str(
                 detail.get(
@@ -504,15 +551,21 @@ class CheckPageAgainstTechnicalAssignment:
 
         else:
             if compact_mode and raw_issue is not None:
-                raise TechnicalAssignmentValidationError(
-                    "T-first issue нельзя создавать для "
-                    "satisfied/not_applicable decision.",
+                logger.warning(
+                    (
+                        "technical_assignment_issue_ignored "
+                        "reason=non_finding_decision "
+                        "requirement_id=%s status=%s"
+                    ),
+                    requirement_id,
+                    raw_status,
                 )
 
             severity = cast(
                 FindingSeverity,
                 "info",
             )
+
             comment = ""
             evidence = ""
             recommendation_draft = ""
@@ -528,6 +581,40 @@ class CheckPageAgainstTechnicalAssignment:
             evidence=evidence,
             recommendation_draft=(recommendation_draft),
             confidence=normalized_confidence,
+        )
+
+    @staticmethod
+    def _fallback_review_decision(
+        *,
+        requirement_id: str,
+        confidence: float,
+        original_status: str,
+        reason: str,
+    ) -> TechnicalAssignmentDecision:
+        """Сохраняет проблемный T-R как needs-review вместо HTTP 503."""
+        logger.warning(
+            (
+                "technical_assignment_issue_fallback "
+                "requirement_id=%s "
+                "original_status=%s "
+                "reason=%s"
+            ),
+            requirement_id,
+            original_status,
+            reason,
+        )
+
+        return TechnicalAssignmentDecision(
+            requirement_id=requirement_id,
+            status="insufficient_evidence",
+            severity="warning",
+            comment=_FALLBACK_REVIEW_COMMENT,
+            evidence=_FALLBACK_REVIEW_EVIDENCE,
+            recommendation_draft=(_FALLBACK_REVIEW_RECOMMENDATION),
+            confidence=min(
+                confidence,
+                0.5,
+            ),
         )
 
     @staticmethod

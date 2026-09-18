@@ -2,6 +2,7 @@
 
 """Unit tests bounded lifecycle queued analysis job."""
 
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 from uuid import UUID
@@ -16,6 +17,7 @@ from pdrd_api_gateway.application.ports.orchestration import (
 )
 from pdrd_api_gateway.application.use_cases.execute_analysis_job import (
     AnalysisExecutionError,
+    AnalysisJobCancelledError,
     AnalysisTransientExecutionError,
     ExecuteAnalysisJob,
 )
@@ -170,6 +172,7 @@ class FakeOrchestrator:
         *,
         result: dict[str, Any] | None = None,
         error: Exception | None = None,
+        on_execute: Callable[[], None] | None = None,
     ) -> None:
         """Подготавливает fake response."""
         self.result = result or {
@@ -179,6 +182,7 @@ class FakeOrchestrator:
         }
 
         self.error = error
+        self.on_execute = on_execute
         self.calls = 0
 
     async def execute(
@@ -190,6 +194,9 @@ class FakeOrchestrator:
         self.calls += 1
 
         assert artifacts.pdf_content is not None
+
+        if self.on_execute is not None:
+            self.on_execute()
 
         if self.error is not None:
             raise self.error
@@ -488,3 +495,187 @@ async def test_job_older_than_absolute_deadline_never_starts_orchestrator() -> N
     assert orchestrator.calls == 0
     assert state[job.id].status is AnalysisJobStatus.FAILED
     assert state[job.id].error_code == "analysis_deadline_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_job_never_starts_orchestrator() -> None:
+    """Queued delivery уже cancelled job безопасно ACK-ается без n8n."""
+    artifacts = build_submission()
+
+    job = AnalysisJob.create(
+        document_id=(artifacts.submission.document_id),
+    )
+    job.mark_queued()
+    job.mark_cancelled()
+
+    state = {
+        job.id: job,
+    }
+
+    artifact_store = FakeArtifactStore(
+        request=artifacts,
+    )
+
+    orchestrator = FakeOrchestrator()
+
+    use_case = build_use_case(
+        state=state,
+        artifact_store=artifact_store,
+        orchestrator=orchestrator,
+    )
+
+    with pytest.raises(
+        AnalysisJobCancelledError,
+    ):
+        await use_case.execute(
+            job_id=job.id,
+            allow_retry=True,
+            redelivered=False,
+        )
+
+    assert state[job.id].status is AnalysisJobStatus.CANCELLED
+    assert orchestrator.calls == 0
+    assert artifact_store.result is None
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_orchestration_discards_result() -> None:
+    """Cancellation во время n8n не сохраняет вернувшийся completed result."""
+    artifacts = build_submission()
+
+    job = AnalysisJob.create(
+        document_id=(artifacts.submission.document_id),
+    )
+    job.mark_queued()
+
+    state = {
+        job.id: job,
+    }
+
+    artifact_store = FakeArtifactStore(
+        request=artifacts,
+    )
+
+    def cancel_job() -> None:
+        job.mark_cancelled()
+
+    orchestrator = FakeOrchestrator(
+        on_execute=cancel_job,
+    )
+
+    use_case = build_use_case(
+        state=state,
+        artifact_store=artifact_store,
+        orchestrator=orchestrator,
+    )
+
+    with pytest.raises(
+        AnalysisJobCancelledError,
+    ):
+        await use_case.execute(
+            job_id=job.id,
+            allow_retry=True,
+            redelivered=False,
+        )
+
+    assert state[job.id].status is AnalysisJobStatus.CANCELLED
+    assert orchestrator.calls == 1
+    assert artifact_store.result is None
+
+
+@pytest.mark.asyncio
+async def test_cancellation_wins_over_orchestration_failure() -> None:
+    """Cancellation не превращается в failed при поздней ошибке n8n."""
+    artifacts = build_submission()
+
+    job = AnalysisJob.create(
+        document_id=(artifacts.submission.document_id),
+    )
+    job.mark_queued()
+
+    state = {
+        job.id: job,
+    }
+
+    artifact_store = FakeArtifactStore(
+        request=artifacts,
+    )
+
+    def cancel_job() -> None:
+        job.mark_cancelled()
+
+    orchestrator = FakeOrchestrator(
+        error=AnalysisOrchestrationError(
+            "workflow stopped after cancellation checkpoint",
+        ),
+        on_execute=cancel_job,
+    )
+
+    use_case = build_use_case(
+        state=state,
+        artifact_store=artifact_store,
+        orchestrator=orchestrator,
+    )
+
+    with pytest.raises(
+        AnalysisJobCancelledError,
+    ):
+        await use_case.execute(
+            job_id=job.id,
+            allow_retry=True,
+            redelivered=False,
+        )
+
+    assert state[job.id].status is AnalysisJobStatus.CANCELLED
+    assert state[job.id].error_code is None
+    assert orchestrator.calls == 1
+    assert artifact_store.result is None
+
+
+@pytest.mark.asyncio
+async def test_cancellation_wins_over_transient_orchestration_failure() -> None:
+    """Cancelled job не возвращается в очередь из-за позднего transient сбоя."""
+    artifacts = build_submission()
+
+    job = AnalysisJob.create(
+        document_id=(artifacts.submission.document_id),
+    )
+    job.mark_queued()
+
+    state = {
+        job.id: job,
+    }
+
+    artifact_store = FakeArtifactStore(
+        request=artifacts,
+    )
+
+    def cancel_job() -> None:
+        job.mark_cancelled()
+
+    orchestrator = FakeOrchestrator(
+        error=AnalysisOrchestrationTransientError(
+            "connection closed after cancellation",
+        ),
+        on_execute=cancel_job,
+    )
+
+    use_case = build_use_case(
+        state=state,
+        artifact_store=artifact_store,
+        orchestrator=orchestrator,
+    )
+
+    with pytest.raises(
+        AnalysisJobCancelledError,
+    ):
+        await use_case.execute(
+            job_id=job.id,
+            allow_retry=True,
+            redelivered=False,
+        )
+
+    assert state[job.id].status is AnalysisJobStatus.CANCELLED
+    assert state[job.id].error_code is None
+    assert orchestrator.calls == 1
+    assert artifact_store.result is None

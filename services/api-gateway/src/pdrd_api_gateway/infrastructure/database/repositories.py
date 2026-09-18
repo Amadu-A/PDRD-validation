@@ -5,12 +5,18 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import (
+    and_,
+    func,
+    or_,
+    select,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pdrd_api_gateway.domain.analysis_job import (
     AnalysisJob,
     AnalysisJobStatus,
+    AnalysisProgressStage,
 )
 from pdrd_api_gateway.domain.normative_snapshot import (
     NormativeAnalysisSnapshot,
@@ -49,6 +55,9 @@ class SqlAlchemyAnalysisJobRepository:
                     else None
                 ),
                 status=job.status.value,
+                progress_stage=(
+                    job.progress_stage.value if job.progress_stage is not None else None
+                ),
                 attempt_count=job.attempt_count,
                 error_code=job.error_code,
                 error_message=job.error_message,
@@ -94,6 +103,63 @@ class SqlAlchemyAnalysisJobRepository:
 
         return self._to_domain(
             model,
+        )
+
+    async def get_by_document_id_for_update(
+        self,
+        document_id: UUID,
+    ) -> AnalysisJob | None:
+        """Загружает job по document_id с PostgreSQL row lock."""
+        model = await self._session.scalar(
+            select(
+                AnalysisJobModel,
+            )
+            .where(
+                AnalysisJobModel.document_id == document_id,
+            )
+            .with_for_update()
+        )
+
+        if model is None:
+            return None
+
+        return self._to_domain(
+            model,
+        )
+
+    async def count_waiting_before(
+        self,
+        *,
+        created_at: datetime,
+        job_id: UUID,
+    ) -> int:
+        """Считает jobs впереди в durable admission queue."""
+        count = await self._session.scalar(
+            select(
+                func.count(),
+            )
+            .select_from(
+                AnalysisJobModel,
+            )
+            .where(
+                AnalysisJobModel.status.in_(
+                    (
+                        AnalysisJobStatus.PENDING.value,
+                        AnalysisJobStatus.QUEUED.value,
+                    )
+                ),
+                or_(
+                    AnalysisJobModel.created_at < created_at,
+                    and_(
+                        AnalysisJobModel.created_at == created_at,
+                        AnalysisJobModel.id < job_id,
+                    ),
+                ),
+            )
+        )
+
+        return int(
+            count or 0,
         )
 
     async def get_recoverable(
@@ -166,6 +232,9 @@ class SqlAlchemyAnalysisJobRepository:
         model.document_id = job.document_id
 
         model.status = job.status.value
+        model.progress_stage = (
+            job.progress_stage.value if job.progress_stage is not None else None
+        )
         model.attempt_count = job.attempt_count
 
         model.error_code = job.error_code
@@ -192,6 +261,13 @@ class SqlAlchemyAnalysisJobRepository:
             normative_snapshot=snapshot,
             status=AnalysisJobStatus(
                 model.status,
+            ),
+            progress_stage=(
+                AnalysisProgressStage(
+                    model.progress_stage,
+                )
+                if model.progress_stage is not None
+                else None
             ),
             attempt_count=model.attempt_count,
             error_code=model.error_code,
@@ -289,7 +365,7 @@ class SqlAlchemyOutboxRepository:
     def _to_domain(
         model: OutboxMessageModel,
     ) -> OutboxMessage:
-        """Преобразует SQLAlchemy model в domain entity."""
+        """Преобразует ORM model в domain entity."""
         return OutboxMessage(
             id=model.id,
             aggregate_id=model.aggregate_id,

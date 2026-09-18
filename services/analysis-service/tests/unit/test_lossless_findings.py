@@ -1,6 +1,6 @@
 # services/analysis-service/tests/unit/test_lossless_findings.py
 
-"""Regression tests lossless findings pipeline."""
+"""Regression tests finding consolidation и lossless provenance."""
 
 import logging
 from typing import Any
@@ -88,11 +88,13 @@ def page_facts() -> PageFacts:
     )
 
 
-def normative_source() -> NormativeSource:
+def normative_source(
+    source_id: str = "N1",
+) -> NormativeSource:
     """Возвращает один разрешённый N-source."""
     return NormativeSource(
-        source_id="N1",
-        point_id="point-1",
+        source_id=source_id,
+        point_id=f"point-{source_id}",
         score=0.8,
         source_file="PUE.pdf",
         source_path="/norms/PUE.pdf",
@@ -107,6 +109,8 @@ def violation(
     comment: str,
     evidence: str,
     normative_source_ids: list[str] | None = None,
+    technical_assignment_source_ids: list[str] | None = None,
+    user_package_source_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Строит candidate finding."""
     return {
@@ -120,13 +124,128 @@ def violation(
         "normative_source_ids": (
             normative_source_ids if normative_source_ids is not None else []
         ),
-        "technical_assignment_source_ids": [],
-        "user_package_source_ids": [],
+        "technical_assignment_source_ids": (
+            technical_assignment_source_ids
+            if technical_assignment_source_ids is not None
+            else []
+        ),
+        "user_package_source_ids": (
+            user_package_source_ids if user_package_source_ids is not None else []
+        ),
     }
 
 
-def test_exact_duplicate_comments_are_not_removed_by_python() -> None:
-    """Semantic dedupe оставляется будущему feedback filter."""
+def test_exact_duplicate_comment_and_evidence_are_consolidated() -> None:
+    """Одинаковые comment+evidence становятся одним candidate."""
+    candidates = [
+        violation(
+            comment="Проверить маркировку кабеля.",
+            evidence="Участок кабеля не имеет обозначения.",
+            normative_source_ids=[
+                "N1",
+            ],
+        ),
+        violation(
+            comment="  проверить   маркировку кабеля. ",
+            evidence=" участок КАБЕЛЯ не имеет обозначения. ",
+            normative_source_ids=[
+                "N2",
+            ],
+        ),
+    ]
+
+    selection = select_violation_candidates(
+        candidates,
+    )
+
+    assert selection.generated_count == 2
+    assert selection.consolidated_count == 1
+    assert selection.represented_count == 2
+    assert selection.preserved_count == 2
+    assert selection.duplicate_count == 1
+    assert selection.rejected_count == 0
+
+    assert selection.source_indexes_by_candidate == (
+        (
+            1,
+            2,
+        ),
+    )
+
+    assert (
+        len(
+            selection.candidates,
+        )
+        == 1
+    )
+
+    assert selection.candidates[0]["normative_source_ids"] == [
+        "N1",
+        "N2",
+    ]
+
+    assert selection.candidates[0]["comment"] == ("Проверить маркировку кабеля.")
+
+
+def test_exact_duplicate_merges_all_source_id_namespaces() -> None:
+    """Exact duplicate сохраняет union N/T/U source IDs."""
+    candidates = [
+        violation(
+            comment="Обнаружено несоответствие.",
+            evidence="Один и тот же наблюдаемый факт.",
+            normative_source_ids=[
+                "N1",
+            ],
+            technical_assignment_source_ids=[
+                "T1",
+            ],
+            user_package_source_ids=[
+                "U1",
+            ],
+        ),
+        violation(
+            comment="Обнаружено несоответствие.",
+            evidence="Один и тот же наблюдаемый факт.",
+            normative_source_ids=[
+                "N1",
+                "N2",
+            ],
+            technical_assignment_source_ids=[
+                "T2",
+            ],
+            user_package_source_ids=[
+                "U1",
+                "U2",
+            ],
+        ),
+    ]
+
+    selection = select_violation_candidates(
+        candidates,
+    )
+
+    assert selection.consolidated_count == 1
+
+    candidate = selection.candidates[0]
+
+    assert candidate["normative_source_ids"] == [
+        "N1",
+        "N2",
+    ]
+
+    assert candidate["technical_assignment_source_ids"] == [
+        "T1",
+        "T2",
+    ]
+
+    assert candidate["user_package_source_ids"] == [
+        "U1",
+        "U2",
+    ]
+
+
+def test_same_comment_with_different_evidence_stays_distinct() -> None:
+    """Одинаковый текст замечания не склеивает разные физические факты."""
     candidates = [
         violation(
             comment="Проверить маркировку кабеля.",
@@ -143,19 +262,18 @@ def test_exact_duplicate_comments_are_not_removed_by_python() -> None:
     )
 
     assert selection.generated_count == 2
-    assert selection.preserved_count == 2
-    assert selection.rejected_count == 0
+    assert selection.consolidated_count == 2
+    assert selection.represented_count == 2
+    assert selection.duplicate_count == 0
 
-    assert (
-        len(
-            selection.candidates,
-        )
-        == 2
+    assert selection.source_indexes_by_candidate == (
+        (1,),
+        (2,),
     )
 
 
 def test_semantic_content_is_not_filtered_after_generation() -> None:
-    """Даже ошибочно generated compliance candidate не исчезает молча."""
+    """Semantic correctness пока не является частью exact-dedupe этапа."""
     candidate = violation(
         comment=("Решение соответствует требованиям."),
         evidence=("На листе требование выполнено."),
@@ -168,28 +286,40 @@ def test_semantic_content_is_not_filtered_after_generation() -> None:
     )
 
     assert selection.generated_count == 1
+    assert selection.consolidated_count == 1
     assert selection.preserved_count == 1
     assert selection.rejected_count == 0
     assert selection.rejection_counts == {}
     assert selection.candidates == (candidate,)
 
 
-def test_blank_text_is_not_silently_deleted_by_post_filter() -> None:
-    """Структурную ошибку должен ловить schema boundary, не semantic filter."""
-    candidate = violation(
-        comment="",
-        evidence="",
-    )
+def test_blank_text_candidates_are_not_consolidated() -> None:
+    """Недостаточно описанные candidates не склеиваются без доказательства."""
+    candidates = [
+        violation(
+            comment="",
+            evidence="",
+        ),
+        violation(
+            comment="",
+            evidence="",
+        ),
+    ]
 
     selection = select_violation_candidates(
-        [
-            candidate,
-        ]
+        candidates,
     )
 
-    assert selection.generated_count == 1
-    assert selection.preserved_count == 1
+    assert selection.generated_count == 2
+    assert selection.consolidated_count == 2
+    assert selection.represented_count == 2
+    assert selection.duplicate_count == 0
     assert selection.rejected_count == 0
+
+    assert selection.source_indexes_by_candidate == (
+        (1,),
+        (2,),
+    )
 
 
 def test_malformed_candidate_collection_fails_instead_of_losing_data() -> None:
@@ -213,6 +343,74 @@ def test_malformed_candidate_collection_fails_instead_of_losing_data() -> None:
                 "not-an-object",
             ]
         )
+
+
+async def test_exact_duplicates_become_one_finding_before_downstream_stages(
+    caplog: Any,
+) -> None:
+    """Exact duplicates дают один FindingDraft и auditable provenance log."""
+    caplog.set_level(
+        logging.INFO,
+    )
+
+    model = FakeVisionModel(
+        {
+            "summary": "Есть повторяющееся замечание.",
+            "violations": [
+                violation(
+                    comment="Отсутствует маркировка.",
+                    evidence="Кабель X1 не имеет маркировки.",
+                    normative_source_ids=[
+                        "N1",
+                    ],
+                ),
+                violation(
+                    comment=" отсутствует   маркировка. ",
+                    evidence=" кабель x1 НЕ имеет маркировки. ",
+                    normative_source_ids=[
+                        "N1",
+                    ],
+                ),
+            ],
+        }
+    )
+
+    use_case = CheckPageAgainstNorms(
+        vision_model=model,
+        num_predict=2600,
+        max_issues=10,
+        normative_text_limit=700,
+    )
+
+    _, findings, _ = await use_case.execute(
+        page_number=16,
+        extracted_text="Тестовый лист.",
+        page_facts=page_facts(),
+        normative_sources=(normative_source(),),
+        image_bytes=b"png",
+    )
+
+    assert (
+        len(
+            findings,
+        )
+        == 1
+    )
+
+    finding = findings[0]
+
+    assert finding.finding_id == "p16-f1"
+
+    assert finding.comment == "Отсутствует маркировка."
+    assert finding.evidence == "Кабель X1 не имеет маркировки."
+
+    assert "generated=2 consolidated=1" in caplog.text
+    assert "duplicates=1 represented=2" in caplog.text
+
+    assert "normative_candidate_exact_duplicates_consolidated" in caplog.text
+
+    assert "raw_candidate_indexes=(1, 2)" in caplog.text
+    assert "provenance_lossless=True" in caplog.text
 
 
 async def test_unknown_source_id_does_not_delete_candidate(
@@ -273,10 +471,13 @@ async def test_unknown_source_id_does_not_delete_candidate(
 
     assert "normative_candidate_source_ids_detached" in caplog.text
 
+    assert "finding_id=p14-f1" in caplog.text
+
     assert "N999" in caplog.text
 
-    assert "generated=1 preserved=1 rejected=0" in caplog.text
-    assert "lossless=true" in caplog.text
+    assert "generated=1 consolidated=1" in caplog.text
+    assert "duplicates=0 represented=1" in caplog.text
+    assert "provenance_lossless=True" in caplog.text
 
 
 async def test_invalid_source_is_detached_but_valid_source_is_kept(
@@ -341,4 +542,6 @@ async def test_invalid_source_is_detached_but_valid_source_is_kept(
 
     assert "N999" in caplog.text
 
-    assert "candidates=1 findings=1" in caplog.text
+    assert "raw_candidates=1 findings=1" in caplog.text
+    assert "duplicates=0 represented=1" in caplog.text
+    assert "provenance_lossless=True" in caplog.text

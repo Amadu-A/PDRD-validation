@@ -6,6 +6,9 @@ import asyncio
 import base64
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import Any
 
 import httpx
@@ -90,6 +93,87 @@ class OllamaStructuredVisionModel:
 
         self._unload_poll_seconds = unload_poll_seconds
 
+        self._residency_depth: ContextVar[int] = ContextVar(
+            f"pdrd_vlm_residency_depth_{id(self)}",
+            default=0,
+        )
+
+    def _is_resident_scope_active(
+        self,
+    ) -> bool:
+        """Возвращает True внутри bounded residency scope."""
+        return self._residency_depth.get() > 0
+
+    @asynccontextmanager
+    async def residency_scope(
+        self,
+    ) -> AsyncIterator[None]:
+        """Удерживает GPU lease и VLM до завершения одной операции.
+
+        Nested scopes не захватывают lease повторно и не выгружают
+        модель до завершения самого внешнего scope.
+        """
+        current_depth = self._residency_depth.get()
+
+        if current_depth > 0:
+            token = self._residency_depth.set(
+                current_depth + 1,
+            )
+
+            try:
+                yield
+
+            finally:
+                self._residency_depth.reset(
+                    token,
+                )
+
+            return
+
+        started_at = asyncio.get_running_loop().time()
+
+        try:
+            async with self._gpu_coordinator.reserve(
+                required_free_vram_bytes=(self._min_free_vram_bytes),
+            ):
+                token = self._residency_depth.set(
+                    1,
+                )
+
+                logger.info(
+                    "[VLM:residency] START model=%s keep_alive=%s",
+                    self._model,
+                    self._keep_alive,
+                )
+
+                try:
+                    yield
+
+                finally:
+                    try:
+                        await self._unload_model()
+
+                    finally:
+                        self._residency_depth.reset(
+                            token,
+                        )
+
+                        duration_ms = round(
+                            (asyncio.get_running_loop().time() - started_at) * 1000,
+                            2,
+                        )
+
+                        logger.info(
+                            "[VLM:residency] DONE model=%s duration_ms=%s",
+                            self._model,
+                            duration_ms,
+                        )
+
+        except GpuCoordinationError as error:
+            raise VisionModelError(
+                f"GPU недоступен для bounded VLM residency: {error}",
+            ) from error
+
     async def generate_json(
         self,
         *,
@@ -101,6 +185,16 @@ class OllamaStructuredVisionModel:
         image_bytes: bytes | None = None,
     ) -> GenerationResult:
         """Вызывает Ollama только внутри global GPU lease."""
+        if self._is_resident_scope_active():
+            return await self._generate_json_locked(
+                prompt=prompt,
+                schema=schema,
+                num_predict=num_predict,
+                seed=seed,
+                stage=stage,
+                image_bytes=image_bytes,
+            )
+
         try:
             async with self._gpu_coordinator.reserve(
                 required_free_vram_bytes=(self._min_free_vram_bytes),
@@ -179,11 +273,12 @@ class OllamaStructuredVisionModel:
                 ]
 
             logger.info(
-                "[VLM:%s] START attempt=%s num_predict=%s image=%s",
+                "[VLM:%s] START attempt=%s num_predict=%s image=%s resident=%s",
                 stage,
                 attempt,
                 attempt_num_predict,
                 image_bytes is not None,
+                self._is_resident_scope_active(),
             )
 
             try:
@@ -340,10 +435,15 @@ class OllamaStructuredVisionModel:
             )
 
             logger.info(
-                "[VLM:%s] DONE attempt=%s "
-                "reason=%s prompt_tokens=%s "
-                "output_tokens=%s content_chars=%s "
-                "thinking_chars=%s",
+                "[VLM:%s] DONE "
+                "attempt=%s reason=%s "
+                "prompt_tokens=%s "
+                "output_tokens=%s "
+                "content_chars=%s "
+                "thinking_chars=%s "
+                "total_ms=%s "
+                "load_ms=%s "
+                "resident=%s",
                 stage,
                 attempt,
                 last_metrics.done_reason,
@@ -351,6 +451,9 @@ class OllamaStructuredVisionModel:
                 last_metrics.eval_count,
                 last_metrics.content_length,
                 last_metrics.thinking_length,
+                last_metrics.total_duration_ms,
+                last_metrics.load_duration_ms,
+                self._is_resident_scope_active(),
             )
 
             try:
@@ -371,8 +474,9 @@ class OllamaStructuredVisionModel:
                         "output_tokens="
                         f"{last_metrics.eval_count}. "
                         "Повтор с увеличенным num_predict "
-                        "пропущен, потому что он не помещается "
-                        "в configured context window.",
+                        "пропущен, потому что он "
+                        "не помещается в configured "
+                        "context window.",
                     ) from error
 
                 if last_metrics.done_reason == "length":
@@ -386,7 +490,8 @@ class OllamaStructuredVisionModel:
                         or next_num_predict <= attempt_num_predict
                     ):
                         raise VisionModelError(
-                            "Ollama исчерпал output budget "
+                            "Ollama исчерпал "
+                            "output budget "
                             f"на этапе {stage}: "
                             "num_predict="
                             f"{attempt_num_predict}, "
@@ -394,12 +499,13 @@ class OllamaStructuredVisionModel:
                             f"{last_metrics.prompt_eval_count}, "
                             "output_tokens="
                             f"{last_metrics.eval_count}. "
-                            "Повтор с тем же output budget "
-                            "запрещён.",
+                            "Повтор с тем же output "
+                            "budget запрещён.",
                         ) from error
 
                     logger.warning(
-                        "[VLM:%s] RETRY attempt=%s "
+                        "[VLM:%s] RETRY "
+                        "attempt=%s "
                         "reason=output_limit "
                         "current_num_predict=%s "
                         "next_num_predict=%s",
@@ -452,14 +558,14 @@ class OllamaStructuredVisionModel:
         attempt: int,
         status_code: int,
     ) -> bool:
-        """Разрешает локальный retry только transient Ollama HTTP ошибки."""
+        """Разрешает retry только transient Ollama HTTP ошибки."""
         return attempt < self._max_retries and status_code in _RETRYABLE_HTTP_STATUSES
 
     def _context_window_exhausted(
         self,
         metrics: GenerationMetrics | None,
     ) -> bool:
-        """Определяет, что generation упёрлась именно в context window."""
+        """Определяет исчерпание configured context window."""
         if metrics is None or metrics.done_reason != "length":
             return False
 

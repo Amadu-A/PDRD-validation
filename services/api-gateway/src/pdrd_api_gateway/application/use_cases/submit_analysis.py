@@ -2,10 +2,7 @@
 
 """Use case приёма пользовательских файлов для анализа."""
 
-from dataclasses import (
-    dataclass,
-    replace,
-)
+from dataclasses import dataclass
 from hashlib import sha256
 from uuid import UUID
 
@@ -79,10 +76,10 @@ class SubmitAnalysis:
         ) = None,
         normative_prompt_override_enabled: bool = False,
         normative_prompt_override: str = "",
-        technical_assignment_content: (bytes | None) = None,
-        technical_assignment_file_name: (str | None) = None,
+        technical_assignment_content: bytes | None = None,
+        technical_assignment_file_name: str | None = None,
         technical_assignment_id: UUID | None = None,
-        technical_assignment_analysis_document_id: (UUID | None) = None,
+        technical_assignment_analysis_document_id: UUID | None = None,
     ) -> AnalysisJob:
         """Принимает документы и создаёт надёжное задание."""
         self._validate_file_content(
@@ -133,10 +130,10 @@ class SubmitAnalysis:
 
             normative_snapshot = await resolver.execute(
                 section_id=normative_section_id,
-                document_ids=(normative_document_ids),
+                document_ids=normative_document_ids,
                 user_package_document_ids=(user_package_document_ids),
                 prompt_override_enabled=(normative_prompt_override_enabled),
-                prompt_override=(normative_prompt_override),
+                prompt_override=normative_prompt_override,
             )
 
         submission = AnalysisSubmission.create(
@@ -145,19 +142,10 @@ class SubmitAnalysis:
             pages=pages,
             pdf_file_name=pdf_file_name,
             cad_file_name=cad_file_name,
-            use_explanatory_note=(use_explanatory_note),
+            use_explanatory_note=use_explanatory_note,
             note_start_page=note_start_page,
             note_end_page=note_end_page,
         )
-
-        if (
-            technical_assignment_content is not None
-            and technical_assignment_analysis_document_id is not None
-        ):
-            submission = replace(
-                submission,
-                document_id=(technical_assignment_analysis_document_id),
-            )
 
         if technical_assignment_content is not None:
             if normative_snapshot is None:
@@ -165,11 +153,15 @@ class SubmitAnalysis:
                     "Для ТЗ отсутствует normative snapshot.",
                 )
 
+            technical_assignment_source_document_id = (
+                technical_assignment_analysis_document_id or submission.document_id
+            )
+
             technical_assignment = self._build_technical_assignment_snapshot(
-                analysis_document_id=(submission.document_id),
-                section_id=(normative_snapshot.section_id),
+                analysis_document_id=(technical_assignment_source_document_id),
+                section_id=normative_snapshot.section_id,
                 source_file=(technical_assignment_file_name or ""),
-                content=(technical_assignment_content),
+                content=technical_assignment_content,
                 prepared_technical_assignment_id=(technical_assignment_id),
             )
 
@@ -186,18 +178,18 @@ class SubmitAnalysis:
         try:
             if technical_assignment_content is not None:
                 await self.artifact_store.save_technical_assignment(
-                    document_id=(submission.document_id),
-                    content=(technical_assignment_content),
+                    document_id=submission.document_id,
+                    content=technical_assignment_content,
                 )
 
             return await self.create_analysis_job.execute(
-                document_id=(submission.document_id),
-                normative_snapshot=(normative_snapshot),
+                document_id=submission.document_id,
+                normative_snapshot=normative_snapshot,
             )
 
         except BaseException:
             await self.artifact_store.delete_request(
-                document_id=(submission.document_id),
+                document_id=submission.document_id,
             )
 
             raise
@@ -209,12 +201,12 @@ class SubmitAnalysis:
         section_id: UUID,
         source_file: str,
         content: bytes,
-        prepared_technical_assignment_id: (UUID | None),
+        prepared_technical_assignment_id: UUID | None,
     ) -> TechnicalAssignmentSnapshot:
         """Переиспользует preflight identity либо создаёт новую."""
         if prepared_technical_assignment_id is None:
             return TechnicalAssignmentSnapshot.create(
-                analysis_document_id=(analysis_document_id),
+                analysis_document_id=analysis_document_id,
                 section_id=section_id,
                 source_file=source_file,
                 content=content,
@@ -224,7 +216,7 @@ class SubmitAnalysis:
 
         return TechnicalAssignmentSnapshot(
             technical_assignment_id=(prepared_technical_assignment_id),
-            analysis_document_id=(analysis_document_id),
+            analysis_document_id=analysis_document_id,
             section_id=section_id,
             source_file=normalized_source_file,
             mime_type=(

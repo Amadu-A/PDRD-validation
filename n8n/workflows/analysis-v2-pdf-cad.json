@@ -5,7 +5,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "analysis/v2/pdf-cad",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {}
       },
       "id": "20000000-0000-4000-8000-000000000001",
@@ -51,6 +51,10 @@
             {
               "name": "note_end_page",
               "value": "={{ $json.body?.note_end_page ?? '' }}"
+            },
+            {
+              "name": "include_text_geometry",
+              "value": "true"
             }
           ]
         },
@@ -70,11 +74,60 @@
     {
       "parameters": {
         "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-artifacts/' + $('POST /analysis/v2/pdf-cad').first().json.body.document_id + '/visualization' }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ pages: (() => { const page = $('Document Extract PDF CAD').first().json.pdf ?? null; return page ? [{ page_number: page.page_number, width_points: page.width_points, height_points: page.height_points, image_base64: page.image_base64, extracted_text: page.text ?? '', text_words: page.text_words ?? [] }] : []; })() }) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "7f700000-0000-4000-8000-000000000002",
+      "name": "Persist Visualization Artifact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2020,
+        240
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/project-contexts/resolve-cache",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ context_id: $('POST /analysis/v2/pdf-cad').first().json.body?.document_id, enabled: $('Document Extract PDF CAD').first().json.explanatory_note_context?.enabled ?? false, pages: ($('Document Extract PDF CAD').first().json.explanatory_note_context?.pages ?? []).map((page) => ({ page_number: page.page_number, text: page.text })) }) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "6c300000-0000-4000-8000-000000000001",
+      "name": "Resolve Project Context Cache",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2130,
+        -160
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
         "url": "http://pdrd-analysis-service:8501/internal/v1/project-context/validate",
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ enabled: $('Document Extract PDF CAD').item.json.explanatory_note_context?.enabled ?? false, pages: ($('Document Extract PDF CAD').item.json.explanatory_note_context?.pages ?? []).map((page) => ({ page_number: page.page_number, text: page.text })) }) }}",
+        "body": "={{ JSON.stringify({ enabled: $('Document Extract PDF CAD').first().json.explanatory_note_context?.enabled ?? false, pages: ($('Document Extract PDF CAD').first().json.explanatory_note_context?.pages ?? []).map((page) => ({ page_number: page.page_number, text: page.text })), cached_validation: $('Resolve Project Context Cache').first().json.cache_hit ? ($('Resolve Project Context Cache').first().json.validation ?? null) : null }) }}",
         "options": {
           "timeout": 600000
         }
@@ -96,7 +149,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ context_id: $('POST /analysis/v2/pdf-cad').first().json.body?.document_id, enabled: $json.enabled ?? false, pages: ($('Document Extract PDF CAD').first().json.explanatory_note_context?.pages ?? []).map((page) => ({ page_number: page.page_number, text: page.text })) }) }}",
+        "body": "={{ JSON.stringify({ context_id: $('Resolve Project Context Cache').first().json.context_id, enabled: $json.enabled ?? false, cache_key: $('Resolve Project Context Cache').first().json.cache_key ?? null, validation: { enabled: $json.enabled ?? false, pages_count: $json.pages_count ?? 0, classifications: $json.classifications ?? [], warnings: $json.warnings ?? [] }, pages: ($('Document Extract PDF CAD').first().json.explanatory_note_context?.pages ?? []).map((page) => ({ page_number: page.page_number, text: page.text })) }) }}",
         "options": {
           "timeout": 900000
         }
@@ -115,7 +168,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const combined = $('Document Extract PDF CAD').first().json;\nconst validation = $('Validate Project Context').first().json;\nconst context = $('Create Project Context').first().json;\nconst technicalAssignment = $input.first().json;\nconst pdf = combined.pdf ?? {};\nconst cad = combined.cad ?? {};\n\nreturn [{ json: {\n  source: {\n    pdf_file_name: combined.pdf_file_name ?? 'document.pdf',\n    cad_file_name: combined.cad_file_name ?? 'drawing.dxf',\n    total_pdf_pages: combined.total_pdf_pages ?? 0,\n    selected_page: combined.selected_page ?? 1,\n  },\n  project_context: {\n    context_id: context.context_id,\n    enabled: context.enabled ?? false,\n    start_page: combined.explanatory_note_context?.start_page ?? null,\n    end_page: combined.explanatory_note_context?.end_page ?? null,\n    pages_count: context.pages_count ?? 0,\n    indexed_chunks: context.chunks_count ?? 0,\n    vector_size: context.vector_size ?? 0,\n    validation,\n  },\n  technical_assignment: technicalAssignment,\n  page: {\n    page_number: combined.selected_page ?? 1,\n    page_type: pdf.page_type ?? 'unknown',\n    text: combined.analysis_text ?? '',\n    width_points: pdf.width_points ?? 0,\n    height_points: pdf.height_points ?? 0,\n    image_base64: combined.combined_image_base64 ?? '',\n  },\n  cad: {\n    original_file_name: cad.original_file_name ?? '',\n    original_format: cad.original_format ?? '',\n    normalized_format: cad.normalized_format ?? '',\n    converted_from_dwg: cad.converted_from_dwg ?? false,\n    selected_layout: cad.selected_layout ?? '',\n    warnings: Array.isArray(cad.warnings) ? cad.warnings : [],\n    machine_data: cad.machine_data ?? {},\n    machine_context: cad.machine_context ?? '',\n  },\n  render: {\n    mime_type: 'image/png',\n    image_base64: combined.combined_image_base64 ?? '',\n    pdf_image_base64: pdf.image_base64 ?? '',\n    cad_image_base64: cad.image_base64 ?? '',\n  },\n} }];"
+        "jsCode": "const combined = $('Document Extract PDF CAD').first().json;\nconst validation = $('Validate Project Context').first().json;\nconst context = $('Create Project Context').first().json;\nconst technicalAssignment = $input.first().json;\nconst pdf = combined.pdf ?? {};\nconst cad = combined.cad ?? {};\n\nreturn [{ json: {\n  source: {\n    pdf_file_name: combined.pdf_file_name ?? 'document.pdf',\n    cad_file_name: combined.cad_file_name ?? 'drawing.dxf',\n    total_pdf_pages: combined.total_pdf_pages ?? 0,\n    selected_page: combined.selected_page ?? 1,\n  },\n  project_context: {\n    context_id: context.context_id,\n    enabled: context.enabled ?? false,\n    start_page: combined.explanatory_note_context?.start_page ?? null,\n    end_page: combined.explanatory_note_context?.end_page ?? null,\n    pages_count: context.pages_count ?? 0,\n    indexed_chunks: context.chunks_count ?? 0,\n    vector_size: context.vector_size ?? 0,\n    cache_key: context.cache_key ?? null,\n    cache_hit: Boolean(context.cache_hit),\n    collection_name: context.collection_name ?? null,\n    validation,\n  },\n  technical_assignment: technicalAssignment,\n  page: {\n    page_number: combined.selected_page ?? 1,\n    page_type: pdf.page_type ?? 'unknown',\n    text: combined.analysis_text ?? '',\n    width_points: pdf.width_points ?? 0,\n    height_points: pdf.height_points ?? 0,\n    image_base64: combined.combined_image_base64 ?? '',\n  },\n  cad: {\n    original_file_name: cad.original_file_name ?? '',\n    original_format: cad.original_format ?? '',\n    normalized_format: cad.normalized_format ?? '',\n    converted_from_dwg: cad.converted_from_dwg ?? false,\n    selected_layout: cad.selected_layout ?? '',\n    warnings: Array.isArray(cad.warnings) ? cad.warnings : [],\n    machine_data: cad.machine_data ?? {},\n    machine_context: cad.machine_context ?? '',\n  },\n  render: {\n    mime_type: 'image/png',\n    image_base64: combined.combined_image_base64 ?? '',\n    pdf_image_base64: pdf.image_base64 ?? '',\n    cad_image_base64: cad.image_base64 ?? '',\n  },\n} }];"
       },
       "id": "20000000-0000-4000-8000-000000000006",
       "name": "Prepare Combined Context",
@@ -155,7 +208,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_facts: $json.facts, extracted_text: $('Prepare Combined Context').item.json.page.text }) }}",
+        "body": "={{ JSON.stringify({ page_facts: $('Understand Combined Page').item.json.facts, extracted_text: $('Prepare Combined Context').item.json.page.text }) }}",
         "options": {
           "timeout": 1800000
         }
@@ -433,7 +486,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const prepared = $('Prepare Combined Context').item.json;\nconst understanding = $('Understand Combined Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst requirements = $('Normalize Requirement Search').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst merged = $('Merge Finding Candidates').item.json;\nconst tFirst = $('Technical Assignment First Pass').item.json;\nconst enrichment = $('Prepare Experience Queries').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\nconst candidateGroups = Object.values(candidatesByFinding)\n  .filter((value) => Array.isArray(value));\nconst tDecisions = Array.isArray(tFirst.decisions)\n  ? tFirst.decisions\n  : [];\n\nreturn { json: {\n  status: 'completed',\n  source_mode: 'pdf_cad',\n  file_name: prepared.source.pdf_file_name,\n  pdf_file_name: prepared.source.pdf_file_name,\n  cad_file_name: prepared.source.cad_file_name,\n  total_pages: prepared.source.total_pdf_pages,\n  selected_pages: [prepared.source.selected_page],\n  analyzed_pages: 1,\n  findings_count: findings.length,\n  summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранному PDF + CAD листу не найдены.',\n  findings,\n  render: prepared.render,\n  cad: prepared.cad,\n  explanatory_note_context: prepared.project_context,\n  page: {\n    page_number: prepared.page.page_number,\n    heuristic_page_type: prepared.page.page_type,\n    width_points: prepared.page.width_points,\n    height_points: prepared.page.height_points,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: requirements.normative_sources ?? [],\n    technical_assignment_sources: requirements.technical_assignment_sources ?? [],\n    conflict_candidates: requirements.conflict_candidates ?? [],\n    requirement_diagnostics: requirements.diagnostics ?? [],\n    reference_resolutions: requirements.reference_resolutions ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    technical_assignment_first_pass: {\n      enabled: Boolean(tFirst.enabled),\n      requirements_count: Number(tFirst.requirements_count ?? 0),\n      decisions_count: tDecisions.length,\n      satisfied_count: tDecisions.filter((decision) => decision.status === 'satisfied').length,\n      not_applicable_count: tDecisions.filter((decision) => decision.status === 'not_applicable').length,\n      violated_count: tDecisions.filter((decision) => decision.status === 'violated').length,\n      needs_review_count: tDecisions.filter((decision) => decision.status === 'insufficient_evidence').length,\n      findings_count: Array.isArray(tFirst.findings) ? tFirst.findings.length : 0,\n      summary: String(tFirst.summary ?? ''),\n      metrics: Array.isArray(tFirst.metrics) ? tFirst.metrics : [],\n    },\n    finding_candidates: {\n      normative_check_count: Array.isArray(check.findings) ? check.findings.length : 0,\n      merged_count: Array.isArray(merged.findings) ? merged.findings.length : 0,\n    },\n    normative_enrichment: {\n      queries_count: $('Prepare Finding Normative Queries').item.json.normative_queries?.length ?? 0,\n      candidates_count: candidateGroups.reduce((total, sources) => total + sources.length, 0),\n    },\n    normative_check: { summary: check.summary ?? '', findings: check.findings ?? [], metrics: check.metrics ?? {} },\n    project_context_sources: augmentation.sources ?? [],\n  },\n  pipeline: ['combined_document_extract','explanatory_note_validation','temporary_project_context_index','technical_assignment_requirement_feed','page_understanding','technical_assignment_first_pass','project_context_retrieval','normative_queries','requirement_search','user_package_search','normative_check','finding_candidate_merge','finding_normative_search','experience_search','finalization','project_context_cleanup'],\n  limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Техническое задание проверяется независимым exhaustive T-first проходом и не является нормативным доказательством.', 'T-guided retrieval используется дополнительно и не управляет сохранением T-first findings.', 'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n} };",
+        "jsCode": "const prepared = $('Prepare Combined Context').item.json;\nconst understanding = $('Understand Combined Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst requirements = $('Normalize Requirement Search').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst merged = $('Merge Finding Candidates').item.json;\nconst tFirst = $('Technical Assignment First Pass').item.json;\nconst enrichment = $('Prepare Experience Queries').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\nconst candidateGroups = Object.values(candidatesByFinding)\n  .filter((value) => Array.isArray(value));\nconst tDecisions = Array.isArray(tFirst.decisions)\n  ? tFirst.decisions\n  : [];\n\nreturn { json: {\n  status: 'completed',\n  source_mode: 'pdf_cad',\n  file_name: prepared.source.pdf_file_name,\n  pdf_file_name: prepared.source.pdf_file_name,\n  cad_file_name: prepared.source.cad_file_name,\n  total_pages: prepared.source.total_pdf_pages,\n  selected_pages: [prepared.source.selected_page],\n  analyzed_pages: 1,\n  findings_count: findings.length,\n  summary: findings.length ? `Найдено замечаний: ${findings.length}.` : 'Замечания по выбранному PDF + CAD листу не найдены.',\n  findings,\n  cad: prepared.cad,\n  explanatory_note_context: prepared.project_context,\n  page: {\n    page_number: prepared.page.page_number,\n    heuristic_page_type: prepared.page.page_type,\n    width_points: prepared.page.width_points,\n    height_points: prepared.page.height_points,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: requirements.normative_sources ?? [],\n    technical_assignment_sources: requirements.technical_assignment_sources ?? [],\n    conflict_candidates: requirements.conflict_candidates ?? [],\n    requirement_diagnostics: requirements.diagnostics ?? [],\n    reference_resolutions: requirements.reference_resolutions ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    technical_assignment_first_pass: {\n      enabled: Boolean(tFirst.enabled),\n      requirements_count: Number(tFirst.requirements_count ?? 0),\n      decisions_count: tDecisions.length,\n      satisfied_count: tDecisions.filter((decision) => decision.status === 'satisfied').length,\n      not_applicable_count: tDecisions.filter((decision) => decision.status === 'not_applicable').length,\n      violated_count: tDecisions.filter((decision) => decision.status === 'violated').length,\n      needs_review_count: tDecisions.filter((decision) => decision.status === 'insufficient_evidence').length,\n      findings_count: Array.isArray(tFirst.findings) ? tFirst.findings.length : 0,\n      summary: String(tFirst.summary ?? ''),\n      metrics: Array.isArray(tFirst.metrics) ? tFirst.metrics : [],\n    },\n    finding_candidates: {\n      normative_check_count: Array.isArray(check.findings) ? check.findings.length : 0,\n      merged_count: Array.isArray(merged.findings) ? merged.findings.length : 0,\n    },\n    normative_enrichment: {\n      queries_count: $('Prepare Finding Normative Queries').item.json.normative_queries?.length ?? 0,\n      candidates_count: candidateGroups.reduce((total, sources) => total + sources.length, 0),\n    },\n    normative_check: { summary: check.summary ?? '', findings: check.findings ?? [], metrics: check.metrics ?? {} },\n    project_context_sources: augmentation.sources ?? [],\n  },\n  pipeline: ['combined_document_extract','explanatory_note_validation','project_context_cache','technical_assignment_requirement_feed','page_understanding','technical_assignment_first_pass','project_context_retrieval','normative_queries','requirement_search','user_package_search','normative_check','finding_candidate_merge','finding_normative_search','experience_search','finalization',],\n  limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Техническое задание проверяется независимым exhaustive T-first проходом и не является нормативным доказательством.', 'T-guided retrieval используется дополнительно и не управляет сохранением T-first findings.', 'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n} };",
         "mode": "runOnceForEachItem"
       },
       "id": "20000000-0000-4000-8000-000000000018",
@@ -444,24 +497,6 @@
         3040,
         0
       ]
-    },
-    {
-      "parameters": {
-        "method": "DELETE",
-        "url": "={{ 'http://pdrd-knowledge-service:8401/internal/v1/project-contexts/' + $json.explanatory_note_context.context_id }}",
-        "options": {
-          "timeout": 90000
-        }
-      },
-      "id": "20000000-0000-4000-8000-000000000019",
-      "name": "Cleanup Project Context",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        3260,
-        0
-      ],
-      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -560,7 +595,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const technicalAssignmentId = String(\n  $('POST /analysis/v2/pdf-cad').first().json.body?.technical_assignment_id ?? '',\n).trim();\n\nif (!technicalAssignmentId) {\n  return [{\n    json: {\n      enabled: false,\n      technical_assignment_id: null,\n      analysis_document_id: null,\n      section_id: null,\n      source_file: '',\n      source_sha256: '',\n      total: 0,\n      requirements: [],\n    },\n  }];\n}\n\nconst pages = $input.all().map((item) => item.json ?? {});\n\nif (pages.length === 0) {\n  throw new Error('T-first requirement feed вернул пустой набор страниц.');\n}\n\nconst first = pages[0];\nconst expectedDocumentId = String(\n  $('POST /analysis/v2/pdf-cad').first().json.body?.document_id ?? '',\n).trim();\nconst expectedSectionId = String(\n  $('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id ?? '',\n).trim();\n\nconst total = Number(first.total ?? 0);\n\nif (!Number.isInteger(total) || total < 1) {\n  throw new Error(\n    `T-first requirement feed должен содержать хотя бы одно atomic requirement; total=${first.total}.`,\n  );\n}\n\nif (total > 1000) {\n  throw new Error(\n    `T-first requirement feed превышает configured Analysis limit: total=${total}, limit=1000.`,\n  );\n}\n\nconst requirements = pages\n  .flatMap((page) => Array.isArray(page.requirements) ? page.requirements : [])\n  .sort(\n    (left, right) =>\n      Number(left.requirement_index ?? 0) - Number(right.requirement_index ?? 0),\n  );\n\nfor (const page of pages) {\n  if (String(page.technical_assignment_id ?? '') !== technicalAssignmentId) {\n    throw new Error('T-first requirement feed содержит другой technical_assignment_id.');\n  }\n\n  if (String(page.analysis_document_id ?? '') !== expectedDocumentId) {\n    throw new Error('T-first requirement feed содержит другой analysis_document_id.');\n  }\n\n  if (String(page.section_id ?? '') !== expectedSectionId) {\n    throw new Error('T-first requirement feed содержит другой section_id.');\n  }\n\n  if (Number(page.total ?? -1) !== total) {\n    throw new Error('T-first requirement feed содержит несовместимые total между страницами.');\n  }\n\n  if (\n    String(page.source_file ?? '') !== String(first.source_file ?? '')\n    || String(page.source_sha256 ?? '') !== String(first.source_sha256 ?? '')\n  ) {\n    throw new Error('T-first requirement feed содержит несовместимые source metadata.');\n  }\n}\n\nif (requirements.length !== total) {\n  throw new Error(\n    `T-first requirement feed получен не полностью: expected=${total}, actual=${requirements.length}.`,\n  );\n}\n\nconst requirementIds = requirements.map(\n  (requirement) => String(requirement.requirement_id ?? ''),\n);\n\nif (\n  requirementIds.some((requirementId) => !requirementId)\n  || new Set(requirementIds).size !== requirementIds.length\n) {\n  throw new Error('T-first requirement feed содержит пустые или повторяющиеся requirement_id.');\n}\n\nreturn [{\n  json: {\n    enabled: true,\n    technical_assignment_id: technicalAssignmentId,\n    analysis_document_id: expectedDocumentId,\n    section_id: expectedSectionId,\n    source_file: String(first.source_file ?? ''),\n    source_sha256: String(first.source_sha256 ?? ''),\n    total,\n    requirements,\n  },\n}];"
+        "jsCode": "const technicalAssignmentId = String(\n  $('POST /analysis/v2/pdf-cad').first().json.body?.technical_assignment_id ?? '',\n).trim();\n\nif (!technicalAssignmentId) {\n  return [{\n    json: {\n      enabled: false,\n      technical_assignment_id: null,\n      analysis_document_id: null,\n      section_id: null,\n      source_file: '',\n      source_sha256: '',\n      total: 0,\n      requirements: [],\n    },\n  }];\n}\n\nconst pages = $input.all().map((item) => item.json ?? {});\n\nif (pages.length === 0) {\n  throw new Error('T-first requirement feed вернул пустой набор страниц.');\n}\n\nconst first = pages[0];\nconst expectedDocumentId = String(\n  $('POST /analysis/v2/pdf-cad').first().json.body?.technical_assignment_analysis_document_id ?? '',\n).trim();\n\nif (!expectedDocumentId) {\n  throw new Error(\n    'T-first orchestration не содержит technical_assignment_analysis_document_id.',\n  );\n}\n\nconst expectedSectionId = String(\n  $('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id ?? '',\n).trim();\n\nconst total = Number(first.total ?? 0);\n\nif (!Number.isInteger(total) || total < 1) {\n  throw new Error(\n    `T-first requirement feed должен содержать хотя бы одно atomic requirement; total=${first.total}.`,\n  );\n}\n\nif (total > 1000) {\n  throw new Error(\n    `T-first requirement feed превышает configured Analysis limit: total=${total}, limit=1000.`,\n  );\n}\n\nconst requirements = pages\n  .flatMap((page) => Array.isArray(page.requirements) ? page.requirements : [])\n  .sort(\n    (left, right) =>\n      Number(left.requirement_index ?? 0) - Number(right.requirement_index ?? 0),\n  );\n\nfor (const page of pages) {\n  if (String(page.technical_assignment_id ?? '') !== technicalAssignmentId) {\n    throw new Error('T-first requirement feed содержит другой technical_assignment_id.');\n  }\n\n  if (String(page.analysis_document_id ?? '') !== expectedDocumentId) {\n    throw new Error('T-first requirement feed содержит другой analysis_document_id.');\n  }\n\n  if (String(page.section_id ?? '') !== expectedSectionId) {\n    throw new Error('T-first requirement feed содержит другой section_id.');\n  }\n\n  if (Number(page.total ?? -1) !== total) {\n    throw new Error('T-first requirement feed содержит несовместимые total между страницами.');\n  }\n\n  if (\n    String(page.source_file ?? '') !== String(first.source_file ?? '')\n    || String(page.source_sha256 ?? '') !== String(first.source_sha256 ?? '')\n  ) {\n    throw new Error('T-first requirement feed содержит несовместимые source metadata.');\n  }\n}\n\nif (requirements.length !== total) {\n  throw new Error(\n    `T-first requirement feed получен не полностью: expected=${total}, actual=${requirements.length}.`,\n  );\n}\n\nconst requirementIds = requirements.map(\n  (requirement) => String(requirement.requirement_id ?? ''),\n);\n\nif (\n  requirementIds.some((requirementId) => !requirementId)\n  || new Set(requirementIds).size !== requirementIds.length\n) {\n  throw new Error('T-first requirement feed содержит пустые или повторяющиеся requirement_id.');\n}\n\nreturn [{\n  json: {\n    enabled: true,\n    technical_assignment_id: technicalAssignmentId,\n    analysis_document_id: expectedDocumentId,\n    section_id: expectedSectionId,\n    source_file: String(first.source_file ?? ''),\n    source_sha256: String(first.source_sha256 ?? ''),\n    total,\n    requirements,\n  },\n}];"
       },
       "id": "5c200000-0000-4000-8000-000000000003",
       "name": "Technical Assignment Requirement Feed",
@@ -653,6 +688,616 @@
         1500,
         0
       ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'extracting_sources' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8c200000-0000-4000-8000-000000000001",
+      "name": "Progress Extract Sources",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1780,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'preparing_context' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8c200000-0000-4000-8000-000000000002",
+      "name": "Progress Prepare Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1360,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'understanding_sheet' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8c200000-0000-4000-8000-000000000003",
+      "name": "Progress Understand Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -940,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'retrieving_requirements' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8c200000-0000-4000-8000-000000000004",
+      "name": "Progress Retrieve Requirements",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -520,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'checking_requirements' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8c200000-0000-4000-8000-000000000005",
+      "name": "Progress Check Requirements",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -100,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'enriching_findings' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8c200000-0000-4000-8000-000000000006",
+      "name": "Progress Enrich Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'finalizing_findings' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8c200000-0000-4000-8000-000000000007",
+      "name": "Progress Finalize Findings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'building_result' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "8c200000-0000-4000-8000-000000000008",
+      "name": "Progress Build Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1160,
+        420
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "8c200000-0000-4000-8000-000000000009",
+      "name": "Respond PDF CAD Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        3720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8c200000-0000-4000-8000-000000000101",
+      "name": "Gate Extract Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1570,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8c200000-0000-4000-8000-000000000102",
+      "name": "Gate Prepare Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1150,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8c200000-0000-4000-8000-000000000103",
+      "name": "Gate Understand Sheet",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -730,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8c200000-0000-4000-8000-000000000104",
+      "name": "Gate Retrieve Requirements",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -310,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8c200000-0000-4000-8000-000000000105",
+      "name": "Gate Check Requirements",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        110,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8c200000-0000-4000-8000-000000000106",
+      "name": "Gate Enrich Findings",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        530,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8c200000-0000-4000-8000-000000000107",
+      "name": "Gate Finalize Findings",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        950,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "8c200000-0000-4000-8000-000000000108",
+      "name": "Gate Build Result",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1370,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8c300000-0000-4000-8000-000000000901",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8c300000-0000-4000-8000-000000000001",
+      "name": "Continue Extract Sources",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1570,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8c300000-0000-4000-8000-000000000902",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8c300000-0000-4000-8000-000000000002",
+      "name": "Continue Prepare Context",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1150,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8c300000-0000-4000-8000-000000000903",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8c300000-0000-4000-8000-000000000003",
+      "name": "Continue Understand Sheet",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -730,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8c300000-0000-4000-8000-000000000904",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8c300000-0000-4000-8000-000000000004",
+      "name": "Continue Retrieve Requirements",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -310,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8c300000-0000-4000-8000-000000000905",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8c300000-0000-4000-8000-000000000005",
+      "name": "Continue Check Requirements",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        110,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8c300000-0000-4000-8000-000000000906",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8c300000-0000-4000-8000-000000000006",
+      "name": "Continue Enrich Findings",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        530,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8c300000-0000-4000-8000-000000000907",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8c300000-0000-4000-8000-000000000007",
+      "name": "Continue Finalize Findings",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        950,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8c300000-0000-4000-8000-000000000908",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8c300000-0000-4000-8000-000000000008",
+      "name": "Continue Build Result",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1370,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{ json: { status: 'cancelled', reason: 'analysis_cancelled' } }];"
+      },
+      "id": "8c300000-0000-4000-8000-000000000009",
+      "name": "Build Cancelled Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1580,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "8c300000-0000-4000-8000-000000000010",
+      "name": "Respond Cancelled",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1800,
+        780
+      ]
     }
   ],
   "pinData": {},
@@ -661,7 +1306,12 @@
       "main": [
         [
           {
-            "node": "Document Extract PDF CAD",
+            "node": "Progress Extract Sources",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Extract Sources",
             "type": "main",
             "index": 0
           }
@@ -672,7 +1322,18 @@
       "main": [
         [
           {
-            "node": "Validate Project Context",
+            "node": "Persist Visualization Artifact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Visualization Artifact": {
+      "main": [
+        [
+          {
+            "node": "Resolve Project Context Cache",
             "type": "main",
             "index": 0
           }
@@ -705,7 +1366,12 @@
       "main": [
         [
           {
-            "node": "Understand Combined Page",
+            "node": "Progress Understand Sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Understand Sheet",
             "type": "main",
             "index": 0
           }
@@ -793,7 +1459,12 @@
       "main": [
         [
           {
-            "node": "Check Norms",
+            "node": "Progress Check Requirements",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Check Requirements",
             "type": "main",
             "index": 0
           }
@@ -859,7 +1530,12 @@
       "main": [
         [
           {
-            "node": "Finalize Findings",
+            "node": "Progress Finalize Findings",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Finalize Findings",
             "type": "main",
             "index": 0
           }
@@ -870,7 +1546,12 @@
       "main": [
         [
           {
-            "node": "Build PDF CAD Result",
+            "node": "Progress Build Result",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Build Result",
             "type": "main",
             "index": 0
           }
@@ -878,17 +1559,6 @@
       ]
     },
     "Build PDF CAD Result": {
-      "main": [
-        [
-          {
-            "node": "Cleanup Project Context",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Cleanup Project Context": {
       "main": [
         [
           {
@@ -972,7 +1642,12 @@
       "main": [
         [
           {
-            "node": "Build Project Context Query",
+            "node": "Progress Retrieve Requirements",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Retrieve Requirements",
             "type": "main",
             "index": 0
           }
@@ -983,7 +1658,370 @@
       "main": [
         [
           {
+            "node": "Progress Enrich Findings",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Enrich Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Project Context Cache": {
+      "main": [
+        [
+          {
+            "node": "Progress Prepare Context",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Prepare Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return PDF CAD Result": {
+      "main": [
+        [
+          {
+            "node": "Respond PDF CAD Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Extract Sources": {
+      "main": [
+        [
+          {
+            "node": "Document Extract PDF CAD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Extract Sources": {
+      "main": [
+        [
+          {
+            "node": "Continue Extract Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Prepare Context": {
+      "main": [
+        [
+          {
+            "node": "Validate Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Prepare Context": {
+      "main": [
+        [
+          {
+            "node": "Continue Prepare Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Understand Sheet": {
+      "main": [
+        [
+          {
+            "node": "Understand Combined Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Understand Sheet": {
+      "main": [
+        [
+          {
+            "node": "Continue Understand Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Retrieve Requirements": {
+      "main": [
+        [
+          {
+            "node": "Build Project Context Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Retrieve Requirements": {
+      "main": [
+        [
+          {
+            "node": "Continue Retrieve Requirements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Check Requirements": {
+      "main": [
+        [
+          {
+            "node": "Check Norms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Check Requirements": {
+      "main": [
+        [
+          {
+            "node": "Continue Check Requirements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Enrich Findings": {
+      "main": [
+        [
+          {
             "node": "Prepare Finding Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Enrich Findings": {
+      "main": [
+        [
+          {
+            "node": "Continue Enrich Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Finalize Findings": {
+      "main": [
+        [
+          {
+            "node": "Finalize Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Finalize Findings": {
+      "main": [
+        [
+          {
+            "node": "Continue Finalize Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Build Result": {
+      "main": [
+        [
+          {
+            "node": "Build PDF CAD Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Build Result": {
+      "main": [
+        [
+          {
+            "node": "Continue Build Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Extract Sources": {
+      "main": [
+        [
+          {
+            "node": "Gate Extract Sources",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Prepare Context": {
+      "main": [
+        [
+          {
+            "node": "Gate Prepare Context",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Understand Sheet": {
+      "main": [
+        [
+          {
+            "node": "Gate Understand Sheet",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Retrieve Requirements": {
+      "main": [
+        [
+          {
+            "node": "Gate Retrieve Requirements",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Check Requirements": {
+      "main": [
+        [
+          {
+            "node": "Gate Check Requirements",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Enrich Findings": {
+      "main": [
+        [
+          {
+            "node": "Gate Enrich Findings",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Finalize Findings": {
+      "main": [
+        [
+          {
+            "node": "Gate Finalize Findings",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Build Result": {
+      "main": [
+        [
+          {
+            "node": "Gate Build Result",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Cancelled Result": {
+      "main": [
+        [
+          {
+            "node": "Respond Cancelled",
             "type": "main",
             "index": 0
           }

@@ -2,8 +2,12 @@
 
 """Unit tests HTTP contract Project Context."""
 
+from pdrd_analysis_service.domain.project_context import (
+    ProjectContextPageKind,
+)
 from pdrd_analysis_service.transport.http.project_context_schemas import (
     ProjectContextSourcePayload,
+    ValidateProjectContextRequest,
 )
 
 
@@ -15,7 +19,7 @@ def test_project_context_source_accepts_qdrant_point_id() -> None:
         score=0.87,
         page=2,
         chunk_index=1,
-        text="Описание проектного решения.",
+        text=("Описание проектного решения."),
     )
 
     domain = payload.to_domain()
@@ -31,3 +35,43 @@ def test_project_context_source_accepts_qdrant_point_id() -> None:
     assert domain.chunk_index == 1
 
     assert domain.text == "Описание проектного решения."
+
+
+def test_validate_request_accepts_cached_validation() -> None:
+    """Warm cache validation преобразуется в Domain."""
+    request = ValidateProjectContextRequest.model_validate(
+        {
+            "enabled": True,
+            "pages": [
+                {
+                    "page_number": 5,
+                    "text": ("Пояснительная записка."),
+                }
+            ],
+            "cached_validation": {
+                "enabled": True,
+                "pages_count": 1,
+                "classifications": [
+                    {
+                        "page_number": 5,
+                        "kind": ("explanatory_note"),
+                        "confidence": 0.99,
+                        "reason": ("Cached."),
+                    }
+                ],
+                "warnings": [],
+            },
+        }
+    )
+
+    assert request.cached_validation is not None
+
+    domain = request.cached_validation.to_domain()
+
+    assert domain.enabled is True
+
+    assert domain.pages_count == 1
+
+    assert domain.classifications[0].page_number == 5
+
+    assert domain.classifications[0].kind is ProjectContextPageKind.EXPLANATORY_NOTE

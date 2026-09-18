@@ -36,7 +36,9 @@ from pdrd_analysis_service.transport.http.project_context_schemas import (
 
 router = APIRouter(
     prefix="/internal/v1/project-context",
-    tags=["project-context"],
+    tags=[
+        "project-context",
+    ],
 )
 
 
@@ -48,10 +50,12 @@ async def validate_project_context(
     request: ValidateProjectContextRequest,
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
 ) -> ValidateProjectContextResponse:
-    """Классифицирует выбранный диапазон ПЗ."""
+    """Классифицирует ПЗ или reuse cached validation."""
     use_case = container.validate_project_context
 
     if use_case is None:
@@ -67,6 +71,11 @@ async def validate_project_context(
         ) = await use_case.execute(
             enabled=request.enabled,
             pages=tuple(page.to_domain() for page in request.pages),
+            cached_validation=(
+                request.cached_validation.to_domain()
+                if request.cached_validation is not None
+                else None
+            ),
         )
 
     except InvalidProjectContextError as error:
@@ -87,9 +96,9 @@ async def validate_project_context(
 
     classifications = [
         ProjectContextClassificationPayload(
-            page_number=(item.page_number),
+            page_number=item.page_number,
             kind=item.kind.value,
-            confidence=(item.confidence),
+            confidence=item.confidence,
             reason=item.reason,
         )
         for item in validation.classifications
@@ -97,9 +106,9 @@ async def validate_project_context(
 
     warnings = [
         ProjectContextClassificationPayload(
-            page_number=(item.page_number),
+            page_number=item.page_number,
             kind=item.kind.value,
-            confidence=(item.confidence),
+            confidence=item.confidence,
             reason=item.reason,
         )
         for item in validation.warnings
@@ -110,6 +119,7 @@ async def validate_project_context(
         pages_count=(validation.pages_count),
         classifications=(classifications),
         warnings=warnings,
+        requires_confirmation=(validation.requires_confirmation),
         metrics=[item.as_dict() for item in metrics],
     )
 
@@ -122,7 +132,9 @@ async def build_project_context_query(
     request: BuildProjectContextQueryRequest,
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
 ) -> BuildProjectContextQueryResponse:
     """Строит semantic query для Knowledge Service."""
@@ -152,7 +164,9 @@ async def augment_project_context(
     request: AugmentProjectContextRequest,
     container: Annotated[
         ApplicationContainer,
-        Depends(get_container),
+        Depends(
+            get_container,
+        ),
     ],
 ) -> AugmentProjectContextResponse:
     """Добавляет PZ sources к нормативной проверке."""

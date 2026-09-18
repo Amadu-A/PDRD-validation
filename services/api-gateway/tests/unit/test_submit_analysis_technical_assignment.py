@@ -34,7 +34,11 @@ class ArtifactStoreStub:
         """Инициализирует captured state."""
         self.saved_document_id: UUID | None = None
 
+        self.saved_document_ids: list[UUID] = []
+
         self.technical_assignment_content: bytes | None = None
+
+        self.technical_assignment_document_ids: list[UUID] = []
 
         self.deleted_document_id: UUID | None = None
 
@@ -48,14 +52,22 @@ class ArtifactStoreStub:
         """Запоминает document_id request."""
         self.saved_document_id = submission.document_id
 
+        self.saved_document_ids.append(
+            submission.document_id,
+        )
+
     async def save_technical_assignment(
         self,
         *,
         document_id: UUID,
         content: bytes,
     ) -> None:
-        """Запоминает bytes ТЗ."""
+        """Запоминает bytes ТЗ и analysis artifact identity."""
         assert document_id == self.saved_document_id
+
+        self.technical_assignment_document_ids.append(
+            document_id,
+        )
 
         self.technical_assignment_content = content
 
@@ -105,7 +117,7 @@ class CreateAnalysisJobStub:
         """Возвращает domain job."""
         return AnalysisJob.create(
             document_id=document_id,
-            normative_snapshot=(normative_snapshot),
+            normative_snapshot=normative_snapshot,
         )
 
 
@@ -164,6 +176,105 @@ async def test_submit_analysis_attaches_technical_assignment_snapshot() -> None:
     assert technical_assignment.source_file == "ТЗ.pdf"
 
     assert artifact_store.technical_assignment_content == content
+
+    assert artifact_store.saved_document_ids == [
+        job.document_id,
+    ]
+
+    assert artifact_store.technical_assignment_document_ids == [
+        job.document_id,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_prepared_technical_assignment_keeps_source_identity_separate_from_analysis() -> (
+    None
+):
+    """Prepared ТЗ не переиспользует document_id нового анализа."""
+    artifact_store = ArtifactStoreStub()
+
+    use_case = build_use_case(
+        artifact_store,
+    )
+
+    section_id = uuid4()
+
+    prepared_technical_assignment_id = uuid4()
+
+    prepared_analysis_document_id = uuid4()
+
+    content = b"prepared-technical-assignment"
+
+    first_job = await use_case.execute(
+        pdf_content=b"first-pdf",
+        pdf_file_name="drawing-1.pdf",
+        cad_content=None,
+        cad_file_name=None,
+        pages="19",
+        normative_section_id=section_id,
+        normative_document_ids=(uuid4(),),
+        technical_assignment_content=content,
+        technical_assignment_file_name="ТЗ.pdf",
+        technical_assignment_id=(prepared_technical_assignment_id),
+        technical_assignment_analysis_document_id=(prepared_analysis_document_id),
+    )
+
+    second_job = await use_case.execute(
+        pdf_content=b"second-pdf",
+        pdf_file_name="drawing-2.pdf",
+        cad_content=None,
+        cad_file_name=None,
+        pages="19",
+        normative_section_id=section_id,
+        normative_document_ids=(uuid4(),),
+        technical_assignment_content=content,
+        technical_assignment_file_name="ТЗ.pdf",
+        technical_assignment_id=(prepared_technical_assignment_id),
+        technical_assignment_analysis_document_id=(prepared_analysis_document_id),
+    )
+
+    assert first_job.document_id is not None
+
+    assert second_job.document_id is not None
+
+    assert first_job.document_id != prepared_analysis_document_id
+
+    assert second_job.document_id != prepared_analysis_document_id
+
+    assert first_job.document_id != second_job.document_id
+
+    for job in (
+        first_job,
+        second_job,
+    ):
+        snapshot = job.normative_snapshot
+
+        assert snapshot is not None
+
+        technical_assignment = snapshot.technical_assignment
+
+        assert technical_assignment is not None
+
+        assert (
+            technical_assignment.technical_assignment_id
+            == prepared_technical_assignment_id
+        )
+
+        assert (
+            technical_assignment.analysis_document_id == prepared_analysis_document_id
+        )
+
+        assert technical_assignment.section_id == section_id
+
+    assert artifact_store.saved_document_ids == [
+        first_job.document_id,
+        second_job.document_id,
+    ]
+
+    assert artifact_store.technical_assignment_document_ids == [
+        first_job.document_id,
+        second_job.document_id,
+    ]
 
 
 @pytest.mark.asyncio

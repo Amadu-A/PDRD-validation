@@ -9,6 +9,9 @@ from typing import (
 )
 from uuid import UUID
 
+from pdrd_api_gateway.application.ports.analysis_visualization import (
+    AnalysisPagePreview,
+)
 from pdrd_api_gateway.domain.analysis_submission import (
     AnalysisSubmission,
 )
@@ -112,4 +115,30 @@ class AnalysisArtifactStore(Protocol):
         | None
     ):
         """Возвращает итоговый JSON, если он уже сформирован."""
+        ...
+
+    async def save_visualization(
+        self,
+        *,
+        document_id: UUID,
+        pages: tuple[
+            AnalysisPagePreview,
+            ...,
+        ],
+    ) -> None:
+        """Сохраняет reusable PDF-preview и text geometry отдельно от result."""
+        ...
+
+    async def load_visualization(
+        self,
+        *,
+        document_id: UUID,
+    ) -> (
+        tuple[
+            AnalysisPagePreview,
+            ...,
+        ]
+        | None
+    ):
+        """Возвращает reusable visualization artifact либо None для legacy job."""
         ...

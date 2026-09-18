@@ -9,6 +9,28 @@ import {
 } from "../../config.js";
 
 
+export class ApiError extends Error {
+  /**
+   * @param {number} status HTTP status.
+   * @param {string} detail Человекочитаемый detail.
+   */
+  constructor(
+    status,
+    detail,
+  ) {
+    super(
+      `HTTP ${status}\n${detail}`,
+    );
+
+    this.name = "ApiError";
+
+    this.status = status;
+
+    this.detail = detail;
+  }
+}
+
+
 async function fetchJson(
   url,
   options = {},
@@ -58,12 +80,26 @@ async function fetchJson(
       );
     }
 
-    throw new Error(
-      `HTTP ${response.status}\n${detail}`,
+    throw new ApiError(
+      response.status,
+      detail,
     );
   }
 
   return payload;
+}
+
+
+export async function submitProjectContextPreflight(
+  formData,
+) {
+  return fetchJson(
+    `${ANALYSES_ENDPOINT}/project-context/preflight`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
 }
 
 
@@ -80,12 +116,52 @@ export async function submitAnalysis(
 }
 
 
-export async function getAnalysisStatus(
+export async function cancelAnalysis(
   jobId,
 ) {
   return fetchJson(
+    `${ANALYSES_ENDPOINT}/${jobId}/cancel`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+
+export async function getAnalysisProgress(
+  jobId,
+) {
+  return fetchJson(
+    `${ANALYSES_ENDPOINT}/${jobId}/progress`,
+  );
+}
+
+
+export async function getAnalysisStatus(
+  jobId,
+) {
+  const statusPayload = await fetchJson(
     `${ANALYSES_ENDPOINT}/${jobId}`,
   );
+
+  let progress = null;
+
+  try {
+    progress = await getAnalysisProgress(
+      jobId,
+    );
+
+  } catch (error) {
+    console.warn(
+      "Не удалось получить analysis progress.",
+      error,
+    );
+  }
+
+  return {
+    ...statusPayload,
+    progress,
+  };
 }
 
 

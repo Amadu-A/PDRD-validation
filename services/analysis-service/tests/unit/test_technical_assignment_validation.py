@@ -284,7 +284,9 @@ async def test_first_pass_preserves_all_compact_decisions_and_findings() -> None
     assert violated.comment == "Требование ТЗ нарушено."
     assert violated.normative_source_ids == ()
     assert violated.basis_sources == ()
+
     assert violated.technical_assignment_source_ids == ("T-R2",)
+
     assert violated.technical_assignment_basis_sources[0].text == requirements[1].text
 
     review = findings[1]
@@ -318,9 +320,11 @@ async def test_default_batch_policy_can_check_96_requirements_in_one_call() -> N
         [
             {
                 "decisions": {
-                    requirement.requirement_id: _compact_decision(
-                        status="not_applicable",
-                        confidence=0.9,
+                    requirement.requirement_id: (
+                        _compact_decision(
+                            status="not_applicable",
+                            confidence=0.9,
+                        )
                     )
                     for requirement in requirements
                 },
@@ -361,24 +365,28 @@ async def test_default_batch_policy_can_check_96_requirements_in_one_call() -> N
         )
         == 1
     )
+
     assert (
         len(
             parsed_decisions,
         )
         == 96
     )
+
     assert (
         len(
             findings,
         )
         == 0
     )
+
     assert (
         len(
             metrics,
         )
         == 1
     )
+
     assert model.calls[0]["stage"] == ("technical_assignment_check:15:1")
 
 
@@ -471,8 +479,8 @@ async def test_first_pass_rejects_duplicate_requirement_ids() -> None:
     assert model.calls == []
 
 
-async def test_compact_finding_requires_issue_details() -> None:
-    """Finding status не может потерять evidence в compact формате."""
+async def test_compact_finding_without_issue_details_falls_back_to_review() -> None:
+    """Потерянные issue details не должны превращать весь анализ в 503."""
     requirement = _requirement(
         1,
     )
@@ -483,6 +491,7 @@ async def test_compact_finding_requires_issue_details() -> None:
                 "decisions": {
                     "T-R1": _compact_decision(
                         status="violated",
+                        confidence=0.93,
                     )
                 },
                 "issues": [],
@@ -497,23 +506,131 @@ async def test_compact_finding_requires_issue_details() -> None:
         requirement_text_limit=1800,
     )
 
-    with pytest.raises(
-        TechnicalAssignmentValidationError,
-        match="issue details",
-    ):
-        await use_case.execute(
-            page_number=1,
-            page_type="scheme",
-            extracted_text="",
-            page_facts=_facts(),
-            image_bytes=b"image",
-            technical_assignment_id=("11111111-1111-4111-8111-111111111111"),
-            analysis_document_id=("22222222-2222-4222-8222-222222222222"),
-            section_id=("33333333-3333-4333-8333-333333333333"),
-            source_file="ТЗ.pdf",
-            source_sha256="a" * 64,
-            requirements=(requirement,),
+    (
+        summary,
+        decisions,
+        findings,
+        metrics,
+    ) = await use_case.execute(
+        page_number=1,
+        page_type="scheme",
+        extracted_text="",
+        page_facts=_facts(),
+        image_bytes=b"image",
+        technical_assignment_id=("11111111-1111-4111-8111-111111111111"),
+        analysis_document_id=("22222222-2222-4222-8222-222222222222"),
+        section_id=("33333333-3333-4333-8333-333333333333"),
+        source_file="ТЗ.pdf",
+        source_sha256="a" * 64,
+        requirements=(requirement,),
+    )
+
+    assert (
+        len(
+            decisions,
         )
+        == 1
+    )
+
+    decision = decisions[0]
+
+    assert decision.requirement_id == "T-R1"
+
+    # Без concrete issue evidence нарушение нельзя считать confirmed.
+    assert decision.status == "insufficient_evidence"
+    assert decision.severity == "warning"
+    assert decision.confidence == 0.5
+
+    assert (
+        decision.comment == "Требование ТЗ требует дополнительной инженерной проверки."
+    )
+
+    assert (
+        len(
+            findings,
+        )
+        == 1
+    )
+
+    finding = findings[0]
+
+    assert finding.finding_id == "p1-tr1"
+    assert finding.status == "needs_review"
+    assert finding.category == "customer_requirements"
+
+    assert finding.technical_assignment_source_ids == ("T-R1",)
+
+    assert (
+        len(
+            finding.technical_assignment_basis_sources,
+        )
+        == 1
+    )
+
+    assert (
+        len(
+            metrics,
+        )
+        == 1
+    )
+
+    assert "нарушений: 0" in summary
+    assert "требуют проверки: 1" in summary
+
+
+async def test_orphan_issue_for_satisfied_decision_is_ignored() -> None:
+    """Лишний issue не должен превратить satisfied requirement в finding."""
+    requirement = _requirement(
+        1,
+    )
+
+    model = _FakeVisionModel(
+        [
+            {
+                "decisions": {
+                    "T-R1": _compact_decision(
+                        status="satisfied",
+                        confidence=0.97,
+                    )
+                },
+                "issues": [
+                    _compact_issue(
+                        requirement_id="T-R1",
+                        status="violated",
+                    )
+                ],
+            }
+        ]
+    )
+
+    use_case = CheckPageAgainstTechnicalAssignment(
+        vision_model=model,
+        num_predict=2600,
+        batch_size=100,
+        requirement_text_limit=1800,
+    )
+
+    (
+        _summary,
+        decisions,
+        findings,
+        _metrics_result,
+    ) = await use_case.execute(
+        page_number=1,
+        page_type="scheme",
+        extracted_text="",
+        page_facts=_facts(),
+        image_bytes=b"image",
+        technical_assignment_id=("11111111-1111-4111-8111-111111111111"),
+        analysis_document_id=("22222222-2222-4222-8222-222222222222"),
+        section_id=("33333333-3333-4333-8333-333333333333"),
+        source_file="ТЗ.pdf",
+        source_sha256="a" * 64,
+        requirements=(requirement,),
+    )
+
+    assert decisions[0].status == "satisfied"
+    assert findings == ()
 
 
 def test_schema_requires_exact_compact_requirement_keys() -> None:
@@ -579,4 +696,5 @@ def test_prompt_is_high_recall_and_omits_duplicate_source_context() -> None:
     assert "КРИТИЧЕСКИ ВАЖНО ДЛЯ HIGH-RECALL" in prompt
     assert "issues" in prompt
     assert "source_context" not in prompt
+
     assert "Исходный контекст требования" not in prompt

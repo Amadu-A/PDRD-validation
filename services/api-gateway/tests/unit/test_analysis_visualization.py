@@ -17,6 +17,7 @@ from pdrd_api_gateway.application.ports.analysis_visualization import (
     AnalysisVisualRegion,
 )
 from pdrd_api_gateway.application.ports.artifacts import (
+    AnalysisArtifactStorageError,
     AnalysisRequestArtifacts,
 )
 from pdrd_api_gateway.application.use_cases.get_analysis_visualization import (
@@ -52,7 +53,7 @@ class FakeGetJob:
 
 
 class FakeArtifactStore:
-    """Минимальный artifact store."""
+    """Минимальный artifact store с reusable visualization."""
 
     def __init__(
         self,
@@ -62,10 +63,22 @@ class FakeArtifactStore:
             str,
             object,
         ],
+        visualization_pages: (
+            tuple[
+                AnalysisPagePreview,
+                ...,
+            ]
+            | None
+        ) = None,
+        visualization_load_error_once: bool = False,
     ) -> None:
-        """Сохраняет request/result."""
+        """Сохраняет request/result/optional visualization."""
         self.request = request
         self.result = result
+        self.visualization_pages = visualization_pages
+        self.visualization_load_error_once = visualization_load_error_once
+        self.visualization_load_calls = 0
+        self.visualization_save_calls = 0
 
     async def load_request(
         self,
@@ -89,6 +102,46 @@ class FakeArtifactStore:
         assert document_id == self.request.submission.document_id
 
         return self.result
+
+    async def load_visualization(
+        self,
+        *,
+        document_id: UUID,
+    ) -> (
+        tuple[
+            AnalysisPagePreview,
+            ...,
+        ]
+        | None
+    ):
+        """Возвращает optional reusable visualization."""
+        assert document_id == self.request.submission.document_id
+
+        self.visualization_load_calls += 1
+
+        if self.visualization_load_error_once:
+            self.visualization_load_error_once = False
+
+            raise AnalysisArtifactStorageError(
+                "corrupt visualization artifact",
+            )
+
+        return self.visualization_pages
+
+    async def save_visualization(
+        self,
+        *,
+        document_id: UUID,
+        pages: tuple[
+            AnalysisPagePreview,
+            ...,
+        ],
+    ) -> None:
+        """Сохраняет fallback visualization для следующего GET."""
+        assert document_id == self.request.submission.document_id
+
+        self.visualization_save_calls += 1
+        self.visualization_pages = pages
 
 
 class FakeRenderer:
@@ -225,9 +278,31 @@ def pdf_word(
     )
 
 
-@pytest.mark.asyncio
-async def test_exact_pdf_anchor_skips_vlm_localization() -> None:
-    """Если XT1 есть в PDF text layer, VLM не нужен."""
+def preview_with_text(
+    *,
+    page_number: int = 14,
+    text: str = "XT1",
+) -> AnalysisPagePreview:
+    """Создаёт reusable preview с deterministic anchor."""
+    return AnalysisPagePreview(
+        page_number=page_number,
+        width_points=841.89,
+        height_points=595.28,
+        image_base64=("iVBORw0KGgo="),
+        extracted_text=text,
+        text_words=(
+            pdf_word(
+                text,
+            ),
+        ),
+    )
+
+
+def build_pdf_request() -> tuple[
+    AnalysisSubmission,
+    AnalysisRequestArtifacts,
+]:
+    """Создаёт стандартный PDF request."""
     submission = AnalysisSubmission.create(
         pdf_present=True,
         cad_present=False,
@@ -236,27 +311,182 @@ async def test_exact_pdf_anchor_skips_vlm_localization() -> None:
         cad_file_name=None,
     )
 
-    request = AnalysisRequestArtifacts(
-        submission=submission,
-        pdf_content=b"pdf",
-        cad_content=None,
+    return (
+        submission,
+        AnalysisRequestArtifacts(
+            submission=submission,
+            pdf_content=b"pdf",
+            cad_content=None,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_persisted_visualization_skips_document_service_renderer() -> None:
+    """Новый job читает initial extraction artifact без PDF rerender."""
+    (
+        submission,
+        request,
+    ) = build_pdf_request()
+
+    preview = preview_with_text()
+
+    store = FakeArtifactStore(
+        request=request,
+        result={
+            "findings": [
+                {
+                    "finding_id": "F-1",
+                    "page": 14,
+                    "comment": "Нет маркировки XT1.",
+                    "evidence": "Разъём XT1 не маркирован.",
+                },
+            ],
+        },
+        visualization_pages=(preview,),
     )
 
     renderer = FakeRenderer(
-        pages=(
-            AnalysisPagePreview(
-                page_number=14,
-                width_points=841.89,
-                height_points=595.28,
-                image_base64=("iVBORw0KGgo="),
-                extracted_text=("XT1"),
-                text_words=(
-                    pdf_word(
-                        "XT1",
-                    ),
-                ),
-            ),
-        ),
+        pages=(preview,),
+    )
+
+    locator = FakeLocator()
+
+    job = completed_job(
+        submission,
+    )
+
+    use_case = GetAnalysisVisualization(
+        get_analysis_job=FakeGetJob(
+            job,
+        ),  # type: ignore[arg-type]
+        artifact_store=store,  # type: ignore[arg-type]
+        pdf_page_renderer=(renderer),
+        finding_locator=(locator),  # type: ignore[arg-type]
+        anchor_matcher=(FindingAnchorMatcher()),
+    )
+
+    payload = await use_case.execute(
+        job_id=job.id,
+    )
+
+    assert payload["pages"][0]["locations"][0]["method"] == "pdf_text"
+
+    assert store.visualization_load_calls == 1
+    assert store.visualization_save_calls == 0
+    assert renderer.calls == 0
+    assert locator.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_job_fallback_is_persisted_for_second_visualization_get() -> None:
+    """Старый job рендерится один раз, затем становится cache hit."""
+    (
+        submission,
+        request,
+    ) = build_pdf_request()
+
+    preview = preview_with_text()
+
+    store = FakeArtifactStore(
+        request=request,
+        result={
+            "findings": [],
+        },
+    )
+
+    renderer = FakeRenderer(
+        pages=(preview,),
+    )
+
+    job = completed_job(
+        submission,
+    )
+
+    use_case = GetAnalysisVisualization(
+        get_analysis_job=FakeGetJob(
+            job,
+        ),  # type: ignore[arg-type]
+        artifact_store=store,  # type: ignore[arg-type]
+        pdf_page_renderer=(renderer),
+        finding_locator=FakeLocator(),  # type: ignore[arg-type]
+        anchor_matcher=(FindingAnchorMatcher()),
+    )
+
+    await use_case.execute(
+        job_id=job.id,
+    )
+
+    await use_case.execute(
+        job_id=job.id,
+    )
+
+    assert renderer.calls == 1
+    assert store.visualization_load_calls == 2
+    assert store.visualization_save_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_corrupt_visualization_uses_backward_compatible_fallback() -> None:
+    """Corrupt artifact не ломает старый rerender path."""
+    (
+        submission,
+        request,
+    ) = build_pdf_request()
+
+    preview = preview_with_text()
+
+    store = FakeArtifactStore(
+        request=request,
+        result={
+            "findings": [],
+        },
+        visualization_load_error_once=True,
+    )
+
+    renderer = FakeRenderer(
+        pages=(preview,),
+    )
+
+    job = completed_job(
+        submission,
+    )
+
+    use_case = GetAnalysisVisualization(
+        get_analysis_job=FakeGetJob(
+            job,
+        ),  # type: ignore[arg-type]
+        artifact_store=store,  # type: ignore[arg-type]
+        pdf_page_renderer=(renderer),
+        finding_locator=FakeLocator(),  # type: ignore[arg-type]
+        anchor_matcher=(FindingAnchorMatcher()),
+    )
+
+    payload = await use_case.execute(
+        job_id=job.id,
+    )
+
+    assert (
+        len(
+            payload["pages"],
+        )
+        == 1
+    )
+
+    assert renderer.calls == 1
+    assert store.visualization_save_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_exact_pdf_anchor_skips_vlm_localization() -> None:
+    """Если XT1 есть в PDF text layer, VLM не нужен."""
+    (
+        submission,
+        request,
+    ) = build_pdf_request()
+
+    renderer = FakeRenderer(
+        pages=(preview_with_text(),),
     )
 
     locator = FakeLocator()
@@ -310,6 +540,8 @@ async def test_exact_pdf_anchor_skips_vlm_localization() -> None:
         )
         == 1
     )
+
+    assert renderer.calls == 1
 
     assert locator.calls == 0
 
@@ -379,6 +611,8 @@ async def test_unresolved_finding_uses_vlm_fallback() -> None:
     location = payload["pages"][0]["locations"][0]
 
     assert location["method"] == "vlm"
+
+    assert renderer.calls == 1
 
     assert locator.calls == 1
 

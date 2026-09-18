@@ -366,7 +366,7 @@ def test_extract_cad_rejects_wrong_extension() -> None:
 
 
 def test_extract_combined_endpoint() -> None:
-    """Проверяет полный HTTP PDF + CAD extraction contract."""
+    """Проверяет полный HTTP PDF + CAD extraction contract с geometry."""
     with build_client() as client:
         response = client.post(
             "/internal/v1/combined/extract",
@@ -384,6 +384,7 @@ def test_extract_combined_endpoint() -> None:
             },
             data={
                 "pages": "2",
+                "include_text_geometry": "true",
             },
         )
 
@@ -406,6 +407,18 @@ def test_extract_combined_endpoint() -> None:
     assert "TEST-CAD" in payload["analysis_text"]
 
     assert payload["cad"]["original_format"] == "dxf"
+
+    text_words = payload["pdf"]["text_words"]
+
+    assert text_words
+
+    assert any(word["text"] == "Second" for word in text_words)
+
+    assert all(
+        0 <= coordinate <= 1000
+        for word in text_words
+        for coordinate in word["bbox"].values()
+    )
 
     for image_field in (
         payload["pdf"]["image_base64"],

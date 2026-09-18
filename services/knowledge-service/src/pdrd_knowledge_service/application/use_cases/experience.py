@@ -3,11 +3,13 @@
 """Поиск похожих экспертных замечаний."""
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from pdrd_knowledge_service.application.ports.embedding import (
     EmbeddingProvider,
+    EmbeddingProviderError,
 )
 from pdrd_knowledge_service.application.ports.vector_store import (
     VectorStore,
@@ -16,6 +18,10 @@ from pdrd_knowledge_service.domain.search import (
     ExperienceSearchResult,
     ExperienceSource,
     VectorPoint,
+)
+
+logger = logging.getLogger(
+    __name__,
 )
 
 EXPERIENCE_QUERY_INSTRUCTION = (
@@ -36,6 +42,8 @@ class SearchExperience:
 
     top_k: int
 
+    enabled: bool = True
+
     async def execute(
         self,
         queries: list[str],
@@ -43,7 +51,7 @@ class SearchExperience:
         ExperienceSearchResult,
         ...,
     ]:
-        """Выполняет независимый поиск для каждого нарушения."""
+        """Выполняет grouped поиск без повторной обработки одинаковых queries."""
         normalized = tuple(query.strip() for query in queries)
 
         if not normalized:
@@ -54,12 +62,53 @@ class SearchExperience:
                 "Запрос к Базе Опыта не может быть пустым.",
             )
 
+        if not self.enabled:
+            logger.info(
+                "experience_search_disabled queries=%s",
+                len(
+                    normalized,
+                ),
+            )
+
+            return tuple(
+                ExperienceSearchResult(
+                    query=query,
+                    sources=(),
+                    embedding_model=self.embedding_model,
+                )
+                for query in normalized
+            )
+
+        started_at = asyncio.get_running_loop().time()
+
+        unique_queries = tuple(
+            dict.fromkeys(
+                normalized,
+            )
+        )
+
+        embedding_started_at = asyncio.get_running_loop().time()
+
         vectors = await self.embedding_provider.embed(
-            normalized,
+            unique_queries,
             instruction=EXPERIENCE_QUERY_INSTRUCTION,
         )
 
-        groups = await asyncio.gather(
+        embedding_finished_at = asyncio.get_running_loop().time()
+
+        if len(
+            vectors,
+        ) != len(
+            unique_queries,
+        ):
+            raise EmbeddingProviderError(
+                "Embedding provider вернул неверное количество "
+                "vectors для поиска по Базе Опыта.",
+            )
+
+        qdrant_started_at = asyncio.get_running_loop().time()
+
+        unique_groups = await asyncio.gather(
             *(
                 self.vector_store.search(
                     collection=self.collection,
@@ -70,7 +119,17 @@ class SearchExperience:
             )
         )
 
-        return tuple(
+        qdrant_finished_at = asyncio.get_running_loop().time()
+
+        groups_by_query = dict(
+            zip(
+                unique_queries,
+                unique_groups,
+                strict=True,
+            )
+        )
+
+        results = tuple(
             ExperienceSearchResult(
                 query=query,
                 sources=tuple(
@@ -79,18 +138,47 @@ class SearchExperience:
                         index=index,
                     )
                     for index, point in enumerate(
-                        points,
+                        groups_by_query[query],
                         start=1,
                     )
                 ),
                 embedding_model=self.embedding_model,
             )
-            for query, points in zip(
-                normalized,
-                groups,
-                strict=True,
-            )
+            for query in normalized
         )
+
+        finished_at = asyncio.get_running_loop().time()
+
+        logger.info(
+            (
+                "experience_grouped_search "
+                "queries=%s "
+                "unique_queries=%s "
+                "duplicate_queries=%s "
+                "embedding_ms=%.2f "
+                "qdrant_ms=%.2f "
+                "total_ms=%.2f"
+            ),
+            len(
+                normalized,
+            ),
+            len(
+                unique_queries,
+            ),
+            (
+                len(
+                    normalized,
+                )
+                - len(
+                    unique_queries,
+                )
+            ),
+            (embedding_finished_at - embedding_started_at) * 1000,
+            (qdrant_finished_at - qdrant_started_at) * 1000,
+            (finished_at - started_at) * 1000,
+        )
+
+        return results
 
     @staticmethod
     def _build_source(
@@ -98,6 +186,7 @@ class SearchExperience:
         *,
         index: int,
     ) -> ExperienceSource:
+        """Преобразует Qdrant point в источник Базы Опыта."""
         payload = point.payload
 
         raw_text = str(
@@ -184,6 +273,7 @@ class SearchExperience:
     def _split_legacy_context(
         text: str,
     ) -> tuple[str, str]:
+        """Разделяет legacy before/after context."""
         before_context = ""
         after_context = ""
 
@@ -230,6 +320,7 @@ class SearchExperience:
     def _optional_string(
         value: Any,
     ) -> str | None:
+        """Преобразует optional payload value в строку."""
         if value is None:
             return None
 
@@ -241,9 +332,13 @@ class SearchExperience:
     def _page_value(
         value: Any,
     ) -> int | str | None:
+        """Нормализует номер страницы payload."""
         if isinstance(
             value,
-            (int, str),
+            (
+                int,
+                str,
+            ),
         ):
             return value
 
