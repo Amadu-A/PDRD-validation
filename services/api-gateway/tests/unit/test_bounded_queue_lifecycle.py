@@ -10,7 +10,10 @@ import pytest
 from pdrd_api_gateway.application.use_cases.recover_stale_analysis_jobs import (
     RecoverStaleAnalysisJobs,
 )
-from pdrd_api_gateway.core.settings import BrokerSettings, get_settings
+from pdrd_api_gateway.core.settings import (
+    BrokerSettings,
+    get_settings,
+)
 from pdrd_api_gateway.domain.analysis_job import (
     AnalysisJob,
     AnalysisJobStatus,
@@ -21,13 +24,17 @@ from pdrd_api_gateway.infrastructure.messaging.celery_app import (
     analysis_queue,
     celery_app,
 )
-from pdrd_api_gateway.infrastructure.messaging.publisher import CeleryOutboxPublisher
+from pdrd_api_gateway.infrastructure.messaging.publisher import (
+    CeleryOutboxPublisher,
+)
 
 
 class FakeCelery:
     """Фиксирует параметры send_task без RabbitMQ."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+    ) -> None:
         """Создаёт пустой вызов."""
         self.call: dict[str, Any] | None = None
 
@@ -62,6 +69,7 @@ class FakeJobRepository:
     ) -> list[AnalysisJob]:
         """Возвращает fake batch."""
         del stale_processing_before, deadline_before
+
         return list(self.state.values())[:limit]
 
     async def update(
@@ -75,7 +83,9 @@ class FakeJobRepository:
 class FakeOutboxRepository:
     """Собирает recovery publications."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+    ) -> None:
         """Создаёт пустой список."""
         self.messages: list[OutboxMessage] = []
 
@@ -101,9 +111,12 @@ class FakeRecoveryUnitOfWork:
         self.analysis_jobs = FakeJobRepository(
             state,
         )
+
         self.outbox = outbox
 
-    async def __aenter__(self) -> "FakeRecoveryUnitOfWork":
+    async def __aenter__(
+        self,
+    ) -> "FakeRecoveryUnitOfWork":
         """Открывает UoW."""
         return self
 
@@ -115,10 +128,14 @@ class FakeRecoveryUnitOfWork:
     ) -> None:
         """Закрывает UoW."""
 
-    async def commit(self) -> None:
+    async def commit(
+        self,
+    ) -> None:
         """Имитирует commit."""
 
-    async def rollback(self) -> None:
+    async def rollback(
+        self,
+    ) -> None:
         """Имитирует rollback."""
 
 
@@ -132,9 +149,12 @@ class FakeRecoveryFactory:
     ) -> None:
         """Сохраняет state."""
         self.state = state
+
         self.outbox = outbox
 
-    def __call__(self) -> FakeRecoveryUnitOfWork:
+    def __call__(
+        self,
+    ) -> FakeRecoveryUnitOfWork:
         """Возвращает UoW."""
         return FakeRecoveryUnitOfWork(
             self.state,
@@ -143,27 +163,43 @@ class FakeRecoveryFactory:
 
 
 def test_analysis_queue_declares_broker_ttl() -> None:
-    """Durable queue содержит project-scoped RabbitMQ safety TTL."""
+    """Durable queue сохраняет TTL и часовую bounded lifecycle hierarchy."""
     settings = get_settings()
+
     arguments = analysis_queue.queue_arguments
 
     assert arguments is not None
-    assert arguments["x-message-ttl"] == settings.broker.message_ttl_seconds * 1000
-    assert arguments["x-expires"] == settings.broker.queue_expires_seconds * 1000
+
+    assert arguments["x-message-ttl"] == (settings.broker.message_ttl_seconds * 1000)
+
+    assert arguments["x-expires"] == (settings.broker.queue_expires_seconds * 1000)
 
     annotation = celery_app.conf.task_annotations["pdrd.analysis.requested"]
+
     assert (
         annotation["soft_time_limit"] == settings.lifecycle.task_soft_time_limit_seconds
     )
+
     assert annotation["time_limit"] == settings.lifecycle.task_hard_time_limit_seconds
-    assert settings.lifecycle.max_runtime_seconds < 1800
-    assert settings.lifecycle.task_hard_time_limit_seconds == 1800
+
+    assert settings.lifecycle.max_runtime_seconds == 3540
+
+    assert settings.lifecycle.task_soft_time_limit_seconds == 3570
+
+    assert settings.lifecycle.task_hard_time_limit_seconds == 3600
+
+    assert (
+        settings.lifecycle.max_runtime_seconds
+        < settings.lifecycle.task_soft_time_limit_seconds
+        < settings.lifecycle.task_hard_time_limit_seconds
+    )
 
 
 @pytest.mark.asyncio
 async def test_outbox_publish_sets_celery_expiration() -> None:
     """Published task получает Celery expires дополнительно к broker TTL."""
     fake_celery = FakeCelery()
+
     settings = BrokerSettings(
         task_expires_seconds=1234,
     )
@@ -182,6 +218,7 @@ async def test_outbox_publish_sets_celery_expiration() -> None:
     )
 
     assert fake_celery.call is not None
+
     assert fake_celery.call["expires"] == 1234
 
 
@@ -191,8 +228,11 @@ async def test_stale_processing_is_requeued_via_outbox() -> None:
     now = utc_now()
 
     job = AnalysisJob.create()
+
     job.mark_queued()
+
     job.mark_processing()
+
     job.updated_at = now - timedelta(
         minutes=5,
     )
@@ -200,6 +240,7 @@ async def test_stale_processing_is_requeued_via_outbox() -> None:
     state = {
         job.id: job,
     }
+
     outbox = FakeOutboxRepository()
 
     recovery = RecoverStaleAnalysisJobs(
@@ -218,30 +259,47 @@ async def test_stale_processing_is_requeued_via_outbox() -> None:
     )
 
     assert report.selected == 1
+
     assert report.requeued == 1
+
     assert report.failed == 0
+
     assert state[job.id].status is AnalysisJobStatus.QUEUED
-    assert len(outbox.messages) == 1
+
+    assert (
+        len(
+            outbox.messages,
+        )
+        == 1
+    )
+
     assert outbox.messages[0].aggregate_id == job.id
 
 
 @pytest.mark.asyncio
 async def test_expired_analysis_is_failed_not_requeued() -> None:
-    """Job старше absolute deadline не возвращается в очередь."""
+    """Job старше configured absolute deadline не возвращается в очередь."""
     now = utc_now()
 
     job = AnalysisJob.create()
+
     job.created_at = now - timedelta(
         minutes=31,
     )
+
     job.updated_at = job.created_at
+
     job.mark_queued()
 
     state = {
         job.id: job,
     }
+
     outbox = FakeOutboxRepository()
 
+    # Здесь намеренно локальный 1740-second deadline:
+    # unit test проверяет саму generic recovery semantics,
+    # а production hour hierarchy закреплена тестом выше.
     recovery = RecoverStaleAnalysisJobs(
         unit_of_work_factory=FakeRecoveryFactory(
             state,
@@ -258,6 +316,9 @@ async def test_expired_analysis_is_failed_not_requeued() -> None:
     )
 
     assert report.failed == 1
+
     assert state[job.id].status is AnalysisJobStatus.FAILED
+
     assert state[job.id].error_code == "analysis_deadline_exceeded"
+
     assert outbox.messages == []

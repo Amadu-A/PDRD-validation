@@ -29,6 +29,9 @@ from pdrd_analysis_service.transport.http.project_context_routes import (
 from pdrd_analysis_service.transport.http.routes import (
     router,
 )
+from pdrd_analysis_service.transport.http.stage_batch_routes import (
+    router as stage_batch_router,
+)
 from pdrd_analysis_service.transport.http.technical_assignment_routes import (
     router as technical_assignment_router,
 )
@@ -41,6 +44,10 @@ _VLM_RESIDENCY_PATHS = frozenset(
         "/internal/v1/project-context/validate",
         "/internal/v1/findings/finalize",
         "/internal/v1/findings/localize",
+        "/internal/v1/stages/understand-pages",
+        "/internal/v1/stages/check-technical-assignment",
+        "/internal/v1/stages/check-norms",
+        "/internal/v1/stages/finalize",
     }
 )
 
@@ -70,7 +77,7 @@ def create_app(
         request: Request,
         call_next: RequestResponseEndpoint,
     ) -> Response:
-        """Удерживает одну VLM внутри одного bounded HTTP stage."""
+        """Удерживает одну VLM на весь bounded GPU stage."""
         if request.url.path not in _VLM_RESIDENCY_PATHS:
             return await call_next(
                 request,
@@ -106,6 +113,10 @@ def create_app(
 
     application.include_router(
         technical_assignment_router,
+    )
+
+    application.include_router(
+        stage_batch_router,
     )
 
     return application

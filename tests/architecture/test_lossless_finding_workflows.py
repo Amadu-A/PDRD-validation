@@ -110,8 +110,11 @@ def test_merge_never_semantically_filters_generated_findings() -> None:
         )
 
         assert "...normativeFindings" in code, path
+
         assert "...technicalAssignmentFindings" in code, path
+
         assert ".filter(" not in code, path
+
         assert "confidence" not in code.lower(), path
 
 
@@ -131,16 +134,21 @@ def test_result_nodes_take_all_finalization_findings() -> None:
 
         if path.name == "analysis-v2-cad.json":
             assert "Array.isArray(finalization.findings)" in code, path
+
             assert "findings_count: findings.length" in code, path
+
             continue
 
-        assert "(finalization.findings ?? []).map(" in code, path
+        # PDF Stage 8.4 форматирует expression
+        # многострочно, но semantic invariant тот же:
+        # весь finalization.findings проходит через map,
+        # без shortlist/filter.
+        assert ".map((finding)" in code, path
 
         if path.name == "analysis-v2-pdf-cad.json":
             assert "findings_count: findings.length" in code, path
+
         else:
-            # PDF сначала собирает findings одного листа в Build Page Result.
-            # Общий findings_count считается позже в Aggregate PDF Result.
             assert "findings," in code, path
 
 
@@ -156,7 +164,9 @@ def test_pdf_aggregate_counts_every_page_finding() -> None:
     )
 
     assert "flatMap" in code
+
     assert "page.findings" in code
+
     assert "findings_count: findings.length" in code
 
 
@@ -178,8 +188,11 @@ def test_finalization_source_contains_per_finding_fallback() -> None:
     )
 
     assert "item = returned.get(" in source
+
     assert "if item is None:" in source
+
     assert "self._fallback(" in source
+
     assert "except VisionModelError as error:" in source
 
 

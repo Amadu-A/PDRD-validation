@@ -4,6 +4,9 @@
 
 from dataclasses import dataclass
 
+from pdrd_analysis_service.application.ports.analysis_progress import (
+    AnalysisProgressProbe,
+)
 from pdrd_analysis_service.application.use_cases import (
     AugmentProjectContext,
     BuildNormativeQueries,
@@ -21,6 +24,9 @@ from pdrd_analysis_service.application.use_cases.technical_assignment_validation
 from pdrd_analysis_service.core.settings import (
     Settings,
     get_settings,
+)
+from pdrd_analysis_service.infrastructure.analysis_progress import (
+    HttpAnalysisProgressProbe,
 )
 from pdrd_analysis_service.infrastructure.gpu_coordination import (
     CrossProcessFileGpuLease,
@@ -58,6 +64,8 @@ class ApplicationContainer:
 
     augment_project_context: AugmentProjectContext | None = None
 
+    analysis_progress_probe: AnalysisProgressProbe | None = None
+
 
 def build_container() -> ApplicationContainer:
     """Собирает concrete runtime dependencies."""
@@ -94,6 +102,12 @@ def build_container() -> ApplicationContainer:
         min_free_vram_bytes=(settings.vision.min_free_vram_bytes),
         unload_timeout_seconds=(settings.vision.unload_timeout_seconds),
         unload_poll_seconds=(settings.vision.unload_poll_seconds),
+    )
+
+    progress_probe = HttpAnalysisProgressProbe(
+        base_url=settings.progress.base_url,
+        request_timeout_seconds=(settings.progress.request_timeout_seconds),
+        connect_timeout_seconds=(settings.progress.connect_timeout_seconds),
     )
 
     return ApplicationContainer(
@@ -148,4 +162,5 @@ def build_container() -> ApplicationContainer:
         augment_project_context=AugmentProjectContext(
             context_text_limit=(settings.project_context.context_text_limit),
         ),
+        analysis_progress_probe=progress_probe,
     )

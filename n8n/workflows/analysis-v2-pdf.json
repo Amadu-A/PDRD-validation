@@ -272,17 +272,17 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/understand",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/stages/understand-pages",
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_number: $json.page.page_number, heuristic_page_type: $json.page.page_type, extracted_text: $json.page.text, image_base64: $json.page.image_base64 }) }}",
+        "body": "={{ JSON.stringify({ document_id: $json.document_id, items: $json.items }) }}",
         "options": {
-          "timeout": 600000
+          "timeout": 3300000
         }
       },
       "id": "396791ba-1c47-4c90-96f9-68e396d0672f",
-      "name": "Understand Page",
+      "name": "Understand Pages Stage",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -303,7 +303,7 @@
           "conditions": [
             {
               "id": "5a100000-0000-4000-8000-000000000012",
-              "leftValue": "={{ Boolean($('Expand PDF Pages').item.json.technical_assignment?.enabled) }}",
+              "leftValue": "={{ Boolean($json.expanded?.technical_assignment?.enabled) }}",
               "rightValue": true,
               "operator": {
                 "type": "boolean",
@@ -327,13 +327,13 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/check-technical-assignment",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/stages/check-technical-assignment",
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({\n  page_number: $('Expand PDF Pages').item.json.page.page_number,\n  extracted_text: $('Expand PDF Pages').item.json.page.text,\n  page_facts: $('Understand Page').item.json.facts,\n  image_base64: $('Expand PDF Pages').item.json.page.image_base64,\n  technical_assignment_id: $('Expand PDF Pages').item.json.technical_assignment.technical_assignment_id,\n  analysis_document_id: $('Expand PDF Pages').item.json.technical_assignment.analysis_document_id,\n  section_id: $('Expand PDF Pages').item.json.technical_assignment.section_id,\n  source_file: $('Expand PDF Pages').item.json.technical_assignment.source_file,\n  source_sha256: $('Expand PDF Pages').item.json.technical_assignment.source_sha256,\n  requirements: $('Expand PDF Pages').item.json.technical_assignment.requirements ?? [],\n}) }}",
+        "body": "={{ JSON.stringify($json) }}",
         "options": {
-          "timeout": 600000
+          "timeout": 3300000
         }
       },
       "id": "5a100000-0000-4000-8000-000000000005",
@@ -348,8 +348,8 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const enabled = Boolean(\n  $('Expand PDF Pages').item.json.technical_assignment?.enabled,\n);\n\nif (!enabled) {\n  return {\n    json: {\n      enabled: false,\n      requirements_count: 0,\n      summary: '',\n      decisions: [],\n      findings: [],\n      metrics: [],\n    },\n  };\n}\n\nconst response = $json ?? {};\nconst decisions = Array.isArray(response.decisions) ? response.decisions : [];\nconst findings = Array.isArray(response.findings) ? response.findings : [];\nconst metrics = Array.isArray(response.metrics) ? response.metrics : [];\nconst requirementsCount = Number(\n  $('Expand PDF Pages').item.json.technical_assignment?.total ?? 0,\n);\n\nif (decisions.length !== requirementsCount) {\n  throw new Error(\n    `T-first потеряла atomic decisions: expected=${requirementsCount}, actual=${decisions.length}.`,\n  );\n}\n\nconst decisionIds = decisions.map(\n  (decision) => String(decision.requirement_id ?? ''),\n);\nconst expectedIds = $('Expand PDF Pages').item.json.technical_assignment.requirements\n  .map((requirement) => String(requirement.requirement_id ?? ''));\n\nif (\n  decisionIds.length !== expectedIds.length\n  || decisionIds.some((requirementId) => !requirementId)\n  || new Set(decisionIds).size !== decisionIds.length\n  || expectedIds.some((requirementId, index) => requirementId !== decisionIds[index])\n) {\n  throw new Error('T-first decisions не соответствуют полному ordered atomic requirement feed.');\n}\n\nreturn {\n  json: {\n    enabled: true,\n    requirements_count: requirementsCount,\n    summary: String(response.summary ?? ''),\n    decisions,\n    findings,\n    metrics,\n  },\n};"
+        "mode": "runOnceForAllItems",
+        "jsCode": "const understoodPages = $('Understand Page')\n  .all()\n  .map((item) => item.json);\n\nif (!understoodPages.length) {\n  throw new Error(\n    'T-first normalization не получила understood pages.',\n  );\n}\n\nconst enabled = Boolean(\n  understoodPages[0]?.expanded\n    ?.technical_assignment?.enabled,\n);\n\nif (!enabled) {\n  return understoodPages.map((page) => ({\n    json: {\n      ...page,\n      enabled: false,\n      requirements_count: 0,\n      summary: '',\n      decisions: [],\n      findings: [],\n      metrics: [],\n    },\n  }));\n}\n\nconst batchItems = Array.isArray(\n  $input.first().json.items,\n)\n  ? $input.first().json.items\n  : [];\n\nif (batchItems.length !== understoodPages.length) {\n  throw new Error(\n    `T-first stage потеряла страницы: expected=${understoodPages.length}, actual=${batchItems.length}.`,\n  );\n}\n\nconst byPage = new Map(\n  batchItems.map((item) => [\n    Number(item.page_number ?? 0),\n    item.result ?? {},\n  ]),\n);\n\nreturn understoodPages.map((page) => {\n  const pageNumber = Number(\n    page.expanded?.page?.page_number ?? 0,\n  );\n\n  const response = byPage.get(pageNumber);\n\n  if (!response) {\n    throw new Error(\n      `T-first stage не вернула страницу ${pageNumber}.`,\n    );\n  }\n\n  const decisions = Array.isArray(response.decisions)\n    ? response.decisions\n    : [];\n\n  const findings = Array.isArray(response.findings)\n    ? response.findings\n    : [];\n\n  const metrics = Array.isArray(response.metrics)\n    ? response.metrics\n    : [];\n\n  const requirements = Array.isArray(\n    page.expanded?.technical_assignment?.requirements,\n  )\n    ? page.expanded.technical_assignment.requirements\n    : [];\n\n  const expectedIds = requirements.map(\n    (requirement) =>\n      String(requirement.requirement_id ?? ''),\n  );\n\n  const actualIds = decisions.map(\n    (decision) =>\n      String(decision.requirement_id ?? ''),\n  );\n\n  if (\n    actualIds.length !== expectedIds.length\n    || actualIds.some((id) => !id)\n    || new Set(actualIds).size !== actualIds.length\n    || expectedIds.some(\n      (id, index) => id !== actualIds[index],\n    )\n  ) {\n    throw new Error(\n      `T-first decisions страницы ${pageNumber} не соответствуют полному ordered atomic requirement feed.`,\n    );\n  }\n\n  return {\n    json: {\n      ...page,\n      enabled: true,\n      requirements_count: expectedIds.length,\n      summary: String(response.summary ?? ''),\n      decisions,\n      findings,\n      metrics,\n    },\n  };\n});"
       },
       "id": "5a100000-0000-4000-8000-000000000006",
       "name": "Technical Assignment First Pass",
@@ -367,7 +367,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_facts: $('Understand Page').item.json.facts, extracted_text: $('Expand PDF Pages').item.json.page.text }) }}",
+        "body": "={{ JSON.stringify({ page_facts: $json.facts, extracted_text: $json.expanded.page.text }) }}",
         "options": {
           "timeout": 1800000
         }
@@ -388,7 +388,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ context_id: $('Expand PDF Pages').item.json.project_context.context_id, enabled: $('Expand PDF Pages').item.json.project_context.enabled, query: $json.query ?? '' }) }}",
+        "body": "={{ JSON.stringify({ context_id: $('Technical Assignment First Pass').all()[$itemIndex].json.expanded.project_context.context_id, enabled: $('Technical Assignment First Pass').all()[$itemIndex].json.expanded.project_context.enabled, query: $json.query ?? '' }) }}",
         "options": {
           "timeout": 900000
         }
@@ -412,7 +412,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ extracted_text: $('Expand PDF Pages').item.json.page.text, sources: $json.sources ?? [] }) }}",
+        "body": "={{ JSON.stringify({ extracted_text: $('Technical Assignment First Pass').all()[$itemIndex].json.expanded.page.text, sources: $json.sources ?? [] }) }}",
         "options": {
           "timeout": 1800000
         }
@@ -433,7 +433,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_facts: $('Understand Page').item.json.facts, extracted_text: $('Expand PDF Pages').item.json.page.text, project_context_texts: $json.project_context_texts ?? [] }) }}",
+        "body": "={{ JSON.stringify({ page_facts: $('Technical Assignment First Pass').all()[$itemIndex].json.facts, extracted_text: $('Technical Assignment First Pass').all()[$itemIndex].json.expanded.page.text, project_context_texts: $json.project_context_texts ?? [] }) }}",
         "options": {
           "timeout": 1800000
         }
@@ -512,13 +512,13 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://pdrd-analysis-service:8501/internal/v1/pages/check-norms",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/stages/check-norms",
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{\n  JSON.stringify({\n    page_number:\n      $('Expand PDF Pages').item.json.page.page_number,\n    extracted_text:\n      $('Augment Project Context').item.json.analysis_text,\n    page_facts:\n      $('Understand Page').item.json.facts,\n    normative_sources:\n      $('Normalize Requirement Search').item.json.normative_sources ?? [],\n    technical_assignment_sources:\n      $('Normalize Requirement Search').item.json.technical_assignment_sources ?? [],\n    conflict_candidates:\n      $('Normalize Requirement Search').item.json.conflict_candidates ?? [],\n    user_package_sources:\n      $json.sources ?? [],\n    image_base64:\n      $('Expand PDF Pages').item.json.page.image_base64,\n    normative_system_prompt:\n      $('POST /analysis/v2/pdf').first().json.body?.normative_system_prompt ?? null,\n  })\n}}",
+        "body": "={{ JSON.stringify({ document_id: $json.document_id, items: $json.items.map((item) => ({ page_number: item.page_number, extracted_text: item.extracted_text, page_facts: item.page_facts, normative_sources: item.normative_sources, technical_assignment_sources: item.technical_assignment_sources, conflict_candidates: item.conflict_candidates, user_package_sources: item.user_package_sources, image_base64: item.image_base64, normative_system_prompt: item.normative_system_prompt })) }) }}",
         "options": {
-          "timeout": 600000
+          "timeout": 3300000
         }
       },
       "id": "4abeef13-13e8-481e-b3d4-6cf9a536fdf1",
@@ -534,7 +534,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const normativeCheck = $json ?? {};\nconst normativeFindings = Array.isArray(normativeCheck.findings)\n  ? normativeCheck.findings\n  : [];\nconst technicalAssignment = $('Technical Assignment First Pass').item.json ?? {};\nconst technicalAssignmentFindings = Array.isArray(technicalAssignment.findings)\n  ? technicalAssignment.findings\n  : [];\n\nconst findings = [\n  ...normativeFindings,\n  ...technicalAssignmentFindings,\n];\n\nconst findingIds = findings.map(\n  (finding) => String(finding.finding_id ?? ''),\n);\n\nif (\n  findingIds.some((findingId) => !findingId)\n  || new Set(findingIds).size !== findingIds.length\n) {\n  throw new Error(\n    'Finding candidate merge обнаружил пустой или повторяющийся finding_id.',\n  );\n}\n\nreturn {\n  json: {\n    ...normativeCheck,\n    findings,\n    technical_assignment_first_pass: {\n      enabled: Boolean(technicalAssignment.enabled),\n      requirements_count: Number(\n        technicalAssignment.requirements_count ?? 0,\n      ),\n      decisions_count: Array.isArray(technicalAssignment.decisions)\n        ? technicalAssignment.decisions.length\n        : 0,\n      findings_count: technicalAssignmentFindings.length,\n      summary: String(technicalAssignment.summary ?? ''),\n      metrics: Array.isArray(technicalAssignment.metrics)\n        ? technicalAssignment.metrics\n        : [],\n    },\n  },\n};"
+        "jsCode": "const normativeCheck = $json ?? {};\n\nconst normativeFindings = Array.isArray(\n  normativeCheck.findings,\n)\n  ? normativeCheck.findings\n  : [];\n\nconst pageIndex = Number(\n  normativeCheck.page_index ?? $itemIndex,\n);\n\nconst technicalAssignment =\n  $('Technical Assignment First Pass')\n    .all()[pageIndex]?.json ?? {};\n\nconst technicalAssignmentFindings =\n  Array.isArray(technicalAssignment.findings)\n    ? technicalAssignment.findings\n    : [];\n\nconst findings = [\n  ...normativeFindings,\n  ...technicalAssignmentFindings,\n];\n\nconst findingIds = findings.map(\n  (finding) =>\n    String(finding.finding_id ?? ''),\n);\n\nif (\n  findingIds.some((findingId) => !findingId)\n  || new Set(findingIds).size\n    !== findingIds.length\n) {\n  throw new Error(\n    'Finding candidate merge обнаружил пустой или повторяющийся finding_id.',\n  );\n}\n\nreturn {\n  json: {\n    ...normativeCheck,\n    findings,\n    technical_assignment_first_pass: {\n      enabled:\n        Boolean(technicalAssignment.enabled),\n      requirements_count:\n        Number(\n          technicalAssignment.requirements_count\n          ?? 0,\n        ),\n      decisions_count:\n        Array.isArray(technicalAssignment.decisions)\n          ? technicalAssignment.decisions.length\n          : 0,\n      findings_count:\n        technicalAssignmentFindings.length,\n      summary:\n        String(technicalAssignment.summary ?? ''),\n      metrics:\n        Array.isArray(technicalAssignment.metrics)\n          ? technicalAssignment.metrics\n          : [],\n    },\n  },\n};"
       },
       "id": "5a100000-0000-4000-8000-000000000007",
       "name": "Merge Finding Candidates",
@@ -638,13 +638,13 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://pdrd-analysis-service:8501/internal/v1/findings/finalize",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/stages/finalize",
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ findings: $json.findings ?? [], experience_by_finding: $json.experience_by_finding ?? {}, normative_candidates_by_finding: $json.normative_candidates_by_finding ?? {} }) }}",
+        "body": "={{ JSON.stringify({ document_id: $json.document_id, items: $json.items.map((item) => ({ page_number: item.page_number, request: { findings: item.request.findings, experience_by_finding: item.request.experience_by_finding, normative_candidates: item.request.normative_candidates, normative_candidates_by_finding: item.request.normative_candidates_by_finding } })) }) }}",
         "options": {
-          "timeout": 600000
+          "timeout": 3300000
         }
       },
       "id": "6d35b3ed-a71d-4d80-bb2f-41f830120da9",
@@ -659,8 +659,8 @@
     },
     {
       "parameters": {
-        "jsCode": "const expanded = $('Expand PDF Pages').item.json;\nconst understanding = $('Understand Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst requirements = $('Normalize Requirement Search').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst merged = $('Merge Finding Candidates').item.json;\nconst tFirst = $('Technical Assignment First Pass').item.json;\nconst enrichment = $('Prepare Experience Queries').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\n\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\n\nconst candidateGroups = Object.values(candidatesByFinding)\n  .filter((value) => Array.isArray(value));\n\nconst candidatesCount = candidateGroups\n  .reduce((total, sources) => total + sources.length, 0);\n\nconst findingsWithCandidates = candidateGroups\n  .filter((sources) => sources.length > 0)\n  .length;\n\nconst tDecisions = Array.isArray(tFirst.decisions)\n  ? tFirst.decisions\n  : [];\n\nreturn {\n  json: {\n    document: expanded.document,\n    project_context: expanded.project_context,\n    page_number: expanded.page.page_number,\n    heuristic_page_type: expanded.page.page_type,\n    width_points: expanded.page.width_points,\n    height_points: expanded.page.height_points,\n    extracted_text: expanded.page.text,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: requirements.normative_sources ?? [],\n    technical_assignment_sources:\n      requirements.technical_assignment_sources ?? [],\n    conflict_candidates: requirements.conflict_candidates ?? [],\n    requirement_diagnostics: requirements.diagnostics ?? [],\n    reference_resolutions: requirements.reference_resolutions ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    technical_assignment_first_pass: {\n      enabled: Boolean(tFirst.enabled),\n      requirements_count: Number(tFirst.requirements_count ?? 0),\n      decisions_count: tDecisions.length,\n      satisfied_count: tDecisions.filter(\n        (decision) => decision.status === 'satisfied',\n      ).length,\n      not_applicable_count: tDecisions.filter(\n        (decision) => decision.status === 'not_applicable',\n      ).length,\n      violated_count: tDecisions.filter(\n        (decision) => decision.status === 'violated',\n      ).length,\n      needs_review_count: tDecisions.filter(\n        (decision) => decision.status === 'insufficient_evidence',\n      ).length,\n      findings_count: Array.isArray(tFirst.findings)\n        ? tFirst.findings.length\n        : 0,\n      summary: String(tFirst.summary ?? ''),\n      metrics: Array.isArray(tFirst.metrics) ? tFirst.metrics : [],\n    },\n    finding_candidates: {\n      normative_check_count: Array.isArray(check.findings)\n        ? check.findings.length\n        : 0,\n      merged_count: Array.isArray(merged.findings)\n        ? merged.findings.length\n        : 0,\n    },\n    normative_enrichment: {\n      queries_count:\n        $('Prepare Finding Normative Queries').item.json.normative_queries?.length ?? 0,\n      findings_with_candidates: findingsWithCandidates,\n      candidates_count: candidatesCount,\n    },\n    normative_check: {\n      summary: check.summary ?? '',\n      findings: check.findings ?? [],\n      metrics: check.metrics ?? {},\n    },\n    findings,\n  },\n};",
-        "mode": "runOnceForEachItem"
+        "mode": "runOnceForEachItem",
+        "jsCode": "const index = Number(\n  $json.page_index ?? $itemIndex,\n);\n\nconst prepared =\n  $('Technical Assignment First Pass')\n    .all()[index]?.json ?? {};\n\nconst expanded =\n  prepared.expanded ?? {};\n\nconst understanding = {\n  facts:\n    prepared.facts ?? {},\n  metrics:\n    prepared.understanding_metrics ?? {},\n};\n\nconst queries =\n  $('Build Normative Queries')\n    .all()[index]?.json ?? {};\n\nconst requirements =\n  $('Normalize Requirement Search')\n    .all()[index]?.json ?? {};\n\nconst userPackages =\n  $('Search User Packages')\n    .all()[index]?.json ?? {};\n\nconst check =\n  $('Gate Expand Norm Check Stage')\n    .all()[index]?.json ?? {};\n\nconst merged =\n  $('Merge Finding Candidates')\n    .all()[index]?.json ?? {};\n\nconst tFirst = prepared;\n\nconst enrichment =\n  $('Prepare Experience Queries')\n    .all()[index]?.json ?? {};\n\nconst augmentation =\n  $('Augment Project Context')\n    .all()[index]?.json ?? {};\n\nconst findingQuery =\n  $('Prepare Finding Normative Queries')\n    .all()[index]?.json ?? {};\n\nconst finalization =\n  $json.finalization ?? {};\n\nconst findings = (\n  finalization.findings ?? []\n).map((finding) => ({\n  ...finding,\n  project_context_sources:\n    augmentation.sources ?? [],\n}));\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding\n    === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\n\nconst candidateGroups = Object.values(\n  candidatesByFinding,\n).filter(\n  (value) => Array.isArray(value),\n);\n\nconst candidatesCount = candidateGroups\n  .reduce(\n    (total, sources) =>\n      total + sources.length,\n    0,\n  );\n\nconst findingsWithCandidates =\n  candidateGroups\n    .filter(\n      (sources) => sources.length > 0,\n    )\n    .length;\n\nconst tDecisions = Array.isArray(\n  tFirst.decisions,\n)\n  ? tFirst.decisions\n  : [];\n\nreturn {\n  json: {\n    document:\n      expanded.document,\n    project_context:\n      expanded.project_context,\n    page_number:\n      expanded.page.page_number,\n    heuristic_page_type:\n      expanded.page.page_type,\n    width_points:\n      expanded.page.width_points,\n    height_points:\n      expanded.page.height_points,\n    extracted_text:\n      expanded.page.text,\n    facts:\n      understanding.facts ?? {},\n    normative_queries:\n      queries.queries ?? [],\n    normative_sources:\n      requirements.normative_sources ?? [],\n    technical_assignment_sources:\n      requirements.technical_assignment_sources ?? [],\n    conflict_candidates:\n      requirements.conflict_candidates ?? [],\n    requirement_diagnostics:\n      requirements.diagnostics ?? [],\n    reference_resolutions:\n      requirements.reference_resolutions ?? [],\n    user_package_sources:\n      userPackages.sources ?? [],\n    technical_assignment_first_pass: {\n      enabled:\n        Boolean(tFirst.enabled),\n      requirements_count:\n        Number(tFirst.requirements_count ?? 0),\n      decisions_count:\n        tDecisions.length,\n      satisfied_count:\n        tDecisions.filter(\n          (decision) =>\n            decision.status === 'satisfied',\n        ).length,\n      not_applicable_count:\n        tDecisions.filter(\n          (decision) =>\n            decision.status === 'not_applicable',\n        ).length,\n      violated_count:\n        tDecisions.filter(\n          (decision) =>\n            decision.status === 'violated',\n        ).length,\n      needs_review_count:\n        tDecisions.filter(\n          (decision) =>\n            decision.status\n              === 'insufficient_evidence',\n        ).length,\n      findings_count:\n        Array.isArray(tFirst.findings)\n          ? tFirst.findings.length\n          : 0,\n      summary:\n        String(tFirst.summary ?? ''),\n      metrics:\n        Array.isArray(tFirst.metrics)\n          ? tFirst.metrics\n          : [],\n    },\n    finding_candidates: {\n      normative_check_count:\n        Array.isArray(check.findings)\n          ? check.findings.length\n          : 0,\n      merged_count:\n        Array.isArray(merged.findings)\n          ? merged.findings.length\n          : 0,\n    },\n    normative_enrichment: {\n      queries_count:\n        findingQuery.normative_queries?.length\n        ?? 0,\n      findings_with_candidates:\n        findingsWithCandidates,\n      candidates_count:\n        candidatesCount,\n    },\n    normative_check: {\n      summary:\n        check.summary ?? '',\n      findings:\n        check.findings ?? [],\n      metrics:\n        check.metrics ?? {},\n    },\n    findings,\n  },\n};"
       },
       "id": "57a66ecb-aeff-449d-9240-38dbd0dcb7f4",
       "name": "Build Page Result",
@@ -1306,6 +1306,104 @@
         1800,
         1540
       ]
+    },
+    {
+      "id": "8d400000-0000-4000-8000-000000000001",
+      "name": "Gate Collect Understanding Stage",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const expandedItems = $input.all().map((item) => item.json);\n\nif (!expandedItems.length) {\n  throw new Error('Understanding stage не получил PDF-страницы.');\n}\n\nreturn [{\n  json: {\n    document_id:\n      $('POST /analysis/v2/pdf').first().json.body.document_id,\n    expanded_items: expandedItems,\n    items: expandedItems.map((item) => ({\n      page_number: item.page.page_number,\n      heuristic_page_type: item.page.page_type,\n      extracted_text: item.page.text,\n      image_base64: item.page.image_base64,\n    })),\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -760,
+        980
+      ]
+    },
+    {
+      "id": "8d400000-0000-4000-8000-000000000002",
+      "name": "Understand Page",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const source = $('Gate Collect Understanding Stage').first().json;\nconst expandedItems = Array.isArray(source.expanded_items)\n  ? source.expanded_items\n  : [];\nconst results = Array.isArray($json.items)\n  ? $json.items\n  : [];\n\nif (results.length !== expandedItems.length) {\n  throw new Error(\n    `Understanding stage потерял страницы: expected=${expandedItems.length}, actual=${results.length}.`,\n  );\n}\n\nreturn results.map((entry, index) => {\n  const expanded = expandedItems[index];\n  const expectedPage = Number(expanded?.page?.page_number ?? 0);\n  const actualPage = Number(entry?.page_number ?? 0);\n\n  if (!expectedPage || actualPage !== expectedPage) {\n    throw new Error(\n      `Understanding stage нарушил порядок страниц: expected=${expectedPage}, actual=${actualPage}.`,\n    );\n  }\n\n  return {\n    json: {\n      page_number: actualPage,\n      expanded,\n      facts: entry?.result?.facts ?? {},\n      understanding_metrics:\n        entry?.result?.metrics ?? {},\n    },\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -500,
+        980
+      ]
+    },
+    {
+      "id": "8d400000-0000-4000-8000-000000000003",
+      "name": "Gate Collect Technical Assignment Stage",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const pageItems = $input.all().map((item) => item.json);\n\nif (!pageItems.length) {\n  throw new Error('T-first stage не получил страницы.');\n}\n\nconst technicalAssignment =\n  pageItems[0]?.expanded?.technical_assignment ?? {};\n\nconst requirements = Array.isArray(\n  technicalAssignment.requirements,\n)\n  ? technicalAssignment.requirements\n  : [];\n\nif (!requirements.length) {\n  throw new Error(\n    'T-first включён, но atomic requirement feed пуст.',\n  );\n}\n\nreturn [{\n  json: {\n    document_id:\n      $('POST /analysis/v2/pdf').first().json.body.document_id,\n    technical_assignment_id:\n      technicalAssignment.technical_assignment_id,\n    analysis_document_id:\n      technicalAssignment.analysis_document_id,\n    section_id:\n      technicalAssignment.section_id,\n    source_file:\n      technicalAssignment.source_file,\n    source_sha256:\n      technicalAssignment.source_sha256,\n    requirements,\n    items: pageItems.map((item) => ({\n      page_number:\n        item.expanded.page.page_number,\n      extracted_text:\n        item.expanded.page.text,\n      page_facts:\n        item.facts ?? {},\n      image_base64:\n        item.expanded.page.image_base64,\n    })),\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        520
+      ]
+    },
+    {
+      "id": "8d400000-0000-4000-8000-000000000004",
+      "name": "Gate Collect Norm Check Stage",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const preparedPages = $('Technical Assignment First Pass')\n  .all()\n  .map((item) => item.json);\n\nconst augmentations = $('Augment Project Context')\n  .all()\n  .map((item) => item.json);\n\nconst requirements = $('Normalize Requirement Search')\n  .all()\n  .map((item) => item.json);\n\nconst userPackages = $input.all()\n  .map((item) => item.json);\n\nconst expected = preparedPages.length;\n\nif (\n  augmentations.length !== expected\n  || requirements.length !== expected\n  || userPackages.length !== expected\n) {\n  throw new Error(\n    'Normative stage потеряла page-local retrieval context.',\n  );\n}\n\nreturn [{\n  json: {\n    document_id:\n      $('POST /analysis/v2/pdf').first().json.body.document_id,\n    items: preparedPages.map((page, index) => ({\n      page_number:\n        page.expanded.page.page_number,\n      extracted_text:\n        augmentations[index].analysis_text ?? '',\n      page_facts:\n        page.facts ?? {},\n      normative_sources:\n        requirements[index].normative_sources ?? [],\n      technical_assignment_sources:\n        requirements[index]\n          .technical_assignment_sources ?? [],\n      conflict_candidates:\n        requirements[index].conflict_candidates ?? [],\n      user_package_sources:\n        userPackages[index].sources ?? [],\n      image_base64:\n        page.expanded.page.image_base64,\n      normative_system_prompt:\n        $('POST /analysis/v2/pdf')\n          .first()\n          .json.body?.normative_system_prompt\n          ?? null,\n    })),\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        980
+      ]
+    },
+    {
+      "id": "8d400000-0000-4000-8000-000000000005",
+      "name": "Gate Expand Norm Check Stage",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const preparedPages = $('Technical Assignment First Pass')\n  .all()\n  .map((item) => item.json);\n\nconst results = Array.isArray($json.items)\n  ? $json.items\n  : [];\n\nif (results.length !== preparedPages.length) {\n  throw new Error(\n    `Normative stage потеряла страницы: expected=${preparedPages.length}, actual=${results.length}.`,\n  );\n}\n\nreturn results.map((entry, index) => {\n  const expectedPage = Number(\n    preparedPages[index]?.expanded\n      ?.page?.page_number ?? 0,\n  );\n\n  const actualPage = Number(\n    entry?.page_number ?? 0,\n  );\n\n  if (\n    !expectedPage\n    || actualPage !== expectedPage\n  ) {\n    throw new Error(\n      `Normative stage нарушил порядок страниц: expected=${expectedPage}, actual=${actualPage}.`,\n    );\n  }\n\n  return {\n    json: {\n      page_index: index,\n      page_number: actualPage,\n      ...(\n        entry?.result ?? {}\n      ),\n    },\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1900,
+        980
+      ]
+    },
+    {
+      "id": "8d400000-0000-4000-8000-000000000006",
+      "name": "Gate Collect Finalization Stage",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const experienceItems = $input.all()\n  .map((item) => item.json);\n\nconst preparedPages =\n  $('Technical Assignment First Pass')\n    .all()\n    .map((item) => item.json);\n\nif (experienceItems.length !== preparedPages.length) {\n  throw new Error(\n    'Finalization stage потеряла page-local context.',\n  );\n}\n\nreturn [{\n  json: {\n    document_id:\n      $('POST /analysis/v2/pdf').first().json.body.document_id,\n    items: experienceItems.map((item, index) => ({\n      page_number:\n        preparedPages[index]\n          .expanded.page.page_number,\n      request: {\n        findings:\n          item.findings ?? [],\n        experience_by_finding:\n          item.experience_by_finding ?? {},\n        normative_candidates: [],\n        normative_candidates_by_finding:\n          item.normative_candidates_by_finding ?? {},\n      },\n    })),\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3220,
+        980
+      ]
+    },
+    {
+      "id": "8d400000-0000-4000-8000-000000000007",
+      "name": "Gate Expand Finalization Stage",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const preparedPages =\n  $('Technical Assignment First Pass')\n    .all()\n    .map((item) => item.json);\n\nconst results = Array.isArray($json.items)\n  ? $json.items\n  : [];\n\nif (results.length !== preparedPages.length) {\n  throw new Error(\n    `Finalization stage потеряла страницы: expected=${preparedPages.length}, actual=${results.length}.`,\n  );\n}\n\nreturn results.map((entry, index) => {\n  const expectedPage = Number(\n    preparedPages[index]?.expanded\n      ?.page?.page_number ?? 0,\n  );\n\n  const actualPage = Number(\n    entry?.page_number ?? 0,\n  );\n\n  if (\n    !expectedPage\n    || actualPage !== expectedPage\n  ) {\n    throw new Error(\n      `Finalization stage нарушил порядок страниц: expected=${expectedPage}, actual=${actualPage}.`,\n    );\n  }\n\n  return {\n    json: {\n      page_index: index,\n      page_number: actualPage,\n      finalization:\n        entry?.result ?? {},\n    },\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3460,
+        980
+      ]
     }
   ],
   "pinData": {},
@@ -1380,17 +1478,6 @@
           },
           {
             "node": "Gate Understand Sheet",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Understand Page": {
-      "main": [
-        [
-          {
-            "node": "Has T First Pass",
             "type": "main",
             "index": 0
           }
@@ -1483,7 +1570,7 @@
       "main": [
         [
           {
-            "node": "Merge Finding Candidates",
+            "node": "Gate Expand Norm Check Stage",
             "type": "main",
             "index": 0
           }
@@ -1632,7 +1719,7 @@
       "main": [
         [
           {
-            "node": "Check Technical Assignment",
+            "node": "Gate Collect Technical Assignment Stage",
             "type": "main",
             "index": 0
           }
@@ -1764,7 +1851,7 @@
       "main": [
         [
           {
-            "node": "Understand Page",
+            "node": "Gate Collect Understanding Stage",
             "type": "main",
             "index": 0
           }
@@ -1808,7 +1895,7 @@
       "main": [
         [
           {
-            "node": "Check Norms",
+            "node": "Gate Collect Norm Check Stage",
             "type": "main",
             "index": 0
           }
@@ -1852,7 +1939,7 @@
       "main": [
         [
           {
-            "node": "Finalize Findings",
+            "node": "Gate Collect Finalization Stage",
             "type": "main",
             "index": 0
           }
@@ -1874,7 +1961,7 @@
       "main": [
         [
           {
-            "node": "Build Page Result",
+            "node": "Gate Expand Finalization Stage",
             "type": "main",
             "index": 0
           }
@@ -2046,13 +2133,101 @@
           }
         ]
       ]
+    },
+    "Understand Pages Stage": {
+      "main": [
+        [
+          {
+            "node": "Understand Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Collect Understanding Stage": {
+      "main": [
+        [
+          {
+            "node": "Understand Pages Stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Understand Page": {
+      "main": [
+        [
+          {
+            "node": "Has T First Pass",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Collect Technical Assignment Stage": {
+      "main": [
+        [
+          {
+            "node": "Check Technical Assignment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Collect Norm Check Stage": {
+      "main": [
+        [
+          {
+            "node": "Check Norms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Expand Norm Check Stage": {
+      "main": [
+        [
+          {
+            "node": "Merge Finding Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Collect Finalization Stage": {
+      "main": [
+        [
+          {
+            "node": "Finalize Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Expand Finalization Stage": {
+      "main": [
+        [
+          {
+            "node": "Build Page Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate",
-    "executionTimeout": 1650
+    "executionTimeout": 3450
   },
   "versionId": "5a200000-0000-4000-8000-000000000001",
   "meta": {

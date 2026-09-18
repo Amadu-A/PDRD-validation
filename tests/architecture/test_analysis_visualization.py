@@ -370,12 +370,7 @@ def test_pdf_renderer_uses_one_document_service_request() -> None:
         )
     ]
 
-    assert (
-        len(
-            pdf_extract_calls,
-        )
-        == 1
-    )
+    assert len(pdf_extract_calls) == 1
 
 
 def test_visual_localization_stays_out_of_core_n8n_workflows() -> None:
@@ -399,11 +394,14 @@ def test_visual_localization_stays_out_of_core_n8n_workflows() -> None:
             dict,
         )
 
+        # Stage 8.4 увеличивает общий analysis budget,
+        # но lazy visualization по-прежнему не входит
+        # в основной n8n workflow.
         assert (
             settings.get(
                 "executionTimeout",
             )
-            == 1650
+            == 3450
         )
 
         nodes = workflow.get(

@@ -148,12 +148,13 @@ def _functional_successor(
     workflow: dict[str, Any],
     source_name: str,
 ) -> str:
-    """Возвращает бизнес-successor, прозрачно проходя Progress Gate."""
+    """Возвращает business successor через infrastructure Gate nodes."""
     current_name = source_name
+
     visited: set[str] = set()
 
     for _ in range(
-        16,
+        32,
     ):
         successor = _direct_functional_successor(
             workflow,
@@ -176,7 +177,7 @@ def _functional_successor(
 
         current_name = successor
 
-    raise AssertionError(f"Превышена глубина progress gate chain: {source_name}")
+    raise AssertionError(f"Превышена глубина infrastructure gate chain: {source_name}")
 
 
 def test_every_analysis_workflow_supports_t_guided_requirements() -> None:
@@ -354,16 +355,27 @@ def test_t_first_vlm_has_no_n8n_level_retry() -> None:
             dict,
         )
 
+        expected_timeout = 3_300_000 if path.name == "analysis-v2-pdf.json" else 600_000
+
         assert (
             options.get(
                 "timeout",
             )
-            == 600000
+            == expected_timeout
         ), path
+
+        if path.name == "analysis-v2-pdf.json":
+            assert parameters.get(
+                "url",
+            ) == (
+                "http://pdrd-analysis-service:8501/"
+                "internal/v1/stages/"
+                "check-technical-assignment"
+            )
 
 
 def test_requirement_flow_order_is_consistent() -> None:
-    """Progress gates не изменяют основной requirement flow."""
+    """Infrastructure batching не изменяет requirement business flow."""
     expected_pairs = (
         (
             "Build Normative Queries",

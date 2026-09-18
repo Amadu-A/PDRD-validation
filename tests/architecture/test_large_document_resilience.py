@@ -1,0 +1,261 @@
+# tests/architecture/test_large_document_resilience.py
+
+"""Architecture guards Stage 8.4 large-document resilience."""
+
+import json
+from pathlib import Path
+from typing import Any
+
+ROOT = (
+    Path(
+        __file__,
+    )
+    .resolve()
+    .parents[2]
+)
+
+WORKFLOW_ROOT = ROOT / "n8n" / "workflows"
+
+PDF_WORKFLOW = WORKFLOW_ROOT / "analysis-v2-pdf.json"
+
+ALL_WORKFLOWS = (
+    PDF_WORKFLOW,
+    WORKFLOW_ROOT / "analysis-v2-cad.json",
+    WORKFLOW_ROOT / "analysis-v2-pdf-cad.json",
+)
+
+ANALYSIS_MAIN = (
+    ROOT / "services" / "analysis-service" / "src" / "pdrd_analysis_service" / "main.py"
+)
+
+
+def _workflow(
+    path: Path,
+) -> dict[str, Any]:
+    """Читает workflow JSON."""
+    payload = json.loads(
+        path.read_text(
+            encoding="utf-8",
+        )
+    )
+
+    assert isinstance(
+        payload,
+        dict,
+    )
+
+    return payload
+
+
+def _nodes(
+    workflow: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Индексирует nodes."""
+    raw_nodes = workflow["nodes"]
+
+    assert isinstance(
+        raw_nodes,
+        list,
+    )
+
+    return {
+        str(
+            node["name"],
+        ): node
+        for node in raw_nodes
+        if (
+            isinstance(
+                node,
+                dict,
+            )
+            and "name" in node
+        )
+    }
+
+
+def _successors(
+    workflow: dict[str, Any],
+    source: str,
+) -> list[str]:
+    """Возвращает первый main output."""
+    return [
+        str(
+            item["node"],
+        )
+        for item in (workflow["connections"][source]["main"][0])
+    ]
+
+
+def test_all_analysis_workflows_allow_nearly_one_hour() -> None:
+    """n8n timeout меньше Gateway/application/Celery hierarchy."""
+    for path in ALL_WORKFLOWS:
+        workflow = _workflow(
+            path,
+        )
+
+        assert workflow["settings"]["executionTimeout"] == 3450, path
+
+
+def test_pdf_gpu_stages_are_document_scoped() -> None:
+    """PDF-only не fan-out-ит VLM по одной HTTP-сессии на страницу."""
+    workflow = _workflow(
+        PDF_WORKFLOW,
+    )
+
+    nodes = _nodes(
+        workflow,
+    )
+
+    assert nodes["Understand Pages Stage"]["parameters"]["url"] == (
+        "http://pdrd-analysis-service:8501/internal/v1/stages/understand-pages"
+    )
+
+    assert nodes["Check Technical Assignment"]["parameters"]["url"] == (
+        "http://pdrd-analysis-service:8501/"
+        "internal/v1/stages/"
+        "check-technical-assignment"
+    )
+
+    assert nodes["Check Norms"]["parameters"]["url"] == (
+        "http://pdrd-analysis-service:8501/internal/v1/stages/check-norms"
+    )
+
+    assert nodes["Finalize Findings"]["parameters"]["url"] == (
+        "http://pdrd-analysis-service:8501/internal/v1/stages/finalize"
+    )
+
+    for node_name in (
+        "Understand Pages Stage",
+        "Check Technical Assignment",
+        "Check Norms",
+        "Finalize Findings",
+    ):
+        assert nodes[node_name]["parameters"]["options"]["timeout"] == 3_300_000
+
+
+def test_pdf_stage_batch_topology_is_ordered() -> None:
+    """Stage сначала собирается, затем VLM, затем снова expand."""
+    workflow = _workflow(
+        PDF_WORKFLOW,
+    )
+
+    assert _successors(
+        workflow,
+        "Gate Understand Sheet",
+    ) == [
+        "Gate Collect Understanding Stage",
+    ]
+
+    assert _successors(
+        workflow,
+        "Gate Collect Understanding Stage",
+    ) == [
+        "Understand Pages Stage",
+    ]
+
+    assert _successors(
+        workflow,
+        "Understand Pages Stage",
+    ) == [
+        "Understand Page",
+    ]
+
+    assert _successors(
+        workflow,
+        "Understand Page",
+    ) == [
+        "Has T First Pass",
+    ]
+
+    assert _successors(
+        workflow,
+        "Gate Check Requirements",
+    ) == [
+        "Gate Collect Norm Check Stage",
+    ]
+
+    assert _successors(
+        workflow,
+        "Gate Collect Norm Check Stage",
+    ) == [
+        "Check Norms",
+    ]
+
+    assert _successors(
+        workflow,
+        "Check Norms",
+    ) == [
+        "Gate Expand Norm Check Stage",
+    ]
+
+    assert _successors(
+        workflow,
+        "Gate Expand Norm Check Stage",
+    ) == [
+        "Merge Finding Candidates",
+    ]
+
+    assert _successors(
+        workflow,
+        "Gate Finalize Findings",
+    ) == [
+        "Gate Collect Finalization Stage",
+    ]
+
+    assert _successors(
+        workflow,
+        "Gate Collect Finalization Stage",
+    ) == [
+        "Finalize Findings",
+    ]
+
+    # Existing progress/cancellation boundary after finalization
+    # остаётся на месте.
+    assert _successors(
+        workflow,
+        "Finalize Findings",
+    ) == [
+        "Progress Build Result",
+        "Gate Build Result",
+    ]
+
+    assert _successors(
+        workflow,
+        "Gate Build Result",
+    ) == [
+        "Gate Expand Finalization Stage",
+    ]
+
+
+def test_batch_paths_hold_vlm_residency() -> None:
+    """Каждый document-scoped GPU stage входит в residency middleware."""
+    source = ANALYSIS_MAIN.read_text(
+        encoding="utf-8",
+    )
+
+    for path in (
+        "/internal/v1/stages/understand-pages",
+        ("/internal/v1/stages/check-technical-assignment"),
+        "/internal/v1/stages/check-norms",
+        "/internal/v1/stages/finalize",
+    ):
+        assert path in source
+
+
+def test_one_hour_runtime_hierarchy_is_committed() -> None:
+    """Canonical env содержит согласованную timeout hierarchy."""
+    source = (ROOT / ".env.example").read_text(
+        encoding="utf-8",
+    )
+
+    assert "API_GATEWAY_ORCHESTRATION__REQUEST_TIMEOUT_SECONDS=3480" in source
+
+    assert "API_GATEWAY_LIFECYCLE__MAX_RUNTIME_SECONDS=3540" in source
+
+    assert "API_GATEWAY_LIFECYCLE__TASK_SOFT_TIME_LIMIT_SECONDS=3570" in source
+
+    assert "API_GATEWAY_LIFECYCLE__TASK_HARD_TIME_LIMIT_SECONDS=3600" in source
+
+    assert "ANALYSIS_SERVICE_GPU__LEASE_TIMEOUT_SECONDS=3300" in source
+
+    assert "ANALYSIS_SERVICE_PIPELINE__MAX_STAGE_PAGES=50" in source
