@@ -67,7 +67,7 @@ class FakeArtifactStore:
         document_id: UUID,
     ) -> AnalysisRequestArtifacts:
         """Возвращает request."""
-        assert document_id == self.request.submission.document_id
+        assert document_id == (self.request.submission.document_id)
 
         return self.request
 
@@ -80,7 +80,7 @@ class FakeArtifactStore:
         object,
     ]:
         """Возвращает result."""
-        assert document_id == self.request.submission.document_id
+        assert document_id == (self.request.submission.document_id)
 
         return self.result
 
@@ -123,10 +123,12 @@ class FakeRenderer:
     ) -> None:
         """Создаёт empty state."""
         self.calls = 0
+
         self.annotations: tuple[
             AnalysisPdfAnnotation,
             ...,
         ] = ()
+
         self.report: AnalysisPdfReport | None = None
 
     async def render(
@@ -157,10 +159,11 @@ class FakeCache:
 
     def __init__(
         self,
-        annotated_pdf: bytes | None = None,
+        annotated_pdf: (bytes | None) = None,
     ) -> None:
         """Сохраняет initial cache."""
         self.annotated_pdf = annotated_pdf
+
         self.save_calls = 0
 
     async def load_annotated_pdf(
@@ -183,6 +186,7 @@ class FakeCache:
         del document_id
 
         self.save_calls += 1
+
         self.annotated_pdf = content
 
 
@@ -195,7 +199,9 @@ def _completed_job(
     )
 
     job.mark_queued()
+
     job.mark_processing()
+
     job.mark_completed()
 
     return job
@@ -213,13 +219,13 @@ def _finding_field_map(
 
 
 @pytest.mark.asyncio
-async def test_export_keeps_all_findings_and_annotates_only_located() -> None:
-    """Unlocated finding не теряется и не получает fake bbox."""
+async def test_export_keeps_all_findings_and_marks_unlocated_on_page() -> None:
+    """Unlocated finding получает page-level annotation без fake bbox."""
     submission = AnalysisSubmission.create(
         pdf_present=True,
         cad_present=False,
         pages="14",
-        pdf_file_name="drawing.pdf",
+        pdf_file_name=("drawing.pdf"),
         cad_file_name=None,
     )
 
@@ -236,46 +242,46 @@ async def test_export_keeps_all_findings_and_annotates_only_located() -> None:
             14,
         ],
         "findings_count": 2,
-        "summary": "Есть замечания.",
+        "summary": ("Есть замечания."),
         "findings": [
             {
                 "finding_id": "F-1",
                 "page": 14,
-                "status": "needs_review",
+                "status": ("needs_review"),
                 "severity": "error",
                 "category": "marking",
-                "comment": "Нет маркировки XT1.",
-                "evidence": "XT1 не подписан.",
-                "basis": "Требование нормы.",
+                "comment": ("Нет маркировки XT1."),
+                "evidence": ("XT1 не подписан."),
+                "basis": ("Требование нормы."),
                 "normative_sources": [
                     {
-                        "source_file": "СП.pdf",
+                        "source_file": ("СП.pdf"),
                         "page": 3,
-                        "point_id": "5.1",
+                        "point_id": ("5.1"),
                     },
                 ],
-                "technical_assignment_basis_sources": [
+                ("technical_assignment_basis_sources"): [
                     {
-                        "source_file": "ТЗ.pdf",
+                        "source_file": ("ТЗ.pdf"),
                         "page": 4,
                     },
                 ],
-                "user_package_basis_sources": [
+                ("user_package_basis_sources"): [
                     {
-                        "source_file": "Исходные.pdf",
+                        "source_file": ("Исходные.pdf"),
                         "page": 2,
                     },
                 ],
-                "recommendation": "Добавить маркировку.",
+                "recommendation": ("Добавить маркировку."),
             },
             {
                 "finding_id": "F-2",
                 "page": 14,
-                "status": "needs_review",
-                "severity": "warning",
+                "status": ("needs_review"),
+                "severity": ("warning"),
                 "category": "other",
-                "comment": "Второе замечание.",
-                "recommendation": "Проверить вручную.",
+                "comment": ("Второе замечание."),
+                "recommendation": ("Проверить вручную."),
             },
         ],
         "limitations": [],
@@ -288,8 +294,8 @@ async def test_export_keeps_all_findings_and_annotates_only_located() -> None:
                     "page_number": 14,
                     "locations": [
                         {
-                            "finding_id": "F-1",
-                            "status": "located",
+                            "finding_id": ("F-1"),
+                            "status": ("located"),
                             "bbox": {
                                 "x_min": 100,
                                 "y_min": 200,
@@ -308,8 +314,8 @@ async def test_export_keeps_all_findings_and_annotates_only_located() -> None:
                             ],
                         },
                         {
-                            "finding_id": "F-2",
-                            "status": "unlocated",
+                            "finding_id": ("F-2"),
+                            "status": ("unlocated"),
                             "regions": [],
                         },
                     ],
@@ -327,16 +333,20 @@ async def test_export_keeps_all_findings_and_annotates_only_located() -> None:
     )
 
     use_case = GetAnalysisAnnotatedPdf(
-        get_analysis_job=FakeGetJob(
-            job,
+        get_analysis_job=(
+            FakeGetJob(
+                job,
+            )
         ),  # type: ignore[arg-type]
-        artifact_store=FakeArtifactStore(
-            request=request,
-            result=result,
+        artifact_store=(
+            FakeArtifactStore(
+                request=request,
+                result=result,
+            )
         ),  # type: ignore[arg-type]
-        get_analysis_visualization=visualization,  # type: ignore[arg-type]
-        renderer=renderer,  # type: ignore[arg-type]
-        visualization_cache=cache,  # type: ignore[arg-type]
+        get_analysis_visualization=(visualization),  # type: ignore[arg-type]
+        renderer=(renderer),  # type: ignore[arg-type]
+        visualization_cache=(cache),  # type: ignore[arg-type]
     )
 
     document = await use_case.execute(
@@ -355,10 +365,29 @@ async def test_export_keeps_all_findings_and_annotates_only_located() -> None:
         len(
             renderer.annotations,
         )
+        == 2
+    )
+
+    first_annotation = renderer.annotations[0]
+
+    second_annotation = renderer.annotations[1]
+
+    assert first_annotation.finding_id == "F-1"
+
+    assert first_annotation.page_number == 14
+
+    assert (
+        len(
+            first_annotation.regions,
+        )
         == 1
     )
 
-    assert renderer.annotations[0].finding_id == "F-1"
+    assert second_annotation.finding_id == "F-2"
+
+    assert second_annotation.page_number == 14
+
+    assert second_annotation.regions == ()
 
     assert renderer.report is not None
 
@@ -381,13 +410,20 @@ async def test_export_keeps_all_findings_and_annotates_only_located() -> None:
 
     assert "СП.pdf" in first_fields["Нормативные источники"]
 
-    assert "ТЗ.pdf" in first_fields["Требования технического задания"]
+    assert "ТЗ.pdf" in first_fields[("Требования технического задания")]
 
-    assert "Исходные.pdf" in first_fields["Пользовательские требования / документы"]
+    assert "Исходные.pdf" in first_fields[("Пользовательские требования / документы")]
 
-    assert first_fields["Локализация"] == "PDF-аннотация размещена на листе 14."
+    assert first_fields["Локализация"] == (
+        "PDF-аннотация размещена по найденной области на листе 14."
+    )
 
-    assert second_fields["Локализация"] == "Точное место автоматически не локализовано."
+    assert second_fields["Локализация"] == (
+        "Точное место автоматически "
+        "не локализовано. "
+        "PDF-аннотация размещена "
+        "на уровне листа 14."
+    )
 
     assert cache.save_calls == 1
 
@@ -399,7 +435,7 @@ async def test_final_pdf_cache_skips_visualization_and_renderer() -> None:
         pdf_present=True,
         cad_present=False,
         pages="1",
-        pdf_file_name="drawing.pdf",
+        pdf_file_name=("drawing.pdf"),
         cad_file_name=None,
     )
 
@@ -418,7 +454,7 @@ async def test_final_pdf_cache_skips_visualization_and_renderer() -> None:
     renderer = FakeRenderer()
 
     cache = FakeCache(
-        b"%PDF-1.7\ncached",
+        (b"%PDF-1.7\ncached"),
     )
 
     job = _completed_job(
@@ -426,19 +462,23 @@ async def test_final_pdf_cache_skips_visualization_and_renderer() -> None:
     )
 
     use_case = GetAnalysisAnnotatedPdf(
-        get_analysis_job=FakeGetJob(
-            job,
+        get_analysis_job=(
+            FakeGetJob(
+                job,
+            )
         ),  # type: ignore[arg-type]
-        artifact_store=FakeArtifactStore(
-            request=request,
-            result={
-                "status": "completed",
-                "findings": [],
-            },
+        artifact_store=(
+            FakeArtifactStore(
+                request=request,
+                result={
+                    "status": ("completed"),
+                    "findings": [],
+                },
+            )
         ),  # type: ignore[arg-type]
-        get_analysis_visualization=visualization,  # type: ignore[arg-type]
-        renderer=renderer,  # type: ignore[arg-type]
-        visualization_cache=cache,  # type: ignore[arg-type]
+        get_analysis_visualization=(visualization),  # type: ignore[arg-type]
+        renderer=(renderer),  # type: ignore[arg-type]
+        visualization_cache=(cache),  # type: ignore[arg-type]
     )
 
     document = await use_case.execute(
@@ -448,6 +488,7 @@ async def test_final_pdf_cache_skips_visualization_and_renderer() -> None:
     assert document.content == b"%PDF-1.7\ncached"
 
     assert visualization.calls == 0
+
     assert renderer.calls == 0
 
 
@@ -459,7 +500,7 @@ async def test_cad_only_job_has_no_annotated_pdf() -> None:
         cad_present=True,
         pages=None,
         pdf_file_name=None,
-        cad_file_name="drawing.dxf",
+        cad_file_name=("drawing.dxf"),
     )
 
     request = AnalysisRequestArtifacts(
@@ -473,23 +514,29 @@ async def test_cad_only_job_has_no_annotated_pdf() -> None:
     )
 
     use_case = GetAnalysisAnnotatedPdf(
-        get_analysis_job=FakeGetJob(
-            job,
+        get_analysis_job=(
+            FakeGetJob(
+                job,
+            )
         ),  # type: ignore[arg-type]
-        artifact_store=FakeArtifactStore(
-            request=request,
-            result={
-                "status": "completed",
-                "findings": [],
-            },
+        artifact_store=(
+            FakeArtifactStore(
+                request=request,
+                result={
+                    "status": ("completed"),
+                    "findings": [],
+                },
+            )
         ),  # type: ignore[arg-type]
-        get_analysis_visualization=FakeVisualization(
-            {
-                "pages": [],
-            }
+        get_analysis_visualization=(
+            FakeVisualization(
+                {
+                    "pages": [],
+                }
+            )
         ),  # type: ignore[arg-type]
-        renderer=FakeRenderer(),  # type: ignore[arg-type]
-        visualization_cache=FakeCache(),  # type: ignore[arg-type]
+        renderer=(FakeRenderer()),  # type: ignore[arg-type]
+        visualization_cache=(FakeCache()),  # type: ignore[arg-type]
     )
 
     with pytest.raises(

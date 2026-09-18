@@ -129,7 +129,7 @@ class _PdfReportWriter:
     ) -> None:
         """Печатает label/value поле."""
         self._write(
-            f"{field.label}: {field.value}",
+            (f"{field.label}: {field.value}"),
             after=2.5,
         )
 
@@ -203,7 +203,10 @@ class _PdfReportWriter:
 
         result: list[str] = []
 
-        for paragraph_index, paragraph in enumerate(
+        for (
+            paragraph_index,
+            paragraph,
+        ) in enumerate(
             paragraphs,
         ):
             words: list[str] = []
@@ -213,7 +216,7 @@ class _PdfReportWriter:
                     self._split_long_token(
                         token,
                         font_size=font_size,
-                        available_width=available_width,
+                        available_width=(available_width),
                     )
                 )
 
@@ -231,7 +234,7 @@ class _PdfReportWriter:
                     if (
                         self._text_width(
                             candidate,
-                            font_size=font_size,
+                            font_size=(font_size),
                         )
                         <= available_width
                     ):
@@ -248,7 +251,13 @@ class _PdfReportWriter:
                     current,
                 )
 
-            if paragraph_index < len(paragraphs) - 1:
+            if (
+                paragraph_index
+                < len(
+                    paragraphs,
+                )
+                - 1
+            ):
                 result.append(
                     "",
                 )
@@ -278,6 +287,7 @@ class _PdfReportWriter:
             return (token,)
 
         chunks: list[str] = []
+
         current = ""
 
         for character in token:
@@ -287,7 +297,7 @@ class _PdfReportWriter:
                 current
                 and self._text_width(
                     candidate,
-                    font_size=font_size,
+                    font_size=(font_size),
                 )
                 > available_width
             ):
@@ -365,15 +375,37 @@ class PyMuPdfAnnotationWriter:
 
                 if original_page_count < 1:
                     raise PdfProcessingError(
-                        "Исходный PDF не содержит страниц.",
+                        ("Исходный PDF не содержит страниц."),
                     )
 
+                page_level_slots: dict[
+                    int,
+                    int,
+                ] = {}
+
                 for annotation in annotations:
-                    self._add_finding_annotation(
-                        document=document,
-                        original_page_count=original_page_count,
-                        annotation=annotation,
+                    if annotation.regions:
+                        self._add_finding_annotation(
+                            document=document,
+                            original_page_count=(original_page_count),
+                            annotation=annotation,
+                        )
+
+                        continue
+
+                    slot = page_level_slots.get(
+                        annotation.page_number,
+                        0,
                     )
+
+                    self._add_page_level_annotation(
+                        document=document,
+                        original_page_count=(original_page_count),
+                        annotation=annotation,
+                        slot=slot,
+                    )
+
+                    page_level_slots[annotation.page_number] = slot + 1
 
                 report_font = fitz.Font(
                     "cjk",
@@ -398,14 +430,14 @@ class PyMuPdfAnnotationWriter:
 
         except Exception as error:
             raise PdfProcessingError(
-                "Не удалось сформировать PDF с аннотациями.",
+                ("Не удалось сформировать PDF с аннотациями."),
             ) from error
 
         if not result.startswith(
             b"%PDF-",
         ):
             raise PdfProcessingError(
-                "Сформированный annotation export не является PDF.",
+                ("Сформированный annotation export не является PDF."),
             )
 
         return result
@@ -418,15 +450,16 @@ class PyMuPdfAnnotationWriter:
         annotation: PdfFindingAnnotation,
     ) -> None:
         """Добавляет все visual regions одного finding."""
-        if not (1 <= annotation.page_number <= original_page_count):
-            raise PdfProcessingError(
-                "Finding ссылается на несуществующую PDF-страницу: "
-                f"{annotation.page_number}.",
-            )
+        page = self._annotation_page(
+            document=document,
+            original_page_count=(original_page_count),
+            page_number=(annotation.page_number),
+        )
 
-        page = document[annotation.page_number - 1]
-
-        for region_index, bbox in enumerate(
+        for (
+            region_index,
+            bbox,
+        ) in enumerate(
             annotation.regions,
             start=1,
         ):
@@ -453,7 +486,7 @@ class PyMuPdfAnnotationWriter:
             )
 
             rectangle_annotation.set_colors(
-                stroke=self._ANNOTATION_COLOR,
+                stroke=(self._ANNOTATION_COLOR),
             )
 
             rectangle_annotation.update(
@@ -481,8 +514,8 @@ class PyMuPdfAnnotationWriter:
                 label_rect,
                 label,
                 fontsize=7.0,
-                text_color=self._LABEL_TEXT_COLOR,
-                fill_color=self._LABEL_FILL_COLOR,
+                text_color=(self._LABEL_TEXT_COLOR),
+                fill_color=(self._LABEL_FILL_COLOR),
                 border_width=0.4,
                 opacity=0.92,
             )
@@ -492,6 +525,172 @@ class PyMuPdfAnnotationWriter:
                 content=annotation.content,
                 subject="PDRD Validation",
             )
+
+    def _add_page_level_annotation(
+        self,
+        *,
+        document: fitz.Document,
+        original_page_count: int,
+        annotation: PdfFindingAnnotation,
+        slot: int,
+    ) -> None:
+        """Добавляет marker без fake bbox, если точное место неизвестно."""
+        page = self._annotation_page(
+            document=document,
+            original_page_count=(original_page_count),
+            page_number=(annotation.page_number),
+        )
+
+        (
+            visual_badge_rect,
+            badge_rect,
+        ) = self._page_level_badge_rect(
+            page=page,
+            slot=slot,
+        )
+
+        label = f"PDRD [{annotation.number}]"
+
+        badge = page.add_freetext_annot(
+            badge_rect,
+            label,
+            fontsize=7.0,
+            text_color=(self._LABEL_TEXT_COLOR),
+            fill_color=(self._LABEL_FILL_COLOR),
+            border_width=0.7,
+            opacity=0.92,
+        )
+
+        # Для FreeText content должен оставаться самим
+        # отображаемым label. Полный текст finding хранит
+        # отдельная native Comment annotation ниже.
+        badge.set_info(
+            title=annotation.title,
+            subject="PDRD Validation",
+        )
+
+        visual_note_point = fitz.Point(
+            min(
+                page.rect.x1 - 12.0,
+                visual_badge_rect.x1 + 4.0,
+            ),
+            min(
+                page.rect.y1 - 12.0,
+                visual_badge_rect.y0 + 4.0,
+            ),
+        )
+
+        note_point = (
+            visual_note_point * page.derotation_matrix
+            if page.rotation
+            else visual_note_point
+        )
+
+        note = page.add_text_annot(
+            note_point,
+            annotation.content,
+            icon="Comment",
+        )
+
+        note.set_info(
+            title=annotation.title,
+            subject="PDRD Validation",
+        )
+
+    @staticmethod
+    def _annotation_page(
+        *,
+        document: fitz.Document,
+        original_page_count: int,
+        page_number: int,
+    ) -> fitz.Page:
+        """Возвращает исходную PDF-страницу finding."""
+        if not (1 <= page_number <= original_page_count):
+            raise PdfProcessingError(
+                (f"Finding ссылается на несуществующую PDF-страницу: {page_number}."),
+            )
+
+        return document[page_number - 1]
+
+    @staticmethod
+    def _page_level_badge_rect(
+        *,
+        page: fitz.Page,
+        slot: int,
+    ) -> tuple[
+        fitz.Rect,
+        fitz.Rect,
+    ]:
+        """Размещает compact page-level marker в верхнем rail листа."""
+        page_rect = page.rect
+
+        margin = 10.0
+        gap = 6.0
+        preferred_width = 72.0
+        badge_height = 16.0
+
+        available_width = max(
+            page_rect.width - (2 * margin),
+            1.0,
+        )
+
+        badge_width = min(
+            preferred_width,
+            available_width,
+        )
+
+        columns = max(
+            1,
+            int((available_width + gap) // (badge_width + gap)),
+        )
+
+        column = slot % columns
+
+        row = slot // columns
+
+        x = page_rect.x0 + margin + column * (badge_width + gap)
+
+        y = page_rect.y0 + margin + row * (badge_height + gap)
+
+        x = min(
+            x,
+            max(
+                page_rect.x0,
+                page_rect.x1 - margin - badge_width,
+            ),
+        )
+
+        y = min(
+            y,
+            max(
+                page_rect.y0,
+                page_rect.y1 - margin - badge_height,
+            ),
+        )
+
+        visual_badge_rect = fitz.Rect(
+            x,
+            y,
+            min(
+                page_rect.x1,
+                x + badge_width,
+            ),
+            min(
+                page_rect.y1,
+                y + badge_height,
+            ),
+        )
+
+        badge_rect = (
+            visual_badge_rect * page.derotation_matrix
+            if page.rotation
+            else visual_badge_rect
+        )
+
+        return (
+            visual_badge_rect,
+            badge_rect,
+        )
 
     @staticmethod
     def _annotation_rect(
@@ -524,29 +723,37 @@ class PyMuPdfAnnotationWriter:
             or page_height <= 0
         ):
             raise PdfProcessingError(
-                "PDF-страница имеет некорректный размер.",
+                ("PDF-страница имеет некорректный размер."),
             )
 
-        x_min = float(bbox.x_min)
+        x_min = float(
+            bbox.x_min,
+        )
 
-        y_min = float(bbox.y_min)
+        y_min = float(
+            bbox.y_min,
+        )
 
-        x_max = float(bbox.x_max)
+        x_max = float(
+            bbox.x_max,
+        )
 
-        y_max = float(bbox.y_max)
+        y_max = float(
+            bbox.y_max,
+        )
 
         visual_rect = fitz.Rect(
-            page_rect.x0 + (x_min / 1000.0 * page_width),
-            page_rect.y0 + (y_min / 1000.0 * page_height),
-            page_rect.x0 + (x_max / 1000.0 * page_width),
-            page_rect.y0 + (y_max / 1000.0 * page_height),
+            (page_rect.x0 + (x_min / 1000.0 * page_width)),
+            (page_rect.y0 + (y_min / 1000.0 * page_height)),
+            (page_rect.x0 + (x_max / 1000.0 * page_width)),
+            (page_rect.y0 + (y_max / 1000.0 * page_height)),
         )
 
         visual_rect = visual_rect & page_rect
 
         if visual_rect.is_empty or visual_rect.is_infinite:
             raise PdfProcessingError(
-                "Finding содержит пустой PDF bbox.",
+                ("Finding содержит пустой PDF bbox."),
             )
 
         annotation_rect = (
@@ -574,7 +781,15 @@ class PyMuPdfAnnotationWriter:
             30.0,
             min(
                 52.0,
-                12.0 + (7.0 * len(label)),
+                (
+                    12.0
+                    + (
+                        7.0
+                        * len(
+                            label,
+                        )
+                    )
+                ),
             ),
         )
 

@@ -26,7 +26,7 @@ class LocalFilesystemAnalysisVisualizationCache:
 
     _LOCATIONS_FILE = "locations.json"
 
-    _ANNOTATED_PDF_FILE = "annotated.pdf"
+    _ANNOTATED_PDF_FILE = "annotated-v2.pdf"
 
     _LOCATIONS_SCHEMA_VERSION = 1
 
@@ -127,17 +127,14 @@ class LocalFilesystemAnalysisVisualizationCache:
                 dict,
             ):
                 raise ValueError(
-                    "Location cache должен быть JSON object.",
+                    ("Location cache должен быть JSON object."),
                 )
 
-            if (
-                payload.get(
-                    "schema_version",
-                )
-                != self._LOCATIONS_SCHEMA_VERSION
-            ):
+            if payload.get(
+                "schema_version",
+            ) != (self._LOCATIONS_SCHEMA_VERSION):
                 raise ValueError(
-                    "Unsupported location cache schema.",
+                    ("Unsupported location cache schema."),
                 )
 
             raw_pages = payload.get(
@@ -149,7 +146,7 @@ class LocalFilesystemAnalysisVisualizationCache:
                 list,
             ):
                 raise ValueError(
-                    "Location cache pages должен быть array.",
+                    ("Location cache pages должен быть array."),
                 )
 
             pages: list[AnalysisVisualizationLocationPage] = []
@@ -162,14 +159,14 @@ class LocalFilesystemAnalysisVisualizationCache:
                     dict,
                 ):
                     raise ValueError(
-                        "Location cache page должен быть object.",
+                        ("Location cache page должен быть object."),
                     )
 
                 page_number = int(raw_page["page_number"])
 
                 if page_number < 1 or page_number in seen_pages:
                     raise ValueError(
-                        "Некорректный cached page_number.",
+                        ("Некорректный cached page_number."),
                     )
 
                 seen_pages.add(
@@ -185,7 +182,7 @@ class LocalFilesystemAnalysisVisualizationCache:
                     list,
                 ):
                     raise ValueError(
-                        "Cached locations должен быть array.",
+                        ("Cached locations должен быть array."),
                     )
 
                 locations = tuple(
@@ -197,8 +194,8 @@ class LocalFilesystemAnalysisVisualizationCache:
 
                 pages.append(
                     AnalysisVisualizationLocationPage(
-                        page_number=page_number,
-                        locations=locations,
+                        page_number=(page_number),
+                        locations=(locations),
                     )
                 )
 
@@ -213,8 +210,10 @@ class LocalFilesystemAnalysisVisualizationCache:
             ValueError,
             json.JSONDecodeError,
         ) as error:
-            raise AnalysisVisualizationCacheError(
-                "Не удалось прочитать finding location cache.",
+            raise (
+                AnalysisVisualizationCacheError(
+                    ("Не удалось прочитать finding location cache."),
+                )
             ) from error
 
     def _save_locations_sync(
@@ -230,8 +229,10 @@ class LocalFilesystemAnalysisVisualizationCache:
         )
 
         if not document_directory.is_dir():
-            raise AnalysisVisualizationCacheError(
-                "Analysis artifacts для location cache не найдены.",
+            raise (
+                AnalysisVisualizationCacheError(
+                    ("Analysis artifacts для location cache не найдены."),
+                )
             )
 
         target_directory = self._visualization_directory(
@@ -258,7 +259,7 @@ class LocalFilesystemAnalysisVisualizationCache:
             }
 
             self._write_json_atomic(
-                target_directory / self._LOCATIONS_FILE,
+                (target_directory / self._LOCATIONS_FILE),
                 payload,
             )
 
@@ -267,8 +268,10 @@ class LocalFilesystemAnalysisVisualizationCache:
             TypeError,
             ValueError,
         ) as error:
-            raise AnalysisVisualizationCacheError(
-                "Не удалось сохранить finding location cache.",
+            raise (
+                AnalysisVisualizationCacheError(
+                    ("Не удалось сохранить finding location cache."),
+                )
             ) from error
 
     def _load_annotated_pdf_sync(
@@ -289,15 +292,19 @@ class LocalFilesystemAnalysisVisualizationCache:
             content = path.read_bytes()
 
         except OSError as error:
-            raise AnalysisVisualizationCacheError(
-                "Не удалось прочитать cached annotated PDF.",
+            raise (
+                AnalysisVisualizationCacheError(
+                    ("Не удалось прочитать cached annotated PDF."),
+                )
             ) from error
 
         if not content.startswith(
             b"%PDF-",
         ):
-            raise AnalysisVisualizationCacheError(
-                "Cached annotated artifact повреждён.",
+            raise (
+                AnalysisVisualizationCacheError(
+                    ("Cached annotated artifact повреждён."),
+                )
             )
 
         return content
@@ -312,26 +319,32 @@ class LocalFilesystemAnalysisVisualizationCache:
         )
 
         if not document_directory.is_dir():
-            raise AnalysisVisualizationCacheError(
-                "Analysis artifacts для annotated PDF не найдены.",
+            raise (
+                AnalysisVisualizationCacheError(
+                    ("Analysis artifacts для annotated PDF не найдены."),
+                )
             )
 
         if not content.startswith(
             b"%PDF-",
         ):
-            raise AnalysisVisualizationCacheError(
-                "Нельзя сохранить не-PDF annotated artifact.",
+            raise (
+                AnalysisVisualizationCacheError(
+                    ("Нельзя сохранить не-PDF annotated artifact."),
+                )
             )
 
         try:
             self._write_bytes_atomic(
-                document_directory / self._ANNOTATED_PDF_FILE,
+                (document_directory / self._ANNOTATED_PDF_FILE),
                 content,
             )
 
         except OSError as error:
-            raise AnalysisVisualizationCacheError(
-                "Не удалось сохранить annotated PDF.",
+            raise (
+                AnalysisVisualizationCacheError(
+                    ("Не удалось сохранить annotated PDF."),
+                )
             ) from error
 
     @classmethod
@@ -345,7 +358,7 @@ class LocalFilesystemAnalysisVisualizationCache:
             dict,
         ):
             raise ValueError(
-                "Cached location должен быть object.",
+                ("Cached location должен быть object."),
             )
 
         finding_id = str(
@@ -357,7 +370,7 @@ class LocalFilesystemAnalysisVisualizationCache:
 
         if not finding_id:
             raise ValueError(
-                "Cached location не содержит finding_id.",
+                ("Cached location не содержит finding_id."),
             )
 
         if (
@@ -367,7 +380,7 @@ class LocalFilesystemAnalysisVisualizationCache:
             != "located"
         ):
             return AnalysisFindingLocation.unlocated(
-                finding_id=finding_id,
+                finding_id=(finding_id),
             )
 
         raw_regions = raw_location.get(
@@ -382,7 +395,7 @@ class LocalFilesystemAnalysisVisualizationCache:
             or not raw_regions
         ):
             raise ValueError(
-                "Located cache item не содержит regions.",
+                ("Located cache item не содержит regions."),
             )
 
         regions = tuple(
@@ -419,7 +432,7 @@ class LocalFilesystemAnalysisVisualizationCache:
             dict,
         ):
             raise ValueError(
-                "Cached region должен быть object.",
+                ("Cached region должен быть object."),
             )
 
         raw_bbox = raw_region.get(
@@ -431,7 +444,7 @@ class LocalFilesystemAnalysisVisualizationCache:
             dict,
         ):
             raise ValueError(
-                "Cached region не содержит bbox.",
+                ("Cached region не содержит bbox."),
             )
 
         return AnalysisVisualRegion(

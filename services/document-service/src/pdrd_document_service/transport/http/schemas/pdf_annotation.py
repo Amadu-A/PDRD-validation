@@ -105,7 +105,7 @@ class PdfFindingAnnotationRequest(
     )
 
     regions: list[PdfAnnotationBoundingBoxRequest] = Field(
-        min_length=1,
+        default_factory=list,
     )
 
     def to_domain(

@@ -372,6 +372,7 @@ class GetAnalysisAnnotatedPdf:
             fields = cls._finding_fields(
                 finding=finding,
                 located=located,
+                page_number=page_number,
             )
 
             title = f"{index}. Лист/страница {page_number}"
@@ -383,17 +384,28 @@ class GetAnalysisAnnotatedPdf:
                 )
             )
 
-            if finding_id and located is not None and located.regions:
-                annotations.append(
-                    AnalysisPdfAnnotation(
-                        number=index,
-                        finding_id=(finding_id),
-                        page_number=(located.page_number),
-                        title=(f"Замечание №{index}"),
-                        content=(cls._annotation_content(fields)),
-                        regions=(located.regions),
-                    )
+            annotation_finding_id = finding_id or f"finding-{index}"
+
+            annotation_page_number = (
+                located.page_number if located is not None else page_number
+            )
+
+            annotation_regions = located.regions if located is not None else ()
+
+            annotations.append(
+                AnalysisPdfAnnotation(
+                    number=index,
+                    finding_id=(annotation_finding_id),
+                    page_number=(annotation_page_number),
+                    title=(f"Замечание №{index}"),
+                    content=(
+                        cls._annotation_content(
+                            fields,
+                        )
+                    ),
+                    regions=(annotation_regions),
                 )
+            )
 
         metadata = cls._report_metadata(
             job_id=job_id,
@@ -457,6 +469,7 @@ class GetAnalysisAnnotatedPdf:
             Any,
         ],
         located: _LocatedFinding | None,
+        page_number: int,
     ) -> tuple[
         AnalysisPdfReportField,
         ...,
@@ -529,7 +542,7 @@ class GetAnalysisAnnotatedPdf:
                 or finding.get(
                     "issue_text",
                 )
-                or "Текст замечания не передан."
+                or ("Текст замечания не передан.")
             ),
         )
 
@@ -575,7 +588,7 @@ class GetAnalysisAnnotatedPdf:
 
         cls._append_field(
             fields,
-            "Пользовательские требования / документы",
+            ("Пользовательские требования / документы"),
             cls._source_value(
                 cls._preferred_sources(
                     finding,
@@ -622,10 +635,21 @@ class GetAnalysisAnnotatedPdf:
             )
 
         if located is None:
-            localization = "Точное место автоматически не локализовано."
+            localization = (
+                "Точное место автоматически "
+                "не локализовано. "
+                "PDF-аннотация размещена "
+                "на уровне "
+                f"листа {page_number}."
+            )
 
         else:
-            localization = f"PDF-аннотация размещена на листе {located.page_number}."
+            localization = (
+                "PDF-аннотация размещена "
+                "по найденной области "
+                f"на листе "
+                f"{located.page_number}."
+            )
 
         cls._append_field(
             fields,
@@ -1035,7 +1059,7 @@ class GetAnalysisAnnotatedPdf:
                     "document_id",
                 )
                 or source.get(
-                    "technical_assignment_id",
+                    ("technical_assignment_id"),
                 )
                 or "Источник"
             )

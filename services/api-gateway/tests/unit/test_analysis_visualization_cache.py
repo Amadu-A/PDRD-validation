@@ -22,18 +22,32 @@ from pdrd_api_gateway.infrastructure.storage.visualization_cache import (
 async def test_location_and_annotated_pdf_cache_round_trip(
     tmp_path,
 ) -> None:
-    """Derivative cache сохраняет typed locations и PDF bytes."""
+    """Derivative cache сохраняет typed locations и versioned PDF bytes."""
     document_id = uuid4()
 
-    (
-        tmp_path
-        / str(
-            document_id,
-        )
-    ).mkdir()
+    document_directory = tmp_path / str(
+        document_id,
+    )
+
+    document_directory.mkdir()
 
     cache = LocalFilesystemAnalysisVisualizationCache(
         root_path=tmp_path,
+    )
+
+    legacy_pdf_path = document_directory / "annotated.pdf"
+
+    legacy_pdf_path.write_bytes(
+        b"%PDF-1.7\nlegacy",
+    )
+
+    # Старый Stage 8.6 artifact не должен
+    # возвращаться после исправления page-level annotations.
+    assert (
+        await cache.load_annotated_pdf(
+            document_id=document_id,
+        )
+        is None
     )
 
     pages = (
@@ -90,6 +104,10 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         document_id=document_id,
         content=pdf_content,
     )
+
+    versioned_pdf_path = document_directory / "annotated-v2.pdf"
+
+    assert versioned_pdf_path.read_bytes() == pdf_content
 
     assert (
         await cache.load_annotated_pdf(
