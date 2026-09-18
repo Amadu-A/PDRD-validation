@@ -54,7 +54,10 @@ export async function waitForAnalysis(
       elapsedSeconds,
     });
 
-    if (payload.status === "completed") {
+    if (
+      payload.status === "completed"
+      || payload.status === "cancelled"
+    ) {
       return payload;
     }
 
@@ -63,12 +66,6 @@ export async function waitForAnalysis(
         payload.error_message
         || payload.error_code
         || "Анализ завершился ошибкой.",
-      );
-    }
-
-    if (payload.status === "cancelled") {
-      throw new Error(
-        "Анализ был отменён.",
       );
     }
 

@@ -74,6 +74,28 @@ export function createModal({
 }) {
   let jobId = null;
 
+  let cancelHandler = null;
+
+  const cancelButton = document.createElement(
+    "button",
+  );
+
+  cancelButton.type = "button";
+
+  cancelButton.className = (
+    "analysis-modal__cancel-button"
+  );
+
+  cancelButton.textContent = (
+    "Отменить анализ"
+  );
+
+  cancelButton.hidden = true;
+
+  jobElement.append(
+    cancelButton,
+  );
+
 
   function show(
     text = "Идёт анализ документа…",
@@ -107,6 +129,30 @@ export function createModal({
   }
 
 
+  function setCancelling(
+    value,
+  ) {
+    const cancelling = Boolean(
+      value,
+    );
+
+    cancelButton.disabled = cancelling;
+
+    cancelButton.textContent = (
+      cancelling
+        ? "Отменяю анализ…"
+        : "Отменить анализ"
+    );
+  }
+
+
+  function setCancelHandler(
+    handler,
+  ) {
+    cancelHandler = handler;
+  }
+
+
   function setJobId(
     value,
   ) {
@@ -117,6 +163,12 @@ export function createModal({
     jobElement.hidden = false;
 
     copyStatusElement.textContent = "";
+
+    cancelButton.hidden = false;
+
+    setCancelling(
+      false,
+    );
   }
 
 
@@ -128,6 +180,12 @@ export function createModal({
     jobElement.hidden = true;
 
     copyStatusElement.textContent = "";
+
+    cancelButton.hidden = true;
+
+    setCancelling(
+      false,
+    );
   }
 
 
@@ -158,6 +216,42 @@ export function createModal({
   );
 
 
+  cancelButton.addEventListener(
+    "click",
+    async () => {
+      if (
+        !jobId
+        || cancelButton.disabled
+        || typeof cancelHandler !== "function"
+      ) {
+        return;
+      }
+
+      setCancelling(
+        true,
+      );
+
+      copyStatusElement.textContent = "";
+
+      try {
+        await cancelHandler(
+          jobId,
+        );
+
+      } catch (error) {
+        setCancelling(
+          false,
+        );
+
+        console.error(
+          "Не удалось обработать отмену анализа.",
+          error,
+        );
+      }
+    },
+  );
+
+
   clearJobId();
 
 
@@ -166,5 +260,7 @@ export function createModal({
     hide,
     setJobId,
     clearJobId,
+    setCancelHandler,
+    setCancelling,
   };
 }

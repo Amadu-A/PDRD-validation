@@ -9,6 +9,7 @@
 
 import {
   ApiError,
+  cancelAnalysis,
   getAnalysisResult,
   getAnalysisVisualization,
   submitAnalysis,
@@ -42,6 +43,11 @@ export function createAnalysisController({
   modal,
   resultView,
 }) {
+  let activeJobId = null;
+
+  let cancellationRequested = false;
+
+
   function progressDescription(
     payload,
   ) {
@@ -83,6 +89,35 @@ export function createAnalysisController({
     payload,
     elapsedSeconds,
   ) {
+    if (
+      cancellationRequested
+      && ![
+        "cancelled",
+        "completed",
+        "failed",
+      ].includes(
+        payload.status,
+      )
+    ) {
+      const description = (
+        "Останавливаю анализ… "
+        + "Текущий этап завершится безопасно."
+      );
+
+      modal.show(
+        `${description} Прошло ${elapsedSeconds} сек.`,
+      );
+
+      resultView.show(
+        `Задание: ${jobId}\n`
+        + "Статус: Отмена запрошена\n"
+        + `Сейчас: ${description}\n`
+        + `Прошло: ${elapsedSeconds} сек.`,
+      );
+
+      return;
+    }
+
     const description = progressDescription(
       payload,
     );
@@ -123,6 +158,102 @@ export function createAnalysisController({
       + `\nПопытка worker: ${payload.attempt_count ?? 0}\n`
       + `Прошло: ${elapsedSeconds} сек.`,
     );
+  }
+
+
+  function cancellationErrorMessage(
+    error,
+  ) {
+    if (error instanceof ApiError) {
+      return error.detail;
+    }
+
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    return String(
+      error,
+    );
+  }
+
+
+  async function cancelActiveAnalysis(
+    jobId,
+  ) {
+    if (
+      !jobId
+      || jobId !== activeJobId
+      || cancellationRequested
+    ) {
+      return;
+    }
+
+    try {
+      const response = await cancelAnalysis(
+        jobId,
+      );
+
+      if (jobId !== activeJobId) {
+        return;
+      }
+
+      if (response.status !== "cancelled") {
+        throw new Error(
+          "API Gateway не подтвердил отмену анализа.",
+        );
+      }
+
+      cancellationRequested = true;
+
+      modal.show(
+        "Отмена запрошена. "
+        + "Текущий этап завершится безопасно…",
+      );
+
+      resultView.show(
+        `Задание: ${jobId}\n`
+        + "Статус: Отмена запрошена\n"
+        + "Ожидаем остановки analysis workflow.",
+      );
+
+    } catch (error) {
+      if (jobId !== activeJobId) {
+        return;
+      }
+
+      modal.setCancelling(
+        false,
+      );
+
+      if (
+        error instanceof ApiError
+        && error.status === 409
+      ) {
+        modal.show(
+          "Анализ уже завершает работу. "
+          + "Проверяем итоговый статус…",
+        );
+
+        return;
+      }
+
+      const message = cancellationErrorMessage(
+        error,
+      );
+
+      modal.show(
+        "Не удалось отправить запрос отмены. "
+        + "Анализ продолжает выполняться.",
+      );
+
+      resultView.show(
+        `Задание: ${jobId}\n`
+        + "Не удалось отменить анализ.\n"
+        + `${message}\n`
+        + "Сам анализ продолжает выполняться.",
+      );
+    }
   }
 
 
@@ -218,6 +349,10 @@ export function createAnalysisController({
       return;
     }
 
+    activeJobId = null;
+
+    cancellationRequested = false;
+
     modal.clearJobId();
 
     try {
@@ -249,6 +384,8 @@ export function createAnalysisController({
         );
       }
 
+      activeJobId = jobId;
+
       modal.setJobId(
         jobId,
       );
@@ -258,7 +395,7 @@ export function createAnalysisController({
         + `Статус: ${statusLabel(accepted.status)}`,
       );
 
-      await waitForAnalysis(
+      const finalStatus = await waitForAnalysis(
         jobId,
         {
           onProgress: ({
@@ -273,6 +410,16 @@ export function createAnalysisController({
           },
         },
       );
+
+      if (finalStatus.status === "cancelled") {
+        resultView.show(
+          `Задание: ${jobId}\n`
+          + `Статус: ${statusLabel(finalStatus.status)}\n`
+          + "Анализ остановлен по запросу пользователя.",
+        );
+
+        return;
+      }
 
       modal.show(
         "Анализ завершён. Загружаем результат…",
@@ -329,9 +476,22 @@ export function createAnalysisController({
       );
 
     } finally {
+      activeJobId = null;
+
+      cancellationRequested = false;
+
+      modal.setCancelling(
+        false,
+      );
+
       modal.hide();
     }
   }
+
+
+  modal.setCancelHandler(
+    cancelActiveAnalysis,
+  );
 
 
   return {

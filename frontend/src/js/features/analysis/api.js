@@ -116,6 +116,18 @@ export async function submitAnalysis(
 }
 
 
+export async function cancelAnalysis(
+  jobId,
+) {
+  return fetchJson(
+    `${ANALYSES_ENDPOINT}/${jobId}/cancel`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+
 export async function getAnalysisProgress(
   jobId,
 ) {
