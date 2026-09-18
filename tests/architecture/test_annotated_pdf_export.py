@@ -118,7 +118,7 @@ def _read(
 def _string_literals(
     source: str,
 ) -> set[str]:
-    """Возвращает строковые литералы Python без зависимости от Ruff formatting."""
+    """Возвращает Python string literals независимо от Ruff formatting."""
     tree = ast.parse(
         source,
     )
@@ -143,13 +143,11 @@ def _compact(
     source: str,
 ) -> str:
     """Удаляет whitespace для устойчивых structural guards."""
-    return "".join(
-        source.split(),
-    )
+    return "".join(source.split())
 
 
 def test_document_service_owns_pdf_annotation_mutation() -> None:
-    """PyMuPDF mutation остаётся внутри Document Service."""
+    """Document Service владеет native card/bbox/connector mutation."""
     annotator = _read(
         DOCUMENT_ANNOTATOR,
     )
@@ -159,13 +157,25 @@ def test_document_service_owns_pdf_annotation_mutation() -> None:
     )
 
     assert "add_rect_annot" in annotator
+
     assert "add_freetext_annot" in annotator
+
+    assert "add_line_annot" in annotator
+
     assert "add_text_annot" in annotator
-    assert "PDRD [" in annotator
+
+    assert "_place_card" in annotator
+
     assert "derotation_matrix" in annotator
+
     assert '"cjk"' in annotator
+
     assert "new_page" in annotator
+
+    assert "PDRD [" not in annotator
+
     assert '"/annotate"' in router
+
     assert '"application/pdf"' in router
 
 
@@ -188,17 +198,24 @@ def test_gateway_exposes_lazy_download_and_keeps_typed_sources_separate() -> Non
     )
 
     assert '"/{job_id}/annotated-pdf"' in router
+
     assert "GetAnalysisAnnotatedPdf" in container
+
     assert "get_analysis_visualization" in use_case
+
     assert "normative_sources" in string_literals
+
     assert "technical_assignment_basis_sources" in string_literals
+
     assert "user_package_basis_sources" in string_literals
 
-    assert any("Точное место автоматически" in value for value in string_literals)
+    assert "_annotation_card_text" in use_case
+
+    assert any(("Норматив:" in value) for value in string_literals)
 
 
-def test_unlocated_findings_use_page_level_marker_and_v2_cache() -> None:
-    """Unlocated finding использует page-level marker и versioned PDF cache."""
+def test_unlocated_findings_use_full_callout_and_v3_cache() -> None:
+    """Unlocated fallback остаётся visible card без fake bbox."""
     use_case = _read(
         GATEWAY_USE_CASE,
     )
@@ -219,26 +236,23 @@ def test_unlocated_findings_use_page_level_marker_and_v2_cache() -> None:
         schema,
     )
 
-    use_case_literals = _string_literals(
-        use_case,
-    )
-
     cache_literals = _string_literals(
         cache,
     )
 
     assert (
-        "annotation_regions=located.regionsiflocatedisnotNoneelse()" in compact_use_case
-    )
+        "annotation_regions=located.regionsiflocatedisnotNoneelse()"
+    ) in compact_use_case
 
-    assert any(
-        "PDF-аннотация размещена на уровне" in value for value in use_case_literals
-    )
-
-    assert "regions:list[PdfAnnotationBoundingBoxRequest]" in compact_schema
+    assert ("regions:list[PdfAnnotationBoundingBoxRequest]") in compact_schema
 
     assert "default_factory=list" in compact_schema
-    assert "annotated-v2.pdf" in cache_literals
+
+    assert "annotated-v3.pdf" in cache_literals
+
+    assert "_LOCATIONS_SCHEMA_VERSION=2" in _compact(
+        cache,
+    )
 
 
 def test_frontend_download_is_appended_after_report() -> None:
@@ -256,7 +270,9 @@ def test_frontend_download_is_appended_after_report() -> None:
     )
 
     assert "Скачать PDF с аннотациями" in export
+
     assert "/annotated-pdf" in export
+
     assert "appendAnnotatedPdfDownload" in controller
 
     report_position = controller.rfind(
@@ -268,9 +284,10 @@ def test_frontend_download_is_appended_after_report() -> None:
     )
 
     assert report_position >= 0
+
     assert export_position > report_position
 
-    assert '@import url("./blocks/analysis-export.css");' in style
+    assert ('@import url("./blocks/analysis-export.css");') in style
 
 
 def test_annotated_pdf_export_stays_out_of_core_n8n() -> None:
@@ -292,4 +309,5 @@ def test_annotated_pdf_export_stays_out_of_core_n8n() -> None:
         )
 
         assert "annotated-pdf" not in serialized
-        assert "/internal/v1/pdf/annotate" not in serialized
+
+        assert ("/internal/v1/pdf/annotate") not in serialized

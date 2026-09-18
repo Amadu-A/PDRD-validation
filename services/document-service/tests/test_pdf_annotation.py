@@ -62,7 +62,7 @@ def _source_pdf() -> bytes:
 
 
 def test_writer_preserves_original_pages_and_appends_report() -> None:
-    """Export сохраняет исходный PDF, annotations и русский report."""
+    """Export сохраняет исходный PDF, callouts, connectors и русский report."""
     writer = PyMuPdfAnnotationWriter()
 
     result = writer.build(
@@ -72,8 +72,8 @@ def test_writer_preserves_original_pages_and_appends_report() -> None:
                 number=1,
                 finding_id="F-1",
                 page_number=1,
-                title="Замечание №1",
-                content="Замечание: Нет маркировки ЩР-1.",
+                title=("Нет маркировки ЩР-1.\nНорматив: СП 1.2.3"),
+                content=("Замечание: Нет маркировки ЩР-1."),
                 regions=(
                     PdfNormalizedBoundingBox(
                         x_min=100,
@@ -87,8 +87,8 @@ def test_writer_preserves_original_pages_and_appends_report() -> None:
                 number=2,
                 finding_id="F-2",
                 page_number=2,
-                title="Замечание №2",
-                content="Замечание на повёрнутом листе.",
+                title=("Замечание на повёрнутом листе."),
+                content=("Полный текст замечания на повёрнутом листе."),
                 regions=(
                     PdfNormalizedBoundingBox(
                         x_min=200,
@@ -110,20 +110,20 @@ def test_writer_preserves_original_pages_and_appends_report() -> None:
             summary="Итоговая сводка.",
             findings=(
                 PdfReportFinding(
-                    title="1. Лист/страница 1",
+                    title=("1. Лист/страница 1"),
                     fields=(
                         PdfReportField(
                             label="Замечание",
-                            value="Нет маркировки ЩР-1.",
+                            value=("Нет маркировки ЩР-1."),
                         ),
                         PdfReportField(
                             label="Рекомендация",
-                            value="Добавить маркировку.",
+                            value=("Добавить маркировку."),
                         ),
                     ),
                 ),
             ),
-            limitations=("Требуется инженерная проверка.",),
+            limitations=(("Требуется инженерная проверка."),),
         ),
     )
 
@@ -138,34 +138,43 @@ def test_writer_preserves_original_pages_and_appends_report() -> None:
 
     try:
         assert document.page_count >= 3
+
         assert "ORIGINAL PAGE 1" in document[0].get_text()
+
         assert "ORIGINAL PAGE 2" in document[1].get_text()
 
         first_page = document[0]
+
         second_page = document[1]
 
         first_annotations = list(first_page.annots() or ())
 
         second_annotations = list(second_page.annots() or ())
 
-        assert (
-            len(
-                first_annotations,
-            )
-            == 2
+        first_types = {annotation.type[1] for annotation in first_annotations}
+
+        second_types = {annotation.type[1] for annotation in second_annotations}
+
+        assert "Square" in first_types
+        assert "FreeText" in first_types
+        assert "Text" in first_types
+        assert "Line" in first_types
+
+        assert "Square" in second_types
+        assert "FreeText" in second_types
+        assert "Text" in second_types
+        assert "Line" in second_types
+
+        first_help = next(
+            annotation
+            for annotation in first_annotations
+            if annotation.type[1] == "Text"
         )
 
-        assert (
-            len(
-                second_annotations,
-            )
-            == 2
-        )
-
-        assert first_annotations[0].info["title"] == "Замечание №1"
+        assert "Нет маркировки ЩР-1." in first_help.info["content"]
 
         report_text = "\n".join(
-            document[page_index].get_text()
+            (document[page_index].get_text())
             for page_index in range(
                 2,
                 document.page_count,
@@ -173,32 +182,35 @@ def test_writer_preserves_original_pages_and_appends_report() -> None:
         )
 
         assert "Отчёт анализа PDRD" in report_text
+
         assert "Нет маркировки ЩР-1." in report_text
+
         assert "Требуется инженерная проверка." in report_text
 
     finally:
         document.close()
 
 
-def test_annotation_schema_accepts_empty_regions_for_page_level_marker() -> None:
-    """Transport допускает page-level finding без выдуманного bbox."""
+def test_annotation_schema_accepts_empty_regions_for_full_page_callout() -> None:
+    """Transport допускает full callout без выдуманного bbox."""
     request = PdfFindingAnnotationRequest(
         number=7,
         finding_id="F-7",
         page_number=2,
-        title="Замечание №7",
-        content="Точное место не локализовано.",
+        title=("Проверить лист целиком."),
+        content=("Точное место не локализовано."),
         regions=[],
     )
 
     annotation = request.to_domain()
 
     assert annotation.page_number == 2
+
     assert annotation.regions == ()
 
 
-def test_writer_adds_page_level_marker_when_bbox_is_unavailable() -> None:
-    """Unlocated finding остаётся видимым на исходном PDF-листе."""
+def test_writer_adds_full_page_callout_when_bbox_is_unavailable() -> None:
+    """Truly-unlocated finding получает full card, а не PDRD rail marker."""
     writer = PyMuPdfAnnotationWriter()
 
     result = writer.build(
@@ -208,9 +220,10 @@ def test_writer_adds_page_level_marker_when_bbox_is_unavailable() -> None:
                 number=3,
                 finding_id="F-3",
                 page_number=1,
-                title="Замечание №3",
+                title=("Проверить лист целиком.\nНорматив: СП 1.2.3"),
                 content=(
-                    "Точное место автоматически не локализовано. "
+                    "Точное место автоматически "
+                    "не локализовано. "
                     "Проверить лист целиком."
                 ),
                 regions=(),
@@ -235,30 +248,53 @@ def test_writer_adds_page_level_marker_when_bbox_is_unavailable() -> None:
 
         annotations = list(page.annots() or ())
 
+        types = [annotation.type[1] for annotation in annotations]
+
+        assert "FreeText" in types
+        assert "Square" in types
+        assert "Text" in types
+        assert "Line" not in types
+
+        free_text_annotations = [
+            annotation for annotation in annotations if annotation.type[1] == "FreeText"
+        ]
+
         assert (
             len(
-                annotations,
+                free_text_annotations,
             )
-            == 2
+            >= 2
         )
 
-        free_text = next(
-            annotation for annotation in annotations if annotation.type[1] == "FreeText"
+        visible_text = "\n".join(
+            str(
+                annotation.info.get(
+                    "content",
+                    "",
+                )
+            )
+            for annotation in free_text_annotations
         )
 
-        comment = next(
+        assert "Проверить лист целиком." in visible_text
+
+        assert "PDRD [" not in visible_text
+
+        help_annotation = next(
             annotation for annotation in annotations if annotation.type[1] == "Text"
         )
 
-        assert free_text.info["content"] == "PDRD [3]"
-        assert free_text.info["title"] == "Замечание №3"
-        assert comment.info["name"] == "Comment"
+        assert help_annotation.info["name"] == "Help"
 
-        assert "Точное место автоматически не локализовано." in comment.info["content"]
+        assert (
+            "Точное место автоматически "
+            "не локализовано." in help_annotation.info["content"]
+        )
 
-        assert free_text.rect.is_empty is False
-
-        assert (free_text.rect & page.rect).is_empty is False
+        assert all(
+            (annotation.rect & page.rect).is_empty is False
+            for annotation in free_text_annotations
+        )
 
     finally:
         document.close()

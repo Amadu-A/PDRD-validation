@@ -26,9 +26,9 @@ class LocalFilesystemAnalysisVisualizationCache:
 
     _LOCATIONS_FILE = "locations.json"
 
-    _ANNOTATED_PDF_FILE = "annotated-v2.pdf"
+    _ANNOTATED_PDF_FILE = "annotated-v3.pdf"
 
-    _LOCATIONS_SCHEMA_VERSION = 1
+    _LOCATIONS_SCHEMA_VERSION = 2
 
     def __init__(
         self,
@@ -127,14 +127,17 @@ class LocalFilesystemAnalysisVisualizationCache:
                 dict,
             ):
                 raise ValueError(
-                    ("Location cache должен быть JSON object."),
+                    "Location cache должен быть JSON object.",
                 )
 
-            if payload.get(
-                "schema_version",
-            ) != (self._LOCATIONS_SCHEMA_VERSION):
+            if (
+                payload.get(
+                    "schema_version",
+                )
+                != self._LOCATIONS_SCHEMA_VERSION
+            ):
                 raise ValueError(
-                    ("Unsupported location cache schema."),
+                    "Unsupported location cache schema.",
                 )
 
             raw_pages = payload.get(
@@ -146,7 +149,7 @@ class LocalFilesystemAnalysisVisualizationCache:
                 list,
             ):
                 raise ValueError(
-                    ("Location cache pages должен быть array."),
+                    "Location cache pages должен быть array.",
                 )
 
             pages: list[AnalysisVisualizationLocationPage] = []
@@ -159,14 +162,14 @@ class LocalFilesystemAnalysisVisualizationCache:
                     dict,
                 ):
                     raise ValueError(
-                        ("Location cache page должен быть object."),
+                        "Location cache page должен быть object.",
                     )
 
                 page_number = int(raw_page["page_number"])
 
                 if page_number < 1 or page_number in seen_pages:
                     raise ValueError(
-                        ("Некорректный cached page_number."),
+                        "Некорректный cached page_number.",
                     )
 
                 seen_pages.add(
@@ -182,7 +185,7 @@ class LocalFilesystemAnalysisVisualizationCache:
                     list,
                 ):
                     raise ValueError(
-                        ("Cached locations должен быть array."),
+                        "Cached locations должен быть array.",
                     )
 
                 locations = tuple(
@@ -194,8 +197,8 @@ class LocalFilesystemAnalysisVisualizationCache:
 
                 pages.append(
                     AnalysisVisualizationLocationPage(
-                        page_number=(page_number),
-                        locations=(locations),
+                        page_number=page_number,
+                        locations=locations,
                     )
                 )
 
@@ -212,7 +215,7 @@ class LocalFilesystemAnalysisVisualizationCache:
         ) as error:
             raise (
                 AnalysisVisualizationCacheError(
-                    ("Не удалось прочитать finding location cache."),
+                    "Не удалось прочитать finding location cache.",
                 )
             ) from error
 
@@ -249,7 +252,7 @@ class LocalFilesystemAnalysisVisualizationCache:
                 "schema_version": (self._LOCATIONS_SCHEMA_VERSION),
                 "pages": [
                     {
-                        "page_number": (page.page_number),
+                        "page_number": page.page_number,
                         "locations": [
                             location.as_dict() for location in page.locations
                         ],
@@ -358,7 +361,7 @@ class LocalFilesystemAnalysisVisualizationCache:
             dict,
         ):
             raise ValueError(
-                ("Cached location должен быть object."),
+                "Cached location должен быть object.",
             )
 
         finding_id = str(
@@ -370,7 +373,7 @@ class LocalFilesystemAnalysisVisualizationCache:
 
         if not finding_id:
             raise ValueError(
-                ("Cached location не содержит finding_id."),
+                "Cached location не содержит finding_id.",
             )
 
         if (
@@ -380,7 +383,7 @@ class LocalFilesystemAnalysisVisualizationCache:
             != "located"
         ):
             return AnalysisFindingLocation.unlocated(
-                finding_id=(finding_id),
+                finding_id=finding_id,
             )
 
         raw_regions = raw_location.get(
@@ -395,7 +398,7 @@ class LocalFilesystemAnalysisVisualizationCache:
             or not raw_regions
         ):
             raise ValueError(
-                ("Located cache item не содержит regions."),
+                "Located cache item не содержит regions.",
             )
 
         regions = tuple(
@@ -432,7 +435,7 @@ class LocalFilesystemAnalysisVisualizationCache:
             dict,
         ):
             raise ValueError(
-                ("Cached region должен быть object."),
+                "Cached region должен быть object.",
             )
 
         raw_bbox = raw_region.get(
@@ -444,7 +447,7 @@ class LocalFilesystemAnalysisVisualizationCache:
             dict,
         ):
             raise ValueError(
-                ("Cached region не содержит bbox."),
+                "Cached region не содержит bbox.",
             )
 
         return AnalysisVisualRegion(

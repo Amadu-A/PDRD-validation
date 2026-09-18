@@ -75,6 +75,8 @@ _SOURCE_MODE_LABELS = {
     "pdf_cad": "PDF + DWG/DXF",
 }
 
+_GENERIC_FINDING_PREFIX = "на листе выявлено несоответствие"
+
 
 class AnalysisAnnotatedPdfJobNotFoundError(
     LookupError,
@@ -155,11 +157,11 @@ class GetAnalysisAnnotatedPdf:
 
         try:
             artifacts = await self.artifact_store.load_request(
-                document_id=(job.document_id),
+                document_id=job.document_id,
             )
 
             result = await self.artifact_store.load_result(
-                document_id=(job.document_id),
+                document_id=job.document_id,
             )
 
         except Exception as error:
@@ -169,7 +171,7 @@ class GetAnalysisAnnotatedPdf:
 
         if artifacts.pdf_content is None:
             raise AnalysisAnnotatedPdfSourceUnavailableError(
-                "Для этого analysis job исходный PDF отсутствует.",
+                ("Для этого analysis job исходный PDF отсутствует."),
             )
 
         if result is None:
@@ -178,12 +180,12 @@ class GetAnalysisAnnotatedPdf:
             )
 
         file_name = self._output_file_name(
-            artifacts.submission.pdf_file_name or "document.pdf",
+            (artifacts.submission.pdf_file_name or "document.pdf"),
         )
 
         try:
             cached_pdf = await self.visualization_cache.load_annotated_pdf(
-                document_id=(job.document_id),
+                document_id=job.document_id,
             )
 
         except AnalysisVisualizationCacheError as error:
@@ -217,7 +219,7 @@ class GetAnalysisAnnotatedPdf:
 
         except Exception as error:
             raise AnalysisAnnotatedPdfUnavailableError(
-                "Не удалось получить locations для PDF export.",
+                ("Не удалось получить locations для PDF export."),
             ) from error
 
         (
@@ -234,7 +236,7 @@ class GetAnalysisAnnotatedPdf:
 
         try:
             content = await self.renderer.render(
-                pdf_content=(artifacts.pdf_content),
+                pdf_content=artifacts.pdf_content,
                 file_name=(artifacts.submission.pdf_file_name or "document.pdf"),
                 annotations=annotations,
                 report=report,
@@ -242,7 +244,7 @@ class GetAnalysisAnnotatedPdf:
 
         except Exception as error:
             raise AnalysisAnnotatedPdfUnavailableError(
-                "Document Service не сформировал annotated PDF.",
+                ("Document Service не сформировал annotated PDF."),
             ) from error
 
         if not content.startswith(
@@ -254,7 +256,7 @@ class GetAnalysisAnnotatedPdf:
 
         try:
             await self.visualization_cache.save_annotated_pdf(
-                document_id=(job.document_id),
+                document_id=job.document_id,
                 content=content,
             )
 
@@ -375,11 +377,9 @@ class GetAnalysisAnnotatedPdf:
                 page_number=page_number,
             )
 
-            title = f"{index}. Лист/страница {page_number}"
-
             report_findings.append(
                 AnalysisPdfReportFinding(
-                    title=title,
+                    title=(f"{index}. Лист/страница {page_number}"),
                     fields=fields,
                 )
             )
@@ -395,15 +395,15 @@ class GetAnalysisAnnotatedPdf:
             annotations.append(
                 AnalysisPdfAnnotation(
                     number=index,
-                    finding_id=(annotation_finding_id),
-                    page_number=(annotation_page_number),
-                    title=(f"Замечание №{index}"),
-                    content=(
-                        cls._annotation_content(
-                            fields,
-                        )
+                    finding_id=annotation_finding_id,
+                    page_number=annotation_page_number,
+                    title=cls._annotation_card_text(
+                        finding,
                     ),
-                    regions=(annotation_regions),
+                    content=cls._annotation_content(
+                        fields,
+                    ),
+                    regions=annotation_regions,
                 )
             )
 
@@ -458,6 +458,163 @@ class GetAnalysisAnnotatedPdf:
                 annotations,
             ),
             report,
+        )
+
+    @classmethod
+    def _annotation_card_text(
+        cls,
+        finding: dict[
+            str,
+            Any,
+        ],
+    ) -> str:
+        """Строит compact card text для native PDF callout."""
+        summary = cls._finding_display_text(
+            finding,
+        )
+
+        source_label = cls._compact_normative_source_label(
+            finding,
+        )
+
+        lines = [
+            cls._shorten_text(
+                summary,
+                limit=220,
+            ),
+        ]
+
+        if source_label:
+            lines.append(
+                "Норматив: "
+                + cls._shorten_text(
+                    source_label,
+                    limit=150,
+                )
+            )
+
+        return "\n".join(line for line in lines if line)
+
+    @classmethod
+    def _finding_display_text(
+        cls,
+        finding: dict[
+            str,
+            Any,
+        ],
+    ) -> str:
+        """Выбирает содержательный compact текст вместо generic comment."""
+        comment = str(
+            finding.get(
+                "comment",
+            )
+            or finding.get(
+                "message",
+            )
+            or finding.get(
+                "issue_text",
+            )
+            or ""
+        ).strip()
+
+        evidence = str(
+            finding.get(
+                "evidence",
+                "",
+            )
+            or ""
+        ).strip()
+
+        normalized_comment = " ".join(comment.casefold().split())
+
+        if evidence and normalized_comment.startswith(_GENERIC_FINDING_PREFIX):
+            return evidence
+
+        return comment or evidence or "Текст замечания не передан."
+
+    @classmethod
+    def _compact_normative_source_label(
+        cls,
+        finding: dict[
+            str,
+            Any,
+        ],
+    ) -> str:
+        """Возвращает короткую подпись первого N-source для callout."""
+        sources = cls._preferred_sources(
+            finding,
+            "normative_sources",
+            "basis_sources",
+        )
+
+        for source in sources:
+            if not isinstance(
+                source,
+                dict,
+            ):
+                continue
+
+            source_name = str(
+                source.get(
+                    "source_file",
+                )
+                or source.get(
+                    "file_name",
+                )
+                or source.get(
+                    "source",
+                )
+                or source.get(
+                    "source_id",
+                )
+                or "Нормативный источник"
+            ).strip()
+
+            page = cls._normalize_page(
+                source.get(
+                    "page",
+                    source.get(
+                        "page_number",
+                    ),
+                )
+            )
+
+            if page is not None:
+                return f"{source_name}, стр. {page}"
+
+            return source_name
+
+        return ""
+
+    @staticmethod
+    def _shorten_text(
+        value: str,
+        *,
+        limit: int,
+    ) -> str:
+        """Ограничивает только visible callout text, не popup/report."""
+        normalized = " ".join(
+            str(
+                value,
+            ).split()
+        )
+
+        if (
+            len(
+                normalized,
+            )
+            <= limit
+        ):
+            return normalized
+
+        return (
+            normalized[
+                : max(
+                    0,
+                    limit - 1,
+                )
+            ].rstrip()
+            + "…"
         )
 
     @classmethod
@@ -542,7 +699,7 @@ class GetAnalysisAnnotatedPdf:
                 or finding.get(
                     "issue_text",
                 )
-                or ("Текст замечания не передан.")
+                or "Текст замечания не передан."
             ),
         )
 
@@ -647,8 +804,7 @@ class GetAnalysisAnnotatedPdf:
             localization = (
                 "PDF-аннотация размещена "
                 "по найденной области "
-                f"на листе "
-                f"{located.page_number}."
+                f"на листе {located.page_number}."
             )
 
         cls._append_field(
@@ -905,7 +1061,7 @@ class GetAnalysisAnnotatedPdf:
                     continue
 
                 result[finding_id] = _LocatedFinding(
-                    page_number=(page_number),
+                    page_number=page_number,
                     regions=regions,
                 )
 
@@ -1059,7 +1215,7 @@ class GetAnalysisAnnotatedPdf:
                     "document_id",
                 )
                 or source.get(
-                    ("technical_assignment_id"),
+                    "technical_assignment_id",
                 )
                 or "Источник"
             )

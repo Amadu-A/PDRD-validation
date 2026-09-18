@@ -15,5 +15,6 @@
 @import url("./blocks/analysis-panel.css");
 @import url("./blocks/analysis-form.css");
 @import url("./blocks/analysis-result.css");
+@import url("./blocks/analysis-annotation-detail.css");
 @import url("./blocks/analysis-export.css");
 @import url("./blocks/analysis-modal.css");

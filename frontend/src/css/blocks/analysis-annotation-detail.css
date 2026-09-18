@@ -1,0 +1,208 @@
+/* frontend/src/css/blocks/analysis-annotation-detail.css */
+
+/*
+ * Полный tooltip замечания внутри compact annotation-card.
+ *
+ * Карточка остаётся небольшой и не закрывает чертёж,
+ * а button "i" открывает полный текст finding.
+ */
+
+.analysis-result__annotation-header {
+  position: relative;
+
+  width: 100%;
+}
+
+
+.analysis-result__annotation-title {
+  flex: 1 1 auto;
+}
+
+
+.analysis-result__annotation-info {
+  position: relative;
+
+  display: inline-flex;
+
+  flex: 0 0 auto;
+
+  margin-left: auto;
+
+  pointer-events: auto;
+}
+
+
+.analysis-result__annotation-info-button {
+  display: inline-flex;
+
+  width: 1rem;
+  height: 1rem;
+
+  align-items: center;
+  justify-content: center;
+
+  padding: 0;
+
+  border:
+    1px
+    solid
+    color-mix(
+      in srgb,
+      var(--color-danger) 72%,
+      transparent
+    );
+  border-radius: 999px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(--color-surface) 88%,
+      transparent
+    );
+
+  color: var(--color-danger);
+
+  cursor: help;
+
+  font: inherit;
+  font-size: 0.62rem;
+  font-weight: var(--font-weight-semibold);
+
+  line-height: 1;
+}
+
+
+.analysis-result__annotation-info-button:hover {
+  border-color: var(--color-danger);
+
+  background:
+    color-mix(
+      in srgb,
+      var(--color-danger) 12%,
+      var(--color-surface)
+    );
+}
+
+
+.analysis-result__annotation-info-button:focus-visible {
+  outline: 2px solid var(--color-danger);
+  outline-offset: 2px;
+}
+
+
+.analysis-result__annotation:has(
+  .analysis-result__annotation-info:hover
+),
+.analysis-result__annotation:has(
+  .analysis-result__annotation-info:focus-within
+) {
+  z-index: 80;
+}
+
+
+.analysis-result__annotation-detail-tooltip {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+
+  z-index: 90;
+
+  display: grid;
+
+  width: min(34rem, 80vw);
+  max-height: 22rem;
+
+  gap: var(--space-2);
+
+  padding: var(--space-3);
+
+  overflow: auto;
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+
+  background: var(--color-surface);
+
+  color: var(--color-text-primary);
+
+  box-shadow:
+    0
+    0.5rem
+    1.5rem
+    rgb(0 0 0 / 20%);
+
+  font-size: 0.78rem;
+  line-height: 1.4;
+
+  opacity: 0;
+  visibility: hidden;
+
+  pointer-events: none;
+
+  transform: translateY(
+    calc(-1 * var(--space-1))
+  );
+
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 120ms ease;
+}
+
+
+.analysis-result__annotation-info:hover
+.analysis-result__annotation-detail-tooltip,
+.analysis-result__annotation-info:focus-within
+.analysis-result__annotation-detail-tooltip {
+  opacity: 1;
+  visibility: visible;
+
+  pointer-events: auto;
+
+  transform: translateY(
+    0
+  );
+}
+
+
+.analysis-result__annotation-detail-title {
+  display: block;
+
+  font-size: 0.82rem;
+}
+
+
+.analysis-result__annotation-detail-field {
+  display: grid;
+
+  gap: 0.18rem;
+}
+
+
+.analysis-result__annotation-detail-label {
+  display: block;
+
+  font-size: 0.7rem;
+  font-weight: var(--font-weight-semibold);
+}
+
+
+.analysis-result__annotation-detail-value {
+  display: block;
+
+  color: var(--color-text-secondary);
+
+  overflow-wrap: anywhere;
+
+  white-space: pre-wrap;
+}
+
+
+@media (max-width: 640px) {
+  .analysis-result__annotation-detail-tooltip {
+    right: -0.5rem;
+
+    width: min(30rem, 86vw);
+    max-height: 18rem;
+  }
+}

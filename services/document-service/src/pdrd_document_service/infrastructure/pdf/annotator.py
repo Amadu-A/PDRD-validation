@@ -234,7 +234,7 @@ class _PdfReportWriter:
                     if (
                         self._text_width(
                             candidate,
-                            font_size=(font_size),
+                            font_size=font_size,
                         )
                         <= available_width
                     ):
@@ -297,7 +297,7 @@ class _PdfReportWriter:
                 current
                 and self._text_width(
                     candidate,
-                    font_size=(font_size),
+                    font_size=font_size,
                 )
                 > available_width
             ):
@@ -335,7 +335,7 @@ class _PdfReportWriter:
 
 
 class PyMuPdfAnnotationWriter:
-    """Добавляет annotations без растрирования исходных PDF-страниц."""
+    """Добавляет callout annotations без растрирования исходного PDF."""
 
     _ANNOTATION_COLOR = (
         0.86,
@@ -343,17 +343,33 @@ class PyMuPdfAnnotationWriter:
         0.12,
     )
 
-    _LABEL_TEXT_COLOR = (
-        0.75,
-        0.05,
-        0.05,
+    _CARD_TEXT_COLOR = (
+        0.12,
+        0.12,
+        0.12,
     )
 
-    _LABEL_FILL_COLOR = (
+    _CARD_FILL_COLOR = (
         1.0,
-        0.96,
-        0.78,
+        0.92,
+        0.92,
     )
+
+    _BADGE_TEXT_COLOR = (
+        1.0,
+        1.0,
+        1.0,
+    )
+
+    _BADGE_FILL_COLOR = (
+        0.86,
+        0.12,
+        0.12,
+    )
+
+    _CARD_OVERLAP_WEIGHT = 12.0
+    _REGION_OVERLAP_WEIGHT = 5.0
+    _DISTANCE_WEIGHT = 0.015
 
     def build(
         self,
@@ -365,7 +381,7 @@ class PyMuPdfAnnotationWriter:
         ],
         report: PdfTextReport,
     ) -> bytes:
-        """Создаёт PDF с native annotations и текстовыми report pages."""
+        """Создаёт PDF с callout annotations и текстовыми report pages."""
         try:
             with fitz.open(
                 stream=content,
@@ -378,34 +394,35 @@ class PyMuPdfAnnotationWriter:
                         ("Исходный PDF не содержит страниц."),
                     )
 
-                page_level_slots: dict[
+                all_regions_by_page = self._all_visual_regions(
+                    document=document,
+                    original_page_count=(original_page_count),
+                    annotations=annotations,
+                )
+
+                occupied_cards: dict[
                     int,
-                    int,
+                    list[fitz.Rect],
                 ] = {}
 
                 for annotation in annotations:
-                    if annotation.regions:
-                        self._add_finding_annotation(
-                            document=document,
-                            original_page_count=(original_page_count),
-                            annotation=annotation,
-                        )
-
-                        continue
-
-                    slot = page_level_slots.get(
+                    page_cards = occupied_cards.setdefault(
                         annotation.page_number,
-                        0,
+                        [],
                     )
 
-                    self._add_page_level_annotation(
+                    self._add_finding_annotation(
                         document=document,
                         original_page_count=(original_page_count),
                         annotation=annotation,
-                        slot=slot,
+                        occupied_cards=page_cards,
+                        all_regions=(
+                            all_regions_by_page.get(
+                                annotation.page_number,
+                                (),
+                            )
+                        ),
                     )
-
-                    page_level_slots[annotation.page_number] = slot + 1
 
                 report_font = fitz.Font(
                     "cjk",
@@ -442,41 +459,105 @@ class PyMuPdfAnnotationWriter:
 
         return result
 
+    def _all_visual_regions(
+        self,
+        *,
+        document: fitz.Document,
+        original_page_count: int,
+        annotations: tuple[
+            PdfFindingAnnotation,
+            ...,
+        ],
+    ) -> dict[
+        int,
+        tuple[
+            fitz.Rect,
+            ...,
+        ],
+    ]:
+        """Собирает bbox всех findings для collision-aware card layout."""
+        result: dict[
+            int,
+            list[fitz.Rect],
+        ] = {}
+
+        for annotation in annotations:
+            page = self._annotation_page(
+                document=document,
+                original_page_count=(original_page_count),
+                page_number=annotation.page_number,
+            )
+
+            page_regions = result.setdefault(
+                annotation.page_number,
+                [],
+            )
+
+            for bbox in annotation.regions:
+                visual_rect, _ = self._annotation_rect(
+                    page=page,
+                    bbox=bbox,
+                )
+
+                page_regions.append(
+                    visual_rect,
+                )
+
+        return {
+            page_number: tuple(
+                regions,
+            )
+            for (
+                page_number,
+                regions,
+            ) in result.items()
+        }
+
     def _add_finding_annotation(
         self,
         *,
         document: fitz.Document,
         original_page_count: int,
         annotation: PdfFindingAnnotation,
+        occupied_cards: list[fitz.Rect],
+        all_regions: tuple[
+            fitz.Rect,
+            ...,
+        ],
     ) -> None:
-        """Добавляет все visual regions одного finding."""
+        """Добавляет bbox, connector, card и native info одного finding."""
         page = self._annotation_page(
             document=document,
             original_page_count=(original_page_count),
-            page_number=(annotation.page_number),
+            page_number=annotation.page_number,
         )
 
-        for (
-            region_index,
-            bbox,
-        ) in enumerate(
-            annotation.regions,
-            start=1,
-        ):
-            (
-                visual_rect,
-                annotation_rect,
-            ) = self._annotation_rect(
+        region_pairs = tuple(
+            self._annotation_rect(
                 page=page,
                 bbox=bbox,
             )
+            for bbox in annotation.regions
+        )
 
+        visual_regions = tuple(
+            visual_rect
+            for (
+                visual_rect,
+                _,
+            ) in region_pairs
+        )
+
+        for (
+            _,
+            annotation_rect,
+        ) in region_pairs:
             rectangle_annotation = page.add_rect_annot(
                 annotation_rect,
             )
 
             rectangle_annotation.set_info(
-                title=annotation.title,
+                title=(f"Замечание №{annotation.number}"),
                 content=annotation.content,
                 subject="PDRD Validation",
             )
@@ -486,115 +567,698 @@ class PyMuPdfAnnotationWriter:
             )
 
             rectangle_annotation.set_colors(
-                stroke=(self._ANNOTATION_COLOR),
+                stroke=self._ANNOTATION_COLOR,
             )
 
             rectangle_annotation.update(
                 opacity=0.35,
             )
 
-            if (
-                len(
-                    annotation.regions,
-                )
-                == 1
-            ):
-                label = f"[{annotation.number}]"
+        anchor = self._union_rect(
+            regions=visual_regions,
+            page_rect=page.rect,
+        )
 
-            else:
-                label = f"[{annotation.number}.{region_index}]"
+        card_rect = self._place_card(
+            page=page,
+            anchor=anchor,
+            occupied_cards=occupied_cards,
+            all_regions=all_regions,
+        )
 
-            label_rect = self._label_rect(
+        for visual_region in visual_regions:
+            self._add_connector(
                 page=page,
-                visual_rect=visual_rect,
-                label=label,
+                region=visual_region,
+                card=card_rect,
+                annotation=annotation,
             )
 
-            label_annotation = page.add_freetext_annot(
-                label_rect,
-                label,
-                fontsize=7.0,
-                text_color=(self._LABEL_TEXT_COLOR),
-                fill_color=(self._LABEL_FILL_COLOR),
-                border_width=0.4,
-                opacity=0.92,
-            )
+        self._add_callout_card(
+            page=page,
+            annotation=annotation,
+            visual_card_rect=card_rect,
+        )
 
-            label_annotation.set_info(
-                title=annotation.title,
-                content=annotation.content,
-                subject="PDRD Validation",
-            )
+        occupied_cards.append(
+            card_rect,
+        )
 
-    def _add_page_level_annotation(
+    def _add_connector(
         self,
         *,
-        document: fitz.Document,
-        original_page_count: int,
+        page: fitz.Page,
+        region: fitz.Rect,
+        card: fitz.Rect,
         annotation: PdfFindingAnnotation,
-        slot: int,
     ) -> None:
-        """Добавляет marker без fake bbox, если точное место неизвестно."""
-        page = self._annotation_page(
-            document=document,
-            original_page_count=(original_page_count),
-            page_number=(annotation.page_number),
+        """Соединяет finding bbox с видимой annotation-card."""
+        start, end = self._nearest_connector_points(
+            region,
+            card,
         )
 
-        (
-            visual_badge_rect,
-            badge_rect,
-        ) = self._page_level_badge_rect(
+        annotation_start = self._visual_point_to_annotation(
             page=page,
-            slot=slot,
+            point=start,
         )
 
-        label = f"PDRD [{annotation.number}]"
+        annotation_end = self._visual_point_to_annotation(
+            page=page,
+            point=end,
+        )
+
+        connector = page.add_line_annot(
+            annotation_start,
+            annotation_end,
+        )
+
+        connector.set_info(
+            title=(f"Замечание №{annotation.number}"),
+            content=annotation.content,
+            subject="PDRD Validation",
+        )
+
+        connector.set_border(
+            width=1.1,
+        )
+
+        connector.set_colors(
+            stroke=self._ANNOTATION_COLOR,
+        )
+
+        connector.update(
+            opacity=0.58,
+        )
+
+    def _add_callout_card(
+        self,
+        *,
+        page: fitz.Page,
+        annotation: PdfFindingAnnotation,
+        visual_card_rect: fitz.Rect,
+    ) -> None:
+        """Добавляет visible card, number badge и native Help annotation."""
+        card_rect = self._visual_rect_to_annotation(
+            page=page,
+            rect=visual_card_rect,
+        )
+
+        border = page.add_rect_annot(
+            card_rect,
+        )
+
+        border.set_info(
+            title=(f"Замечание №{annotation.number}"),
+            content=annotation.content,
+            subject="PDRD Validation",
+        )
+
+        border.set_border(
+            width=1.0,
+        )
+
+        border.set_colors(
+            stroke=self._ANNOTATION_COLOR,
+        )
+
+        border.update(
+            opacity=0.82,
+        )
+
+        font_size = self._card_font_size(
+            page,
+        )
+
+        visible_text = self._visible_card_text(
+            annotation.title,
+            page=page,
+        )
+
+        card = page.add_freetext_annot(
+            card_rect,
+            ("     " + visible_text),
+            fontsize=font_size,
+            text_color=self._CARD_TEXT_COLOR,
+            fill_color=self._CARD_FILL_COLOR,
+            border_width=0,
+            opacity=0.90,
+        )
+
+        # Не записываем full content в FreeText:
+        # некоторые PDF viewers заменяют им appearance text.
+        card.set_info(
+            title=(f"Замечание №{annotation.number}"),
+            subject="PDRD Validation",
+        )
+
+        badge_size = max(
+            14.0,
+            min(
+                30.0,
+                font_size * 1.65,
+            ),
+        )
+
+        visual_badge_rect = fitz.Rect(
+            visual_card_rect.x0 + 4.0,
+            visual_card_rect.y0 + 4.0,
+            visual_card_rect.x0 + 4.0 + badge_size,
+            visual_card_rect.y0 + 4.0 + badge_size,
+        )
+
+        badge_rect = self._visual_rect_to_annotation(
+            page=page,
+            rect=visual_badge_rect,
+        )
 
         badge = page.add_freetext_annot(
             badge_rect,
-            label,
-            fontsize=7.0,
-            text_color=(self._LABEL_TEXT_COLOR),
-            fill_color=(self._LABEL_FILL_COLOR),
-            border_width=0.7,
-            opacity=0.92,
+            str(
+                annotation.number,
+            ),
+            fontsize=max(
+                6.0,
+                font_size * 0.72,
+            ),
+            text_color=self._BADGE_TEXT_COLOR,
+            fill_color=self._BADGE_FILL_COLOR,
+            border_width=0,
+            align=1,
+            opacity=0.98,
         )
 
-        # Для FreeText content должен оставаться самим
-        # отображаемым label. Полный текст finding хранит
-        # отдельная native Comment annotation ниже.
         badge.set_info(
-            title=annotation.title,
+            title=(f"Замечание №{annotation.number}"),
             subject="PDRD Validation",
         )
 
-        visual_note_point = fitz.Point(
-            min(
-                page.rect.x1 - 12.0,
-                visual_badge_rect.x1 + 4.0,
+        visual_info_point = fitz.Point(
+            max(
+                visual_card_rect.x0 + 10.0,
+                visual_card_rect.x1 - 14.0,
             ),
             min(
-                page.rect.y1 - 12.0,
-                visual_badge_rect.y0 + 4.0,
+                page.rect.y1 - 10.0,
+                visual_card_rect.y0 + 12.0,
             ),
         )
 
-        note_point = (
-            visual_note_point * page.derotation_matrix
-            if page.rotation
-            else visual_note_point
+        info_point = self._visual_point_to_annotation(
+            page=page,
+            point=visual_info_point,
         )
 
-        note = page.add_text_annot(
-            note_point,
+        info = page.add_text_annot(
+            info_point,
             annotation.content,
-            icon="Comment",
+            icon="Help",
         )
 
-        note.set_info(
-            title=annotation.title,
+        info.set_info(
+            title=(f"Замечание №{annotation.number}"),
             subject="PDRD Validation",
+        )
+
+    def _place_card(
+        self,
+        *,
+        page: fitz.Page,
+        anchor: fitz.Rect,
+        occupied_cards: list[fitz.Rect],
+        all_regions: tuple[
+            fitz.Rect,
+            ...,
+        ],
+    ) -> fitz.Rect:
+        """Выбирает свободное место card рядом с finding bbox."""
+        width, height = self._card_dimensions(
+            page,
+        )
+
+        candidates = self._candidate_rects(
+            anchor=anchor,
+            width=width,
+            height=height,
+            page_rect=page.rect,
+        )
+
+        if not candidates:
+            return self._clamp_card_rect(
+                left=page.rect.x0 + 10.0,
+                top=page.rect.y0 + 10.0,
+                width=width,
+                height=height,
+                page_rect=page.rect,
+            )
+
+        return min(
+            candidates,
+            key=lambda candidate: self._candidate_score(
+                candidate=candidate,
+                anchor=anchor,
+                occupied_cards=(occupied_cards),
+                all_regions=all_regions,
+            ),
+        )
+
+    def _candidate_rects(
+        self,
+        *,
+        anchor: fitz.Rect,
+        width: float,
+        height: float,
+        page_rect: fitz.Rect,
+    ) -> tuple[
+        fitz.Rect,
+        ...,
+    ]:
+        """Строит near-anchor и grid candidates подобно browser overlay."""
+        margin = 10.0
+        gap = 14.0
+
+        center_x = (anchor.x0 + anchor.x1) / 2.0
+
+        center_y = (anchor.y0 + anchor.y1) / 2.0
+
+        raw_candidates: list[
+            tuple[
+                float,
+                float,
+            ]
+        ] = [
+            (
+                anchor.x1 + gap,
+                center_y - height / 2.0,
+            ),
+            (
+                anchor.x0 - width - gap,
+                center_y - height / 2.0,
+            ),
+            (
+                center_x - width / 2.0,
+                anchor.y1 + gap,
+            ),
+            (
+                center_x - width / 2.0,
+                anchor.y0 - height - gap,
+            ),
+            (
+                anchor.x1 + gap,
+                anchor.y0 - height - gap,
+            ),
+            (
+                anchor.x1 + gap,
+                anchor.y1 + gap,
+            ),
+            (
+                anchor.x0 - width - gap,
+                anchor.y0 - height - gap,
+            ),
+            (
+                anchor.x0 - width - gap,
+                anchor.y1 + gap,
+            ),
+        ]
+
+        for factor in (
+            -1.35,
+            -0.7,
+            0.0,
+            0.7,
+            1.35,
+        ):
+            raw_candidates.append(
+                (
+                    (page_rect.x1 - width - margin),
+                    (center_y - height / 2.0 + factor * (height + gap)),
+                )
+            )
+
+            raw_candidates.append(
+                (
+                    page_rect.x0 + margin,
+                    (center_y - height / 2.0 + factor * (height + gap)),
+                )
+            )
+
+        horizontal_step = max(
+            width + gap,
+            1.0,
+        )
+
+        vertical_step = max(
+            height + gap,
+            1.0,
+        )
+
+        top = page_rect.y0 + margin
+
+        while top <= page_rect.y1 - height - margin:
+            left = page_rect.x0 + margin
+
+            while left <= page_rect.x1 - width - margin:
+                raw_candidates.append(
+                    (
+                        left,
+                        top,
+                    )
+                )
+
+                left += horizontal_step
+
+            top += vertical_step
+
+        unique: dict[
+            tuple[
+                int,
+                int,
+            ],
+            fitz.Rect,
+        ] = {}
+
+        for left, top in raw_candidates:
+            rect = self._clamp_card_rect(
+                left=left,
+                top=top,
+                width=width,
+                height=height,
+                page_rect=page_rect,
+            )
+
+            key = (
+                round(
+                    rect.x0,
+                ),
+                round(
+                    rect.y0,
+                ),
+            )
+
+            unique.setdefault(
+                key,
+                rect,
+            )
+
+        return tuple(
+            unique.values(),
+        )
+
+    def _candidate_score(
+        self,
+        *,
+        candidate: fitz.Rect,
+        anchor: fitz.Rect,
+        occupied_cards: list[fitz.Rect],
+        all_regions: tuple[
+            fitz.Rect,
+            ...,
+        ],
+    ) -> float:
+        """Штрафует card-card/card-region overlap и большую дистанцию."""
+        card_overlap = sum(
+            self._intersection_area(
+                candidate,
+                occupied,
+            )
+            for occupied in occupied_cards
+        )
+
+        region_overlap = sum(
+            self._intersection_area(
+                candidate,
+                region,
+            )
+            for region in all_regions
+        )
+
+        distance = self._distance_between_centers(
+            candidate,
+            anchor,
+        )
+
+        return (
+            card_overlap * self._CARD_OVERLAP_WEIGHT
+            + region_overlap * self._REGION_OVERLAP_WEIGHT
+            + distance * self._DISTANCE_WEIGHT
+        )
+
+    @staticmethod
+    def _clamp_card_rect(
+        *,
+        left: float,
+        top: float,
+        width: float,
+        height: float,
+        page_rect: fitz.Rect,
+    ) -> fitz.Rect:
+        """Удерживает card внутри visual page."""
+        margin = 10.0
+
+        safe_left = min(
+            max(
+                left,
+                page_rect.x0 + margin,
+            ),
+            max(
+                page_rect.x0 + margin,
+                (page_rect.x1 - width - margin),
+            ),
+        )
+
+        safe_top = min(
+            max(
+                top,
+                page_rect.y0 + margin,
+            ),
+            max(
+                page_rect.y0 + margin,
+                (page_rect.y1 - height - margin),
+            ),
+        )
+
+        return fitz.Rect(
+            safe_left,
+            safe_top,
+            min(
+                page_rect.x1 - margin,
+                safe_left + width,
+            ),
+            min(
+                page_rect.y1 - margin,
+                safe_top + height,
+            ),
+        )
+
+    @staticmethod
+    def _card_dimensions(
+        page: fitz.Page,
+    ) -> tuple[
+        float,
+        float,
+    ]:
+        """Масштабирует callout относительно PDF-листа."""
+        width = min(
+            max(
+                page.rect.width * 0.22,
+                130.0,
+            ),
+            520.0,
+        )
+
+        height = min(
+            max(
+                page.rect.height * 0.12,
+                78.0,
+            ),
+            210.0,
+        )
+
+        width = min(
+            width,
+            max(
+                page.rect.width - 20.0,
+                20.0,
+            ),
+        )
+
+        height = min(
+            height,
+            max(
+                page.rect.height - 20.0,
+                20.0,
+            ),
+        )
+
+        return (
+            width,
+            height,
+        )
+
+    @staticmethod
+    def _card_font_size(
+        page: fitz.Page,
+    ) -> float:
+        """Масштабирует visible card font для A4/A3/A1."""
+        return max(
+            7.0,
+            min(
+                20.0,
+                page.rect.width / 120.0,
+            ),
+        )
+
+    @staticmethod
+    def _visible_card_text(
+        value: str,
+        *,
+        page: fitz.Page,
+    ) -> str:
+        """Ограничивает visible PDF text; full text остаётся в Help popup."""
+        normalized_lines = [
+            " ".join(line.split())
+            for line in str(
+                value,
+            ).splitlines()
+            if line.strip()
+        ]
+
+        normalized = "\n".join(
+            normalized_lines,
+        )
+
+        limit = max(
+            100,
+            min(
+                360,
+                int(page.rect.width / 6.0),
+            ),
+        )
+
+        if (
+            len(
+                normalized,
+            )
+            <= limit
+        ):
+            return normalized
+
+        return normalized[: limit - 1].rstrip() + "…"
+
+    @staticmethod
+    def _union_rect(
+        *,
+        regions: tuple[
+            fitz.Rect,
+            ...,
+        ],
+        page_rect: fitz.Rect,
+    ) -> fitz.Rect:
+        """Возвращает union bbox или центр page для truly-unlocated finding."""
+        if not regions:
+            center = fitz.Point(
+                (page_rect.x0 + page_rect.x1) / 2.0,
+                (page_rect.y0 + page_rect.y1) / 2.0,
+            )
+
+            return fitz.Rect(
+                center.x,
+                center.y,
+                center.x,
+                center.y,
+            )
+
+        return fitz.Rect(
+            min(region.x0 for region in regions),
+            min(region.y0 for region in regions),
+            max(region.x1 for region in regions),
+            max(region.y1 for region in regions),
+        )
+
+    @staticmethod
+    def _intersection_area(
+        first: fitz.Rect,
+        second: fitz.Rect,
+    ) -> float:
+        """Возвращает площадь пересечения двух visual rect."""
+        intersection = first & second
+
+        if intersection.is_empty:
+            return 0.0
+
+        return max(
+            0.0,
+            intersection.width,
+        ) * max(
+            0.0,
+            intersection.height,
+        )
+
+    @staticmethod
+    def _distance_between_centers(
+        first: fitz.Rect,
+        second: fitz.Rect,
+    ) -> float:
+        """Возвращает Euclidean distance между центрами rect."""
+        first_x = (first.x0 + first.x1) / 2.0
+
+        first_y = (first.y0 + first.y1) / 2.0
+
+        second_x = (second.x0 + second.x1) / 2.0
+
+        second_y = (second.y0 + second.y1) / 2.0
+
+        return math.hypot(
+            first_x - second_x,
+            first_y - second_y,
+        )
+
+    @staticmethod
+    def _nearest_connector_points(
+        region: fitz.Rect,
+        card: fitz.Rect,
+    ) -> tuple[
+        fitz.Point,
+        fitz.Point,
+    ]:
+        """Выбирает ближайшие стороны bbox/card для connector."""
+        region_center_x = (region.x0 + region.x1) / 2.0
+
+        region_center_y = (region.y0 + region.y1) / 2.0
+
+        card_center_x = (card.x0 + card.x1) / 2.0
+
+        card_center_y = (card.y0 + card.y1) / 2.0
+
+        horizontal_delta = card_center_x - region_center_x
+
+        vertical_delta = card_center_y - region_center_y
+
+        if abs(
+            horizontal_delta,
+        ) >= abs(
+            vertical_delta,
+        ):
+            return (
+                fitz.Point(
+                    (region.x1 if horizontal_delta >= 0 else region.x0),
+                    region_center_y,
+                ),
+                fitz.Point(
+                    (card.x0 if horizontal_delta >= 0 else card.x1),
+                    card_center_y,
+                ),
+            )
+
+        return (
+            fitz.Point(
+                region_center_x,
+                (region.y1 if vertical_delta >= 0 else region.y0),
+            ),
+            fitz.Point(
+                card_center_x,
+                (card.y0 if vertical_delta >= 0 else card.y1),
+            ),
         )
 
     @staticmethod
@@ -611,86 +1275,6 @@ class PyMuPdfAnnotationWriter:
             )
 
         return document[page_number - 1]
-
-    @staticmethod
-    def _page_level_badge_rect(
-        *,
-        page: fitz.Page,
-        slot: int,
-    ) -> tuple[
-        fitz.Rect,
-        fitz.Rect,
-    ]:
-        """Размещает compact page-level marker в верхнем rail листа."""
-        page_rect = page.rect
-
-        margin = 10.0
-        gap = 6.0
-        preferred_width = 72.0
-        badge_height = 16.0
-
-        available_width = max(
-            page_rect.width - (2 * margin),
-            1.0,
-        )
-
-        badge_width = min(
-            preferred_width,
-            available_width,
-        )
-
-        columns = max(
-            1,
-            int((available_width + gap) // (badge_width + gap)),
-        )
-
-        column = slot % columns
-
-        row = slot // columns
-
-        x = page_rect.x0 + margin + column * (badge_width + gap)
-
-        y = page_rect.y0 + margin + row * (badge_height + gap)
-
-        x = min(
-            x,
-            max(
-                page_rect.x0,
-                page_rect.x1 - margin - badge_width,
-            ),
-        )
-
-        y = min(
-            y,
-            max(
-                page_rect.y0,
-                page_rect.y1 - margin - badge_height,
-            ),
-        )
-
-        visual_badge_rect = fitz.Rect(
-            x,
-            y,
-            min(
-                page_rect.x1,
-                x + badge_width,
-            ),
-            min(
-                page_rect.y1,
-                y + badge_height,
-            ),
-        )
-
-        badge_rect = (
-            visual_badge_rect * page.derotation_matrix
-            if page.rotation
-            else visual_badge_rect
-        )
-
-        return (
-            visual_badge_rect,
-            badge_rect,
-        )
 
     @staticmethod
     def _annotation_rect(
@@ -756,76 +1340,36 @@ class PyMuPdfAnnotationWriter:
                 ("Finding содержит пустой PDF bbox."),
             )
 
-        annotation_rect = (
-            visual_rect * page.derotation_matrix if page.rotation else visual_rect
-        )
-
         return (
             visual_rect,
-            annotation_rect,
+            (
+                PyMuPdfAnnotationWriter._visual_rect_to_annotation(
+                    page=page,
+                    rect=visual_rect,
+                )
+            ),
         )
 
     @staticmethod
-    def _label_rect(
+    def _visual_rect_to_annotation(
         *,
         page: fitz.Page,
-        visual_rect: fitz.Rect,
-        label: str,
+        rect: fitz.Rect,
     ) -> fitz.Rect:
-        """Строит compact label около visual bbox."""
-        page_rect = page.rect
-
-        height = 14.0
-
-        width = max(
-            30.0,
-            min(
-                52.0,
-                (
-                    12.0
-                    + (
-                        7.0
-                        * len(
-                            label,
-                        )
-                    )
-                ),
-            ),
-        )
-
-        x = min(
-            max(
-                page_rect.x0,
-                visual_rect.x0,
-            ),
-            max(
-                page_rect.x0,
-                page_rect.x1 - width,
-            ),
-        )
-
-        y = visual_rect.y0 - height - 2.0
-
-        if y < page_rect.y0:
-            y = min(
-                page_rect.y1 - height,
-                visual_rect.y1 + 2.0,
-            )
-
-        visual_label_rect = fitz.Rect(
-            x,
-            y,
-            min(
-                page_rect.x1,
-                x + width,
-            ),
-            min(
-                page_rect.y1,
-                y + height,
-            ),
-        )
-
+        """Переводит visual rect в annotation coordinate system."""
         if page.rotation:
-            return visual_label_rect * page.derotation_matrix
+            return rect * page.derotation_matrix
 
-        return visual_label_rect
+        return rect
+
+    @staticmethod
+    def _visual_point_to_annotation(
+        *,
+        page: fitz.Page,
+        point: fitz.Point,
+    ) -> fitz.Point:
+        """Переводит visual point в annotation coordinate system."""
+        if page.rotation:
+            return point * page.derotation_matrix
+
+        return point

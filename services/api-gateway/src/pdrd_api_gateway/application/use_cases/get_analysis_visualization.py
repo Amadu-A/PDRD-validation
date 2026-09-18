@@ -37,6 +37,28 @@ logger = logging.getLogger(
     "uvicorn.error",
 )
 
+_VISUAL_REFINEMENT_MARKERS = (
+    "не содержит",
+    "отсутств",
+    "не показ",
+    "не изображ",
+    "не нанес",
+    "не обознач",
+    "не указан",
+    "не предусмотр",
+    "не установлен",
+    "не выполнен",
+    "не выполнена",
+    "не выполнено",
+    "не подключ",
+    "не прослеж",
+    "разрыв",
+    "missing",
+    "absent",
+    "not shown",
+    "not provided",
+)
+
 
 class AnalysisVisualizationJobNotFoundError(
     LookupError,
@@ -103,11 +125,11 @@ class GetAnalysisVisualization:
 
         try:
             artifacts = await self.artifact_store.load_request(
-                document_id=(job.document_id),
+                document_id=job.document_id,
             )
 
             result = await self.artifact_store.load_result(
-                document_id=(job.document_id),
+                document_id=job.document_id,
             )
 
         except Exception as error:
@@ -132,10 +154,10 @@ class GetAnalysisVisualization:
             )
 
         pages = await self._load_or_render_pages(
-            document_id=(job.document_id),
-            pdf_content=(artifacts.pdf_content),
+            document_id=job.document_id,
+            pdf_content=artifacts.pdf_content,
             file_name=(artifacts.submission.pdf_file_name or "document.pdf"),
-            page_spec=(artifacts.submission.pages),
+            page_spec=artifacts.submission.pages,
         )
 
         raw_findings = result.get(
@@ -150,7 +172,7 @@ class GetAnalysisVisualization:
             raw_findings = []
 
         cached_pages = await self._load_cached_locations(
-            document_id=(job.document_id),
+            document_id=job.document_id,
         )
 
         cached_by_page = {page.page_number: page for page in cached_pages}
@@ -169,7 +191,7 @@ class GetAnalysisVisualization:
         for page in pages:
             targets = self._targets_for_page(
                 findings=raw_findings,
-                page_number=(page.page_number),
+                page_number=page.page_number,
             )
 
             cached_page = cached_by_page.get(
@@ -195,7 +217,7 @@ class GetAnalysisVisualization:
 
                 deterministic_locations = self.anchor_matcher.locate(
                     findings=targets,
-                    text_words=(page.text_words),
+                    text_words=page.text_words,
                 )
 
                 deterministic_by_id = {
@@ -209,18 +231,40 @@ class GetAnalysisVisualization:
                     if (deterministic_by_id[target.finding_id].status != "located")
                 )
 
+                refinement_targets = tuple(
+                    target
+                    for target in targets
+                    if self._requires_visual_refinement(
+                        target,
+                    )
+                )
+
+                vlm_target_ids = {
+                    target.finding_id
+                    for target in (
+                        *unresolved_targets,
+                        *refinement_targets,
+                    )
+                }
+
+                vlm_targets = tuple(
+                    target
+                    for target in targets
+                    if (target.finding_id in vlm_target_ids)
+                )
+
                 fallback_by_id: dict[
                     str,
                     AnalysisFindingLocation,
                 ] = {}
 
-                if unresolved_targets:
+                if vlm_targets:
                     try:
                         fallback_locations = await self.finding_locator.localize(
-                            page_number=(page.page_number),
-                            extracted_text=(page.extracted_text),
-                            image_base64=(page.image_base64),
-                            findings=(unresolved_targets),
+                            page_number=page.page_number,
+                            extracted_text=page.extracted_text,
+                            image_base64=page.image_base64,
+                            findings=vlm_targets,
                         )
 
                         fallback_by_id = {
@@ -231,6 +275,8 @@ class GetAnalysisVisualization:
                     except Exception:
                         localization_error = True
 
+                refinement_ids = {target.finding_id for target in refinement_targets}
+
                 locations = tuple(
                     self._merge_location(
                         target=target,
@@ -240,6 +286,7 @@ class GetAnalysisVisualization:
                                 target.finding_id,
                             )
                         ),
+                        prefer_vlm=(target.finding_id in refinement_ids),
                     )
                     for target in targets
                 )
@@ -247,7 +294,7 @@ class GetAnalysisVisualization:
                 if not localization_error:
                     cache_pages.append(
                         AnalysisVisualizationLocationPage(
-                            page_number=(page.page_number),
+                            page_number=page.page_number,
                             locations=locations,
                         )
                     )
@@ -271,7 +318,7 @@ class GetAnalysisVisualization:
 
         if cache_changed and cache_pages:
             await self._save_cached_locations(
-                document_id=(job.document_id),
+                document_id=job.document_id,
                 pages=tuple(
                     cache_pages,
                 ),
@@ -301,7 +348,7 @@ class GetAnalysisVisualization:
         """Читает Stage 7 artifact, а для legacy/corrupt job делает fallback."""
         try:
             pages = await self.artifact_store.load_visualization(
-                document_id=(document_id),
+                document_id=document_id,
             )
 
         except AnalysisArtifactStorageError as error:
@@ -334,7 +381,7 @@ class GetAnalysisVisualization:
 
         try:
             pages = await self.pdf_page_renderer.render(
-                pdf_content=(pdf_content),
+                pdf_content=pdf_content,
                 file_name=file_name,
                 page_spec=page_spec,
             )
@@ -346,7 +393,7 @@ class GetAnalysisVisualization:
 
         try:
             await self.artifact_store.save_visualization(
-                document_id=(document_id),
+                document_id=document_id,
                 pages=pages,
             )
 
@@ -478,8 +525,12 @@ class GetAnalysisVisualization:
         target: AnalysisFindingTarget,
         deterministic: AnalysisFindingLocation,
         fallback: AnalysisFindingLocation | None,
+        prefer_vlm: bool = False,
     ) -> AnalysisFindingLocation:
-        """Приоритетно сохраняет deterministic PDF location."""
+        """Объединяет PDF geometry и VLM refinement без потери safe fallback."""
+        if prefer_vlm and fallback is not None and fallback.status == "located":
+            return fallback
+
         if deterministic.status == "located":
             return deterministic
 
@@ -487,8 +538,22 @@ class GetAnalysisVisualization:
             return fallback
 
         return AnalysisFindingLocation.unlocated(
-            finding_id=(target.finding_id),
+            finding_id=target.finding_id,
         )
+
+    @staticmethod
+    def _requires_visual_refinement(
+        target: AnalysisFindingTarget,
+    ) -> bool:
+        """Определяет findings, где нужно локализовать evidence area отсутствия."""
+        finding_text = "\n".join(
+            (
+                target.comment,
+                target.evidence,
+            )
+        ).casefold()
+
+        return any(marker in finding_text for marker in _VISUAL_REFINEMENT_MARKERS)
 
     @staticmethod
     def _localization_summary(
@@ -557,7 +622,7 @@ class GetAnalysisVisualization:
 
             targets.append(
                 AnalysisFindingTarget(
-                    finding_id=(finding_id),
+                    finding_id=finding_id,
                     comment=str(
                         finding.get(
                             "comment",

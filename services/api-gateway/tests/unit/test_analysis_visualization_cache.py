@@ -2,6 +2,7 @@
 
 """Unit tests filesystem derivative visualization cache."""
 
+import json
 from uuid import uuid4
 
 import pytest
@@ -11,6 +12,7 @@ from pdrd_api_gateway.application.ports.analysis_visualization import (
     AnalysisVisualRegion,
 )
 from pdrd_api_gateway.application.ports.analysis_visualization_cache import (
+    AnalysisVisualizationCacheError,
     AnalysisVisualizationLocationPage,
 )
 from pdrd_api_gateway.infrastructure.storage.visualization_cache import (
@@ -22,7 +24,7 @@ from pdrd_api_gateway.infrastructure.storage.visualization_cache import (
 async def test_location_and_annotated_pdf_cache_round_trip(
     tmp_path,
 ) -> None:
-    """Derivative cache сохраняет typed locations и versioned PDF bytes."""
+    """Cache invalidates старую localization/PDF schema и round-trip v2/v3."""
     document_id = uuid4()
 
     document_directory = tmp_path / str(
@@ -31,18 +33,41 @@ async def test_location_and_annotated_pdf_cache_round_trip(
 
     document_directory.mkdir()
 
+    visualization_directory = document_directory / "visualization"
+
+    visualization_directory.mkdir()
+
     cache = LocalFilesystemAnalysisVisualizationCache(
         root_path=tmp_path,
     )
 
-    legacy_pdf_path = document_directory / "annotated.pdf"
+    legacy_locations = visualization_directory / "locations.json"
 
-    legacy_pdf_path.write_bytes(
-        b"%PDF-1.7\nlegacy",
+    legacy_locations.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "pages": [],
+            },
+        ),
+        encoding="utf-8",
     )
 
-    # Старый Stage 8.6 artifact не должен
-    # возвращаться после исправления page-level annotations.
+    with pytest.raises(
+        AnalysisVisualizationCacheError,
+    ):
+        await cache.load_locations(
+            document_id=document_id,
+        )
+
+    (document_directory / "annotated.pdf").write_bytes(
+        b"%PDF-1.7\nlegacy-v1",
+    )
+
+    (document_directory / "annotated-v2.pdf").write_bytes(
+        b"%PDF-1.7\nlegacy-v2",
+    )
+
     assert (
         await cache.load_annotated_pdf(
             document_id=document_id,
@@ -86,6 +111,14 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         pages=pages,
     )
 
+    saved_payload = json.loads(
+        legacy_locations.read_text(
+            encoding="utf-8",
+        )
+    )
+
+    assert saved_payload["schema_version"] == 2
+
     restored = await cache.load_locations(
         document_id=document_id,
     )
@@ -105,7 +138,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         content=pdf_content,
     )
 
-    versioned_pdf_path = document_directory / "annotated-v2.pdf"
+    versioned_pdf_path = document_directory / "annotated-v3.pdf"
 
     assert versioned_pdf_path.read_bytes() == pdf_content
 
