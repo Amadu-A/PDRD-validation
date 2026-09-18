@@ -20,6 +20,9 @@ from pdrd_document_service.transport.http.routers.health import (
 from pdrd_document_service.transport.http.routers.pdf import (
     router as pdf_router,
 )
+from pdrd_document_service.transport.http.routers.pdf_annotation import (
+    router as pdf_annotation_router,
+)
 
 
 def create_app(
@@ -46,6 +49,10 @@ def create_app(
 
     application.include_router(
         pdf_router,
+    )
+
+    application.include_router(
+        pdf_annotation_router,
     )
 
     application.include_router(

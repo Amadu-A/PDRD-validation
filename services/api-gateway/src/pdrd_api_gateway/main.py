@@ -20,6 +20,9 @@ from pdrd_api_gateway.transport.http.routers.analysis_artifacts import (
 from pdrd_api_gateway.transport.http.routers.analysis_cancellation import (
     router as analysis_cancellation_router,
 )
+from pdrd_api_gateway.transport.http.routers.analysis_pdf_exports import (
+    router as analysis_pdf_exports_router,
+)
 from pdrd_api_gateway.transport.http.routers.analysis_progress import (
     router as analysis_progress_router,
 )
@@ -96,6 +99,10 @@ def create_app(
 
     application.include_router(
         analysis_artifacts_router,
+    )
+
+    application.include_router(
+        analysis_pdf_exports_router,
     )
 
     application.include_router(

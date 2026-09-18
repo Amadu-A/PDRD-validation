@@ -4,6 +4,9 @@
 
 from dataclasses import dataclass
 
+from pdrd_document_service.application.use_cases.annotate import (
+    BuildAnnotatedPdf,
+)
 from pdrd_document_service.application.use_cases.cad import (
     ExtractCadDocument,
 )
@@ -35,6 +38,9 @@ from pdrd_document_service.infrastructure.cad.renderer import (
 from pdrd_document_service.infrastructure.image_composer import (
     PillowCombinedImageComposer,
 )
+from pdrd_document_service.infrastructure.pdf.annotator import (
+    PyMuPdfAnnotationWriter,
+)
 from pdrd_document_service.infrastructure.pdf.pymupdf import (
     PyMuPdfReader,
 )
@@ -51,6 +57,8 @@ class ApplicationContainer:
     extract_combined: ExtractCombinedDocument
 
     extract_pdf_project_context: ExtractPdfProjectContext | None = None
+
+    build_annotated_pdf: BuildAnnotatedPdf | None = None
 
 
 def build_container() -> ApplicationContainer:
@@ -72,6 +80,11 @@ def build_container() -> ApplicationContainer:
         reader=pdf_reader,
         max_upload_bytes=(settings.pdf.max_upload_bytes),
         max_context_pages=(settings.pdf.max_context_pages),
+    )
+
+    build_annotated_pdf = BuildAnnotatedPdf(
+        writer=PyMuPdfAnnotationWriter(),
+        max_upload_bytes=(settings.pdf.max_upload_bytes),
     )
 
     cad_normalizer = LibreDwgNormalizer(
@@ -123,4 +136,5 @@ def build_container() -> ApplicationContainer:
         extract_cad=extract_cad,
         extract_combined=extract_combined,
         extract_pdf_project_context=(extract_pdf_project_context),
+        build_annotated_pdf=(build_annotated_pdf),
     )
