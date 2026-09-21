@@ -183,9 +183,9 @@ async def test_multiple_inputs_use_single_batched_chat_request(
 
     assert payload["model"] == "shared-embedding"
 
-    assert payload["dimensions"] == 2
-
     assert payload["encoding_format"] == "float"
+
+    assert "dimensions" not in payload
 
     messages = payload["messages"]
 
@@ -444,6 +444,8 @@ async def test_default_instruction_is_preserved(
     messages = payloads[0]["messages"]
 
     assert messages[0]["content"][0]["text"] == "Represent the user's input."
+
+    assert "dimensions" not in payloads[0]
 
 
 async def test_temporary_http_failure_is_retryable(

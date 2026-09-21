@@ -280,7 +280,6 @@ class HttpMultimodalEmbeddingProvider:
             "model": self._model,
             "messages": messages,
             "encoding_format": "float",
-            "dimensions": (self._output_dimension),
         }
 
     @staticmethod
