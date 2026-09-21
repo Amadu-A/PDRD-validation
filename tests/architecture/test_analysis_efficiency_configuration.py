@@ -6,6 +6,7 @@ from pathlib import Path
 
 from pdrd_analysis_service.core.settings import (
     PipelineSettings,
+    VllmSettings,
 )
 
 ROOT = (
@@ -22,14 +23,25 @@ ANALYSIS_MAIN = (
     ROOT / "services" / "analysis-service" / "src" / "pdrd_analysis_service" / "main.py"
 )
 
-OLLAMA_ADAPTER = (
+VLLM_ADAPTER = (
     ROOT
     / "services"
     / "analysis-service"
     / "src"
     / "pdrd_analysis_service"
     / "infrastructure"
-    / "ollama.py"
+    / "vllm.py"
+)
+
+STAGE_BATCH_ROUTES = (
+    ROOT
+    / "services"
+    / "analysis-service"
+    / "src"
+    / "pdrd_analysis_service"
+    / "transport"
+    / "http"
+    / "stage_batch_routes.py"
 )
 
 
@@ -90,47 +102,88 @@ def test_finalization_output_budget_is_sufficient_for_large_batch() -> None:
     assert settings.final_num_predict == 4000
 
 
-def test_vlm_keep_alive_supports_bounded_residency() -> None:
-    """Ollama не unloads model между calls одного bounded stage."""
+def test_shared_vlm_uses_stable_logical_contract() -> None:
+    """PDRD зависит от alias shared-vlm, а не physical checkpoint."""
     assert (
         _env_value(
-            "ANALYSIS_SERVICE_VISION__KEEP_ALIVE",
+            "ANALYSIS_SERVICE_VLM__BASE_URL",
         )
-        == "60s"
+        == "http://shared-vlm:8000/v1"
     )
 
-    source = OLLAMA_ADAPTER.read_text(
+    assert (
+        _env_value(
+            "ANALYSIS_SERVICE_VLM__MODEL",
+        )
+        == "shared-vlm"
+    )
+
+    settings = VllmSettings()
+
+    assert settings.base_url == "http://shared-vlm:8000/v1"
+
+    assert settings.model == "shared-vlm"
+
+
+def test_pdf_vlm_stages_use_bounded_client_concurrency() -> None:
+    """Document stages одновременно отправляют несколько requests."""
+    assert (
+        _env_value(
+            ("ANALYSIS_SERVICE_PIPELINE__VLM_STAGE_CONCURRENCY"),
+        )
+        == "4"
+    )
+
+    settings = PipelineSettings()
+
+    assert settings.vlm_stage_concurrency == 4
+
+    source = STAGE_BATCH_ROUTES.read_text(
         encoding="utf-8",
     )
 
-    assert "async def residency_scope(" in source
-
-    assert "self._residency_depth" in source
-
-    assert "await self._unload_model()" in source
-
-    assert '"keep_alive": self._keep_alive' in source
+    assert "_run_stage_items(" in source
+    assert "vlm_stage_concurrency" in source
+    assert "asyncio.gather(" in source
 
 
-def test_all_vlm_http_stages_are_request_scoped() -> None:
-    """Каждый VLM HTTP stage проходит через bounded residency middleware."""
+def test_vllm_adapter_has_no_project_gpu_or_model_lifecycle() -> None:
+    """Shared vLLM отвечает за residency, scheduling и physical GPUs."""
+    source = VLLM_ADAPTER.read_text(
+        encoding="utf-8",
+    )
+
+    forbidden = (
+        "gpu_coordinator",
+        "keep_alive",
+        "_unload_model",
+        "/api/chat",
+        "/api/ps",
+        "num_ctx",
+        "min_free_vram",
+    )
+
+    violations = [marker for marker in forbidden if marker in source]
+
+    assert not violations, "\n".join(
+        violations,
+    )
+
+    assert "/chat/completions" in source
+
+    assert '"type": "json_schema"' in source
+
+    assert '"enable_thinking": False' in source
+
+
+def test_analysis_app_has_no_request_scoped_model_residency_middleware() -> None:
+    """Business application больше не управляет residency shared model."""
     source = ANALYSIS_MAIN.read_text(
         encoding="utf-8",
     )
 
-    required_paths = (
-        "/internal/v1/pages/understand",
-        "/internal/v1/pages/check-norms",
-        "/internal/v1/pages/check-technical-assignment",
-        "/internal/v1/project-context/validate",
-        "/internal/v1/findings/finalize",
-        "/internal/v1/findings/localize",
-    )
+    assert "vision_model_residency" not in source
 
-    missing = [path for path in required_paths if path not in source]
+    assert "_VLM_RESIDENCY_PATHS" not in source
 
-    assert not missing, "\n".join(
-        missing,
-    )
-
-    assert "vision_model_residency(" in source
+    assert "vlm_residency_middleware" not in source

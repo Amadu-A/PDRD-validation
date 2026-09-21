@@ -1,6 +1,6 @@
 # tests/architecture/test_large_document_resilience.py
 
-"""Architecture guards Stage 8.4 large-document resilience."""
+"""Architecture guards large-document resilience with shared vLLM."""
 
 import json
 from pathlib import Path
@@ -20,12 +20,19 @@ PDF_WORKFLOW = WORKFLOW_ROOT / "analysis-v2-pdf.json"
 
 ALL_WORKFLOWS = (
     PDF_WORKFLOW,
-    WORKFLOW_ROOT / "analysis-v2-cad.json",
-    WORKFLOW_ROOT / "analysis-v2-pdf-cad.json",
+    (WORKFLOW_ROOT / "analysis-v2-cad.json"),
+    (WORKFLOW_ROOT / "analysis-v2-pdf-cad.json"),
 )
 
-ANALYSIS_MAIN = (
-    ROOT / "services" / "analysis-service" / "src" / "pdrd_analysis_service" / "main.py"
+STAGE_BATCH_ROUTES = (
+    ROOT
+    / "services"
+    / "analysis-service"
+    / "src"
+    / "pdrd_analysis_service"
+    / "transport"
+    / "http"
+    / "stage_batch_routes.py"
 )
 
 
@@ -49,7 +56,13 @@ def _workflow(
 
 def _nodes(
     workflow: dict[str, Any],
-) -> dict[str, dict[str, Any]]:
+) -> dict[
+    str,
+    dict[
+        str,
+        Any,
+    ],
+]:
     """Индексирует nodes."""
     raw_nodes = workflow["nodes"]
 
@@ -87,7 +100,7 @@ def _successors(
 
 
 def test_all_analysis_workflows_allow_nearly_one_hour() -> None:
-    """n8n timeout меньше Gateway/application/Celery hierarchy."""
+    """n8n timeout меньше Gateway/Application/Celery deadlines."""
     for path in ALL_WORKFLOWS:
         workflow = _workflow(
             path,
@@ -96,8 +109,8 @@ def test_all_analysis_workflows_allow_nearly_one_hour() -> None:
         assert workflow["settings"]["executionTimeout"] == 3450, path
 
 
-def test_pdf_gpu_stages_are_document_scoped() -> None:
-    """PDF-only не fan-out-ит VLM по одной HTTP-сессии на страницу."""
+def test_pdf_vlm_stages_are_document_scoped() -> None:
+    """PDF-only сохраняет один HTTP stage на document phase."""
     workflow = _workflow(
         PDF_WORKFLOW,
     )
@@ -134,7 +147,7 @@ def test_pdf_gpu_stages_are_document_scoped() -> None:
 
 
 def test_pdf_stage_batch_topology_is_ordered() -> None:
-    """Stage сначала собирается, затем VLM, затем снова expand."""
+    """Stage собирается и expand-ится в прежнем deterministic порядке."""
     workflow = _workflow(
         PDF_WORKFLOW,
     )
@@ -209,8 +222,6 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
         "Finalize Findings",
     ]
 
-    # Existing progress/cancellation boundary after finalization
-    # остаётся на месте.
     assert _successors(
         workflow,
         "Finalize Findings",
@@ -227,9 +238,9 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
     ]
 
 
-def test_batch_paths_hold_vlm_residency() -> None:
-    """Каждый document-scoped GPU stage входит в residency middleware."""
-    source = ANALYSIS_MAIN.read_text(
+def test_document_scoped_stages_use_bounded_vllm_concurrency() -> None:
+    """Stage route использует shared-vlm concurrency вместо GPU residency."""
+    source = STAGE_BATCH_ROUTES.read_text(
         encoding="utf-8",
     )
 
@@ -241,9 +252,19 @@ def test_batch_paths_hold_vlm_residency() -> None:
     ):
         assert path in source
 
+    assert "_run_stage_items(" in source
+
+    assert "vlm_stage_concurrency" in source
+
+    assert "asyncio.gather(" in source
+
+    assert "residency_scope" not in source
+
+    assert "gpu_stage_" not in source
+
 
 def test_one_hour_runtime_hierarchy_is_committed() -> None:
-    """Canonical env содержит согласованную timeout hierarchy."""
+    """Canonical env сохраняет deadlines без project VLM lease."""
     source = (ROOT / ".env.example").read_text(
         encoding="utf-8",
     )
@@ -256,6 +277,10 @@ def test_one_hour_runtime_hierarchy_is_committed() -> None:
 
     assert "API_GATEWAY_LIFECYCLE__TASK_HARD_TIME_LIMIT_SECONDS=3600" in source
 
-    assert "ANALYSIS_SERVICE_GPU__LEASE_TIMEOUT_SECONDS=3300" in source
+    assert "ANALYSIS_SERVICE_VLM__REQUEST_TIMEOUT_SECONDS=600" in source
 
     assert "ANALYSIS_SERVICE_PIPELINE__MAX_STAGE_PAGES=50" in source
+
+    assert "ANALYSIS_SERVICE_PIPELINE__VLM_STAGE_CONCURRENCY=4" in source
+
+    assert "ANALYSIS_SERVICE_GPU__" not in source

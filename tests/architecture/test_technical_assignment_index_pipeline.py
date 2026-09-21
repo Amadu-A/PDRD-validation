@@ -180,20 +180,44 @@ def test_t_releases_gpu_before_ready() -> None:
     assert ready_position > release_position
 
 
-def test_gpu_coordination_is_cross_container() -> None:
-    """Analysis и embedding service монтируют один OS lock."""
+def test_gpu_coordination_is_embedding_only() -> None:
+    """Project GPU lock остаётся только у dedicated embedding runtime."""
     compose = (ROOT / "compose.yaml").read_text(
         encoding="utf-8",
     )
 
+    lock_mount = "gpu_coordination:/var/lock/pdrd-gpu"
+
+    embedding_block = compose.split(
+        "  multimodal-embedding-service:",
+        maxsplit=1,
+    )[1].split(
+        "  quality-tests:",
+        maxsplit=1,
+    )[0]
+
+    analysis_block = compose.split(
+        "  analysis-service:",
+        maxsplit=1,
+    )[1].split(
+        "  vlm-runtime-tests:",
+        maxsplit=1,
+    )[0]
+
+    assert lock_mount in embedding_block
+
+    assert lock_mount not in analysis_block
+
     assert (
         compose.count(
-            "gpu_coordination:/var/lock/pdrd-gpu",
+            lock_mount,
         )
-        == 2
+        == 1
     )
 
     assert "gpu_coordination:" in compose
+
+    assert "shared-vlm" in compose
 
 
 def test_embedding_migration_gates_knowledge_runtime() -> None:

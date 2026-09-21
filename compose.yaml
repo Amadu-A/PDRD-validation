@@ -1,7 +1,7 @@
 # compose.yaml
 # Project-specific Docker stack PDRD.
 #
-# Shared: RabbitMQ, n8n, Ollama.
+# Shared: RabbitMQ, n8n, shared-vlm.
 # Project-specific: PostgreSQL, Qdrant и application services.
 
 name: ${COMPOSE_PROJECT_NAME:-pdrd-validation-ai}
@@ -601,9 +601,6 @@ services:
 
     env_file: *app-env-files
 
-    volumes:
-      - gpu_coordination:/var/lock/pdrd-gpu
-
     ports:
       - "${ANALYSIS_SERVICE_BIND_IP:-127.0.0.1}:${ANALYSIS_SERVICE_HOST_PORT:-8501}:8501"
 
@@ -620,10 +617,6 @@ services:
       retries: 12
       start_period: 15s
 
-    depends_on:
-      multimodal-embedding-service:
-        condition: service_healthy
-
     logging: *default-logging
 
     networks:
@@ -632,37 +625,31 @@ services:
         aliases:
           - pdrd-analysis-service
 
-  gpu-runtime-tests:
+  vlm-runtime-tests:
     build:
       context: .
       dockerfile: ops/Dockerfile.quality
 
     profiles:
-      - gpu-runtime-test
+      - vlm-runtime-test
 
     env_file: *app-env-files
 
     environment:
-      PDRD_RUN_GPU_RUNTIME_TESTS: "1"
+      PDRD_RUN_VLM_RUNTIME_TESTS: "1"
 
     command:
       [
         "python",
         "-m",
         "pytest",
-        "tests/runtime/test_gpu_coordination_runtime.py",
+        "tests/runtime/test_shared_vlm_runtime.py",
         "-q",
         "--import-mode=importlib"
       ]
 
     depends_on:
       analysis-service:
-        condition: service_healthy
-
-      multimodal-embedding-service:
-        condition: service_healthy
-
-      knowledge-service:
         condition: service_healthy
 
     networks:

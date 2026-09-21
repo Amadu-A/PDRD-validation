@@ -223,12 +223,24 @@ if docker compose exec \
     -T \
     analysis-service \
     python3 \
-    -c 'import urllib.request; urllib.request.urlopen("http://ollama:11434/api/tags", timeout=10)' \
+    -c 'import urllib.request; urllib.request.urlopen("http://shared-vlm:8000/health", timeout=10)' \
     >/dev/null 2>&1; then
 
-    ok "Analysis Service -> Ollama"
+    ok "Analysis Service -> shared-vlm health"
 else
-    bad "Analysis Service -> Ollama"
+    bad "Analysis Service -> shared-vlm health"
+fi
+
+if docker compose exec \
+    -T \
+    analysis-service \
+    python3 \
+    -c 'import json, urllib.request; payload=json.load(urllib.request.urlopen("http://shared-vlm:8000/v1/models", timeout=10)); assert any(isinstance(item, dict) and item.get("id") == "shared-vlm" for item in payload.get("data", []))' \
+    >/dev/null 2>&1; then
+
+    ok "Analysis Service -> shared-vlm model alias"
+else
+    bad "Analysis Service -> shared-vlm model alias"
 fi
 
 echo

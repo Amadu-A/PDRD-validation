@@ -1,9 +1,7 @@
 # services/analysis-service/tests/integration/test_vlm_residency_http.py
 
-"""HTTP integration tests bounded VLM residency."""
+"""HTTP integration tests shared VLM without project residency management."""
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -33,40 +31,16 @@ from pdrd_analysis_service.main import (
 )
 
 
-class ResidentRecordingVisionModel:
-    """Fake VLM с bounded residency capability."""
+class RecordingVisionModel:
+    """Fake shared VLM с записью обычных model calls."""
 
     def __init__(
         self,
     ) -> None:
         """Инициализирует counters."""
-        self.scope_depth = 0
-
-        self.scope_enters = 0
-        self.scope_exits = 0
-
         self.calls = 0
 
-        self.call_depths: list[int] = []
-
         self.batch_sizes: list[int] = []
-
-    @asynccontextmanager
-    async def residency_scope(
-        self,
-    ) -> AsyncIterator[None]:
-        """Записывает request-scoped residency."""
-        self.scope_enters += 1
-
-        self.scope_depth += 1
-
-        try:
-            yield
-
-        finally:
-            self.scope_depth -= 1
-
-            self.scope_exits += 1
 
     async def generate_json(
         self,
@@ -78,14 +52,16 @@ class ResidentRecordingVisionModel:
         stage: str,
         image_bytes: bytes | None = None,
     ) -> GenerationResult:
-        """Возвращает findings и проверяет active scope."""
+        """Возвращает finalization findings без residency lifecycle."""
         assert prompt
         assert schema
         assert num_predict > 0
         assert seed > 0
+
         assert stage.startswith(
             "finalization:",
         )
+
         assert image_bytes is None
 
         finding_ids = tuple(
@@ -100,10 +76,6 @@ class ResidentRecordingVisionModel:
         )
 
         self.calls += 1
-
-        self.call_depths.append(
-            self.scope_depth,
-        )
 
         self.batch_sizes.append(
             len(
@@ -130,7 +102,7 @@ class ResidentRecordingVisionModel:
                 done_reason="stop",
                 requested_num_predict=4000,
                 total_duration_ms=10.0,
-                load_duration_ms=1.0,
+                load_duration_ms=0.0,
                 prompt_eval_count=100,
                 eval_count=50,
                 content_length=300,
@@ -156,14 +128,14 @@ def _finding_payload(
         "category": "scheme_logic",
         "severity": "warning",
         "status": "needs_review",
-        "comment": f"Исходное замечание {index}.",
-        "evidence": f"Конкретный факт {index}.",
+        "comment": (f"Исходное замечание {index}."),
+        "evidence": (f"Конкретный факт {index}."),
         "recommendation_draft": (f"Проверить решение {index}."),
         "confidence": 0.8,
         "normative_source_ids": [],
         "basis": "",
         "basis_sources": [],
-        "experience_query": f"Опыт {index}.",
+        "experience_query": (f"Опыт {index}."),
         "technical_assignment_source_ids": [],
         "technical_assignment_basis_sources": [],
         "user_package_source_ids": [],
@@ -172,7 +144,7 @@ def _finding_payload(
 
 
 def _build_app(
-    model: ResidentRecordingVisionModel,
+    model: RecordingVisionModel,
 ):
     """Создаёт test app с двумя finalization batches."""
     settings = Settings(
@@ -226,9 +198,9 @@ def _build_app(
     )
 
 
-async def test_finalize_multiple_batches_share_one_http_residency_scope() -> None:
-    """11 findings используют один residency scope для 10+1 VLM calls."""
-    model = ResidentRecordingVisionModel()
+async def test_finalize_multiple_batches_use_plain_shared_vlm_calls() -> None:
+    """11 findings используют обычные 10+1 VLM calls без residency scope."""
+    model = RecordingVisionModel()
 
     app = _build_app(
         model,
@@ -278,22 +250,17 @@ async def test_finalize_multiple_batches_share_one_http_residency_scope() -> Non
         1,
     ]
 
-    assert model.call_depths == [
-        1,
-        1,
-    ]
-
-    assert model.scope_enters == 1
-    assert model.scope_exits == 1
-
-    assert model.scope_depth == 0
-
     assert payload["metrics"]["vlm_call_count"] == 2
 
+    assert not hasattr(
+        model,
+        "residency_scope",
+    )
 
-async def test_non_vlm_health_endpoint_does_not_take_residency_scope() -> None:
-    """Обычный endpoint не должен занимать GPU lease."""
-    model = ResidentRecordingVisionModel()
+
+async def test_non_vlm_health_endpoint_does_not_call_shared_vlm() -> None:
+    """Обычный health endpoint не обращается к shared VLM."""
+    model = RecordingVisionModel()
 
     app = _build_app(
         model,
@@ -312,8 +279,5 @@ async def test_non_vlm_health_endpoint_does_not_take_residency_scope() -> None:
         )
 
     assert response.status_code == 200
-
-    assert model.scope_enters == 0
-    assert model.scope_exits == 0
 
     assert model.calls == 0

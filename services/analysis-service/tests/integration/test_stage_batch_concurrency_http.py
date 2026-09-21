@@ -1,10 +1,9 @@
-# services/analysis-service/tests/integration/test_stage_batch_residency_http.py
+# services/analysis-service/tests/integration/test_stage_batch_concurrency_http.py
 
-"""Integration tests stage-scoped GPU residency large PDF."""
+"""Integration tests bounded concurrent shared-vlm PDF stages."""
 
+import asyncio
 import base64
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Any
 from uuid import (
     UUID,
@@ -27,6 +26,7 @@ from pdrd_analysis_service.core.container import (
     ApplicationContainer,
 )
 from pdrd_analysis_service.core.settings import (
+    PipelineSettings,
     Settings,
 )
 from pdrd_analysis_service.domain.analysis import (
@@ -38,34 +38,19 @@ from pdrd_analysis_service.main import (
 )
 
 
-class ResidentPageVisionModel:
-    """Fake VLM, записывающая residency depth всех страниц."""
+class ConcurrentPageVisionModel:
+    """Fake VLM с наблюдаемой конкурентностью."""
 
     def __init__(
         self,
     ) -> None:
         """Инициализирует counters."""
-        self.scope_depth = 0
-        self.scope_enters = 0
-        self.scope_exits = 0
+        self.active = 0
+        self.max_active = 0
 
         self.page_calls: list[int] = []
-        self.call_depths: list[int] = []
 
-    @asynccontextmanager
-    async def residency_scope(
-        self,
-    ) -> AsyncIterator[None]:
-        """Имитирует один GPU lease/model residency."""
-        self.scope_enters += 1
-        self.scope_depth += 1
-
-        try:
-            yield
-
-        finally:
-            self.scope_depth -= 1
-            self.scope_exits += 1
+        self._lock = asyncio.Lock()
 
     async def generate_json(
         self,
@@ -77,13 +62,14 @@ class ResidentPageVisionModel:
         stage: str,
         image_bytes: bytes | None = None,
     ) -> GenerationResult:
-        """Возвращает deterministic PageFacts."""
+        """Возвращает deterministic PageFacts после короткого await."""
         del prompt
         del schema
         del num_predict
         del seed
 
         assert image_bytes is not None
+
         assert stage.startswith(
             "page_understanding:",
         )
@@ -95,13 +81,26 @@ class ResidentPageVisionModel:
             )[1]
         )
 
-        self.page_calls.append(
-            page_number,
-        )
+        async with self._lock:
+            self.active += 1
 
-        self.call_depths.append(
-            self.scope_depth,
-        )
+            self.max_active = max(
+                self.max_active,
+                self.active,
+            )
+
+            self.page_calls.append(
+                page_number,
+            )
+
+        try:
+            await asyncio.sleep(
+                0.03,
+            )
+
+        finally:
+            async with self._lock:
+                self.active -= 1
 
         return GenerationResult(
             payload={
@@ -118,7 +117,7 @@ class ResidentPageVisionModel:
                 done_reason="stop",
                 requested_num_predict=1600,
                 total_duration_ms=10.0,
-                load_duration_ms=1.0,
+                load_duration_ms=0.0,
                 prompt_eval_count=100,
                 eval_count=50,
                 content_length=100,
@@ -182,15 +181,19 @@ class RecordingProgressProbe:
 
 def _build_app(
     *,
-    model: ResidentPageVisionModel,
+    model: ConcurrentPageVisionModel,
     progress_probe: RecordingProgressProbe,
+    concurrency: int,
 ):
     """Создаёт test application."""
     settings = Settings(
         _env_file=None,
-        service_name="PDRD Analysis Service Test",
+        service_name=("PDRD Analysis Service Test"),
         service_version="0.1.0-test",
         environment="test",
+        pipeline=PipelineSettings(
+            vlm_stage_concurrency=(concurrency),
+        ),
     )
 
     container = ApplicationContainer(
@@ -199,14 +202,18 @@ def _build_app(
             vision_model=model,
             num_predict=1600,
         ),
-        build_normative_queries=BuildNormativeQueries(
-            max_queries=7,
+        build_normative_queries=(
+            BuildNormativeQueries(
+                max_queries=7,
+            )
         ),
-        check_page_against_norms=CheckPageAgainstNorms(
-            vision_model=model,
-            num_predict=14000,
-            max_issues=50,
-            normative_text_limit=700,
+        check_page_against_norms=(
+            CheckPageAgainstNorms(
+                vision_model=model,
+                num_predict=14000,
+                max_issues=50,
+                normative_text_limit=700,
+            )
         ),
         check_page_against_technical_assignment=(
             CheckPageAgainstTechnicalAssignment(
@@ -216,12 +223,14 @@ def _build_app(
                 requirement_text_limit=1800,
             )
         ),
-        finalize_findings=FinalizeFindings(
-            vision_model=model,
-            num_predict=4000,
-            batch_size=10,
-            experience_context_limit=600,
-            experience_min_score=0.55,
+        finalize_findings=(
+            FinalizeFindings(
+                vision_model=model,
+                num_predict=4000,
+                batch_size=10,
+                experience_context_limit=600,
+                experience_min_score=0.55,
+            )
         ),
         localize_findings=LocalizeFindings(
             vision_model=model,
@@ -230,7 +239,7 @@ def _build_app(
         check_readiness=CheckReadiness(
             vision_model=model,
         ),
-        analysis_progress_probe=progress_probe,
+        analysis_progress_probe=(progress_probe),
     )
 
     return create_app(
@@ -272,15 +281,18 @@ def _request_payload(
     }
 
 
-async def test_understanding_stage_holds_one_residency_for_all_pages() -> None:
-    """Три страницы используют один GPU residency scope."""
-    model = ResidentPageVisionModel()
+async def test_understanding_stage_uses_bounded_concurrency_and_ordered_results() -> (
+    None
+):
+    """Stage использует shared-vlm параллельно, но response остаётся ordered."""
+    model = ConcurrentPageVisionModel()
 
     progress_probe = RecordingProgressProbe()
 
     app = _build_app(
         model=model,
         progress_probe=progress_probe,
+        concurrency=3,
     )
 
     document_id = uuid4()
@@ -294,10 +306,10 @@ async def test_understanding_stage_holds_one_residency_for_all_pages() -> None:
         base_url="http://test",
     ) as client:
         response = await client.post(
-            "/internal/v1/stages/understand-pages",
+            ("/internal/v1/stages/understand-pages"),
             json=_request_payload(
                 document_id=document_id,
-                pages=3,
+                pages=6,
             ),
         )
 
@@ -309,34 +321,39 @@ async def test_understanding_stage_holds_one_residency_for_all_pages() -> None:
         1,
         2,
         3,
+        4,
+        5,
+        6,
     ]
 
-    assert model.page_calls == [
+    assert sorted(
+        model.page_calls,
+    ) == [
         1,
         2,
         3,
+        4,
+        5,
+        6,
     ]
 
-    assert model.call_depths == [
-        1,
-        1,
-        1,
-    ]
+    assert model.max_active == 3
 
-    assert model.scope_enters == 1
-    assert model.scope_exits == 1
-    assert model.scope_depth == 0
-
-    assert [call[2] for call in progress_probe.calls] == [
+    assert [call[2] for call in (progress_probe.calls)] == [
         1,
         2,
         3,
+        4,
+        5,
+        6,
     ]
 
 
-async def test_cancellation_stops_before_next_page() -> None:
-    """Cancelled job не запускает следующую страницу stage."""
-    model = ResidentPageVisionModel()
+async def test_cancellation_stops_new_items_but_allows_inflight_calls_to_finish() -> (
+    None
+):
+    """Cancellation не стартует queued pages после обнаружения stop."""
+    model = ConcurrentPageVisionModel()
 
     progress_probe = RecordingProgressProbe(
         cancel_on_call=3,
@@ -345,6 +362,7 @@ async def test_cancellation_stops_before_next_page() -> None:
     app = _build_app(
         model=model,
         progress_probe=progress_probe,
+        concurrency=3,
     )
 
     transport = httpx.ASGITransport(
@@ -356,24 +374,33 @@ async def test_cancellation_stops_before_next_page() -> None:
         base_url="http://test",
     ) as client:
         response = await client.post(
-            "/internal/v1/stages/understand-pages",
+            ("/internal/v1/stages/understand-pages"),
             json=_request_payload(
                 document_id=uuid4(),
-                pages=5,
+                pages=8,
             ),
         )
 
     assert response.status_code == 409
 
-    assert response.json()["detail"]["code"] == ("analysis_cancelled")
+    assert response.json()["detail"]["code"] == "analysis_cancelled"
 
-    # Страница 3 уже не стартует:
-    # cancellation проверяется перед каждой страницей.
-    assert model.page_calls == [
+    assert sorted(
+        model.page_calls,
+    ) == [
         1,
         2,
     ]
 
-    assert model.scope_enters == 1
-    assert model.scope_exits == 1
-    assert model.scope_depth == 0
+    assert model.active == 0
+    assert model.max_active == 2
+
+    assert all(
+        page_number <= 3
+        for (
+            _,
+            _,
+            page_number,
+            _,
+        ) in progress_probe.calls
+    )

@@ -3,7 +3,6 @@
 """Pydantic Settings Analysis Service."""
 
 from functools import lru_cache
-from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -21,12 +20,12 @@ EnvironmentName = Literal[
 ]
 
 
-class VisionSettings(BaseModel):
-    """Настройки shared Ollama VLM."""
+class VllmSettings(BaseModel):
+    """Настройки stable logical shared-vlm contract."""
 
-    base_url: str = "http://ollama:11434"
+    base_url: str = "http://shared-vlm:8000/v1"
 
-    model: str = "qwen3-vl:8b-instruct"
+    model: str = "shared-vlm"
 
     request_timeout_seconds: float = Field(
         default=600.0,
@@ -46,77 +45,22 @@ class VisionSettings(BaseModel):
         le=60,
     )
 
-    num_ctx: int = Field(
-        default=32768,
-        ge=1024,
-        le=131072,
-    )
-
-    max_retries: int = Field(
+    max_attempts: int = Field(
         default=2,
         ge=1,
         le=5,
     )
 
-    keep_alive: str = "60s"
+    retry_backoff_seconds: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=30.0,
+    )
 
     max_retry_num_predict: int = Field(
         default=14000,
         ge=1,
-        le=20000,
-    )
-
-    min_free_vram_gib: float = Field(
-        default=12.0,
-        gt=0,
-        le=128,
-    )
-
-    unload_timeout_seconds: float = Field(
-        default=60.0,
-        gt=0,
-        le=600,
-    )
-
-    unload_poll_seconds: float = Field(
-        default=0.5,
-        gt=0,
-        le=10,
-    )
-
-    @property
-    def min_free_vram_bytes(
-        self,
-    ) -> int:
-        """Возвращает VRAM threshold в bytes."""
-        return int(self.min_free_vram_gib * 1024**3)
-
-
-class GpuSettings(BaseModel):
-    """Global GPU coordination settings."""
-
-    lock_path: Path = Path(
-        "/var/lock/pdrd-gpu/gpu.lock",
-    )
-
-    lease_timeout_seconds: float = Field(
-        default=3300.0,
-        gt=0,
-        le=7200,
-    )
-
-    admission_poll_seconds: float = Field(
-        default=1.0,
-        gt=0,
-        le=30,
-    )
-
-    status_base_url: str = "http://pdrd-multimodal-embedding-service:8601"
-
-    status_timeout_seconds: float = Field(
-        default=10.0,
-        gt=0,
-        le=120,
+        le=32000,
     )
 
 
@@ -237,6 +181,12 @@ class PipelineSettings(BaseModel):
         le=200,
     )
 
+    vlm_stage_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+    )
+
 
 class ProjectContextSettings(BaseModel):
     """Настройки анализа диапазона ПЗ."""
@@ -308,12 +258,8 @@ class Settings(BaseSettings):
 
     docs_enabled: bool = True
 
-    vision: VisionSettings = Field(
-        default_factory=VisionSettings,
-    )
-
-    gpu: GpuSettings = Field(
-        default_factory=GpuSettings,
+    vlm: VllmSettings = Field(
+        default_factory=VllmSettings,
     )
 
     progress: AnalysisProgressSettings = Field(
