@@ -21,6 +21,10 @@ import {
 } from "./labels.js";
 
 import {
+  appendAnnotatedPdfDownload,
+} from "./pdf-export.js";
+
+import {
   waitForAnalysis,
 } from "./polling.js";
 
@@ -460,14 +464,24 @@ export function createAnalysisController({
         }
       }
 
-      resultView.showReport(
-        renderAnalysisReport(
+      const report = renderAnalysisReport(
+        payload,
+        {
+          jobId,
+          visualization,
+        },
+      );
+
+      appendAnnotatedPdfDownload(
+        report,
+        {
+          jobId,
           payload,
-          {
-            jobId,
-            visualization,
-          },
-        ),
+        },
+      );
+
+      resultView.showReport(
+        report,
       );
 
     } catch (error) {

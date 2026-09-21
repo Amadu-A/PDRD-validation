@@ -15,24 +15,24 @@ REPOSITORY_ROOT = (
 
 _WORKFLOWS = {
     "analysis-v2-pdf.json": {
-        "Validate Project Context",
-        "Understand Page",
-        "Check Technical Assignment",
-        "Check Norms",
-        "Finalize Findings",
+        "Validate Project Context": 600_000,
+        "Understand Pages Stage": 3_300_000,
+        "Check Technical Assignment": 3_300_000,
+        "Check Norms": 3_300_000,
+        "Finalize Findings": 3_300_000,
     },
     "analysis-v2-pdf-cad.json": {
-        "Validate Project Context",
-        "Understand Combined Page",
-        "Check Technical Assignment",
-        "Check Norms",
-        "Finalize Findings",
+        "Validate Project Context": 600_000,
+        "Understand Combined Page": 600_000,
+        "Check Technical Assignment": 600_000,
+        "Check Norms": 600_000,
+        "Finalize Findings": 600_000,
     },
     "analysis-v2-cad.json": {
-        "Understand CAD",
-        "Check Technical Assignment",
-        "Check Norms",
-        "Finalize Findings",
+        "Understand CAD": 600_000,
+        "Check Technical Assignment": 600_000,
+        "Check Norms": 600_000,
+        "Finalize Findings": 600_000,
     },
 }
 
@@ -40,7 +40,7 @@ _WORKFLOWS = {
 def _load_workflow(
     file_name: str,
 ) -> dict[str, object]:
-    """Читает committed workflow JSON."""
+    """Читает committed n8n workflow."""
     path = REPOSITORY_ROOT / "n8n" / "workflows" / file_name
 
     return json.loads(
@@ -64,14 +64,14 @@ def test_all_workflows_have_global_execution_deadline() -> None:
             dict,
         )
 
-        assert settings["executionTimeout"] == 1650
+        assert settings["executionTimeout"] == 3450
 
 
 def test_expensive_vlm_nodes_never_have_n8n_level_retry() -> None:
     """VLM retry принадлежит adapter, а не n8n orchestration."""
     for (
         file_name,
-        expected_names,
+        expected_nodes,
     ) in _WORKFLOWS.items():
         workflow = _load_workflow(
             file_name,
@@ -99,11 +99,16 @@ def test_expensive_vlm_nodes_never_have_n8n_level_retry() -> None:
             )
         }
 
-        assert expected_names <= set(
+        assert set(
+            expected_nodes,
+        ) <= set(
             by_name,
         )
 
-        for node_name in expected_names:
+        for (
+            node_name,
+            expected_timeout,
+        ) in expected_nodes.items():
             node = by_name[node_name]
 
             assert (
@@ -112,11 +117,20 @@ def test_expensive_vlm_nodes_never_have_n8n_level_retry() -> None:
                     False,
                 )
                 is False
+            ), (
+                file_name,
+                node_name,
             )
 
-            assert "maxTries" not in node
+            assert "maxTries" not in node, (
+                file_name,
+                node_name,
+            )
 
-            assert "waitBetweenTries" not in node
+            assert "waitBetweenTries" not in node, (
+                file_name,
+                node_name,
+            )
 
             parameters = node["parameters"]
 
@@ -132,7 +146,26 @@ def test_expensive_vlm_nodes_never_have_n8n_level_retry() -> None:
                 dict,
             )
 
-            assert options["timeout"] == 600000
+            assert options["timeout"] == expected_timeout, (
+                file_name,
+                node_name,
+            )
+
+
+def test_pdf_document_scoped_gpu_stages_have_longer_http_budget() -> None:
+    """Long PDF stage может законно держать GPU дольше 10 минут."""
+    expected = _WORKFLOWS["analysis-v2-pdf.json"]
+
+    assert expected["Understand Pages Stage"] == 3_300_000
+
+    assert expected["Check Technical Assignment"] == 3_300_000
+
+    assert expected["Check Norms"] == 3_300_000
+
+    assert expected["Finalize Findings"] == 3_300_000
+
+    # Project Context остаётся отдельным bounded VLM call.
+    assert expected["Validate Project Context"] == 600_000
 
 
 def test_io_search_nodes_keep_local_n8n_retry() -> None:

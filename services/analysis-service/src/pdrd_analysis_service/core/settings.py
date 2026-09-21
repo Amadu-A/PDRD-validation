@@ -29,7 +29,7 @@ class VisionSettings(BaseModel):
     model: str = "qwen3-vl:8b-instruct"
 
     request_timeout_seconds: float = Field(
-        default=1800.0,
+        default=600.0,
         gt=0,
         le=7200,
     )
@@ -58,7 +58,7 @@ class VisionSettings(BaseModel):
         le=5,
     )
 
-    keep_alive: str = "0s"
+    keep_alive: str = "60s"
 
     max_retry_num_predict: int = Field(
         default=14000,
@@ -100,7 +100,7 @@ class GpuSettings(BaseModel):
     )
 
     lease_timeout_seconds: float = Field(
-        default=1800.0,
+        default=3300.0,
         gt=0,
         le=7200,
     )
@@ -117,6 +117,24 @@ class GpuSettings(BaseModel):
         default=10.0,
         gt=0,
         le=120,
+    )
+
+
+class AnalysisProgressSettings(BaseModel):
+    """Best-effort durable cancellation probe API."""
+
+    base_url: str = "http://api-gateway:8000"
+
+    request_timeout_seconds: float = Field(
+        default=3.0,
+        gt=0,
+        le=30,
+    )
+
+    connect_timeout_seconds: float = Field(
+        default=3.0,
+        gt=0,
+        le=30,
     )
 
 
@@ -213,6 +231,12 @@ class PipelineSettings(BaseModel):
         le=100 * 1024 * 1024,
     )
 
+    max_stage_pages: int = Field(
+        default=50,
+        ge=1,
+        le=200,
+    )
+
 
 class ProjectContextSettings(BaseModel):
     """Настройки анализа диапазона ПЗ."""
@@ -290,6 +314,10 @@ class Settings(BaseSettings):
 
     gpu: GpuSettings = Field(
         default_factory=GpuSettings,
+    )
+
+    progress: AnalysisProgressSettings = Field(
+        default_factory=AnalysisProgressSettings,
     )
 
     pipeline: PipelineSettings = Field(

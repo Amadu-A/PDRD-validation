@@ -131,12 +131,13 @@ def _functional_successor(
     workflow: dict[str, object],
     source_name: str,
 ) -> str:
-    """Возвращает бизнес-successor, прозрачно проходя Progress Gate."""
+    """Возвращает business successor через infrastructure Gate nodes."""
     current_name = source_name
+
     visited: set[str] = set()
 
     for _ in range(
-        16,
+        32,
     ):
         successor = _direct_functional_successor(
             workflow,
@@ -159,11 +160,17 @@ def _functional_successor(
 
         current_name = successor
 
-    raise AssertionError(f"Превышена глубина progress gate chain: {source_name}")
+    raise AssertionError(f"Превышена глубина infrastructure gate chain: {source_name}")
 
 
 def _requirement_search_name(
-    nodes: dict[str, dict[str, object]],
+    nodes: dict[
+        str,
+        dict[
+            str,
+            object,
+        ],
+    ],
 ) -> str:
     """Возвращает имя текущего requirement retrieval node."""
     if "Search Requirements" in nodes:
@@ -172,6 +179,25 @@ def _requirement_search_name(
     assert "Search Normative" in nodes
 
     return "Search Normative"
+
+
+def _node_code(
+    node: dict[str, object],
+) -> str:
+    """Возвращает jsCode Code node."""
+    parameters = node["parameters"]
+
+    assert isinstance(
+        parameters,
+        dict,
+    )
+
+    return str(
+        parameters.get(
+            "jsCode",
+            "",
+        )
+    )
 
 
 def test_all_v2_workflows_search_user_packages() -> None:
@@ -210,7 +236,7 @@ def test_all_v2_workflows_search_user_packages() -> None:
 
 
 def test_n8n_keeps_requirement_and_package_sources_separate() -> None:
-    """Check Norms получает requirement и U sources разными полями."""
+    """Check Norms получает typed N/T/U buckets без смешивания sources."""
     for file_name in WORKFLOW_FILES:
         workflow = _load_workflow(
             file_name,
@@ -237,6 +263,40 @@ def test_n8n_keeps_requirement_and_package_sources_separate() -> None:
 
         assert "user_package_sources" in body
 
+        if file_name == "analysis-v2-pdf.json":
+            # Stage 8.4 сначала собирает page-local
+            # N/T/U в один document-scoped GPU request.
+            collector = nodes["Gate Collect Norm Check Stage"]
+
+            collector_code = _node_code(
+                collector,
+            )
+
+            assert "Normalize Requirement Search" in collector_code
+
+            # Collector находится непосредственно после
+            # Search User Packages progress/gate chain,
+            # поэтому U-result приходит через $input.
+            assert "const userPackages = $input.all()" in collector_code
+
+            assert "normative_sources" in collector_code
+
+            assert "technical_assignment_sources" in collector_code
+
+            assert "conflict_candidates" in collector_code
+
+            assert "user_package_sources" in collector_code
+
+            assert (
+                _functional_successor(
+                    workflow,
+                    "Search User Packages",
+                )
+                == "Check Norms"
+            )
+
+            continue
+
         if "Search Requirements" in nodes:
             assert "Normalize Requirement Search" in body
 
@@ -249,7 +309,7 @@ def test_n8n_keeps_requirement_and_package_sources_separate() -> None:
 
 
 def test_user_package_search_is_between_requirement_search_and_check() -> None:
-    """Закрепляет requirement → U → check functional chain."""
+    """Закрепляет requirement → U → check business flow."""
     for file_name in WORKFLOW_FILES:
         workflow = _load_workflow(
             file_name,

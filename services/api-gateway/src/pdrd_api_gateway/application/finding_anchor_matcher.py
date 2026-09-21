@@ -27,6 +27,23 @@ _DASH_TRANSLATION = str.maketrans(
     }
 )
 
+_HOMOGLYPH_TRANSLATION = str.maketrans(
+    {
+        "А": "A",
+        "В": "B",
+        "С": "C",
+        "Е": "E",
+        "Н": "H",
+        "К": "K",
+        "М": "M",
+        "О": "O",
+        "Р": "P",
+        "Т": "T",
+        "Х": "X",
+        "У": "Y",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class FindingAnchorMatcher:
@@ -160,10 +177,13 @@ class FindingAnchorMatcher:
                 "NFKC",
                 value,
             )
+            .upper()
             .translate(
                 _DASH_TRANSLATION,
             )
-            .upper()
+            .translate(
+                _HOMOGLYPH_TRANSLATION,
+            )
         )
 
     @classmethod

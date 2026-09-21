@@ -158,6 +158,37 @@ def test_every_workflow_runs_independent_t_first_check() -> None:
             "Check Technical Assignment",
         )
 
+        normalized = _serialized_node(
+            nodes,
+            "Technical Assignment First Pass",
+        )
+
+        if path.name == "analysis-v2-pdf.json":
+            assert "/internal/v1/stages/check-technical-assignment" in check, path
+
+            collector = _serialized_node(
+                nodes,
+                "Gate Collect Technical Assignment Stage",
+            )
+
+            assert "requirements" in collector, path
+
+            assert "page_facts" in collector, path
+
+            assert "image_base64" in collector, path
+
+            # Stage 8.4 нормализует batch response обратно
+            # в один item на физическую страницу.
+            assert "actualIds.length !== expectedIds.length" in normalized, path
+
+            assert "expectedIds.some" in normalized, path
+
+            assert "new Set(actualIds).size" in normalized, path
+
+            assert "findings" in normalized, path
+
+            continue
+
         assert "/internal/v1/pages/check-technical-assignment" in check, path
 
         assert "requirements" in check, path
@@ -165,11 +196,6 @@ def test_every_workflow_runs_independent_t_first_check() -> None:
         assert "page_facts" in check, path
 
         assert "image_base64" in check, path
-
-        normalized = _serialized_node(
-            nodes,
-            "Technical Assignment First Pass",
-        )
 
         assert "decisions.length !== requirementsCount" in normalized, path
 

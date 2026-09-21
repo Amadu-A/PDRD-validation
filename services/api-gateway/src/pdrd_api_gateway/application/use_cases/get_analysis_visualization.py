@@ -17,6 +17,11 @@ from pdrd_api_gateway.application.ports.analysis_visualization import (
     AnalysisPagePreview,
     AnalysisPdfPageRenderer,
 )
+from pdrd_api_gateway.application.ports.analysis_visualization_cache import (
+    AnalysisVisualizationCache,
+    AnalysisVisualizationCacheError,
+    AnalysisVisualizationLocationPage,
+)
 from pdrd_api_gateway.application.ports.artifacts import (
     AnalysisArtifactStorageError,
     AnalysisArtifactStore,
@@ -30,6 +35,28 @@ from pdrd_api_gateway.domain.analysis_job import (
 
 logger = logging.getLogger(
     "uvicorn.error",
+)
+
+_VISUAL_REFINEMENT_MARKERS = (
+    "не содержит",
+    "отсутств",
+    "не показ",
+    "не изображ",
+    "не нанес",
+    "не обознач",
+    "не указан",
+    "не предусмотр",
+    "не установлен",
+    "не выполнен",
+    "не выполнена",
+    "не выполнено",
+    "не подключ",
+    "не прослеж",
+    "разрыв",
+    "missing",
+    "absent",
+    "not shown",
+    "not provided",
 )
 
 
@@ -65,6 +92,8 @@ class GetAnalysisVisualization:
 
     anchor_matcher: FindingAnchorMatcher
 
+    visualization_cache: AnalysisVisualizationCache | None = None
+
     async def execute(
         self,
         *,
@@ -96,11 +125,11 @@ class GetAnalysisVisualization:
 
         try:
             artifacts = await self.artifact_store.load_request(
-                document_id=(job.document_id),
+                document_id=job.document_id,
             )
 
             result = await self.artifact_store.load_result(
-                document_id=(job.document_id),
+                document_id=job.document_id,
             )
 
         except Exception as error:
@@ -125,10 +154,10 @@ class GetAnalysisVisualization:
             )
 
         pages = await self._load_or_render_pages(
-            document_id=(job.document_id),
-            pdf_content=(artifacts.pdf_content),
+            document_id=job.document_id,
+            pdf_content=artifacts.pdf_content,
             file_name=(artifacts.submission.pdf_file_name or "document.pdf"),
-            page_spec=(artifacts.submission.pages),
+            page_spec=artifacts.submission.pages,
         )
 
         raw_findings = result.get(
@@ -142,6 +171,16 @@ class GetAnalysisVisualization:
         ):
             raw_findings = []
 
+        cached_pages = await self._load_cached_locations(
+            document_id=job.document_id,
+        )
+
+        cached_by_page = {page.page_number: page for page in cached_pages}
+
+        cache_pages: list[AnalysisVisualizationLocationPage] = []
+
+        cache_changed = False
+
         page_payloads: list[
             dict[
                 str,
@@ -152,59 +191,113 @@ class GetAnalysisVisualization:
         for page in pages:
             targets = self._targets_for_page(
                 findings=raw_findings,
-                page_number=(page.page_number),
+                page_number=page.page_number,
             )
 
-            deterministic_locations = self.anchor_matcher.locate(
-                findings=targets,
-                text_words=(page.text_words),
+            cached_page = cached_by_page.get(
+                page.page_number,
             )
-
-            deterministic_by_id = {
-                location.finding_id: location for location in deterministic_locations
-            }
-
-            unresolved_targets = tuple(
-                target
-                for target in targets
-                if (deterministic_by_id[target.finding_id].status != "located")
-            )
-
-            fallback_by_id: dict[
-                str,
-                AnalysisFindingLocation,
-            ] = {}
 
             localization_error = False
 
-            if unresolved_targets:
-                try:
-                    fallback_locations = await self.finding_locator.localize(
-                        page_number=(page.page_number),
-                        extracted_text=(page.extracted_text),
-                        image_base64=(page.image_base64),
-                        findings=(unresolved_targets),
-                    )
+            if self._cached_page_matches(
+                cached_page=cached_page,
+                targets=targets,
+            ):
+                assert cached_page is not None
 
-                    fallback_by_id = {
-                        location.finding_id: location for location in fallback_locations
-                    }
+                locations = cached_page.locations
 
-                except Exception:
-                    localization_error = True
-
-            locations = tuple(
-                self._merge_location(
-                    target=target,
-                    deterministic=(deterministic_by_id[target.finding_id]),
-                    fallback=(
-                        fallback_by_id.get(
-                            target.finding_id,
-                        )
-                    ),
+                cache_pages.append(
+                    cached_page,
                 )
-                for target in targets
-            )
+
+            else:
+                cache_changed = True
+
+                deterministic_locations = self.anchor_matcher.locate(
+                    findings=targets,
+                    text_words=page.text_words,
+                )
+
+                deterministic_by_id = {
+                    location.finding_id: location
+                    for location in deterministic_locations
+                }
+
+                unresolved_targets = tuple(
+                    target
+                    for target in targets
+                    if (deterministic_by_id[target.finding_id].status != "located")
+                )
+
+                refinement_targets = tuple(
+                    target
+                    for target in targets
+                    if self._requires_visual_refinement(
+                        target,
+                    )
+                )
+
+                vlm_target_ids = {
+                    target.finding_id
+                    for target in (
+                        *unresolved_targets,
+                        *refinement_targets,
+                    )
+                }
+
+                vlm_targets = tuple(
+                    target
+                    for target in targets
+                    if (target.finding_id in vlm_target_ids)
+                )
+
+                fallback_by_id: dict[
+                    str,
+                    AnalysisFindingLocation,
+                ] = {}
+
+                if vlm_targets:
+                    try:
+                        fallback_locations = await self.finding_locator.localize(
+                            page_number=page.page_number,
+                            extracted_text=page.extracted_text,
+                            image_base64=page.image_base64,
+                            findings=vlm_targets,
+                        )
+
+                        fallback_by_id = {
+                            location.finding_id: location
+                            for location in fallback_locations
+                        }
+
+                    except Exception:
+                        localization_error = True
+
+                refinement_ids = {target.finding_id for target in refinement_targets}
+
+                locations = tuple(
+                    self._merge_location(
+                        target=target,
+                        deterministic=(deterministic_by_id[target.finding_id]),
+                        fallback=(
+                            fallback_by_id.get(
+                                target.finding_id,
+                            )
+                        ),
+                        prefer_vlm=(target.finding_id in refinement_ids),
+                    )
+                    for target in targets
+                )
+
+                if not localization_error:
+                    cache_pages.append(
+                        AnalysisVisualizationLocationPage(
+                            page_number=page.page_number,
+                            locations=locations,
+                        )
+                    )
 
             page_payload = page.as_dict()
 
@@ -221,6 +314,14 @@ class GetAnalysisVisualization:
 
             page_payloads.append(
                 page_payload,
+            )
+
+        if cache_changed and cache_pages:
+            await self._save_cached_locations(
+                document_id=job.document_id,
+                pages=tuple(
+                    cache_pages,
+                ),
             )
 
         return {
@@ -254,7 +355,8 @@ class GetAnalysisVisualization:
             logger.warning(
                 (
                     "analysis_visualization_artifact "
-                    "cache_hit=false corrupt=true document_id=%s error=%s"
+                    "cache_hit=false corrupt=true "
+                    "document_id=%s error=%s"
                 ),
                 document_id,
                 error,
@@ -266,7 +368,8 @@ class GetAnalysisVisualization:
             logger.info(
                 (
                     "analysis_visualization_artifact "
-                    "cache_hit=true document_id=%s pages=%s"
+                    "cache_hit=true "
+                    "document_id=%s pages=%s"
                 ),
                 document_id,
                 len(
@@ -298,7 +401,8 @@ class GetAnalysisVisualization:
             logger.warning(
                 (
                     "analysis_visualization_artifact "
-                    "fallback_persisted=false document_id=%s error=%s"
+                    "fallback_persisted=false "
+                    "document_id=%s error=%s"
                 ),
                 document_id,
                 error,
@@ -308,7 +412,8 @@ class GetAnalysisVisualization:
             logger.info(
                 (
                     "analysis_visualization_artifact "
-                    "fallback_persisted=true document_id=%s pages=%s"
+                    "fallback_persisted=true "
+                    "document_id=%s pages=%s"
                 ),
                 document_id,
                 len(
@@ -326,14 +431,106 @@ class GetAnalysisVisualization:
 
         return pages
 
+    async def _load_cached_locations(
+        self,
+        *,
+        document_id: UUID,
+    ) -> tuple[
+        AnalysisVisualizationLocationPage,
+        ...,
+    ]:
+        """Best-effort читает reusable finding location cache."""
+        if self.visualization_cache is None:
+            return ()
+
+        try:
+            pages = await self.visualization_cache.load_locations(
+                document_id=document_id,
+            )
+
+        except AnalysisVisualizationCacheError as error:
+            logger.warning(
+                (
+                    "analysis_location_cache "
+                    "cache_hit=false corrupt=true "
+                    "document_id=%s error=%s"
+                ),
+                document_id,
+                error,
+            )
+
+            return ()
+
+        if pages is None:
+            return ()
+
+        logger.info(
+            ("analysis_location_cache cache_hit=true document_id=%s pages=%s"),
+            document_id,
+            len(
+                pages,
+            ),
+        )
+
+        return pages
+
+    async def _save_cached_locations(
+        self,
+        *,
+        document_id: UUID,
+        pages: tuple[
+            AnalysisVisualizationLocationPage,
+            ...,
+        ],
+    ) -> None:
+        """Best-effort сохраняет reusable locations."""
+        if self.visualization_cache is None:
+            return
+
+        try:
+            await self.visualization_cache.save_locations(
+                document_id=document_id,
+                pages=pages,
+            )
+
+        except AnalysisVisualizationCacheError as error:
+            logger.warning(
+                ("analysis_location_cache persisted=false document_id=%s error=%s"),
+                document_id,
+                error,
+            )
+
+    @staticmethod
+    def _cached_page_matches(
+        *,
+        cached_page: (AnalysisVisualizationLocationPage | None),
+        targets: tuple[
+            AnalysisFindingTarget,
+            ...,
+        ],
+    ) -> bool:
+        """Проверяет, что cache соответствует текущему ordered finding feed."""
+        if cached_page is None:
+            return False
+
+        cached_ids = tuple(location.finding_id for location in cached_page.locations)
+
+        expected_ids = tuple(target.finding_id for target in targets)
+
+        return cached_ids == expected_ids
+
     @staticmethod
     def _merge_location(
         *,
         target: AnalysisFindingTarget,
         deterministic: AnalysisFindingLocation,
         fallback: AnalysisFindingLocation | None,
+        prefer_vlm: bool = False,
     ) -> AnalysisFindingLocation:
-        """Приоритетно сохраняет deterministic PDF location."""
+        """Объединяет PDF geometry и VLM refinement без потери safe fallback."""
+        if prefer_vlm and fallback is not None and fallback.status == "located":
+            return fallback
+
         if deterministic.status == "located":
             return deterministic
 
@@ -341,8 +538,22 @@ class GetAnalysisVisualization:
             return fallback
 
         return AnalysisFindingLocation.unlocated(
-            finding_id=(target.finding_id),
+            finding_id=target.finding_id,
         )
+
+    @staticmethod
+    def _requires_visual_refinement(
+        target: AnalysisFindingTarget,
+    ) -> bool:
+        """Определяет findings, где нужно локализовать evidence area отсутствия."""
+        finding_text = "\n".join(
+            (
+                target.comment,
+                target.evidence,
+            )
+        ).casefold()
+
+        return any(marker in finding_text for marker in _VISUAL_REFINEMENT_MARKERS)
 
     @staticmethod
     def _localization_summary(

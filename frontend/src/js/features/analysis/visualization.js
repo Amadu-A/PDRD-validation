@@ -7,6 +7,7 @@
  * Один finding может содержать несколько visual regions.
  * Карточки замечаний размещаются поверх листа автоматически,
  * а каждая region соединяется с одной общей карточкой finding.
+ * Полный текст finding доступен через detail tooltip.
  * Текст и source data вставляются только через textContent.
  */
 
@@ -15,6 +16,10 @@ const CALLOUT_GAP_PX = 14;
 const CARD_OVERLAP_WEIGHT = 12;
 const REGION_OVERLAP_WEIGHT = 5;
 const DISTANCE_WEIGHT = 0.015;
+
+const GENERIC_FINDING_PREFIX = (
+  "на листе выявлено несоответствие"
+);
 
 let tooltipSequence = 0;
 
@@ -284,6 +289,477 @@ function findingsForPage(
 }
 
 
+function preferredSourceArray(
+  primary,
+  fallback,
+) {
+  if (
+    Array.isArray(
+      primary,
+    )
+    && primary.length
+  ) {
+    return primary;
+  }
+
+  if (Array.isArray(
+    fallback,
+  )) {
+    return fallback;
+  }
+
+  return [];
+}
+
+
+function sourceLine(
+  source,
+  fallbackName,
+) {
+  if (
+    !source
+    || typeof source !== "object"
+  ) {
+    return "";
+  }
+
+  const fileName = (
+    source.source_file
+    || source.file_name
+    || source.source
+    || source.source_id
+    || fallbackName
+  );
+
+  const parts = [
+    String(
+      fileName,
+    ),
+  ];
+
+  const page = (
+    source.page
+    ?? source.page_number
+  );
+
+  if (
+    page !== null
+    && page !== undefined
+    && page !== ""
+  ) {
+    parts.push(
+      `стр. ${page}`,
+    );
+  }
+
+  if (source.point_id) {
+    parts.push(
+      `п. ${source.point_id}`,
+    );
+  }
+
+  if (
+    source.score !== null
+    && source.score !== undefined
+  ) {
+    parts.push(
+      `score=${source.score}`,
+    );
+  }
+
+  return parts.join(
+    ", ",
+  );
+}
+
+
+function sourceListText(
+  sources,
+  fallbackName,
+) {
+  if (!Array.isArray(
+    sources,
+  )) {
+    return "";
+  }
+
+  const values = sources
+    .map(
+      (source) => (
+        sourceLine(
+          source,
+          fallbackName,
+        )
+      ),
+    )
+    .filter(
+      Boolean,
+    );
+
+  return [
+    ...new Set(
+      values,
+    ),
+  ].join(
+    "\n",
+  );
+}
+
+
+function findingComment(
+  finding,
+) {
+  return String(
+    finding.comment
+    || finding.message
+    || finding.issue_text
+    || "",
+  ).trim();
+}
+
+
+function findingDisplayText(
+  finding,
+) {
+  const comment = findingComment(
+    finding,
+  );
+
+  const evidence = String(
+    finding.evidence
+    || "",
+  ).trim();
+
+  const normalizedComment = comment
+    .toLocaleLowerCase(
+      "ru-RU",
+    )
+    .replace(
+      /\s+/g,
+      " ",
+    )
+    .trim();
+
+  if (
+    evidence
+    && normalizedComment.startsWith(
+      GENERIC_FINDING_PREFIX,
+    )
+  ) {
+    return evidence;
+  }
+
+  return (
+    comment
+    || evidence
+    || "Текст замечания не передан."
+  );
+}
+
+
+function projectContextText(
+  finding,
+) {
+  const sources = (
+    Array.isArray(
+      finding.project_context_sources,
+    )
+      ? finding.project_context_sources
+      : []
+  );
+
+  return sources
+    .map(
+      (source) => {
+        if (
+          !source
+          || typeof source !== "object"
+        ) {
+          return "";
+        }
+
+        const parts = [
+          String(
+            source.source_id
+            || "PZ",
+          ),
+        ];
+
+        if (
+          source.page !== null
+          && source.page !== undefined
+        ) {
+          parts.push(
+            `стр. ${source.page}`,
+          );
+        }
+
+        if (
+          source.score !== null
+          && source.score !== undefined
+        ) {
+          parts.push(
+            `score=${source.score}`,
+          );
+        }
+
+        return parts.join(
+          ", ",
+        );
+      },
+    )
+    .filter(
+      Boolean,
+    )
+    .join(
+      "\n",
+    );
+}
+
+
+function localizationText(
+  finding,
+) {
+  const location = finding.location;
+
+  if (
+    location?.status !== "located"
+  ) {
+    return (
+      "Точное место на листе "
+      + "автоматически не определено."
+    );
+  }
+
+  if (
+    location.method === "vlm"
+  ) {
+    return (
+      "Область замечания определена "
+      + "по изображению листа."
+    );
+  }
+
+  if (
+    location.method === "pdf_text"
+  ) {
+    return (
+      "Область замечания определена "
+      + "по координатам текста PDF."
+    );
+  }
+
+  return (
+    "Область замечания определена "
+    + "автоматически."
+  );
+}
+
+
+function appendDetailField(
+  parent,
+  label,
+  value,
+) {
+  if (
+    value === null
+    || value === undefined
+    || String(
+      value,
+    ).trim() === ""
+  ) {
+    return;
+  }
+
+  const field = createElement(
+    "span",
+    "analysis-result__annotation-detail-field",
+  );
+
+  field.append(
+    createElement(
+      "strong",
+      "analysis-result__annotation-detail-label",
+      label,
+    ),
+  );
+
+  field.append(
+    createElement(
+      "span",
+      "analysis-result__annotation-detail-value",
+      value,
+    ),
+  );
+
+  parent.append(
+    field,
+  );
+}
+
+
+function createFindingDetailControl(
+  finding,
+  findingIndex,
+  dependencies,
+) {
+  const wrapper = createElement(
+    "span",
+    "analysis-result__annotation-info",
+  );
+
+  const button = createElement(
+    "button",
+    "analysis-result__annotation-info-button",
+    "i",
+  );
+
+  button.type = "button";
+
+  button.setAttribute(
+    "aria-label",
+    (
+      `Полное замечание №${findingIndex + 1}`
+    ),
+  );
+
+  tooltipSequence += 1;
+
+  const tooltipId = (
+    `analysis-finding-tooltip-${tooltipSequence}`
+  );
+
+  button.setAttribute(
+    "aria-describedby",
+    tooltipId,
+  );
+
+  const tooltip = createElement(
+    "span",
+    "analysis-result__annotation-detail-tooltip",
+  );
+
+  tooltip.id = tooltipId;
+
+  tooltip.setAttribute(
+    "role",
+    "tooltip",
+  );
+
+  tooltip.append(
+    createElement(
+      "strong",
+      "analysis-result__annotation-detail-title",
+      (
+        `Полное замечание №${findingIndex + 1}`
+      ),
+    ),
+  );
+
+  appendDetailField(
+    tooltip,
+    "Замечание",
+    (
+      findingComment(
+        finding,
+      )
+      || "Текст замечания не передан."
+    ),
+  );
+
+  appendDetailField(
+    tooltip,
+    "Основание на листе",
+    finding.evidence,
+  );
+
+  appendDetailField(
+    tooltip,
+    "Нормативное основание",
+    finding.basis,
+  );
+
+  appendDetailField(
+    tooltip,
+    "Нормативные источники",
+    sourceListText(
+      dependencies.normativeSources(
+        finding,
+      ),
+      "Нормативный источник",
+    ),
+  );
+
+  appendDetailField(
+    tooltip,
+    "Требования технического задания",
+    sourceListText(
+      preferredSourceArray(
+        finding.technical_assignment_basis_sources,
+        finding.technical_assignment_sources,
+      ),
+      "Техническое задание",
+    ),
+  );
+
+  appendDetailField(
+    tooltip,
+    "Пользовательские требования / документы",
+    sourceListText(
+      preferredSourceArray(
+        finding.user_package_basis_sources,
+        finding.user_package_sources,
+      ),
+      "Пользовательский документ",
+    ),
+  );
+
+  appendDetailField(
+    tooltip,
+    "Контекст ПЗ",
+    projectContextText(
+      finding,
+    ),
+  );
+
+  appendDetailField(
+    tooltip,
+    "Рекомендация",
+    (
+      finding.recommendation
+      || finding.recommendation_draft
+      || "Не указана."
+    ),
+  );
+
+  if (
+    finding.confidence !== null
+    && finding.confidence !== undefined
+  ) {
+    appendDetailField(
+      tooltip,
+      "Уверенность",
+      finding.confidence,
+    );
+  }
+
+  appendDetailField(
+    tooltip,
+    "Локализация",
+    localizationText(
+      finding,
+    ),
+  );
+
+  wrapper.append(
+    button,
+    tooltip,
+  );
+
+  return wrapper;
+}
+
+
 function appendNormativeLinks(
   parent,
   finding,
@@ -390,7 +866,10 @@ function appendNormativeLinks(
           (
             source.text
             || finding.basis
-            || "Текст нормативного фрагмента не передан."
+            || (
+              "Текст нормативного фрагмента "
+              + "не передан."
+            )
           ),
         ),
       );
@@ -414,7 +893,9 @@ function appendNormativeLinks(
       createElement(
         "span",
         "analysis-result__annotation-source-more",
-        `+${sources.length - visibleSources.length}`,
+        (
+          `+${sources.length - visibleSources.length}`
+        ),
       ),
     );
   }
@@ -443,9 +924,7 @@ function createCallout(
   );
 
   if (findingId) {
-    callout.dataset.findingId = (
-      findingId
-    );
+    callout.dataset.findingId = findingId;
   }
 
   const header = createElement(
@@ -465,12 +944,17 @@ function createCallout(
     createElement(
       "span",
       "analysis-result__annotation-title",
-      (
-        finding.comment
-        || finding.message
-        || finding.issue_text
-        || "Текст замечания не передан."
+      findingDisplayText(
+        finding,
       ),
+    ),
+  );
+
+  header.append(
+    createFindingDetailControl(
+      finding,
+      findingIndex,
+      dependencies,
     ),
   );
 
@@ -493,7 +977,10 @@ function createCallout(
       createElement(
         "span",
         "analysis-result__annotation-unlocated",
-        "Точное место на листе не определено.",
+        (
+          "Точное место на листе "
+          + "не определено."
+        ),
       ),
     );
   }
@@ -657,12 +1144,15 @@ function unionRect(
 function rectangleArea(
   rect,
 ) {
-  return Math.max(
-    0,
-    rect.right - rect.left,
-  ) * Math.max(
-    0,
-    rect.bottom - rect.top,
+  return (
+    Math.max(
+      0,
+      rect.right - rect.left,
+    )
+    * Math.max(
+      0,
+      rect.bottom - rect.top,
+    )
   );
 }
 
@@ -791,7 +1281,9 @@ function candidateRects(
       centerY - height / 2,
     ],
     [
-      anchor.left - width - CALLOUT_GAP_PX,
+      anchor.left
+      - width
+      - CALLOUT_GAP_PX,
       centerY - height / 2,
     ],
     [
@@ -800,22 +1292,32 @@ function candidateRects(
     ],
     [
       centerX - width / 2,
-      anchor.top - height - CALLOUT_GAP_PX,
+      anchor.top
+      - height
+      - CALLOUT_GAP_PX,
     ],
     [
       anchor.right + CALLOUT_GAP_PX,
-      anchor.top - height - CALLOUT_GAP_PX,
+      anchor.top
+      - height
+      - CALLOUT_GAP_PX,
     ],
     [
       anchor.right + CALLOUT_GAP_PX,
       anchor.bottom + CALLOUT_GAP_PX,
     ],
     [
-      anchor.left - width - CALLOUT_GAP_PX,
-      anchor.top - height - CALLOUT_GAP_PX,
+      anchor.left
+      - width
+      - CALLOUT_GAP_PX,
+      anchor.top
+      - height
+      - CALLOUT_GAP_PX,
     ],
     [
-      anchor.left - width - CALLOUT_GAP_PX,
+      anchor.left
+      - width
+      - CALLOUT_GAP_PX,
       anchor.bottom + CALLOUT_GAP_PX,
     ],
   ];
@@ -835,12 +1337,14 @@ function candidateRects(
           paneWidth
           - width
           - CALLOUT_MARGIN_PX,
-          centerY
-          - height / 2
-          + factor
-          * (
-            height
-            + CALLOUT_GAP_PX
+          (
+            centerY
+            - height / 2
+            + factor
+            * (
+              height
+              + CALLOUT_GAP_PX
+            )
           ),
         ],
       );
@@ -848,12 +1352,14 @@ function candidateRects(
       candidates.push(
         [
           CALLOUT_MARGIN_PX,
-          centerY
-          - height / 2
-          + factor
-          * (
-            height
-            + CALLOUT_GAP_PX
+          (
+            centerY
+            - height / 2
+            + factor
+            * (
+              height
+              + CALLOUT_GAP_PX
+            )
           ),
         ],
       );
@@ -872,12 +1378,20 @@ function candidateRects(
 
   for (
     let top = CALLOUT_MARGIN_PX;
-    top <= paneHeight - height - CALLOUT_MARGIN_PX;
+    top <= (
+      paneHeight
+      - height
+      - CALLOUT_MARGIN_PX
+    );
     top += verticalStep
   ) {
     for (
       let left = CALLOUT_MARGIN_PX;
-      left <= paneWidth - width - CALLOUT_MARGIN_PX;
+      left <= (
+        paneWidth
+        - width
+        - CALLOUT_MARGIN_PX
+      );
       left += horizontalStep
     ) {
       candidates.push(
@@ -906,7 +1420,8 @@ function candidateRects(
       );
 
       const key = (
-        `${Math.round(rect.left)}:${Math.round(rect.top)}`
+        `${Math.round(rect.left)}:`
+        + `${Math.round(rect.top)}`
       );
 
       if (!unique.has(
@@ -1011,16 +1526,18 @@ function layoutOverlayAnnotations(
   const orderedItems = items
     .map(
       (item) => {
-        const regionRects = item.bboxEntries.map(
-          ({
-            box,
-          }) => (
-            normalizedBoxToPixels(
+        const regionRects = (
+          item.bboxEntries.map(
+            ({
               box,
-              paneWidth,
-              paneHeight,
-            )
-          ),
+            }) => (
+              normalizedBoxToPixels(
+                box,
+                paneWidth,
+                paneHeight,
+              )
+            ),
+          )
         );
 
         const anchor = unionRect(
@@ -1126,41 +1643,71 @@ function nearestConnectorPoints(
   paneRect,
 ) {
   const box = {
-    left: bboxRect.left - paneRect.left,
-    top: bboxRect.top - paneRect.top,
-    right: bboxRect.right - paneRect.left,
-    bottom: bboxRect.bottom - paneRect.top,
+    left: (
+      bboxRect.left
+      - paneRect.left
+    ),
+    top: (
+      bboxRect.top
+      - paneRect.top
+    ),
+    right: (
+      bboxRect.right
+      - paneRect.left
+    ),
+    bottom: (
+      bboxRect.bottom
+      - paneRect.top
+    ),
   };
 
   const callout = {
-    left: calloutRect.left - paneRect.left,
-    top: calloutRect.top - paneRect.top,
-    right: calloutRect.right - paneRect.left,
-    bottom: calloutRect.bottom - paneRect.top,
+    left: (
+      calloutRect.left
+      - paneRect.left
+    ),
+    top: (
+      calloutRect.top
+      - paneRect.top
+    ),
+    right: (
+      calloutRect.right
+      - paneRect.left
+    ),
+    bottom: (
+      calloutRect.bottom
+      - paneRect.top
+    ),
   };
 
   const boxCenterX = (
-    box.left + box.right
+    box.left
+    + box.right
   ) / 2;
 
   const boxCenterY = (
-    box.top + box.bottom
+    box.top
+    + box.bottom
   ) / 2;
 
   const calloutCenterX = (
-    callout.left + callout.right
+    callout.left
+    + callout.right
   ) / 2;
 
   const calloutCenterY = (
-    callout.top + callout.bottom
+    callout.top
+    + callout.bottom
   ) / 2;
 
   const horizontalDelta = (
-    calloutCenterX - boxCenterX
+    calloutCenterX
+    - boxCenterX
   );
 
   const verticalDelta = (
-    calloutCenterY - boxCenterY
+    calloutCenterY
+    - boxCenterY
   );
 
   if (
@@ -1280,10 +1827,22 @@ function drawConnector(
     polyline.setAttribute(
       "points",
       [
-        `${points.start.x},${points.start.y}`,
-        `${elbowX},${points.start.y}`,
-        `${elbowX},${points.end.y}`,
-        `${points.end.x},${points.end.y}`,
+        (
+          `${points.start.x},`
+          + `${points.start.y}`
+        ),
+        (
+          `${elbowX},`
+          + `${points.start.y}`
+        ),
+        (
+          `${elbowX},`
+          + `${points.end.y}`
+        ),
+        (
+          `${points.end.x},`
+          + `${points.end.y}`
+        ),
       ].join(
         " ",
       ),
@@ -1303,10 +1862,22 @@ function drawConnector(
   polyline.setAttribute(
     "points",
     [
-      `${points.start.x},${points.start.y}`,
-      `${points.start.x},${elbowY}`,
-      `${points.end.x},${elbowY}`,
-      `${points.end.x},${points.end.y}`,
+      (
+        `${points.start.x},`
+        + `${points.start.y}`
+      ),
+      (
+        `${points.start.x},`
+        + `${elbowY}`
+      ),
+      (
+        `${points.end.x},`
+        + `${elbowY}`
+      ),
+      (
+        `${points.end.x},`
+        + `${points.end.y}`
+      ),
     ].join(
       " ",
     ),
@@ -1447,7 +2018,10 @@ function appendPageVisualization(
     section.append(
       createElement(
         "p",
-        "analysis-result__visualization-warning",
+        (
+          "analysis-result__"
+          + "visualization-warning"
+        ),
         page.localization_warning,
       ),
     );
@@ -1559,7 +2133,10 @@ function appendPageVisualization(
           }) => {
             const polyline = (
               document.createElementNS(
-                "http://www.w3.org/2000/svg",
+                (
+                  "http://www.w3.org/"
+                  + "2000/svg"
+                ),
                 "polyline",
               )
             );
@@ -1603,7 +2180,10 @@ function appendPageVisualization(
       createElement(
         "p",
         "analysis-result__page-empty",
-        "На этой странице замечания не сформированы.",
+        (
+          "На этой странице замечания "
+          + "не сформированы."
+        ),
       ),
     );
   }
@@ -1746,11 +2326,17 @@ export function appendAnalysisVisualization(
     section.append(
       createElement(
         "p",
-        "analysis-result__visualization-warning",
+        (
+          "analysis-result__"
+          + "visualization-warning"
+        ),
         (
           visualization?.error
           || "PDF-preview недоступен. "
-          + "Текстовые замечания приведены ниже."
+          + (
+            "Текстовые замечания "
+            + "приведены ниже."
+          )
         ),
       ),
     );

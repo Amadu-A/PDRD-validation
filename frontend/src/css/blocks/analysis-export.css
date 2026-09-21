@@ -1,0 +1,93 @@
+/* frontend/src/css/blocks/analysis-export.css */
+
+/*
+ * Download action итогового annotated PDF.
+ */
+
+.analysis-export {
+  display: grid;
+
+  gap: var(--space-3);
+
+  padding: var(--space-6);
+
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+
+  background: var(--color-surface);
+}
+
+
+.analysis-export__title {
+  margin: 0;
+
+  font-size: 1.05rem;
+}
+
+
+.analysis-export__description {
+  margin: 0;
+
+  color: var(--color-text-secondary);
+
+  line-height: 1.5;
+}
+
+
+.analysis-export__download {
+  display: inline-flex;
+
+  width: fit-content;
+
+  align-items: center;
+  justify-content: center;
+
+  padding:
+    var(--space-3)
+    var(--space-5);
+
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-control);
+
+  background: var(--color-accent);
+
+  color: var(--color-surface);
+
+  font-weight: var(--font-weight-semibold);
+
+  text-decoration: none;
+
+  transition:
+    filter 120ms ease,
+    transform 120ms ease;
+}
+
+
+.analysis-export__download:hover {
+  filter: brightness(0.94);
+}
+
+
+.analysis-export__download:active {
+  transform: translateY(1px);
+}
+
+
+.analysis-export__download:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+
+@media (max-width: 640px) {
+  .analysis-export {
+    padding: var(--space-4);
+  }
+
+
+  .analysis-export__download {
+    width: 100%;
+
+    box-sizing: border-box;
+  }
+}
