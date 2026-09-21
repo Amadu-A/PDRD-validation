@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/infrastructure/embedding/text_http.py
 
-"""Text-only adapter unified multimodal embedding service."""
+"""Text-only adapter resident shared multimodal embedding."""
 
 from pdrd_knowledge_service.application.ports.embedding import (
     EmbeddingProviderError,
@@ -15,7 +15,7 @@ from pdrd_knowledge_service.infrastructure.embedding.multimodal_http import (
 
 
 class HttpTextEmbeddingProvider:
-    """Адаптирует unified multimodal service к text EmbeddingProvider."""
+    """Адаптирует shared multimodal vLLM к text EmbeddingProvider."""
 
     def __init__(
         self,
@@ -25,7 +25,7 @@ class HttpTextEmbeddingProvider:
         connect_timeout_seconds: float,
         health_timeout_seconds: float,
     ) -> None:
-        """Создаёт bounded delegate."""
+        """Создаёт bounded shared-vLLM delegate."""
         self._delegate = HttpMultimodalEmbeddingProvider(
             base_url=base_url,
             request_timeout_seconds=(request_timeout_seconds),
@@ -35,15 +35,16 @@ class HttpTextEmbeddingProvider:
 
     async def embed(
         self,
-        texts: tuple[str, ...],
+        texts: tuple[
+            str,
+            ...,
+        ],
         *,
         instruction: str | None,
     ) -> list[list[float]]:
-        """Строит text embeddings и всегда освобождает checkpoint."""
+        """Строит batch text embeddings без model lifecycle."""
         if not texts:
             return []
-
-        primary_error: Exception | None = None
 
         try:
             return await self._delegate.embed(
@@ -57,26 +58,14 @@ class HttpTextEmbeddingProvider:
             )
 
         except MultimodalEmbeddingProviderError as error:
-            primary_error = error
-
             raise EmbeddingProviderError(
                 str(
                     error,
                 )
             ) from error
 
-        finally:
-            try:
-                await self._delegate.release()
-
-            except MultimodalEmbeddingProviderError as error:
-                if primary_error is None:
-                    raise EmbeddingProviderError(
-                        "Не удалось освободить unified embedding checkpoint.",
-                    ) from error
-
     async def is_ready(
         self,
     ) -> bool:
-        """Проверяет unified provider."""
+        """Проверяет resident shared embedding provider."""
         return await self._delegate.is_ready()

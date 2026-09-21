@@ -152,8 +152,44 @@ def test_grouped_use_case_contains_one_embedding_call_site() -> None:
     assert "execute" not in called
 
 
-def test_text_embedding_release_is_outside_per_input_loop() -> None:
-    """Knowledge adapter releases checkpoint после всего embed batch."""
+def test_embedding_adapters_use_one_resident_batch_without_release_lifecycle() -> None:
+    """Shared vLLM получает batch одним HTTP call без model unload."""
+    text_function = _async_function(
+        TEXT_EMBEDDING_PATH,
+        name="embed",
+    )
+
+    text_calls = _called_attributes(
+        text_function,
+    )
+
+    assert (
+        text_calls.count(
+            "embed",
+        )
+        == 1
+    )
+
+    assert "release" not in text_calls
+
+    multimodal_function = _async_function(
+        MULTIMODAL_EMBEDDING_PATH,
+        name="embed",
+    )
+
+    multimodal_calls = _called_attributes(
+        multimodal_function,
+    )
+
+    assert (
+        multimodal_calls.count(
+            "post",
+        )
+        == 1
+    )
+
+    assert "release" not in multimodal_calls
+
     text_source = TEXT_EMBEDDING_PATH.read_text(
         encoding="utf-8",
     )
@@ -162,10 +198,12 @@ def test_text_embedding_release_is_outside_per_input_loop() -> None:
         encoding="utf-8",
     )
 
-    assert text_source.count("await self._delegate.release()") == 1
+    assert "await self._delegate.release()" not in text_source
 
-    assert "for item in inputs:" in multimodal_source
+    assert "/internal/v1/embeddings" not in multimodal_source
 
-    assert "await self.release()" not in multimodal_source
+    assert "/internal/v1/release" not in multimodal_source
 
-    assert "await self._delegate.release()" not in multimodal_source
+    assert "/embeddings" in multimodal_source
+
+    assert "shared-embedding" in multimodal_source
