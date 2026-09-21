@@ -23,7 +23,6 @@ from pdrd_knowledge_service.application.ports.embedding import (
 from pdrd_knowledge_service.application.ports.multimodal_embedding import (
     MultimodalEmbeddingInput,
     MultimodalEmbeddingProvider,
-    MultimodalEmbeddingProviderError,
 )
 from pdrd_knowledge_service.application.ports.normative_pdf import (
     NormativePdfExtractor,
@@ -70,6 +69,7 @@ from pdrd_knowledge_service.domain.technical_assignment import (
 )
 from pdrd_knowledge_service.domain.technical_assignment_indexing import (
     extract_normative_references,
+    extract_technical_assignment_requirements,
 )
 
 _T_EMBEDDING_INSTRUCTION = (
@@ -77,6 +77,13 @@ _T_EMBEDDING_INSTRUCTION = (
     "against Russian engineering project drawings, "
     "project requirements, equipment requirements and "
     "referenced normative documents."
+)
+
+_T_REQUIREMENT_EMBEDDING_INSTRUCTION = (
+    "Represent this atomic technical assignment requirement "
+    "for retrieval against Russian engineering project drawings "
+    "and compliance checks. Preserve equipment, parameters, "
+    "constraints, mandatory actions and referenced standards."
 )
 
 
@@ -281,7 +288,10 @@ class PersistedEmbeddingCollectionRebuilder:
                         "text": chunk.text,
                     },
                 )
-                for chunk, vector in zip(
+                for (
+                    chunk,
+                    vector,
+                ) in zip(
                     batch,
                     vectors,
                     strict=True,
@@ -317,17 +327,10 @@ class PersistedEmbeddingCollectionRebuilder:
         inserted = 0
 
         for assignment in ready_assignments:
-            try:
-                inserted += await self._reindex_technical_assignment(
-                    collection=collection,
-                    assignment=assignment,
-                )
-
-            finally:
-                with suppress(
-                    MultimodalEmbeddingProviderError,
-                ):
-                    await self.multimodal_embedding_provider.release()
+            inserted += await self._reindex_technical_assignment(
+                collection=collection,
+                assignment=assignment,
+            )
 
         return inserted
 
@@ -337,7 +340,7 @@ class PersistedEmbeddingCollectionRebuilder:
         collection: str,
         assignment: TechnicalAssignment,
     ) -> int:
-        """Переиндексирует одно persisted техническое задание."""
+        """Переиндексирует page и atomic requirement representations ТЗ."""
         storage_key = build_technical_assignment_storage_key(
             analysis_document_id=(assignment.analysis_document_id),
             technical_assignment_id=(assignment.technical_assignment_id),
@@ -373,8 +376,10 @@ class PersistedEmbeddingCollectionRebuilder:
 
         inserted = 0
 
+        requirement_index = 0
+
         for page in pages:
-            vectors = await self.multimodal_embedding_provider.embed(
+            page_vectors = await self.multimodal_embedding_provider.embed(
                 (
                     MultimodalEmbeddingInput(
                         text=page.text,
@@ -386,19 +391,19 @@ class PersistedEmbeddingCollectionRebuilder:
 
             if (
                 len(
-                    vectors,
+                    page_vectors,
                 )
                 != 1
                 or len(
-                    vectors[0],
+                    page_vectors[0],
                 )
                 != self.output_dimension
             ):
                 raise RuntimeError(
-                    "T migration получила invalid vector.",
+                    "T migration получила invalid page vector.",
                 )
 
-            point_id = str(
+            page_point_id = str(
                 uuid5(
                     NAMESPACE_URL,
                     (
@@ -413,8 +418,8 @@ class PersistedEmbeddingCollectionRebuilder:
                 collection=collection,
                 records=(
                     VectorRecord(
-                        point_id=point_id,
-                        vector=vectors[0],
+                        point_id=page_point_id,
+                        vector=page_vectors[0],
                         payload={
                             "source_type": ("technical_assignment"),
                             "representation": ("page_multimodal"),
@@ -430,7 +435,7 @@ class PersistedEmbeddingCollectionRebuilder:
                             "source_file": (assignment.original_name),
                             "source_sha256": (assignment.sha256),
                             "page": page.page_number,
-                            "pixel_width": page.pixel_width,
+                            "pixel_width": (page.pixel_width),
                             "pixel_height": (page.pixel_height),
                             "normative_refs": list(
                                 extract_normative_references(
@@ -446,6 +451,122 @@ class PersistedEmbeddingCollectionRebuilder:
             )
 
             inserted += 1
+
+            requirements = extract_technical_assignment_requirements(
+                page_number=page.page_number,
+                text=page.text,
+            )
+
+            if not requirements:
+                continue
+
+            requirement_vectors = await self.multimodal_embedding_provider.embed(
+                tuple(
+                    MultimodalEmbeddingInput(
+                        text=requirement.text,
+                        instruction=(_T_REQUIREMENT_EMBEDDING_INSTRUCTION),
+                    )
+                    for requirement in requirements
+                )
+            )
+
+            if len(
+                requirement_vectors,
+            ) != len(
+                requirements,
+            ):
+                raise RuntimeError(
+                    "T migration получила invalid requirement vector count.",
+                )
+
+            records: list[VectorRecord] = []
+
+            for offset, (
+                requirement,
+                vector,
+            ) in enumerate(
+                zip(
+                    requirements,
+                    requirement_vectors,
+                    strict=True,
+                ),
+                start=1,
+            ):
+                if (
+                    len(
+                        vector,
+                    )
+                    != self.output_dimension
+                ):
+                    raise RuntimeError(
+                        "T migration получила invalid requirement vector.",
+                    )
+
+                current_requirement_index = requirement_index + offset
+
+                requirement_id = f"T-R{current_requirement_index}"
+
+                point_id = str(
+                    uuid5(
+                        NAMESPACE_URL,
+                        (
+                            "pdrd:technical-assignment:"
+                            f"{assignment.technical_assignment_id}:"
+                            f"requirement:{requirement_id}"
+                        ),
+                    )
+                )
+
+                records.append(
+                    VectorRecord(
+                        point_id=point_id,
+                        vector=vector,
+                        payload={
+                            "source_type": ("technical_assignment"),
+                            "representation": ("requirement_text"),
+                            "technical_assignment_id": str(
+                                assignment.technical_assignment_id,
+                            ),
+                            "analysis_document_id": str(
+                                assignment.analysis_document_id,
+                            ),
+                            "section_id": str(
+                                assignment.section_id,
+                            ),
+                            "source_file": (assignment.original_name),
+                            "source_sha256": (assignment.sha256),
+                            "page": (requirement.page_number),
+                            "parent_page_point_id": (page_point_id),
+                            "requirement_id": (requirement_id),
+                            "requirement_index": (current_requirement_index),
+                            "requirement_local_key": (requirement.local_key),
+                            "requirement_strength": (requirement.strength),
+                            "scopes": list(
+                                requirement.scopes,
+                            ),
+                            "normative_refs": list(
+                                requirement.normative_refs,
+                            ),
+                            "source_text": (requirement.source_text),
+                            "text": requirement.text,
+                        },
+                    )
+                )
+
+            await self.vector_store.upsert(
+                collection=collection,
+                records=tuple(
+                    records,
+                ),
+            )
+
+            requirement_index += len(
+                requirements,
+            )
+
+            inserted += len(
+                records,
+            )
 
         return inserted
 
@@ -507,7 +628,10 @@ class PersistedEmbeddingCollectionRebuilder:
                         point.payload,
                     ),
                 )
-                for point, vector in zip(
+                for (
+                    point,
+                    vector,
+                ) in zip(
                     batch,
                     vectors,
                     strict=True,
@@ -538,15 +662,20 @@ class MigrateEmbeddingIndexes:
 
     vector_size: int
 
-    legacy_collections: tuple[str, ...]
+    legacy_collections: tuple[
+        str,
+        ...,
+    ]
 
     async def execute(
         self,
     ) -> EmbeddingMigrationResult:
-        """Выполняет rebuild, atomic alias switch и cleanup."""
+        """Выполняет rebuild и atomic alias switch без удаления rollback indexes."""
         current = {
-            alias: await self.vector_store.get_alias_target(
-                alias,
+            alias: (
+                await self.vector_store.get_alias_target(
+                    alias,
+                )
             )
             for alias in self.plan.aliases_to_targets
         }
@@ -554,18 +683,16 @@ class MigrateEmbeddingIndexes:
         desired = self.plan.aliases_to_targets
 
         needs_rebuild = {
-            alias: current[alias] != target for alias, target in desired.items()
+            alias: (current[alias] != target)
+            for (
+                alias,
+                target,
+            ) in desired.items()
         }
 
         if not any(
             needs_rebuild.values(),
         ):
-            await self._cleanup_obsolete(
-                keep=set(
-                    desired.values(),
-                ),
-            )
-
             return EmbeddingMigrationResult(
                 skipped=True,
                 catalog_points=0,
@@ -587,7 +714,10 @@ class MigrateEmbeddingIndexes:
             experience_source = await self._find_legacy_experience_source()
 
         try:
-            for alias, target in desired.items():
+            for (
+                alias,
+                target,
+            ) in desired.items():
                 if not needs_rebuild[alias]:
                     continue
 
@@ -628,7 +758,10 @@ class MigrateEmbeddingIndexes:
             await self.vector_store.replace_aliases(
                 {
                     alias: target
-                    for alias, target in desired.items()
+                    for (
+                        alias,
+                        target,
+                    ) in desired.items()
                     if needs_rebuild[alias]
                 }
             )
@@ -644,17 +777,11 @@ class MigrateEmbeddingIndexes:
 
             raise
 
-        await self._cleanup_obsolete(
-            keep=set(
-                desired.values(),
-            ),
-        )
-
         return EmbeddingMigrationResult(
             skipped=False,
             catalog_points=catalog_points,
             technical_assignment_points=(technical_assignment_points),
-            experience_points=experience_points,
+            experience_points=(experience_points),
         )
 
     async def _find_legacy_experience_source(
@@ -668,32 +795,3 @@ class MigrateEmbeddingIndexes:
                 return candidate
 
         return None
-
-    async def _cleanup_obsolete(
-        self,
-        *,
-        keep: set[str],
-    ) -> None:
-        """Удаляет только managed obsolete physical collections."""
-        collections = await self.vector_store.list_collections()
-
-        managed_prefixes = (
-            f"{self.plan.catalog_prefix}_",
-            (f"{self.plan.technical_assignment_prefix}_"),
-            f"{self.plan.experience_prefix}_",
-        )
-
-        legacy = set(
-            self.legacy_collections,
-        )
-
-        for collection in collections:
-            if collection in keep:
-                continue
-
-            if collection in legacy or collection.startswith(
-                managed_prefixes,
-            ):
-                await self.vector_store.delete_collection(
-                    collection=collection,
-                )

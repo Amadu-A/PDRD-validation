@@ -258,10 +258,10 @@ while true; do
             api-gateway \
             api-gateway-worker \
             knowledge-service \
+            knowledge-embedding-migrator \
             knowledge-indexer \
             technical-assignment-indexer \
             analysis-service \
-            multimodal-embedding-service \
             || true
 
         die "PDRD stack не стал ready."

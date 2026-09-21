@@ -1,6 +1,6 @@
 # tests/architecture/test_shared_vllm_integration.py
 
-"""Architecture guards shared-vlm cutover without embedding migration."""
+"""Architecture guards shared vLLM and shared embedding integration."""
 
 from pathlib import Path
 
@@ -120,9 +120,9 @@ def test_committed_vlm_config_contains_no_physical_model_or_gpu_layout() -> None
         "SHARED_VLM_DP_SIZE",
         "SHARED_VLM_GPU_DEVICES",
         "ANALYSIS_SERVICE_GPU__",
-        ("ANALYSIS_SERVICE_VISION__KEEP_ALIVE"),
-        ("ANALYSIS_SERVICE_VISION__NUM_CTX"),
-        ("ANALYSIS_SERVICE_VISION__MIN_FREE_VRAM_GIB"),
+        "ANALYSIS_SERVICE_VISION__KEEP_ALIVE",
+        "ANALYSIS_SERVICE_VISION__NUM_CTX",
+        "ANALYSIS_SERVICE_VISION__MIN_FREE_VRAM_GIB",
     )
 
     violations = [marker for marker in forbidden if marker in source]
@@ -132,24 +132,22 @@ def test_committed_vlm_config_contains_no_physical_model_or_gpu_layout() -> None
     )
 
 
-def test_embedding_contract_remains_unchanged() -> None:
-    """VLM cutover не меняет embedding identity/runtime settings."""
+def test_embedding_contract_uses_shared_resident_runtime() -> None:
+    """Embedding identity фиксирует shared alias и schema-v2 runtime."""
     source = ENV_EXAMPLE.read_text(
         encoding="utf-8",
     )
 
     required = (
-        ("PDRD_EMBEDDING_MODEL=Qwen/Qwen3-VL-Embedding-8B"),
-        ("PDRD_EMBEDDING_DIMENSION=4096"),
-        ("PDRD_EMBEDDING_SCHEMA_VERSION=1"),
+        "PDRD_EMBEDDING_MODEL=shared-embedding",
+        "PDRD_EMBEDDING_DIMENSION=4096",
+        "PDRD_EMBEDDING_SCHEMA_VERSION=2",
+        ("PDRD_SHARED_EMBEDDING_BASE_URL=http://shared-embedding:8000/v1"),
+        ("KNOWLEDGE_SERVICE_EMBEDDING__BASE_URL=http://shared-embedding:8000/v1"),
         (
-            "KNOWLEDGE_SERVICE_EMBEDDING__"
-            "BASE_URL="
-            "http://pdrd-multimodal-"
-            "embedding-service:8601"
+            "KNOWLEDGE_SERVICE_MULTIMODAL_EMBEDDING__BASE_URL="
+            "http://shared-embedding:8000/v1"
         ),
-        ("MULTIMODAL_EMBEDDING_MODEL__MAX_BATCH_SIZE=1"),
-        ("MULTIMODAL_EMBEDDING_MODEL__MAX_CONCURRENCY=1"),
     )
 
     missing = [marker for marker in required if marker not in source]
@@ -158,17 +156,25 @@ def test_embedding_contract_remains_unchanged() -> None:
         missing,
     )
 
+    assert "PDRD_EMBEDDING_MODEL=Qwen/" not in source
 
-def test_stack_check_probes_shared_vlm_from_analysis_container() -> None:
-    """Runtime check использует Docker DNS, а не host loopback."""
+
+def test_stack_check_probes_shared_models_from_application_containers() -> None:
+    """Runtime check использует Docker DNS shared services."""
     source = CHECK_STACK.read_text(
         encoding="utf-8",
     )
 
     assert "http://shared-vlm:8000/health" in source
 
-    assert ("http://shared-vlm:8000/v1/models") in source
+    assert "http://shared-vlm:8000/v1/models" in source
 
     assert "Analysis Service -> shared-vlm" in source
+
+    assert "http://shared-embedding:8000/health" in source
+
+    assert "http://shared-embedding:8000/v1/models" in source
+
+    assert "Knowledge Service -> shared-embedding" in source
 
     assert "http://ollama:11434" not in source

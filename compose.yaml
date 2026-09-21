@@ -1,7 +1,7 @@
 # compose.yaml
 # Project-specific Docker stack PDRD.
 #
-# Shared: RabbitMQ, n8n, shared-vlm.
+# Shared: RabbitMQ, n8n, shared-vlm, shared-embedding.
 # Project-specific: PostgreSQL, Qdrant и application services.
 
 name: ${COMPOSE_PROJECT_NAME:-pdrd-validation-ai}
@@ -39,6 +39,9 @@ x-knowledge-service-environment: &knowledge-service-environment
   KNOWLEDGE_SERVICE_BROKER__USER: ${PDRD_RABBITMQ_USER:-pdrd_validation}
   KNOWLEDGE_SERVICE_BROKER__PASSWORD: ${PDRD_RABBITMQ_PASSWORD:?PDRD_RABBITMQ_PASSWORD must be set in .env}
   KNOWLEDGE_SERVICE_BROKER__VIRTUAL_HOST: ${PDRD_RABBITMQ_VHOST:-pdrd-validation}
+
+  KNOWLEDGE_SERVICE_EMBEDDING__BASE_URL: ${PDRD_SHARED_EMBEDDING_BASE_URL:-http://shared-embedding:8000/v1}
+  KNOWLEDGE_SERVICE_MULTIMODAL_EMBEDDING__BASE_URL: ${PDRD_SHARED_EMBEDDING_BASE_URL:-http://shared-embedding:8000/v1}
 
 services:
   postgres:
@@ -88,49 +91,6 @@ services:
 
     networks:
       - app-net
-
-  multimodal-embedding-service:
-    build:
-      context: ./services/multimodal-embedding-service
-      target: runtime
-
-    restart: unless-stopped
-
-    env_file: *app-env-files
-
-    environment:
-      HF_HOME: /models/huggingface
-      TOKENIZERS_PARALLELISM: "false"
-      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
-
-    gpus: all
-
-    volumes:
-      - multimodal_model_cache:/models/huggingface
-      - gpu_coordination:/var/lock/pdrd-gpu
-
-    ports:
-      - "${MULTIMODAL_EMBEDDING_BIND_IP:-127.0.0.1}:${MULTIMODAL_EMBEDDING_HOST_PORT:-8601}:8601"
-
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8601/health/ready', timeout=10)"
-        ]
-      interval: 15s
-      timeout: 12s
-      retries: 20
-      start_period: 30s
-
-    logging: *default-logging
-
-    networks:
-      app-net:
-        aliases:
-          - pdrd-multimodal-embedding-service
 
   quality-tests:
     build:
@@ -355,13 +315,11 @@ services:
       qdrant:
         condition: service_started
 
-      multimodal-embedding-service:
-        condition: service_healthy
-
     logging: *default-logging
 
     networks:
       - app-net
+      - ai-shared
 
   knowledge-service:
     build:
@@ -400,9 +358,6 @@ services:
 
       qdrant:
         condition: service_started
-
-      multimodal-embedding-service:
-        condition: service_healthy
 
       knowledge-embedding-migrator:
         condition: service_completed_successfully
@@ -490,9 +445,6 @@ services:
       qdrant:
         condition: service_started
 
-      multimodal-embedding-service:
-        condition: service_healthy
-
       knowledge-embedding-migrator:
         condition: service_completed_successfully
 
@@ -548,9 +500,6 @@ services:
 
       qdrant:
         condition: service_started
-
-      multimodal-embedding-service:
-        condition: service_healthy
 
       knowledge-embedding-migrator:
         condition: service_completed_successfully
@@ -676,8 +625,6 @@ volumes:
   analysis_artifacts:
   normative_documents:
   technical_assignment_documents:
-  multimodal_model_cache:
-  gpu_coordination:
 
 networks:
   app-net:

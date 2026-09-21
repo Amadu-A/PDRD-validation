@@ -16,10 +16,17 @@ UP_SCRIPT = ROOT / "scripts" / "up.sh"
 
 CHECK_STACK_SCRIPT = ROOT / "scripts" / "check-stack.sh"
 
+EMBEDDING_MIGRATION_SCRIPT = ROOT / "scripts" / "migrate-embedding-indexes.sh"
+
 
 def test_one_command_startup_script_exists() -> None:
     """Repository содержит единый startup entrypoint."""
     assert UP_SCRIPT.is_file()
+
+
+def test_embedding_cutover_script_exists() -> None:
+    """Repository содержит controlled embedding migration entrypoint."""
+    assert EMBEDDING_MIGRATION_SCRIPT.is_file()
 
 
 def test_startup_provisions_project_rabbitmq_namespace() -> None:
@@ -75,6 +82,7 @@ def test_startup_runs_shared_bootstrap_and_database_migrations() -> None:
     )
 
     assert "api-gateway" in source
+
     assert "knowledge-service" in source
 
     assert "bash scripts/check-stack.sh" in source
@@ -123,11 +131,46 @@ def test_stack_check_covers_background_workers() -> None:
     )
 
 
+def test_embedding_cutover_is_blue_green_and_non_destructive() -> None:
+    """Cutover использует migrator и не удаляет persistent Docker state."""
+    source = EMBEDDING_MIGRATION_SCRIPT.read_text(
+        encoding="utf-8",
+    )
+
+    required = (
+        "knowledge-embedding-migrator",
+        "shared-embedding",
+        "embedding_preflight",
+        "alias_snapshot",
+        "docker compose stop",
+        "docker compose up -d",
+    )
+
+    missing = [marker for marker in required if marker not in source]
+
+    assert not missing, "\n".join(
+        missing,
+    )
+
+    forbidden = (
+        "docker compose down -v",
+        "docker volume rm",
+        "qdrant_data",
+    )
+
+    violations = [marker for marker in forbidden if marker in source]
+
+    assert not violations, "\n".join(
+        violations,
+    )
+
+
 def test_operational_shell_scripts_have_real_shebang() -> None:
     """Shell entrypoints начинают файл с executable shebang."""
     for path in (
         UP_SCRIPT,
         CHECK_STACK_SCRIPT,
+        EMBEDDING_MIGRATION_SCRIPT,
     ):
         first_line = path.read_text(
             encoding="utf-8",
@@ -141,10 +184,12 @@ def test_operational_shell_scripts_avoid_invalid_multiline_if_subshells() -> Non
     for path in (
         UP_SCRIPT,
         CHECK_STACK_SCRIPT,
+        EMBEDDING_MIGRATION_SCRIPT,
     ):
         source = path.read_text(
             encoding="utf-8",
         )
 
         assert "\n    if (\n" not in source
+
         assert "\n        if (\n" not in source

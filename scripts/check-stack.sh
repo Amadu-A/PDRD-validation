@@ -155,7 +155,6 @@ echo "=== Container states ==="
 
 check_service_state "postgres"
 check_service_state "qdrant"
-check_service_state "multimodal-embedding-service"
 
 check_completed_service "knowledge-embedding-migrator"
 
@@ -241,6 +240,30 @@ if docker compose exec \
     ok "Analysis Service -> shared-vlm model alias"
 else
     bad "Analysis Service -> shared-vlm model alias"
+fi
+
+if docker compose exec \
+    -T \
+    knowledge-service \
+    python3 \
+    -c 'import urllib.request; urllib.request.urlopen("http://shared-embedding:8000/health", timeout=10)' \
+    >/dev/null 2>&1; then
+
+    ok "Knowledge Service -> shared-embedding health"
+else
+    bad "Knowledge Service -> shared-embedding health"
+fi
+
+if docker compose exec \
+    -T \
+    knowledge-service \
+    python3 \
+    -c 'import json, urllib.request; payload=json.load(urllib.request.urlopen("http://shared-embedding:8000/v1/models", timeout=10)); assert any(isinstance(item, dict) and item.get("id") == "shared-embedding" for item in payload.get("data", []))' \
+    >/dev/null 2>&1; then
+
+    ok "Knowledge Service -> shared-embedding model alias"
+else
+    bad "Knowledge Service -> shared-embedding model alias"
 fi
 
 echo
