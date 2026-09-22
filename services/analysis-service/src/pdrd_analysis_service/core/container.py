@@ -28,13 +28,8 @@ from pdrd_analysis_service.core.settings import (
 from pdrd_analysis_service.infrastructure.analysis_progress import (
     HttpAnalysisProgressProbe,
 )
-from pdrd_analysis_service.infrastructure.gpu_coordination import (
-    CrossProcessFileGpuLease,
-    HttpGpuMemoryProbe,
-    WaitingGpuCoordinator,
-)
-from pdrd_analysis_service.infrastructure.ollama import (
-    OllamaStructuredVisionModel,
+from pdrd_analysis_service.infrastructure.vllm import (
+    VllmStructuredVisionModel,
 )
 
 
@@ -71,37 +66,15 @@ def build_container() -> ApplicationContainer:
     """Собирает concrete runtime dependencies."""
     settings = get_settings()
 
-    gpu_lease = CrossProcessFileGpuLease(
-        path=settings.gpu.lock_path,
-        poll_seconds=settings.gpu.admission_poll_seconds,
-    )
-
-    gpu_probe = HttpGpuMemoryProbe(
-        base_url=settings.gpu.status_base_url,
-        timeout_seconds=settings.gpu.status_timeout_seconds,
-    )
-
-    gpu_coordinator = WaitingGpuCoordinator(
-        lease=gpu_lease,
-        memory_probe=gpu_probe,
-        lease_timeout_seconds=(settings.gpu.lease_timeout_seconds),
-        admission_poll_seconds=(settings.gpu.admission_poll_seconds),
-    )
-
-    vision_model = OllamaStructuredVisionModel(
-        base_url=settings.vision.base_url,
-        model=settings.vision.model,
-        request_timeout_seconds=(settings.vision.request_timeout_seconds),
-        connect_timeout_seconds=(settings.vision.connect_timeout_seconds),
-        health_timeout_seconds=(settings.vision.health_timeout_seconds),
-        num_ctx=settings.vision.num_ctx,
-        max_retries=settings.vision.max_retries,
-        keep_alive=settings.vision.keep_alive,
-        max_retry_num_predict=(settings.vision.max_retry_num_predict),
-        gpu_coordinator=gpu_coordinator,
-        min_free_vram_bytes=(settings.vision.min_free_vram_bytes),
-        unload_timeout_seconds=(settings.vision.unload_timeout_seconds),
-        unload_poll_seconds=(settings.vision.unload_poll_seconds),
+    vision_model = VllmStructuredVisionModel(
+        base_url=settings.vlm.base_url,
+        model=settings.vlm.model,
+        request_timeout_seconds=(settings.vlm.request_timeout_seconds),
+        connect_timeout_seconds=(settings.vlm.connect_timeout_seconds),
+        health_timeout_seconds=(settings.vlm.health_timeout_seconds),
+        max_attempts=settings.vlm.max_attempts,
+        retry_backoff_seconds=(settings.vlm.retry_backoff_seconds),
+        max_retry_num_predict=(settings.vlm.max_retry_num_predict),
     )
 
     progress_probe = HttpAnalysisProgressProbe(

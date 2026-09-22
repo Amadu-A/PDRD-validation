@@ -102,9 +102,9 @@ class FakeVectorStore:
         }
 
         self.aliases = {
-            "catalog_active": "legacy_catalog",
+            "catalog_active": ("legacy_catalog"),
             "t_active": "legacy_t",
-            "experience_active": "legacy_experience",
+            "experience_active": ("legacy_experience"),
         }
 
         self.deleted: list[str] = []
@@ -158,7 +158,10 @@ class FakeVectorStore:
 
     async def replace_aliases(
         self,
-        aliases_to_targets: dict[str, str],
+        aliases_to_targets: dict[
+            str,
+            str,
+        ],
     ) -> None:
         """Переключает fake aliases."""
         self.aliases.update(
@@ -167,7 +170,10 @@ class FakeVectorStore:
 
     async def list_collections(
         self,
-    ) -> tuple[str, ...]:
+    ) -> tuple[
+        str,
+        ...,
+    ]:
         """Возвращает fake physical collections."""
         return tuple(
             self.collections,
@@ -175,24 +181,24 @@ class FakeVectorStore:
 
 
 def _plan() -> EmbeddingIndexPlan:
-    """Создаёт deterministic plan."""
+    """Создаёт deterministic schema-v2 plan."""
     return EmbeddingIndexPlan(
         identity=EmbeddingIdentity(
-            model="Qwen/Qwen3-VL-Embedding-8B",
+            model="shared-embedding",
             dimension=4096,
-            schema_version=1,
+            schema_version=2,
         ),
         catalog_alias="catalog_active",
-        technical_assignment_alias="t_active",
-        experience_alias="experience_active",
+        technical_assignment_alias=("t_active"),
+        experience_alias=("experience_active"),
         catalog_prefix="catalog",
         technical_assignment_prefix="t",
         experience_prefix="experience",
     )
 
 
-async def test_successful_migration_switches_all_aliases_then_cleans_old() -> None:
-    """Cutover выполняется только после успешных rebuilds."""
+async def test_successful_migration_switches_aliases_and_preserves_old() -> None:
+    """Cutover сохраняет старые physical indexes для rollback."""
     vector_store = FakeVectorStore()
 
     migrator = MigrateEmbeddingIndexes(
@@ -220,16 +226,18 @@ async def test_successful_migration_switches_all_aliases_then_cleans_old() -> No
     plan = _plan()
 
     assert vector_store.aliases == {
-        "catalog_active": plan.catalog_target,
+        "catalog_active": (plan.catalog_target),
         "t_active": (plan.technical_assignment_target),
         "experience_active": (plan.experience_target),
     }
 
-    assert "legacy_catalog" not in vector_store.collections
+    assert "legacy_catalog" in vector_store.collections
 
-    assert "legacy_t" not in vector_store.collections
+    assert "legacy_t" in vector_store.collections
 
-    assert "legacy_experience" not in vector_store.collections
+    assert "legacy_experience" in vector_store.collections
+
+    assert vector_store.deleted == []
 
 
 async def test_failed_migration_never_moves_existing_aliases() -> None:
@@ -269,13 +277,17 @@ async def test_failed_migration_never_moves_existing_aliases() -> None:
     assert "legacy_experience" in vector_store.collections
 
 
-async def test_same_embedding_identity_is_fast_noop() -> None:
-    """Container recreation не переиндексирует всё без model change."""
+async def test_same_embedding_identity_is_fast_noop_without_cleanup() -> None:
+    """Повторный startup не rebuild-ит и не удаляет rollback indexes."""
     vector_store = FakeVectorStore()
 
     plan = _plan()
 
     vector_store.collections = set(plan.aliases_to_targets.values())
+
+    vector_store.collections.add(
+        "legacy_catalog",
+    )
 
     vector_store.aliases = dict(
         plan.aliases_to_targets,
@@ -288,9 +300,13 @@ async def test_same_embedding_identity_is_fast_noop() -> None:
         rebuilder=rebuilder,
         plan=plan,
         vector_size=4096,
-        legacy_collections=(),
+        legacy_collections=("legacy_catalog",),
     ).execute()
 
     assert result.skipped is True
 
     assert rebuilder.calls == []
+
+    assert "legacy_catalog" in vector_store.collections
+
+    assert vector_store.deleted == []

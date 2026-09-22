@@ -2,8 +2,6 @@
 
 """HTTP regression tests устойчивого T-first status/details contract."""
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -33,33 +31,17 @@ from pdrd_analysis_service.main import (
 )
 
 
-class _ResidentVisionModel:
-    """Fake resident VLM для T-first HTTP regression."""
+class _RecordingVisionModel:
+    """Fake VLM для T-first HTTP regression."""
 
     def __init__(
         self,
         *,
         payload: dict[str, Any],
     ) -> None:
-        """Сохраняет ответ модели и counters."""
+        """Сохраняет ответ модели и call counter."""
         self.payload = payload
-
-        self.scope_enters = 0
-        self.scope_exits = 0
         self.calls = 0
-
-    @asynccontextmanager
-    async def residency_scope(
-        self,
-    ) -> AsyncIterator[None]:
-        """Эмулирует bounded VLM residency."""
-        self.scope_enters += 1
-
-        try:
-            yield
-
-        finally:
-            self.scope_exits += 1
 
     async def generate_json(
         self,
@@ -90,7 +72,7 @@ class _ResidentVisionModel:
                 done_reason="stop",
                 requested_num_predict=4000,
                 total_duration_ms=10.0,
-                load_duration_ms=1.0,
+                load_duration_ms=0.0,
                 prompt_eval_count=100,
                 eval_count=50,
                 content_length=300,
@@ -106,12 +88,12 @@ class _ResidentVisionModel:
 
 
 def _build_app(
-    model: _ResidentVisionModel,
+    model: _RecordingVisionModel,
 ):
     """Создаёт Analysis Service test app."""
     settings = Settings(
         _env_file=None,
-        service_name=("PDRD Analysis Service Test"),
+        service_name="PDRD Analysis Service Test",
         service_version="0.1.0-test",
         environment="test",
     )
@@ -208,7 +190,7 @@ def _request_payload() -> dict[str, Any]:
 
 async def _post(
     *,
-    model: _ResidentVisionModel,
+    model: _RecordingVisionModel,
 ) -> httpx.Response:
     """Выполняет один T-first HTTP request."""
     app = _build_app(
@@ -224,14 +206,14 @@ async def _post(
         base_url="http://test",
     ) as client:
         return await client.post(
-            "/internal/v1/pages/check-technical-assignment",
+            ("/internal/v1/pages/check-technical-assignment"),
             json=_request_payload(),
         )
 
 
 async def test_t_first_http_accepts_issue_without_duplicate_status() -> None:
     """Корректный issue/details response остаётся confirmed."""
-    model = _ResidentVisionModel(
+    model = _RecordingVisionModel(
         payload={
             "decisions": {
                 "T-R1": {
@@ -278,13 +260,11 @@ async def test_t_first_http_accepts_issue_without_duplicate_status() -> None:
     assert payload["findings"][0]["status"] == "confirmed"
 
     assert model.calls == 1
-    assert model.scope_enters == 1
-    assert model.scope_exits == 1
 
 
 async def test_t_first_http_repairs_missing_issue_instead_of_503() -> None:
     """Production regression: violated без issue становится needs_review."""
-    model = _ResidentVisionModel(
+    model = _RecordingVisionModel(
         payload={
             "decisions": {
                 "T-R1": {
@@ -317,9 +297,8 @@ async def test_t_first_http_repairs_missing_issue_instead_of_503() -> None:
 
     assert decision["severity"] == "warning"
 
-    assert (
-        decision["comment"] == "Требование ТЗ требует дополнительной "
-        "инженерной проверки."
+    assert decision["comment"] == (
+        "Требование ТЗ требует дополнительной инженерной проверки."
     )
 
     assert (
@@ -338,5 +317,3 @@ async def test_t_first_http_repairs_missing_issue_instead_of_503() -> None:
     ]
 
     assert model.calls == 1
-    assert model.scope_enters == 1
-    assert model.scope_exits == 1

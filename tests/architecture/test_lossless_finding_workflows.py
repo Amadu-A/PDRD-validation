@@ -229,4 +229,4 @@ def test_high_recall_budget_is_committed_in_settings_and_env() -> None:
         "ANALYSIS_SERVICE_PIPELINE__NORM_CHECK_NUM_PREDICT=14000" in environment_source
     )
 
-    assert "ANALYSIS_SERVICE_VISION__MAX_RETRY_NUM_PREDICT=14000" in environment_source
+    assert "ANALYSIS_SERVICE_VLM__MAX_RETRY_NUM_PREDICT=14000" in environment_source

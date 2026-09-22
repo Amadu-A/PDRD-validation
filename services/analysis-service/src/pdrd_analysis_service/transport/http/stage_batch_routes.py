@@ -1,8 +1,14 @@
 # services/analysis-service/src/pdrd_analysis_service/transport/http/stage_batch_routes.py
 
-"""Stage-scoped GPU HTTP API для больших PDF-документов."""
+"""Document-scoped VLM HTTP API для больших PDF-документов."""
 
+import asyncio
 import logging
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Sequence,
+)
 from typing import Annotated
 from uuid import UUID
 
@@ -24,6 +30,13 @@ from pdrd_analysis_service.transport.http.routes import (
     finalize_findings,
     understand_page,
 )
+from pdrd_analysis_service.transport.http.schemas import (
+    CheckNormsRequest,
+    CheckNormsResponse,
+    FinalizeResponse,
+    UnderstandPageRequest,
+    UnderstandPageResponse,
+)
 from pdrd_analysis_service.transport.http.stage_batch_schemas import (
     CheckNormsStageItemResponse,
     CheckNormsStageRequest,
@@ -31,9 +44,11 @@ from pdrd_analysis_service.transport.http.stage_batch_schemas import (
     CheckTechnicalAssignmentStageItemResponse,
     CheckTechnicalAssignmentStageRequest,
     CheckTechnicalAssignmentStageResponse,
+    FinalizeStageItemRequest,
     FinalizeStageItemResponse,
     FinalizeStageRequest,
     FinalizeStageResponse,
+    TechnicalAssignmentStagePageRequest,
     UnderstandPagesStageItemResponse,
     UnderstandPagesStageRequest,
     UnderstandPagesStageResponse,
@@ -43,6 +58,7 @@ from pdrd_analysis_service.transport.http.technical_assignment_routes import (
 )
 from pdrd_analysis_service.transport.http.technical_assignment_schemas import (
     CheckTechnicalAssignmentRequest,
+    CheckTechnicalAssignmentResponse,
 )
 
 router = APIRouter()
@@ -68,24 +84,24 @@ def _validate_stage_size(
     raise HTTPException(
         status_code=status.HTTP_413_CONTENT_TOO_LARGE,
         detail=(
-            "Количество страниц GPU stage "
+            "Количество страниц VLM stage "
             f"({actual}) превышает configured limit "
             f"({maximum})."
         ),
     )
 
 
-async def _ensure_stage_active(
+async def _is_stage_cancelled(
     *,
     container: ApplicationContainer,
     document_id: UUID,
     stage: str,
     current: int,
     total: int,
-) -> None:
-    """Проверяет cancellation перед запуском следующей страницы."""
+) -> bool:
+    """Проверяет cancellation непосредственно перед новым VLM item."""
     logger.info(
-        ("gpu_stage_page_start document_id=%s stage=%s current=%s total=%s"),
+        ("vlm_stage_item_start document_id=%s stage=%s current=%s total=%s"),
         document_id,
         stage,
         current,
@@ -95,7 +111,7 @@ async def _ensure_stage_active(
     probe = container.analysis_progress_probe
 
     if probe is None:
-        return
+        return False
 
     cancelled = await probe.is_cancelled(
         document_id=document_id,
@@ -104,26 +120,162 @@ async def _ensure_stage_active(
         total=total,
     )
 
-    if not cancelled:
-        return
+    if cancelled:
+        logger.info(
+            ("vlm_stage_cancelled document_id=%s stage=%s before_item=%s total=%s"),
+            document_id,
+            stage,
+            current,
+            total,
+        )
 
-    logger.info(
-        ("gpu_stage_cancelled document_id=%s stage=%s before_page=%s total=%s"),
-        document_id,
-        stage,
-        current,
+    return cancelled
+
+
+async def _run_stage_items[ItemT, ResultT](
+    *,
+    container: ApplicationContainer,
+    document_id: UUID,
+    stage: str,
+    items: Sequence[ItemT],
+    process: Callable[
+        [ItemT],
+        Awaitable[ResultT],
+    ],
+) -> list[ResultT]:
+    """Выполняет stage bounded-concurrently, сохраняя исходный порядок.
+
+    Cancellation не прерывает уже запущенные inference.
+    Новые items после обнаружения cancellation больше не стартуют.
+    """
+    total = len(
+        items,
+    )
+
+    if total == 0:
+        return []
+
+    concurrency = min(
+        container.settings.pipeline.vlm_stage_concurrency,
         total,
     )
 
-    raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={
-            "code": "analysis_cancelled",
-            "message": (
-                f"Analysis job отменён до запуска страницы {current} из {total}."
-            ),
-        },
+    results: list[ResultT | None] = [None] * total
+
+    next_index = 0
+
+    stop_event = asyncio.Event()
+
+    state_lock = asyncio.Lock()
+
+    first_error: Exception | None = None
+
+    cancelled_before: int | None = None
+
+    async def claim_next() -> tuple[int, ItemT] | None:
+        nonlocal next_index
+
+        async with state_lock:
+            if stop_event.is_set() or next_index >= total:
+                return None
+
+            index = next_index
+
+            next_index += 1
+
+            return (
+                index,
+                items[index],
+            )
+
+    async def worker() -> None:
+        nonlocal first_error
+        nonlocal cancelled_before
+
+        while True:
+            claimed = await claim_next()
+
+            if claimed is None:
+                return
+
+            index, item = claimed
+
+            current = index + 1
+
+            if await _is_stage_cancelled(
+                container=container,
+                document_id=document_id,
+                stage=stage,
+                current=current,
+                total=total,
+            ):
+                async with state_lock:
+                    if cancelled_before is None:
+                        cancelled_before = current
+
+                    stop_event.set()
+
+                return
+
+            try:
+                result = await process(
+                    item,
+                )
+
+            except asyncio.CancelledError:
+                raise
+
+            except Exception as error:
+                async with state_lock:
+                    if first_error is None:
+                        first_error = error
+
+                    stop_event.set()
+
+                return
+
+            results[index] = result
+
+            logger.info(
+                ("vlm_stage_item_complete document_id=%s stage=%s current=%s total=%s"),
+                document_id,
+                stage,
+                current,
+                total,
+            )
+
+    await asyncio.gather(
+        *(
+            worker()
+            for _ in range(
+                concurrency,
+            )
+        )
     )
+
+    if first_error is not None:
+        raise first_error
+
+    if cancelled_before is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "analysis_cancelled",
+                "message": (
+                    "Analysis job отменён "
+                    "до запуска элемента "
+                    f"{cancelled_before} "
+                    f"из {total}."
+                ),
+            },
+        )
+
+    if any(item is None for item in results):
+        raise RuntimeError(
+            "VLM stage завершился без части результатов.",
+        )
+
+    return [item for item in results if item is not None]
 
 
 @router.post(
@@ -139,7 +291,7 @@ async def understand_pages_stage(
         ),
     ],
 ) -> UnderstandPagesStageResponse:
-    """Последовательно понимает все страницы под одним GPU residency scope."""
+    """Понимает страницы с bounded concurrency shared-vlm."""
     _validate_stage_size(
         actual=len(
             request.items,
@@ -147,41 +299,42 @@ async def understand_pages_stage(
         maximum=container.settings.pipeline.max_stage_pages,
     )
 
-    total = len(
-        request.items,
-    )
-
-    result: list[UnderstandPagesStageItemResponse] = []
-
-    for index, item in enumerate(
-        request.items,
-        start=1,
-    ):
-        await _ensure_stage_active(
-            container=container,
-            document_id=request.document_id,
-            stage=_UNDERSTANDING_STAGE,
-            current=index,
-            total=total,
-        )
-
-        response = await understand_page(
+    async def process(
+        item: UnderstandPageRequest,
+    ) -> UnderstandPageResponse:
+        return await understand_page(
             request=item,
             container=container,
         )
 
-        result.append(
-            UnderstandPagesStageItemResponse(
-                page_number=item.page_number,
-                result=response,
-            )
+    responses = await _run_stage_items(
+        container=container,
+        document_id=request.document_id,
+        stage=_UNDERSTANDING_STAGE,
+        items=request.items,
+        process=process,
+    )
+
+    result = [
+        UnderstandPagesStageItemResponse(
+            page_number=item.page_number,
+            result=response,
         )
+        for item, response in zip(
+            request.items,
+            responses,
+            strict=True,
+        )
+    ]
 
     logger.info(
-        ("gpu_stage_complete document_id=%s stage=%s pages=%s"),
+        ("vlm_stage_complete document_id=%s stage=%s pages=%s concurrency=%s"),
         request.document_id,
         _UNDERSTANDING_STAGE,
-        total,
+        len(
+            request.items,
+        ),
+        container.settings.pipeline.vlm_stage_concurrency,
     )
 
     return UnderstandPagesStageResponse(
@@ -202,7 +355,7 @@ async def check_technical_assignment_stage(
         ),
     ],
 ) -> CheckTechnicalAssignmentStageResponse:
-    """Выполняет T-first для всех страниц под одним GPU residency scope."""
+    """Выполняет T-first с bounded concurrency shared-vlm."""
     _validate_stage_size(
         actual=len(
             request.items,
@@ -210,25 +363,10 @@ async def check_technical_assignment_stage(
         maximum=container.settings.pipeline.max_stage_pages,
     )
 
-    total = len(
-        request.items,
-    )
-
-    result: list[CheckTechnicalAssignmentStageItemResponse] = []
-
-    for index, item in enumerate(
-        request.items,
-        start=1,
-    ):
-        await _ensure_stage_active(
-            container=container,
-            document_id=request.document_id,
-            stage=_UNDERSTANDING_STAGE,
-            current=index,
-            total=total,
-        )
-
-        response = await check_technical_assignment(
+    async def process(
+        item: TechnicalAssignmentStagePageRequest,
+    ) -> CheckTechnicalAssignmentResponse:
+        return await check_technical_assignment(
             request=CheckTechnicalAssignmentRequest(
                 page_number=item.page_number,
                 extracted_text=item.extracted_text,
@@ -244,17 +382,38 @@ async def check_technical_assignment_stage(
             container=container,
         )
 
-        result.append(
-            CheckTechnicalAssignmentStageItemResponse(
-                page_number=item.page_number,
-                result=response,
-            )
+    responses = await _run_stage_items(
+        container=container,
+        document_id=request.document_id,
+        stage=_UNDERSTANDING_STAGE,
+        items=request.items,
+        process=process,
+    )
+
+    result = [
+        CheckTechnicalAssignmentStageItemResponse(
+            page_number=item.page_number,
+            result=response,
         )
+        for item, response in zip(
+            request.items,
+            responses,
+            strict=True,
+        )
+    ]
 
     logger.info(
-        ("gpu_stage_complete document_id=%s stage=technical_assignment pages=%s"),
+        (
+            "vlm_stage_complete "
+            "document_id=%s "
+            "stage=technical_assignment "
+            "pages=%s concurrency=%s"
+        ),
         request.document_id,
-        total,
+        len(
+            request.items,
+        ),
+        container.settings.pipeline.vlm_stage_concurrency,
     )
 
     return CheckTechnicalAssignmentStageResponse(
@@ -275,7 +434,7 @@ async def check_norms_stage(
         ),
     ],
 ) -> CheckNormsStageResponse:
-    """Проверяет N/T/U всех страниц под одним GPU residency scope."""
+    """Проверяет N/T/U с bounded concurrency shared-vlm."""
     _validate_stage_size(
         actual=len(
             request.items,
@@ -283,41 +442,42 @@ async def check_norms_stage(
         maximum=container.settings.pipeline.max_stage_pages,
     )
 
-    total = len(
-        request.items,
-    )
-
-    result: list[CheckNormsStageItemResponse] = []
-
-    for index, item in enumerate(
-        request.items,
-        start=1,
-    ):
-        await _ensure_stage_active(
-            container=container,
-            document_id=request.document_id,
-            stage=_CHECKING_STAGE,
-            current=index,
-            total=total,
-        )
-
-        response = await check_norms(
+    async def process(
+        item: CheckNormsRequest,
+    ) -> CheckNormsResponse:
+        return await check_norms(
             request=item,
             container=container,
         )
 
-        result.append(
-            CheckNormsStageItemResponse(
-                page_number=item.page_number,
-                result=response,
-            )
+    responses = await _run_stage_items(
+        container=container,
+        document_id=request.document_id,
+        stage=_CHECKING_STAGE,
+        items=request.items,
+        process=process,
+    )
+
+    result = [
+        CheckNormsStageItemResponse(
+            page_number=item.page_number,
+            result=response,
         )
+        for item, response in zip(
+            request.items,
+            responses,
+            strict=True,
+        )
+    ]
 
     logger.info(
-        ("gpu_stage_complete document_id=%s stage=%s pages=%s"),
+        ("vlm_stage_complete document_id=%s stage=%s pages=%s concurrency=%s"),
         request.document_id,
         _CHECKING_STAGE,
-        total,
+        len(
+            request.items,
+        ),
+        container.settings.pipeline.vlm_stage_concurrency,
     )
 
     return CheckNormsStageResponse(
@@ -338,7 +498,7 @@ async def finalize_stage(
         ),
     ],
 ) -> FinalizeStageResponse:
-    """Финализирует все страницы под одним GPU residency scope."""
+    """Финализирует страницы с bounded concurrency shared-vlm."""
     _validate_stage_size(
         actual=len(
             request.items,
@@ -346,41 +506,42 @@ async def finalize_stage(
         maximum=container.settings.pipeline.max_stage_pages,
     )
 
-    total = len(
-        request.items,
-    )
-
-    result: list[FinalizeStageItemResponse] = []
-
-    for index, item in enumerate(
-        request.items,
-        start=1,
-    ):
-        await _ensure_stage_active(
-            container=container,
-            document_id=request.document_id,
-            stage=_FINALIZATION_STAGE,
-            current=index,
-            total=total,
-        )
-
-        response = await finalize_findings(
+    async def process(
+        item: FinalizeStageItemRequest,
+    ) -> FinalizeResponse:
+        return await finalize_findings(
             request=item.request,
             container=container,
         )
 
-        result.append(
-            FinalizeStageItemResponse(
-                page_number=item.page_number,
-                result=response,
-            )
+    responses = await _run_stage_items(
+        container=container,
+        document_id=request.document_id,
+        stage=_FINALIZATION_STAGE,
+        items=request.items,
+        process=process,
+    )
+
+    result = [
+        FinalizeStageItemResponse(
+            page_number=item.page_number,
+            result=response,
         )
+        for item, response in zip(
+            request.items,
+            responses,
+            strict=True,
+        )
+    ]
 
     logger.info(
-        ("gpu_stage_complete document_id=%s stage=%s pages=%s"),
+        ("vlm_stage_complete document_id=%s stage=%s pages=%s concurrency=%s"),
         request.document_id,
         _FINALIZATION_STAGE,
-        total,
+        len(
+            request.items,
+        ),
+        container.settings.pipeline.vlm_stage_concurrency,
     )
 
     return FinalizeStageResponse(

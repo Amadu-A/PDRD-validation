@@ -49,7 +49,7 @@ def test_t_index_uses_separate_queue_and_worker() -> None:
 
 
 def test_knowledge_workers_can_reach_shared_rabbitmq() -> None:
-    """Оба indexing worker обязаны состоять в shared RabbitMQ network."""
+    """Оба indexing worker обязаны состоять в shared network."""
     compose = (ROOT / "compose.yaml").read_text(
         encoding="utf-8",
     )
@@ -152,8 +152,8 @@ def test_gateway_passes_t_id_to_every_source_mode() -> None:
     assert "AnalysisSourceMode.PDF_CAD" in orchestrator
 
 
-def test_t_releases_gpu_before_ready() -> None:
-    """READY нельзя публиковать до embedding release."""
+def test_t_release_is_currently_compatibility_noop_before_ready() -> None:
+    """До cleanup-этапа T lifecycle сохраняет harmless compatibility call."""
     use_case = (
         ROOT
         / "services"
@@ -167,33 +167,77 @@ def test_t_releases_gpu_before_ready() -> None:
         encoding="utf-8",
     )
 
-    release_position = use_case.find(
-        "await self.embedding_provider.release()",
+    adapter = (
+        ROOT
+        / "services"
+        / "knowledge-service"
+        / "src"
+        / "pdrd_knowledge_service"
+        / "infrastructure"
+        / "embedding"
+        / "multimodal_http.py"
+    ).read_text(
+        encoding="utf-8",
     )
 
-    ready_position = use_case.find(
-        "return await self._mark_ready(",
-    )
+    assert "await self.embedding_provider.release()" in use_case
 
-    assert release_position >= 0
+    assert "Compatibility no-op" in adapter
 
-    assert ready_position > release_position
+    assert "/internal/v1/release" not in adapter
 
 
-def test_gpu_coordination_is_cross_container() -> None:
-    """Analysis и embedding service монтируют один OS lock."""
+def test_project_compose_uses_shared_embedding_without_local_runtime() -> None:
+    """Main stack не запускает project-local embedding GPU runtime."""
     compose = (ROOT / "compose.yaml").read_text(
         encoding="utf-8",
     )
 
-    assert (
-        compose.count(
-            "gpu_coordination:/var/lock/pdrd-gpu",
-        )
-        == 2
+    assert "\n  multimodal-embedding-service:\n" not in compose
+
+    assert "pdrd-multimodal-embedding-service" not in compose
+
+    assert "multimodal_model_cache:" not in compose
+
+    assert "gpu_coordination:" not in compose
+
+    assert "http://shared-embedding:8000/v1" in compose
+
+    migrator_block = compose.split(
+        "  knowledge-embedding-migrator:",
+        maxsplit=1,
+    )[1].split(
+        "  knowledge-service:",
+        maxsplit=1,
+    )[0]
+
+    assert "ai-shared" in migrator_block
+
+    assert (ROOT / "services" / "multimodal-embedding-service").is_dir()
+
+
+def test_embedding_migration_preserves_atomic_t_requirements() -> None:
+    """Schema migration rebuild-ит page и requirement representations."""
+    migration = (
+        ROOT
+        / "services"
+        / "knowledge-service"
+        / "src"
+        / "pdrd_knowledge_service"
+        / "application"
+        / "use_cases"
+        / "embedding_migration.py"
+    ).read_text(
+        encoding="utf-8",
     )
 
-    assert "gpu_coordination:" in compose
+    assert "extract_technical_assignment_requirements" in migration
+
+    assert '"requirement_text"' in migration
+
+    assert "_T_REQUIREMENT_EMBEDDING_INSTRUCTION" in migration
+
+    assert "parent_page_point_id" in migration
 
 
 def test_embedding_migration_gates_knowledge_runtime() -> None:
