@@ -108,13 +108,14 @@ def violation(
     *,
     comment: str,
     evidence: str,
+    category: str = "normative_control",
     normative_source_ids: list[str] | None = None,
     technical_assignment_source_ids: list[str] | None = None,
     user_package_source_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Строит candidate finding."""
     return {
-        "category": "normative_control",
+        "category": category,
         "severity": "warning",
         "status": "confirmed",
         "comment": comment,
@@ -272,8 +273,104 @@ def test_same_comment_with_different_evidence_stays_distinct() -> None:
     )
 
 
+def test_rephrased_same_position_and_issue_are_consolidated() -> None:
+    """Перефразирование одной проблемы с тем же object anchor объединяется."""
+    candidates = [
+        violation(
+            category="marking",
+            comment="Позиция 8.5.4 дублируется на схеме.",
+            evidence=("Позиционное обозначение 8.5.4 указано у двух фильтров."),
+            normative_source_ids=[
+                "N1",
+            ],
+        ),
+        violation(
+            category="marking",
+            comment="На схеме повторно указана позиция 8.5.4.",
+            evidence="Обозначение 8.5.4 повторяется у двух фильтров.",
+            normative_source_ids=[
+                "N2",
+            ],
+        ),
+    ]
+
+    selection = select_violation_candidates(
+        candidates,
+    )
+
+    assert selection.generated_count == 2
+    assert selection.consolidated_count == 1
+    assert selection.represented_count == 2
+    assert selection.duplicate_count == 1
+
+    assert selection.source_indexes_by_candidate == (
+        (
+            1,
+            2,
+        ),
+    )
+
+    assert selection.candidates[0]["normative_source_ids"] == [
+        "N1",
+        "N2",
+    ]
+
+
+def test_similar_findings_for_different_positions_stay_distinct() -> None:
+    """Похожие формулировки не склеивают разные позиции оборудования."""
+    candidates = [
+        violation(
+            category="marking",
+            comment="Позиция 8.3.6 дублируется на схеме.",
+            evidence=("Позиционное обозначение 8.3.6 указано у двух шаровых кранов."),
+        ),
+        violation(
+            category="marking",
+            comment="Позиция 8.3.7 дублируется на схеме.",
+            evidence=("Позиционное обозначение 8.3.7 указано у двух шаровых кранов."),
+        ),
+    ]
+
+    selection = select_violation_candidates(
+        candidates,
+    )
+
+    assert selection.generated_count == 2
+    assert selection.consolidated_count == 2
+    assert selection.duplicate_count == 0
+
+    assert selection.source_indexes_by_candidate == (
+        (1,),
+        (2,),
+    )
+
+
+def test_same_position_with_different_missing_properties_stays_distinct() -> None:
+    """Один объект не склеивает замечания о разных отсутствующих свойствах."""
+    candidates = [
+        violation(
+            category="completeness",
+            comment="Для позиции 8.20.1 отсутствует код оборудования.",
+            evidence="В строке позиции 8.20.1 поле кода пустое.",
+        ),
+        violation(
+            category="completeness",
+            comment="Для позиции 8.20.1 отсутствует завод-изготовитель.",
+            evidence="В строке позиции 8.20.1 поле изготовителя пустое.",
+        ),
+    ]
+
+    selection = select_violation_candidates(
+        candidates,
+    )
+
+    assert selection.generated_count == 2
+    assert selection.consolidated_count == 2
+    assert selection.duplicate_count == 0
+
+
 def test_semantic_content_is_not_filtered_after_generation() -> None:
-    """Semantic correctness пока не является частью exact-dedupe этапа."""
+    """Semantic correctness не является частью deterministic dedupe этапа."""
     candidate = violation(
         comment=("Решение соответствует требованиям."),
         evidence=("На листе требование выполнено."),
