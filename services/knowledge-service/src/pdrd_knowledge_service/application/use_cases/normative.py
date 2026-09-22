@@ -66,7 +66,18 @@ class SearchNormative:
     top_k: int
     max_sources: int
 
+    min_score: float = 0.0
+
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory | None = None
+
+    def __post_init__(
+        self,
+    ) -> None:
+        """Проверяет bounded N retrieval threshold."""
+        if not 0.0 <= self.min_score <= 1.0:
+            raise ValueError(
+                "min_score должен быть в диапазоне 0..1.",
+            )
 
     async def execute(
         self,
@@ -154,8 +165,43 @@ class SearchNormative:
             search_filter=search_filter,
         )
 
-        merged = self._merge_points(
+        raw_points_count = sum(
+            len(
+                points,
+            )
+            for points in groups
+        )
+
+        filtered_groups = self._filter_normative_points(
             groups,
+            expected_area=expected_area,
+        )
+
+        accepted_points_count = sum(
+            len(
+                points,
+            )
+            for points in filtered_groups
+        )
+
+        logger.info(
+            (
+                "normative_search_score_filter "
+                "queries=%s min_score=%.4f "
+                "raw_points=%s accepted_points=%s "
+                "filtered_points=%s"
+            ),
+            len(
+                normalized_queries,
+            ),
+            self.min_score,
+            raw_points_count,
+            accepted_points_count,
+            raw_points_count - accepted_points_count,
+        )
+
+        merged = self._merge_points(
+            filtered_groups,
         )
 
         sources = self._build_sources(
@@ -273,10 +319,29 @@ class SearchNormative:
 
         vector_finished_at = asyncio.get_running_loop().time()
 
+        raw_points_count = sum(
+            len(
+                points,
+            )
+            for points in groups
+        )
+
+        filtered_groups = self._filter_normative_points(
+            groups,
+            expected_area=expected_area,
+        )
+
+        accepted_points_count = sum(
+            len(
+                points,
+            )
+            for points in filtered_groups
+        )
+
         groups_by_query = dict(
             zip(
                 unique_queries,
-                groups,
+                filtered_groups,
                 strict=True,
             )
         )
@@ -299,6 +364,9 @@ class SearchNormative:
             (
                 "normative_grouped_search "
                 "queries=%s unique_queries=%s "
+                "min_score=%.4f "
+                "raw_points=%s accepted_points=%s "
+                "filtered_points=%s "
                 "embedding_ms=%.2f "
                 "qdrant_ms=%.2f "
                 "total_ms=%.2f"
@@ -309,6 +377,10 @@ class SearchNormative:
             len(
                 unique_queries,
             ),
+            self.min_score,
+            raw_points_count,
+            accepted_points_count,
+            raw_points_count - accepted_points_count,
             (embedding_finished_at - embedding_started_at) * 1000,
             (vector_finished_at - vector_started_at) * 1000,
             (finished_at - started_at) * 1000,
@@ -353,6 +425,27 @@ class SearchNormative:
 
         return tuple(
             groups,
+        )
+
+    def _filter_normative_points(
+        self,
+        groups: tuple[
+            list[VectorPoint],
+            ...,
+        ],
+        *,
+        expected_area: CatalogArea,
+    ) -> tuple[
+        list[VectorPoint],
+        ...,
+    ]:
+        """Фильтрует только N points по configured cosine threshold."""
+        if expected_area is not CatalogArea.NORMATIVE or self.min_score <= 0.0:
+            return groups
+
+        return tuple(
+            [point for point in points if point.score >= self.min_score]
+            for points in groups
         )
 
     async def _resolve_scope(

@@ -522,7 +522,7 @@ class QdrantSettings(BaseModel):
         "dva_normative_v2",
         "dva_experience_v2",
         "dva_multimodal_qwen3vl2b_v1",
-        "dva_multimodal_qwen3vl8b_v1",
+        "dva_multimodal_vl8b_v1",
         "dva_multimodal_v1",
     )
 
@@ -540,6 +540,16 @@ class SearchSettings(BaseModel):
         default=12,
         ge=1,
         le=500,
+    )
+
+    normative_min_score: float = Field(
+        default=0.48,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Минимальный cosine score только для N retrieval. "
+            "T/U retrieval этим порогом не фильтруется."
+        ),
     )
 
     experience_enabled: bool = Field(
