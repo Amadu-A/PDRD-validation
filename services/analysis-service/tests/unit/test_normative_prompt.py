@@ -16,6 +16,15 @@ from pdrd_analysis_service.transport.http.schemas import (
 )
 
 
+def normalize_prompt(
+    value: str,
+) -> str:
+    """Нормализует регистр и пробелы для semantic prompt assertions."""
+    return " ".join(
+        value.casefold().split(),
+    )
+
+
 def make_page_facts() -> PageFacts:
     """Создаёт минимальные test page facts."""
     return PageFacts(
@@ -103,7 +112,7 @@ def test_none_prompt_uses_legacy_compatibility_fallback() -> None:
 
 
 def test_prompt_supports_independent_engineering_findings_without_sources() -> None:
-    """Prompt требует инженерный анализ даже при пустых N/T/U."""
+    """Prompt сохраняет independent engineering analysis без N/T/U."""
     prompt = build_normative_check_prompt(
         page_number=3,
         extracted_text="Чистый исходный проект без замечаний проверяющего.",
@@ -131,10 +140,97 @@ def test_prompt_supports_independent_engineering_findings_without_sources() -> N
 
     assert "status=needs_review" in prompt
 
-    # Не привязываемся к переносам строк внутри multiline prompt.
     assert "Не подавляй конкретное engineering finding" in prompt
 
     assert "только потому, что для него не найден N/T/U source." in prompt
+
+
+def test_active_section_prompt_cannot_weaken_global_evidence_rules() -> None:
+    """Section prompt уточняет N-проверку, но не меняет evidence semantics."""
+    prompt = build_normative_check_prompt(
+        page_number=3,
+        extracted_text="Тестовый лист.",
+        page_facts=make_page_facts(),
+        normative_sources=(),
+        normative_text_limit=1000,
+        normative_system_prompt=(
+            "Проверяй лист ТОЛЬКО по приведённым нормативным фрагментам."
+        ),
+    )
+
+    normalized = normalize_prompt(
+        prompt,
+    )
+
+    assert "роль active section system prompt" in normalized
+
+    assert "не может превращать отсутствие n-source" in normalized
+
+    assert "не отменяет независимый engineering / visual" in normalized
+
+    assert "при конфликте этих правил" in normalized
+
+
+def test_source_less_finding_requires_direct_internal_evidence() -> None:
+    """Source-less candidate допускается только для внутренне доказуемого факта."""
+    prompt = build_normative_check_prompt(
+        page_number=3,
+        extracted_text="Тестовый лист.",
+        page_facts=make_page_facts(),
+        normative_sources=(),
+        normative_text_limit=1000,
+        normative_system_prompt=None,
+    )
+
+    normalized = normalize_prompt(
+        prompt,
+    )
+
+    assert "перед source-less finding обязательно проверь" in normalized
+
+    assert "один и тот же объект" in normalized
+
+    assert "одна и та же характеристика" in normalized
+
+    assert "одному и тому же смысловому scope" in normalized
+
+    assert "пустая ячейка таблицы" in normalized
+
+    assert "needs_review не является разрешением" in normalized
+
+    assert "source-less режим не является fallback" in normalized
+
+    assert "если эти условия не доказаны самим листом" in normalized
+
+
+def test_external_normative_claim_requires_real_normative_source() -> None:
+    """Модель не должна объявлять внешнее нормативное требование без N."""
+    prompt = build_normative_check_prompt(
+        page_number=3,
+        extracted_text="На листе указан ГОСТ.",
+        page_facts=make_page_facts(),
+        normative_sources=(),
+        normative_text_limit=1000,
+        normative_system_prompt=None,
+    )
+
+    normalized = normalize_prompt(
+        prompt,
+    )
+
+    assert '"не соответствует нормативу"' in normalized
+
+    assert '"норматив требует"' in normalized
+
+    assert '"стандарт устарел"' in normalized
+
+    assert '"стандарт заменён"' in normalized
+
+    assert "только тогда, когда реально переданный" in normalized
+
+    assert "не создавай нормативное утверждение из памяти модели" in normalized
+
+    assert "само по себе не доказывает" in normalized
 
 
 def test_managed_normative_source_payload_roundtrip() -> None:
