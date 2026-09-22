@@ -227,7 +227,7 @@ docker compose run \
 echo
 echo "=== Application stack ==="
 
-docker compose up -d
+docker compose up -d --remove-orphans
 
 echo
 echo "=== Frontend proxy refresh ==="

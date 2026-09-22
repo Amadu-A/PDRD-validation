@@ -8,6 +8,9 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${REPO_DIR}"
 
+PDRD_STARTUP_TIMEOUT_SECONDS="${PDRD_STARTUP_TIMEOUT_SECONDS:-360}"
+PDRD_STARTUP_POLL_SECONDS="${PDRD_STARTUP_POLL_SECONDS:-5}"
+
 die() {
     printf 'ERROR: %s\n' "$1" >&2
     exit 1
@@ -80,6 +83,7 @@ echo "=== PostgreSQL / Qdrant ==="
 
 docker compose up \
     -d \
+    --remove-orphans \
     postgres \
     qdrant
 
@@ -278,40 +282,51 @@ echo "=== Physical collections after migration ==="
 print_collections
 
 echo
-echo "=== Stop legacy local embedding container if it is still running ==="
-
-project_name="${COMPOSE_PROJECT_NAME:-pdrd-validation-ai}"
-
-legacy_ids="$(
-    docker ps \
-        --quiet \
-        --filter "label=com.docker.compose.project=${project_name}" \
-        --filter "label=com.docker.compose.service=multimodal-embedding-service"
-)"
-
-if [[ -n "${legacy_ids}" ]]; then
-    while IFS= read -r container_id; do
-        [[ -z "${container_id}" ]] && continue
-
-        echo "Stopping legacy embedding container: ${container_id}"
-
-        docker stop \
-            "${container_id}" \
-            >/dev/null
-    done <<< "${legacy_ids}"
-else
-    echo "Legacy embedding container is not running."
-fi
-
-echo
 echo "=== Start PDRD with schema-v2 aliases ==="
 
-docker compose up -d
+docker compose up -d --remove-orphans
 
 echo
-echo "=== Stack check ==="
+echo "=== Frontend proxy refresh ==="
 
-bash scripts/check-stack.sh
+docker compose up \
+    -d \
+    --no-deps \
+    --force-recreate \
+    frontend
+
+echo
+echo "=== Stack readiness ==="
+
+deadline=$((SECONDS + PDRD_STARTUP_TIMEOUT_SECONDS))
+
+while true; do
+    if bash scripts/check-stack.sh; then
+        break
+    fi
+
+    if (( SECONDS >= deadline )); then
+        echo
+        docker compose ps
+
+        echo
+        docker compose logs \
+            --tail=80 \
+            api-gateway \
+            api-gateway-worker \
+            knowledge-service \
+            knowledge-embedding-migrator \
+            knowledge-indexer \
+            technical-assignment-indexer \
+            analysis-service \
+            frontend \
+            || true
+
+        die "PDRD stack не стал ready после embedding cutover."
+    fi
+
+    sleep "${PDRD_STARTUP_POLL_SECONDS}"
+done
 
 echo
 echo "EMBEDDING CUTOVER PASSED"

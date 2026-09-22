@@ -131,6 +131,45 @@ def test_stack_check_covers_background_workers() -> None:
     )
 
 
+def test_startup_removes_obsolete_orphan_containers_without_pruning_volumes() -> None:
+    """Startup удаляет только obsolete containers, не persistent volumes."""
+    for path in (
+        UP_SCRIPT,
+        EMBEDDING_MIGRATION_SCRIPT,
+    ):
+        source = path.read_text(
+            encoding="utf-8",
+        )
+
+        assert "--remove-orphans" in source
+
+        assert "docker compose down -v" not in source
+
+        assert "docker volume rm" not in source
+
+
+def test_embedding_cutover_refreshes_frontend_and_waits_for_full_readiness() -> None:
+    """Cutover не проверяет stack до worker/proxy readiness."""
+    source = EMBEDDING_MIGRATION_SCRIPT.read_text(
+        encoding="utf-8",
+    )
+
+    required = (
+        "PDRD_STARTUP_TIMEOUT_SECONDS",
+        "PDRD_STARTUP_POLL_SECONDS",
+        "--force-recreate",
+        "frontend",
+        "while true",
+        "bash scripts/check-stack.sh",
+    )
+
+    missing = [marker for marker in required if marker not in source]
+
+    assert not missing, "\n".join(
+        missing,
+    )
+
+
 def test_embedding_cutover_is_blue_green_and_non_destructive() -> None:
     """Cutover использует migrator и не удаляет persistent Docker state."""
     source = EMBEDDING_MIGRATION_SCRIPT.read_text(

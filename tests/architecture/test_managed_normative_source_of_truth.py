@@ -12,12 +12,15 @@ REPOSITORY_ROOT = (
     .parents[2]
 )
 
-KB_SYNC = REPOSITORY_ROOT / "scripts" / "kb_sync.py"
-
-KB_SEARCH = REPOSITORY_ROOT / "scripts" / "kb_search.py"
-
 LEGACY_SOURCE_DIRECTORY = (
     REPOSITORY_ROOT / "data" / "knowledge" / "normative" / "source"
+)
+
+LEGACY_DIRECT_EMBEDDING_CLI_PATHS = (
+    REPOSITORY_ROOT / "scripts" / "kb_common.py",
+    REPOSITORY_ROOT / "scripts" / "kb_search.py",
+    REPOSITORY_ROOT / "scripts" / "kb_sync.py",
+    REPOSITORY_ROOT / "scripts" / "requirements-kb.txt",
 )
 
 
@@ -26,35 +29,18 @@ def test_repository_has_no_legacy_normative_source_directory() -> None:
     assert not LEGACY_SOURCE_DIRECTORY.exists()
 
 
-def test_kb_sync_cannot_index_normative_collection() -> None:
-    """Legacy sync не должен писать managed нормативы напрямую."""
-    content = KB_SYNC.read_text(
-        encoding="utf-8",
+def test_repository_has_no_legacy_direct_embedding_cli() -> None:
+    """Legacy Ollama/Qdrant CLI не должен обходить managed retrieval."""
+    existing = [
+        str(
+            path.relative_to(
+                REPOSITORY_ROOT,
+            )
+        )
+        for path in LEGACY_DIRECT_EMBEDDING_CLI_PATHS
+        if path.exists()
+    ]
+
+    assert not existing, "\n".join(
+        existing,
     )
-
-    forbidden = (
-        "prepare_normative_chunks",
-        "normative_dir",
-        "settings.normative_collection",
-    )
-
-    violations = [marker for marker in forbidden if marker in content]
-
-    assert not violations, "\n".join(
-        violations,
-    )
-
-    assert "settings.experience_collection" in content
-
-
-def test_kb_search_cannot_bypass_managed_normative_scope() -> None:
-    """Legacy diagnostic search не должен читать normative unscoped."""
-    content = KB_SEARCH.read_text(
-        encoding="utf-8",
-    )
-
-    assert "settings.normative_collection" not in content
-
-    assert "print_normative_results" not in content
-
-    assert "settings.experience_collection" in content
