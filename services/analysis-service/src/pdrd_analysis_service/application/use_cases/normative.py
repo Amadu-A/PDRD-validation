@@ -47,6 +47,7 @@ _NORMATIVE_PROBE_BATCH_SIZE = 10
 _NORMATIVE_PROBE_NUM_PREDICT = 4000
 _NORMATIVE_MAX_PROBE_ROUNDS = 3
 _NORMATIVE_DENSE_UNIQUE_RATIO = 0.70
+_NORMATIVE_DENSE_CONFIRMATION_ROUNDS = 2
 
 _HIGH_RECALL_FINDING_POLICY = """
 --- HIGH-RECALL FINDING POLICY ---
@@ -188,6 +189,31 @@ BUSINESS CHECK MATRIX.
      из самого листа либо N/T/U context;
    - отсутствие внешней информации само по себе
      не является нарушением.
+
+SEMANTIC EVIDENCE DISCIPLINE.
+
+Визуальная форма, ориентация, заливка или стиль символа
+сами по себе НЕ доказывают скрытую инженерную классификацию,
+если её смысл не задан явно на текущем листе, в легенде
+либо переданным N/T/U source.
+
+Не выводи только по внешнему виду условного обозначения,
+что объект является:
+- наземным или подземным;
+- рабочим или резервным;
+- открытым или закрытым;
+- конкретным типом, исполнением или состоянием оборудования.
+
+Если такое значение прямо подписано, определено легендой
+или подтверждено N/T/U source, используй его как evidence.
+
+Если у одного символа остаются несколько правдоподобных
+трактовок, не создавай finding, противоречие которого
+возникает только после выбора одной из этих трактовок.
+
+Для сравнительного finding отдельно проверь,
+что сравниваются один и тот же объект/класс объектов,
+одно и то же свойство и один и тот же смысловой scope.
 
 VISUAL EVIDENCE REGIONS.
 
@@ -461,7 +487,7 @@ class CheckPageAgainstNorms:
         ViolationCandidateSelection,
         GenerationMetrics,
     ]:
-        """Adaptive discovery не даёт дублям занять весь output budget."""
+        """Adaptive discovery подтверждает насыщенность до перехода в bulk."""
         raw_candidates: list[
             dict[
                 str,
@@ -479,6 +505,7 @@ class CheckPageAgainstNorms:
 
         mode = "probe"
         probe_round = 0
+        dense_probe_streak = 0
         call_index = 0
 
         while candidate_selection.consolidated_count < self.max_issues:
@@ -505,6 +532,8 @@ class CheckPageAgainstNorms:
                 )
 
                 stage_suffix = f"probe{probe_round}"
+
+            batch_covers_remaining_capacity = current_capacity >= remaining_capacity
 
             existing_candidates = candidate_selection.candidates
 
@@ -585,6 +614,19 @@ class CheckPageAgainstNorms:
 
             duplicate_ratio = 1.0 - unique_ratio if generated > 0 else 0.0
 
+            dense_probe = (
+                mode == "probe"
+                and generated == current_capacity
+                and unique_ratio >= _NORMATIVE_DENSE_UNIQUE_RATIO
+            )
+
+            if mode == "probe":
+                if dense_probe:
+                    dense_probe_streak += 1
+
+                else:
+                    dense_probe_streak = 0
+
             logger.info(
                 (
                     "normative_discovery_round "
@@ -596,7 +638,9 @@ class CheckPageAgainstNorms:
                     "new_unique=%s "
                     "total_unique=%s "
                     "unique_ratio=%.3f "
-                    "duplicate_ratio=%.3f"
+                    "duplicate_ratio=%.3f "
+                    "dense_probe=%s "
+                    "dense_probe_streak=%s"
                 ),
                 page_number,
                 mode,
@@ -609,6 +653,8 @@ class CheckPageAgainstNorms:
                 candidate_selection.consolidated_count,
                 unique_ratio,
                 duplicate_ratio,
+                dense_probe,
+                dense_probe_streak,
             )
 
             if candidate_selection.consolidated_count >= self.max_issues:
@@ -627,17 +673,15 @@ class CheckPageAgainstNorms:
 
                 break
 
-            if generated < current_capacity:
+            if new_unique == 0:
                 logger.info(
                     (
                         "normative_discovery_stop "
-                        "page=%s reason=batch_not_full "
-                        "generated=%s capacity=%s "
+                        "page=%s "
+                        "reason=no_new_distinct "
                         "unique=%s raw=%s"
                     ),
                     page_number,
-                    generated,
-                    current_capacity,
                     candidate_selection.consolidated_count,
                     len(
                         raw_candidates,
@@ -646,14 +690,20 @@ class CheckPageAgainstNorms:
 
                 break
 
-            if new_unique == 0:
+            if generated < current_capacity and batch_covers_remaining_capacity:
                 logger.info(
                     (
                         "normative_discovery_stop "
-                        "page=%s reason=no_new_distinct "
+                        "page=%s "
+                        "reason=batch_covers_remaining "
+                        "generated=%s capacity=%s "
+                        "remaining=%s "
                         "unique=%s raw=%s"
                     ),
                     page_number,
+                    generated,
+                    current_capacity,
+                    remaining_capacity,
                     candidate_selection.consolidated_count,
                     len(
                         raw_candidates,
@@ -678,18 +728,19 @@ class CheckPageAgainstNorms:
 
                 break
 
-            if unique_ratio >= _NORMATIVE_DENSE_UNIQUE_RATIO:
+            if dense_probe_streak >= _NORMATIVE_DENSE_CONFIRMATION_ROUNDS:
                 mode = "bulk"
 
                 logger.info(
                     (
                         "normative_discovery_expand "
-                        "page=%s reason=dense_probe "
-                        "unique_ratio=%.3f "
+                        "page=%s "
+                        "reason=confirmed_dense_probes "
+                        "dense_probe_streak=%s "
                         "unique=%s"
                     ),
                     page_number,
-                    unique_ratio,
+                    dense_probe_streak,
                     candidate_selection.consolidated_count,
                 )
 
@@ -699,7 +750,8 @@ class CheckPageAgainstNorms:
                 logger.info(
                     (
                         "normative_discovery_stop "
-                        "page=%s reason=duplicate_saturation "
+                        "page=%s "
+                        "reason=probe_confirmation_limit "
                         "probe_rounds=%s "
                         "unique=%s raw=%s"
                     ),
@@ -712,6 +764,43 @@ class CheckPageAgainstNorms:
                 )
 
                 break
+
+            if generated < current_capacity:
+                logger.info(
+                    (
+                        "normative_discovery_continue "
+                        "page=%s "
+                        "reason=sparse_probe_confirmation "
+                        "round=%s "
+                        "generated=%s capacity=%s "
+                        "remaining=%s "
+                        "new_unique=%s total_unique=%s"
+                    ),
+                    page_number,
+                    probe_round,
+                    generated,
+                    current_capacity,
+                    remaining_capacity,
+                    new_unique,
+                    candidate_selection.consolidated_count,
+                )
+
+            else:
+                logger.info(
+                    (
+                        "normative_discovery_continue "
+                        "page=%s "
+                        "reason=dense_probe_confirmation "
+                        "round=%s "
+                        "dense_probe_streak=%s "
+                        "new_unique=%s total_unique=%s"
+                    ),
+                    page_number,
+                    probe_round,
+                    dense_probe_streak,
+                    new_unique,
+                    candidate_selection.consolidated_count,
+                )
 
         return (
             summary,
@@ -787,7 +876,7 @@ class CheckPageAgainstNorms:
         ) = await self._discover_candidates(
             page_number=page_number,
             prompt=prompt,
-            normative_source_ids=normative_source_ids,
+            normative_source_ids=(normative_source_ids),
             technical_assignment_source_ids=(technical_assignment_source_ids),
             user_package_source_ids=(user_package_source_ids),
             image_bytes=image_bytes,
@@ -841,7 +930,12 @@ class CheckPageAgainstNorms:
 
             finding_id = f"p{page_number}-f{representative_index}"
 
-            if len(source_indexes) > 1:
+            if (
+                len(
+                    source_indexes,
+                )
+                > 1
+            ):
                 logger.info(
                     (
                         "normative_candidate_"
