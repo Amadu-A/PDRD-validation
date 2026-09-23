@@ -22,7 +22,7 @@ def _metrics(
     return GenerationMetrics(
         attempt=1,
         done_reason="stop",
-        requested_num_predict=(requested_num_predict),
+        requested_num_predict=requested_num_predict,
         total_duration_ms=10.0,
         load_duration_ms=1.0,
         prompt_eval_count=100,
@@ -111,7 +111,7 @@ class SequentialVisionModel:
             {
                 "prompt": prompt,
                 "schema": schema,
-                "num_predict": (num_predict),
+                "num_predict": num_predict,
                 "seed": seed,
                 "stage": stage,
                 "image_bytes": image_bytes,
@@ -128,7 +128,7 @@ class SequentialVisionModel:
                 0,
             ),
             metrics=_metrics(
-                requested_num_predict=(num_predict),
+                requested_num_predict=num_predict,
             ),
         )
 
@@ -164,45 +164,8 @@ def _use_case(
     )
 
 
-async def test_empty_first_probe_stops_without_confirmation() -> None:
-    """Пустой первый probe не создаёт бессмысленный повторный VLM call."""
-    model = SequentialVisionModel(
-        [
-            {
-                "summary": "Замечаний нет.",
-                "violations": [],
-            },
-        ]
-    )
-
-    summary, findings, metrics = await _use_case(
-        model,
-    ).execute(
-        page_number=1,
-        extracted_text=("Тестовый лист."),
-        page_facts=_page_facts(),
-        normative_sources=(),
-        image_bytes=b"png",
-    )
-
-    assert summary == "Замечаний нет."
-
-    assert findings == ()
-
-    assert (
-        len(
-            model.calls,
-        )
-        == 1
-    )
-
-    assert model.calls[0]["stage"] == "normative_check:1:probe1"
-
-    assert metrics.requested_num_predict == 4000
-
-
-async def test_sparse_first_probe_requires_confirmation_before_stop() -> None:
-    """Неполный первый batch подтверждается вторым probe перед остановкой."""
+async def test_sparse_probe_stops_without_extra_call() -> None:
+    """Неполный первый batch означает, что continuation не нужен."""
     model = SequentialVisionModel(
         [
             {
@@ -213,17 +176,13 @@ async def test_sparse_first_probe_requires_confirmation_before_stop() -> None:
                     ),
                 ],
             },
-            {
-                "summary": "Новых замечаний нет.",
-                "violations": [],
-            },
         ]
     )
 
     summary, findings, metrics = await _use_case(
         model,
     ).execute(
-        page_number=2,
+        page_number=1,
         extracted_text=("Тестовый лист."),
         page_facts=_page_facts(),
         normative_sources=(),
@@ -239,81 +198,22 @@ async def test_sparse_first_probe_requires_confirmation_before_stop() -> None:
         == 1
     )
 
-    assert [call["stage"] for call in model.calls] == [
-        "normative_check:2:probe1",
-        "normative_check:2:probe2",
-    ]
-
-    assert all(call["num_predict"] == 4000 for call in model.calls)
-
-    assert metrics.requested_num_predict == 8000
-
-    confirmation_prompt = str(
-        model.calls[1]["prompt"],
-    )
-
-    assert "Замечание 1." in confirmation_prompt
-    assert "Наблюдаемый факт 1." in confirmation_prompt
-
-
-async def test_sparse_confirmation_recovers_additional_findings() -> None:
-    """Первый sparse probe не должен фиксировать случайно малый итог листа."""
-    model = SequentialVisionModel(
-        [
-            {
-                "summary": "Первичный sparse batch.",
-                "violations": [
-                    _candidate(
-                        1,
-                    ),
-                    _candidate(
-                        2,
-                    ),
-                ],
-            },
-            {
-                "summary": "Найдены дополнительные findings.",
-                "violations": [
-                    _candidate(
-                        index,
-                    )
-                    for index in range(
-                        3,
-                        11,
-                    )
-                ],
-            },
-            {
-                "summary": "Новых findings больше нет.",
-                "violations": [],
-            },
-        ]
-    )
-
-    _, findings, metrics = await _use_case(
-        model,
-    ).execute(
-        page_number=22,
-        extracted_text=("Тестовый лист."),
-        page_facts=_page_facts(),
-        normative_sources=(),
-        image_bytes=b"png",
-    )
-
     assert (
         len(
-            findings,
+            model.calls,
         )
-        == 10
+        == 1
     )
 
-    assert [call["stage"] for call in model.calls] == [
-        "normative_check:22:probe1",
-        "normative_check:22:probe2",
-        "normative_check:22:probe3",
-    ]
+    call = model.calls[0]
 
-    assert metrics.requested_num_predict == 12000
+    assert call["schema"]["properties"]["violations"]["maxItems"] == 10
+
+    assert call["num_predict"] == 4000
+
+    assert call["stage"] == "normative_check:1:probe1"
+
+    assert metrics.requested_num_predict == 4000
 
 
 async def test_duplicate_saturation_requests_distinct_continuation() -> None:
@@ -341,10 +241,6 @@ async def test_duplicate_saturation_requests_distinct_continuation() -> None:
                     second,
                 ],
             },
-            {
-                "summary": ("Новых findings нет."),
-                "violations": [],
-            },
         ]
     )
 
@@ -362,7 +258,7 @@ async def test_duplicate_saturation_requests_distinct_continuation() -> None:
         len(
             model.calls,
         )
-        == 3
+        == 2
     )
 
     assert (
@@ -376,11 +272,13 @@ async def test_duplicate_saturation_requests_distinct_continuation() -> None:
 
     assert model.calls[1]["stage"] == "normative_check:3:probe2"
 
-    assert model.calls[2]["stage"] == "normative_check:3:probe3"
+    assert model.calls[0]["num_predict"] == 4000
 
-    assert all(call["num_predict"] == 4000 for call in model.calls)
+    assert model.calls[1]["num_predict"] == 4000
 
-    continuation_prompt = str(model.calls[1]["prompt"])
+    continuation_prompt = str(
+        model.calls[1]["prompt"],
+    )
 
     assert "ALREADY FOUND DISTINCT CANDIDATES" in continuation_prompt
 
@@ -394,13 +292,13 @@ async def test_duplicate_saturation_requests_distinct_continuation() -> None:
 
     assert "Не перефразируй их как новые findings." in continuation_prompt
 
-    assert metrics.requested_num_predict == 12000
+    assert metrics.requested_num_predict == 8000
 
-    assert metrics.total_duration_ms == 30.0
+    assert metrics.total_duration_ms == 20.0
 
 
-async def test_dense_discovery_requires_two_confirming_probes_before_bulk() -> None:
-    """Один плотный probe не должен сразу открывать большой bulk batch."""
+async def test_dense_probe_switches_to_one_bulk_continuation() -> None:
+    """Distinct-heavy лист не режется probe batch size."""
     first_batch = [
         _candidate(
             index,
@@ -411,34 +309,20 @@ async def test_dense_discovery_requires_two_confirming_probes_before_bulk() -> N
         )
     ]
 
-    second_batch = [
-        _candidate(
-            index,
-        )
-        for index in range(
-            11,
-            21,
-        )
-    ]
-
     model = SequentialVisionModel(
         [
             {
-                "summary": ("Первый плотный probe."),
+                "summary": ("Много distinct findings."),
                 "violations": first_batch,
-            },
-            {
-                "summary": ("Второй плотный probe."),
-                "violations": second_batch,
             },
             {
                 "summary": ("Остаток."),
                 "violations": [
                     _candidate(
-                        21,
+                        11,
                     ),
                     _candidate(
-                        22,
+                        12,
                     ),
                 ],
             },
@@ -459,46 +343,37 @@ async def test_dense_discovery_requires_two_confirming_probes_before_bulk() -> N
         len(
             model.calls,
         )
-        == 3
+        == 2
     )
 
     assert (
         len(
             findings,
         )
-        == 22
+        == 12
     )
 
     first_call = model.calls[0]
 
     second_call = model.calls[1]
 
-    bulk_call = model.calls[2]
-
     assert first_call["schema"]["properties"]["violations"]["maxItems"] == 10
 
-    assert second_call["schema"]["properties"]["violations"]["maxItems"] == 10
-
-    assert bulk_call["schema"]["properties"]["violations"]["maxItems"] == 30
+    assert second_call["schema"]["properties"]["violations"]["maxItems"] == 40
 
     assert first_call["num_predict"] == 4000
 
-    assert second_call["num_predict"] == 4000
+    assert second_call["num_predict"] == 14000
 
-    assert bulk_call["num_predict"] == 14000
+    assert second_call["stage"] == "normative_check:7:bulk"
 
-    assert [call["stage"] for call in model.calls] == [
-        "normative_check:7:probe1",
-        "normative_check:7:probe2",
-        "normative_check:7:bulk",
-    ]
+    assert "Замечание 1." in str(
+        second_call["prompt"],
+    )
 
-    assert "Замечание 1." in str(second_call["prompt"])
-    assert "Замечание 20." in str(bulk_call["prompt"])
+    assert metrics.requested_num_predict == 18000
 
-    assert metrics.requested_num_predict == 22000
-
-    assert metrics.total_duration_ms == 30.0
+    assert metrics.total_duration_ms == 20.0
 
 
 async def test_repeated_saturation_stops_after_three_probes() -> None:
@@ -572,8 +447,8 @@ async def test_repeated_saturation_stops_after_three_probes() -> None:
     assert metrics.requested_num_predict == 12000
 
 
-async def test_discovery_prompt_forbids_unproven_visual_semantics() -> None:
-    """Source-less visual finding не может зависеть от скрытой трактовки символа."""
+async def test_high_recall_policy_contains_semantic_guardrails() -> None:
+    """Discovery запрещает transport-page и unsupported relation assumptions."""
     model = SequentialVisionModel(
         [
             {
@@ -587,7 +462,7 @@ async def test_discovery_prompt_forbids_unproven_visual_semantics() -> None:
         model,
     ).execute(
         page_number=23,
-        extracted_text=("Два резервуара 100 м3."),
+        extracted_text=("Лист 5. Насосы 3 шт. Виброкомпенсаторы 4 шт."),
         page_facts=_page_facts(),
         normative_sources=(),
         image_bytes=b"png",
@@ -599,16 +474,23 @@ async def test_discovery_prompt_forbids_unproven_visual_semantics() -> None:
 
     assert "SEMANTIC EVIDENCE DISCIPLINE" in prompt
 
-    assert "сами по себе НЕ доказывают скрытую инженерную классификацию" in prompt
+    assert "TRANSPORT / PROJECT PAGE NUMBERING" in prompt
 
-    assert "наземным или подземным" in prompt
+    assert "page_number" in prompt
 
-    assert "рабочим или резервным" in prompt
+    assert 'проектного поля "Лист"' in prompt
 
-    assert "несколько правдоподобных" in prompt
+    assert "QUANTITY / CHARACTERISTIC RELATIONSHIP" in prompt
 
-    assert "один и тот же объект/класс объектов" in prompt
+    assert "насосов 3, а виброкомпенсаторов 4" in prompt
 
-    assert "одно и то же свойство" in prompt
+    assert "один и тот же tagged object" in prompt
 
-    assert "один и тот же смысловой scope" in prompt
+    assert "Например несоответствие номера листа в верхнем углу" not in prompt
+
+    assert (
+        len(
+            model.calls,
+        )
+        == 1
+    )
