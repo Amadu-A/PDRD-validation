@@ -26,9 +26,9 @@ class LocalFilesystemAnalysisVisualizationCache:
 
     _LOCATIONS_FILE = "locations.json"
 
-    _ANNOTATED_PDF_FILE = "annotated-v4.pdf"
+    _ANNOTATED_PDF_FILE = "annotated-v5.pdf"
 
-    _LOCATIONS_SCHEMA_VERSION = 3
+    _LOCATIONS_SCHEMA_VERSION = 4
 
     def __init__(
         self,
@@ -152,9 +152,9 @@ class LocalFilesystemAnalysisVisualizationCache:
                     "Location cache pages должен быть array.",
                 )
 
-            pages: list[AnalysisVisualizationLocationPage] = []
+            pages: list[AnalysisVisualizationLocationPage,] = []
 
-            seen_pages: set[int] = set()
+            seen_pages: set[int,] = set()
 
             for raw_page in raw_pages:
                 if not isinstance(
@@ -248,7 +248,7 @@ class LocalFilesystemAnalysisVisualizationCache:
                 "schema_version": (self._LOCATIONS_SCHEMA_VERSION),
                 "pages": [
                     {
-                        "page_number": page.page_number,
+                        "page_number": (page.page_number),
                         "locations": [
                             location.as_dict() for location in page.locations
                         ],
@@ -258,7 +258,7 @@ class LocalFilesystemAnalysisVisualizationCache:
             }
 
             self._write_json_atomic(
-                target_directory / self._LOCATIONS_FILE,
+                (target_directory / self._LOCATIONS_FILE),
                 payload,
             )
 
@@ -325,7 +325,7 @@ class LocalFilesystemAnalysisVisualizationCache:
 
         try:
             self._write_bytes_atomic(
-                document_directory / self._ANNOTATED_PDF_FILE,
+                (document_directory / self._ANNOTATED_PDF_FILE),
                 content,
             )
 

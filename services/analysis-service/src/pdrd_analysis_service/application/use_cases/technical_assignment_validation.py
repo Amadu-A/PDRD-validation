@@ -22,6 +22,9 @@ from pdrd_analysis_service.application.technical_assignment_schema import (
     TECHNICAL_ASSIGNMENT_DECISION_STATUSES,
     build_technical_assignment_check_schema,
 )
+from pdrd_analysis_service.application.use_cases.finding_visual_regions import (
+    parse_finding_visual_regions,
+)
 from pdrd_analysis_service.domain.analysis import (
     FindingDraft,
     FindingSeverity,
@@ -119,9 +122,9 @@ class CheckPageAgainstTechnicalAssignment:
             requirements,
         )
 
-        decisions: list[TechnicalAssignmentDecision] = []
+        decisions: list[TechnicalAssignmentDecision,] = []
 
-        metrics: list[GenerationMetrics] = []
+        metrics: list[GenerationMetrics,] = []
 
         for batch_number, start in enumerate(
             range(
@@ -138,15 +141,19 @@ class CheckPageAgainstTechnicalAssignment:
             requirement_ids = tuple(requirement.requirement_id for requirement in batch)
 
             result = await self.vision_model.generate_json(
-                prompt=build_technical_assignment_check_prompt(
-                    page_number=page_number,
-                    extracted_text=extracted_text,
-                    page_facts=page_facts,
-                    requirements=batch,
-                    requirement_text_limit=(self.requirement_text_limit),
+                prompt=(
+                    build_technical_assignment_check_prompt(
+                        page_number=page_number,
+                        extracted_text=extracted_text,
+                        page_facts=page_facts,
+                        requirements=batch,
+                        requirement_text_limit=(self.requirement_text_limit),
+                    )
                 ),
-                schema=build_technical_assignment_check_schema(
-                    requirement_ids,
+                schema=(
+                    build_technical_assignment_check_schema(
+                        requirement_ids,
+                    )
                 ),
                 num_predict=self.num_predict,
                 seed=500 + batch_number,
@@ -165,7 +172,7 @@ class CheckPageAgainstTechnicalAssignment:
                 )
             )
 
-        findings: list[FindingDraft] = []
+        findings: list[FindingDraft,] = []
 
         requirement_by_id = {
             requirement.requirement_id: requirement for requirement in requirements
@@ -417,7 +424,9 @@ class CheckPageAgainstTechnicalAssignment:
                 raw_issue,
                 dict,
             ):
-                logger.warning("technical_assignment_issue_ignored reason=not_object")
+                logger.warning(
+                    "technical_assignment_issue_ignored reason=not_object",
+                )
 
                 continue
 
@@ -463,11 +472,13 @@ class CheckPageAgainstTechnicalAssignment:
         requirement_id: str,
         raw: Any,
         compact_mode: bool,
-        raw_issue: dict[
-            str,
-            Any,
-        ]
-        | None,
+        raw_issue: (
+            dict[
+                str,
+                Any,
+            ]
+            | None
+        ),
     ) -> TechnicalAssignmentDecision:
         """Строго читает decision, но безопасно ремонтирует issue details."""
         if not isinstance(
@@ -549,6 +560,12 @@ class CheckPageAgainstTechnicalAssignment:
                 )
             ).strip()
 
+            visual_regions = parse_finding_visual_regions(
+                detail.get(
+                    "visual_regions",
+                )
+            )
+
         else:
             if compact_mode and raw_issue is not None:
                 logger.warning(
@@ -569,6 +586,7 @@ class CheckPageAgainstTechnicalAssignment:
             comment = ""
             evidence = ""
             recommendation_draft = ""
+            visual_regions = ()
 
         return TechnicalAssignmentDecision(
             requirement_id=requirement_id,
@@ -581,6 +599,7 @@ class CheckPageAgainstTechnicalAssignment:
             evidence=evidence,
             recommendation_draft=(recommendation_draft),
             confidence=normalized_confidence,
+            visual_regions=visual_regions,
         )
 
     @staticmethod
@@ -615,6 +634,7 @@ class CheckPageAgainstTechnicalAssignment:
                 confidence,
                 0.5,
             ),
+            visual_regions=(),
         )
 
     @staticmethod
@@ -738,14 +758,17 @@ class CheckPageAgainstTechnicalAssignment:
             normative_source_ids=(),
             basis="",
             basis_sources=(),
-            experience_query=build_experience_query(
-                category="customer_requirements",
-                comment=decision.comment,
-                evidence=decision.evidence,
-                recommendation_draft=(decision.recommendation_draft),
+            experience_query=(
+                build_experience_query(
+                    category=("customer_requirements"),
+                    comment=decision.comment,
+                    evidence=decision.evidence,
+                    recommendation_draft=(decision.recommendation_draft),
+                )
             ),
             technical_assignment_source_ids=(requirement.requirement_id,),
             technical_assignment_basis_sources=(source,),
             user_package_source_ids=(),
             user_package_basis_sources=(),
+            visual_regions=(decision.visual_regions),
         )

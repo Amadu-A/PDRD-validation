@@ -111,6 +111,62 @@ class PageFacts:
 
 
 @dataclass(frozen=True, slots=True)
+class FindingVisualRegion:
+    """Визуальная evidence-область finding в координатах 0..1000."""
+
+    x_min: int
+    y_min: int
+    x_max: int
+    y_max: int
+
+    confidence: float
+
+    label: str = ""
+
+    def __post_init__(
+        self,
+    ) -> None:
+        """Проверяет границы и геометрию visual region."""
+        coordinates = (
+            self.x_min,
+            self.y_min,
+            self.x_max,
+            self.y_max,
+        )
+
+        if any(coordinate < 0 or coordinate > 1000 for coordinate in coordinates):
+            raise ValueError(
+                "Visual region coordinates должны быть в диапазоне 0..1000.",
+            )
+
+        if self.x_min >= self.x_max or self.y_min >= self.y_max:
+            raise ValueError(
+                "Visual region должна иметь положительную площадь.",
+            )
+
+        if not (0.0 <= self.confidence <= 1.0):
+            raise ValueError(
+                "Visual region confidence должен быть в диапазоне 0..1.",
+            )
+
+    def as_dict(
+        self,
+    ) -> dict[
+        str,
+        Any,
+    ]:
+        """Возвращает transport-friendly visual region."""
+        return {
+            "x_min": self.x_min,
+            "y_min": self.y_min,
+            "x_max": self.x_max,
+            "y_max": self.y_max,
+            "confidence": self.confidence,
+            "label": self.label,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class NormativeSource:
     """Нормативный фрагмент, полученный из Knowledge Service."""
 
@@ -264,6 +320,11 @@ class FindingDraft:
 
     user_package_basis_sources: tuple[
         UserPackageSource,
+        ...,
+    ] = ()
+
+    visual_regions: tuple[
+        FindingVisualRegion,
         ...,
     ] = ()
 

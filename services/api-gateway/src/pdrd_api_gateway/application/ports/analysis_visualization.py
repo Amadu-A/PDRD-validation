@@ -38,7 +38,10 @@ class AnalysisBoundingBox:
 
     def as_dict(
         self,
-    ) -> dict[str, int]:
+    ) -> dict[
+        str,
+        int,
+    ]:
         """Возвращает JSON-ready bbox."""
         return {
             "x_min": self.x_min,
@@ -59,15 +62,6 @@ class AnalysisTextWord:
     block_no: int
     line_no: int
     word_no: int
-
-
-@dataclass(frozen=True, slots=True)
-class AnalysisFindingTarget:
-    """Finding, который требуется найти на странице."""
-
-    finding_id: str
-    comment: str
-    evidence: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +89,20 @@ class AnalysisVisualRegion:
             "confidence": self.confidence,
             "label": self.label,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisFindingTarget:
+    """Finding, который требуется найти на странице."""
+
+    finding_id: str
+    comment: str
+    evidence: str
+
+    visual_regions: tuple[
+        AnalysisVisualRegion,
+        ...,
+    ] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,7 +249,7 @@ class AnalysisPdfPageRenderer(Protocol):
 
 
 class AnalysisFindingLocator(Protocol):
-    """Контракт VLM fallback visual localization."""
+    """Контракт legacy VLM fallback visual localization."""
 
     async def localize(
         self,
@@ -257,5 +265,5 @@ class AnalysisFindingLocator(Protocol):
         AnalysisFindingLocation,
         ...,
     ]:
-        """Локализует unresolved findings одним запросом на страницу."""
+        """Локализует unresolved legacy findings одним запросом на страницу."""
         ...

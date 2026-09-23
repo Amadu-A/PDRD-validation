@@ -369,6 +369,7 @@ class PyMuPdfAnnotationWriter:
 
     _CARD_OVERLAP_WEIGHT = 12.0
     _REGION_OVERLAP_WEIGHT = 5.0
+    _CONTENT_OVERLAP_WEIGHT = 18.0
     _DISTANCE_WEIGHT = 0.015
 
     def build(
@@ -400,6 +401,12 @@ class PyMuPdfAnnotationWriter:
                     annotations=annotations,
                 )
 
+                text_regions_by_page = self._all_page_text_regions(
+                    document=document,
+                    original_page_count=original_page_count,
+                    annotations=annotations,
+                )
+
                 occupied_cards: dict[
                     int,
                     list[fitz.Rect],
@@ -418,6 +425,12 @@ class PyMuPdfAnnotationWriter:
                         occupied_cards=page_cards,
                         all_regions=(
                             all_regions_by_page.get(
+                                annotation.page_number,
+                                (),
+                            )
+                        ),
+                        text_regions=(
+                            text_regions_by_page.get(
                                 annotation.page_number,
                                 (),
                             )
@@ -513,6 +526,97 @@ class PyMuPdfAnnotationWriter:
             ) in result.items()
         }
 
+    def _all_page_text_regions(
+        self,
+        *,
+        document: fitz.Document,
+        original_page_count: int,
+        annotations: tuple[
+            PdfFindingAnnotation,
+            ...,
+        ],
+    ) -> dict[
+        int,
+        tuple[
+            fitz.Rect,
+            ...,
+        ],
+    ]:
+        """Собирает исходные text blocks для collision-aware card layout."""
+        page_numbers = {annotation.page_number for annotation in annotations}
+
+        result: dict[
+            int,
+            tuple[
+                fitz.Rect,
+                ...,
+            ],
+        ] = {}
+
+        for page_number in page_numbers:
+            page = self._annotation_page(
+                document=document,
+                original_page_count=original_page_count,
+                page_number=page_number,
+            )
+
+            regions: list[fitz.Rect,] = []
+
+            for block in page.get_text(
+                "blocks",
+            ):
+                if (
+                    not isinstance(
+                        block,
+                        tuple,
+                    )
+                    or len(
+                        block,
+                    )
+                    < 5
+                ):
+                    continue
+
+                text = str(
+                    block[4],
+                ).strip()
+
+                if not text:
+                    continue
+
+                rect = fitz.Rect(
+                    float(
+                        block[0],
+                    ),
+                    float(
+                        block[1],
+                    ),
+                    float(
+                        block[2],
+                    ),
+                    float(
+                        block[3],
+                    ),
+                )
+
+                if page.rotation:
+                    rect = rect * page.rotation_matrix
+
+                rect = rect & page.rect
+
+                if rect.is_empty or rect.is_infinite:
+                    continue
+
+                regions.append(
+                    rect,
+                )
+
+            result[page_number] = tuple(
+                regions,
+            )
+
+        return result
+
     def _add_finding_annotation(
         self,
         *,
@@ -521,6 +625,10 @@ class PyMuPdfAnnotationWriter:
         annotation: PdfFindingAnnotation,
         occupied_cards: list[fitz.Rect],
         all_regions: tuple[
+            fitz.Rect,
+            ...,
+        ],
+        text_regions: tuple[
             fitz.Rect,
             ...,
         ],
@@ -584,6 +692,7 @@ class PyMuPdfAnnotationWriter:
             anchor=anchor,
             occupied_cards=occupied_cards,
             all_regions=all_regions,
+            text_regions=text_regions,
         )
 
         for visual_region in visual_regions:
@@ -790,6 +899,10 @@ class PyMuPdfAnnotationWriter:
             fitz.Rect,
             ...,
         ],
+        text_regions: tuple[
+            fitz.Rect,
+            ...,
+        ],
     ) -> fitz.Rect:
         """Выбирает свободное место card рядом с finding bbox."""
         width, height = self._card_dimensions(
@@ -817,8 +930,9 @@ class PyMuPdfAnnotationWriter:
             key=lambda candidate: self._candidate_score(
                 candidate=candidate,
                 anchor=anchor,
-                occupied_cards=(occupied_cards),
+                occupied_cards=occupied_cards,
                 all_regions=all_regions,
+                text_regions=text_regions,
             ),
         )
 
@@ -974,8 +1088,12 @@ class PyMuPdfAnnotationWriter:
             fitz.Rect,
             ...,
         ],
+        text_regions: tuple[
+            fitz.Rect,
+            ...,
+        ],
     ) -> float:
-        """Штрафует card-card/card-region overlap и большую дистанцию."""
+        """Штрафует overlap с cards/findings/source text и дистанцию."""
         card_overlap = sum(
             self._intersection_area(
                 candidate,
@@ -992,6 +1110,14 @@ class PyMuPdfAnnotationWriter:
             for region in all_regions
         )
 
+        content_overlap = sum(
+            self._intersection_area(
+                candidate,
+                region,
+            )
+            for region in text_regions
+        )
+
         distance = self._distance_between_centers(
             candidate,
             anchor,
@@ -1000,6 +1126,7 @@ class PyMuPdfAnnotationWriter:
         return (
             card_overlap * self._CARD_OVERLAP_WEIGHT
             + region_overlap * self._REGION_OVERLAP_WEIGHT
+            + content_overlap * self._CONTENT_OVERLAP_WEIGHT
             + distance * self._DISTANCE_WEIGHT
         )
 

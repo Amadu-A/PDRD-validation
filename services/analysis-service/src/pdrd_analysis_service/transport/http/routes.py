@@ -23,6 +23,7 @@ from pdrd_analysis_service.domain.analysis import (
     ExperienceSource,
     FinalFinding,
     FindingDraft,
+    FindingVisualRegion,
     NormativeSource,
     PageFacts,
     TechnicalAssignmentSource,
@@ -43,6 +44,7 @@ from pdrd_analysis_service.transport.http.schemas import (
     FindingLocalizationRequest,
     FindingLocalizationResponse,
     FindingLocationPayload,
+    FindingVisualRegionPayload,
     LiveHealthResponse,
     NormativeQueriesRequest,
     NormativeQueriesResponse,
@@ -75,20 +77,20 @@ def _decode_image(
         ValueError,
     ) as error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="image_base64 содержит некорректный Base64.",
+            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
+            detail=("image_base64 содержит некорректный Base64."),
         ) from error
 
     if not content:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=(status.HTTP_422_UNPROCESSABLE_CONTENT),
             detail="Передано пустое изображение.",
         )
 
     if len(content) > max_bytes:
         raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail="Изображение превышает допустимый размер.",
+            status_code=(status.HTTP_413_CONTENT_TOO_LARGE),
+            detail=("Изображение превышает допустимый размер."),
         )
 
     return content
@@ -198,6 +200,20 @@ def _experience_source_payload(
     )
 
 
+def _visual_region_payload(
+    region: FindingVisualRegion,
+) -> FindingVisualRegionPayload:
+    """Преобразует domain visual region в HTTP payload."""
+    return FindingVisualRegionPayload(
+        x_min=region.x_min,
+        y_min=region.y_min,
+        x_max=region.x_max,
+        y_max=region.y_max,
+        confidence=region.confidence,
+        label=region.label,
+    )
+
+
 def _finding_draft_payload(
     finding: FindingDraft,
 ) -> FindingDraftPayload:
@@ -223,7 +239,7 @@ def _finding_draft_payload(
             )
             for source in finding.basis_sources
         ],
-        experience_query=finding.experience_query,
+        experience_query=(finding.experience_query),
         technical_assignment_source_ids=list(
             finding.technical_assignment_source_ids,
         ),
@@ -242,13 +258,24 @@ def _finding_draft_payload(
             )
             for source in finding.user_package_basis_sources
         ],
+        visual_regions=[
+            _visual_region_payload(
+                region,
+            )
+            for region in finding.visual_regions
+        ],
     )
 
 
 def _final_finding_payload(
     finding: FinalFinding,
+    *,
+    visual_regions: tuple[
+        FindingVisualRegion,
+        ...,
+    ] = (),
 ) -> FinalFindingPayload:
-    """Преобразует FinalFinding в HTTP payload."""
+    """Преобразует final finding и сохраняет исходный visual provenance."""
     return FinalFindingPayload(
         finding_id=finding.finding_id,
         page=finding.page,
@@ -284,6 +311,12 @@ def _final_finding_payload(
                 source,
             )
             for source in finding.user_package_basis_sources
+        ],
+        visual_regions=[
+            _visual_region_payload(
+                region,
+            )
+            for region in visual_regions
         ],
     )
 
@@ -329,7 +362,7 @@ async def health_ready(
 
     if not report.ready:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
             detail={
                 "status": "not_ready",
                 "dependencies": dependencies,
@@ -367,13 +400,13 @@ async def understand_page(
         facts, metrics = await container.understand_page.execute(
             page_number=request.page_number,
             heuristic_page_type=(request.heuristic_page_type),
-            extracted_text=request.extracted_text,
+            extracted_text=(request.extracted_text),
             image_bytes=image,
         )
 
     except VisionModelError as error:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
             detail=str(
                 error,
             ),
@@ -402,8 +435,8 @@ async def normative_queries(
 ) -> NormativeQueriesResponse:
     """Строит retrieval queries Knowledge Service."""
     queries = container.build_normative_queries.execute(
-        page_facts=request.page_facts.to_domain(),
-        extracted_text=request.extracted_text,
+        page_facts=(request.page_facts.to_domain()),
+        extracted_text=(request.extracted_text),
         project_context_texts=tuple(
             request.project_context_texts,
         ),
@@ -442,8 +475,8 @@ async def check_norms(
             metrics,
         ) = await container.check_page_against_norms.execute(
             page_number=request.page_number,
-            extracted_text=request.extracted_text,
-            page_facts=request.page_facts.to_domain(),
+            extracted_text=(request.extracted_text),
+            page_facts=(request.page_facts.to_domain()),
             normative_sources=tuple(
                 source.to_domain() for source in request.normative_sources
             ),
@@ -462,7 +495,7 @@ async def check_norms(
 
     except VisionModelError as error:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
             detail=str(
                 error,
             ),
@@ -493,7 +526,7 @@ async def localize_findings(
         ),
     ],
 ) -> FindingLocalizationResponse:
-    """Локализует готовые findings на PDF-изображении страницы."""
+    """Legacy fallback: локализует finding без сохранённого visual provenance."""
     image = _decode_image(
         encoded=request.image_base64,
         max_bytes=(container.settings.pipeline.max_image_bytes),
@@ -502,14 +535,14 @@ async def localize_findings(
     try:
         locations, metrics = await container.localize_findings.execute(
             page_number=request.page_number,
-            extracted_text=request.extracted_text,
+            extracted_text=(request.extracted_text),
             image_bytes=image,
             findings=tuple(finding.to_domain() for finding in request.findings),
         )
 
     except VisionModelError as error:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
             detail=str(
                 error,
             ),
@@ -548,7 +581,14 @@ async def finalize_findings(
         ),
     ],
 ) -> FinalizeResponse:
-    """Финализирует findings с finding-local N enrichment."""
+    """Финализирует findings, не теряя их исходный visual provenance."""
+    visual_regions_by_finding_id = {
+        finding.finding_id: tuple(
+            region.to_domain() for region in finding.visual_regions
+        )
+        for finding in request.findings
+    }
+
     (
         summary,
         findings,
@@ -579,6 +619,12 @@ async def finalize_findings(
         findings=[
             _final_finding_payload(
                 finding,
+                visual_regions=(
+                    visual_regions_by_finding_id.get(
+                        finding.finding_id,
+                        (),
+                    )
+                ),
             )
             for finding in findings
         ],

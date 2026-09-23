@@ -90,6 +90,57 @@ def build_page_facts_schema() -> dict[str, Any]:
     }
 
 
+def build_finding_visual_regions_schema() -> dict[str, Any]:
+    """Возвращает schema VLM evidence regions одного finding."""
+    return {
+        "type": "array",
+        "maxItems": 4,
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "x_min": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000,
+                },
+                "y_min": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000,
+                },
+                "x_max": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000,
+                },
+                "y_max": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000,
+                },
+                "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                },
+                "label": {
+                    "type": "string",
+                    "maxLength": 120,
+                },
+            },
+            "required": [
+                "x_min",
+                "y_min",
+                "x_max",
+                "y_max",
+                "confidence",
+                "label",
+            ],
+        },
+    }
+
+
 def _source_ids_schema(
     source_ids: tuple[
         str,
@@ -187,6 +238,7 @@ def build_normative_check_schema(
                             "minimum": 0,
                             "maximum": 1,
                         },
+                        "visual_regions": (build_finding_visual_regions_schema()),
                         "normative_source_ids": (
                             _source_ids_schema(
                                 source_ids,
@@ -211,6 +263,7 @@ def build_normative_check_schema(
                         "evidence",
                         "recommendation_draft",
                         "confidence",
+                        "visual_regions",
                         "normative_source_ids",
                         "technical_assignment_source_ids",
                         "user_package_source_ids",

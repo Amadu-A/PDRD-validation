@@ -130,6 +130,19 @@ decisions[requirement_id].status является
 - evidence должен содержать конкретный факт листа;
 - recommendation_draft должен содержать
   только необходимое действие;
+- visual_regions должен содержать от 0 до 4
+  точных evidence-областей на текущем изображении;
+- координаты visual_regions нормализованы 0..1000;
+- bbox должен указывать именно на объект, текст,
+  линию или узел, из-за которого выбран
+  violated/insufficient_evidence;
+- если сравниваются несколько мест листа,
+  верни отдельную область для каждого места;
+- не размечай случайные слова из comment/evidence;
+- visual_regions=[] допустим только если
+  точную локальную область честно определить нельзя;
+- в PDF + CAD combined mode используй только
+  координаты левого PDF-представления 0..1000;
 - не повторяй полный текст requirement
   во всех полях.
 
@@ -189,8 +202,8 @@ def build_technical_assignment_check_prompt(
         requirement_payload.append(
             {
                 "requirement_id": requirement.requirement_id,
-                "requirement_index": requirement.requirement_index,
-                "technical_assignment_page": requirement.page,
+                "requirement_index": (requirement.requirement_index),
+                "technical_assignment_page": (requirement.page),
                 "strength": requirement.strength,
                 "scopes": list(
                     requirement.scopes,

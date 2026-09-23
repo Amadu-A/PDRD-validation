@@ -11,11 +11,13 @@ from pdrd_api_gateway.application.finding_anchor_matcher import (
     FindingAnchorMatcher,
 )
 from pdrd_api_gateway.application.ports.analysis_visualization import (
+    AnalysisBoundingBox,
     AnalysisFindingLocation,
     AnalysisFindingLocator,
     AnalysisFindingTarget,
     AnalysisPagePreview,
     AnalysisPdfPageRenderer,
+    AnalysisVisualRegion,
 )
 from pdrd_api_gateway.application.ports.analysis_visualization_cache import (
     AnalysisVisualizationCache,
@@ -102,7 +104,7 @@ class GetAnalysisVisualization:
         str,
         object,
     ]:
-        """Возвращает PDF pages вместе с exact/VLM locations."""
+        """Возвращает PDF pages с сохранёнными или fallback locations."""
         job = await self.get_analysis_job.execute(
             job_id=job_id,
         )
@@ -157,7 +159,7 @@ class GetAnalysisVisualization:
             document_id=job.document_id,
             pdf_content=artifacts.pdf_content,
             file_name=(artifacts.submission.pdf_file_name or "document.pdf"),
-            page_spec=artifacts.submission.pages,
+            page_spec=(artifacts.submission.pages),
         )
 
         raw_findings = result.get(
@@ -177,7 +179,7 @@ class GetAnalysisVisualization:
 
         cached_by_page = {page.page_number: page for page in cached_pages}
 
-        cache_pages: list[AnalysisVisualizationLocationPage] = []
+        cache_pages: list[AnalysisVisualizationLocationPage,] = []
 
         cache_changed = False
 
@@ -234,8 +236,11 @@ class GetAnalysisVisualization:
                 refinement_targets = tuple(
                     target
                     for target in targets
-                    if self._requires_visual_refinement(
-                        target,
+                    if (
+                        not target.visual_regions
+                        and self._requires_visual_refinement(
+                            target,
+                        )
                     )
                 )
 
@@ -261,9 +266,9 @@ class GetAnalysisVisualization:
                 if vlm_targets:
                     try:
                         fallback_locations = await self.finding_locator.localize(
-                            page_number=page.page_number,
-                            extracted_text=page.extracted_text,
-                            image_base64=page.image_base64,
+                            page_number=(page.page_number),
+                            extracted_text=(page.extracted_text),
+                            image_base64=(page.image_base64),
                             findings=vlm_targets,
                         )
 
@@ -294,7 +299,7 @@ class GetAnalysisVisualization:
                 if not localization_error:
                     cache_pages.append(
                         AnalysisVisualizationLocationPage(
-                            page_number=page.page_number,
+                            page_number=(page.page_number),
                             locations=locations,
                         )
                     )
@@ -309,7 +314,7 @@ class GetAnalysisVisualization:
 
             if localization_error:
                 page_payload["localization_warning"] = (
-                    "Часть замечаний не удалось локализовать через VLM fallback."
+                    "Часть legacy-замечаний не удалось локализовать через VLM fallback."
                 )
 
             page_payloads.append(
@@ -524,10 +529,10 @@ class GetAnalysisVisualization:
         *,
         target: AnalysisFindingTarget,
         deterministic: AnalysisFindingLocation,
-        fallback: AnalysisFindingLocation | None,
+        fallback: (AnalysisFindingLocation | None),
         prefer_vlm: bool = False,
     ) -> AnalysisFindingLocation:
-        """Объединяет PDF geometry и VLM refinement без потери safe fallback."""
+        """Объединяет saved/PDF geometry и legacy VLM fallback."""
         if prefer_vlm and fallback is not None and fallback.status == "located":
             return fallback
 
@@ -545,7 +550,7 @@ class GetAnalysisVisualization:
     def _requires_visual_refinement(
         target: AnalysisFindingTarget,
     ) -> bool:
-        """Определяет findings, где нужно локализовать evidence area отсутствия."""
+        """Определяет legacy findings с evidence area отсутствия."""
         finding_text = "\n".join(
             (
                 target.comment,
@@ -567,6 +572,9 @@ class GetAnalysisVisualization:
     ]:
         """Возвращает диагностическую статистику страницы."""
         return {
+            "analysis_vlm": sum(
+                location.method == "analysis_vlm" for location in locations
+            ),
             "pdf_text": sum(location.method == "pdf_text" for location in locations),
             "vlm": sum(location.method == "vlm" for location in locations),
             "unlocated": sum(location.status != "located" for location in locations),
@@ -583,9 +591,9 @@ class GetAnalysisVisualization:
         ...,
     ]:
         """Выбирает findings конкретной physical PDF page."""
-        targets: list[AnalysisFindingTarget] = []
+        targets: list[AnalysisFindingTarget,] = []
 
-        seen_ids: set[str] = set()
+        seen_ids: set[str,] = set()
 
         for finding in findings:
             if not isinstance(
@@ -635,11 +643,111 @@ class GetAnalysisVisualization:
                             "",
                         )
                     ),
+                    visual_regions=(
+                        cls._visual_regions_from_finding(
+                            finding,
+                        )
+                    ),
                 )
             )
 
         return tuple(
             targets,
+        )
+
+    @staticmethod
+    def _visual_regions_from_finding(
+        finding: dict[
+            str,
+            Any,
+        ],
+    ) -> tuple[
+        AnalysisVisualRegion,
+        ...,
+    ]:
+        """Читает сохранённые VLM evidence regions из final finding."""
+        raw_regions = finding.get(
+            "visual_regions",
+            [],
+        )
+
+        if not isinstance(
+            raw_regions,
+            list,
+        ):
+            return ()
+
+        regions: list[AnalysisVisualRegion,] = []
+
+        for raw_region in raw_regions[:4]:
+            if not isinstance(
+                raw_region,
+                dict,
+            ):
+                continue
+
+            try:
+                bbox = AnalysisBoundingBox(
+                    x_min=int(
+                        raw_region.get(
+                            "x_min",
+                        )
+                    ),
+                    y_min=int(
+                        raw_region.get(
+                            "y_min",
+                        )
+                    ),
+                    x_max=int(
+                        raw_region.get(
+                            "x_max",
+                        )
+                    ),
+                    y_max=int(
+                        raw_region.get(
+                            "y_max",
+                        )
+                    ),
+                )
+
+                confidence = min(
+                    max(
+                        float(
+                            raw_region.get(
+                                "confidence",
+                                0.0,
+                            )
+                        ),
+                        0.0,
+                    ),
+                    1.0,
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+                continue
+
+            regions.append(
+                AnalysisVisualRegion(
+                    bbox=bbox,
+                    source="analysis_vlm",
+                    confidence=confidence,
+                    label=(
+                        str(
+                            raw_region.get(
+                                "label",
+                                "",
+                            )
+                        ).strip()
+                        or None
+                    ),
+                )
+            )
+
+        return tuple(
+            regions,
         )
 
     @staticmethod
