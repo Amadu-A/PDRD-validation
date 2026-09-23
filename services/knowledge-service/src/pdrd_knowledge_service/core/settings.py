@@ -522,7 +522,7 @@ class QdrantSettings(BaseModel):
         "dva_normative_v2",
         "dva_experience_v2",
         "dva_multimodal_qwen3vl2b_v1",
-        "dva_multimodal_vl8b_v1",
+        "dva_multimodal_qwen3vl8b_v1",
         "dva_multimodal_v1",
     )
 

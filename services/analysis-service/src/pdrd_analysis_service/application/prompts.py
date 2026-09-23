@@ -833,7 +833,7 @@ def build_finalization_prompt(
         ...,
     ] = (),
 ) -> str:
-    """Формирует промпт финализации и enrichment N evidence."""
+    """Формирует conservative candidate gate и enrichment N evidence."""
     findings_payload: list[
         dict[
             str,
@@ -879,8 +879,9 @@ def build_finalization_prompt(
                 "technical_assignment_id": (source.technical_assignment_id),
                 "source_file": source.source_file,
                 "page": source.page,
+                "text": source.text[:experience_context_limit],
             }
-            for source in (finding.technical_assignment_basis_sources)
+            for source in finding.technical_assignment_basis_sources
         ]
 
         user_package_basis = [
@@ -888,24 +889,29 @@ def build_finalization_prompt(
                 "source_id": source.source_id,
                 "source_file": source.source_file,
                 "page": source.page,
+                "text": source.text[:experience_context_limit],
             }
-            for source in (finding.user_package_basis_sources)
+            for source in finding.user_package_basis_sources
         ]
 
         findings_payload.append(
             {
                 "finding": {
                     "finding_id": finding.finding_id,
+                    "page": finding.page,
+                    "page_type": finding.page_type,
                     "category": finding.category,
+                    "severity": finding.severity,
                     "status": finding.status,
                     "comment": finding.comment,
                     "evidence": finding.evidence,
                     "recommendation_draft": (finding.recommendation_draft),
-                    "normative_basis": (normative_basis),
+                    "confidence": finding.confidence,
+                    "normative_basis": normative_basis,
                     "technical_assignment_basis": (technical_assignment_basis),
-                    "user_package_basis": (user_package_basis),
+                    "user_package_basis": user_package_basis,
                 },
-                "experience_examples": (experience_examples),
+                "experience_examples": experience_examples,
             }
         )
 
@@ -937,64 +943,146 @@ def build_finalization_prompt(
     )
 
     return f"""
-Инженерские findings уже обнаружены предыдущим этапом.
+Ты выполняешь ФИНАЛЬНЫЙ КОНТРОЛЬ КАЧЕСТВА
+уже обнаруженных engineering candidates.
 
-ТВОЯ ЗАДАЧА НЕ СОСТОИТ В ТОМ,
-ЧТОБЫ РЕШАТЬ, ОСТАВЛЯТЬ FINDING ИЛИ НЕТ.
+Новый поиск замечаний здесь запрещён.
+Работай только с переданными candidates и sources.
 
 DATA:
 {data_json}
 
-КРИТИЧЕСКИЙ ИНВАРИАНТ:
+КРИТИЧЕСКИЙ КОНТРАКТ:
 
-- верни РОВНО один элемент
+- верни РОВНО один JSON item
   на каждый входной finding_id;
 
-- НИКОГДА не удаляй finding
-  из-за отсутствия нормативного основания;
+- для каждого item обязательно выбери:
+  decision=keep или decision=reject;
 
-- отсутствие подходящего N-source
-  означает только отсутствие
-  подтверждённого нормативного основания;
+- decision=reject означает,
+  что candidate НЕ должен попадать
+  в итоговый отчёт;
 
-- сам инженерный finding при этом сохраняется.
+- rejection_reason для keep = "";
 
-Для каждого finding:
+- для reject rejection_reason содержит
+  одну короткую конкретную причину;
+
+- сомнение само по себе НЕ является
+  причиной reject;
+
+- status=needs_review само по себе
+  НЕ является причиной reject;
+
+- отсутствие N-source само по себе
+  НЕ является причиной reject;
+
+- confidence само по себе
+  НЕ является причиной reject.
+
+CONSERVATIVE CANDIDATE GATE.
+
+decision=reject используй ТОЛЬКО когда
+из переданных DATA достаточно ясно видно,
+что candidate является шумом или ошибочным выводом.
+
+Отклоняй candidate, если выполняется
+хотя бы одно доказуемое условие:
+
+1. comment противоречит собственному evidence
+   или evidence фактически подтверждает,
+   что заявленного несоответствия нет;
+
+2. арифметика, сравнение количества
+   или другая проверяемая операция
+   показывает, что значения согласованы,
+   хотя candidate утверждает обратное;
+
+3. candidate сравнивает разные сущности,
+   разные свойства или разные смысловые поля
+   только потому, что числа или обозначения
+   внешне похожи;
+
+4. вывод основан на внешнем знании модели,
+   которого нет в evidence/N/T/U:
+   "обычно", "как правило",
+   предполагаемая расшифровка каталожного кода,
+   паспортная характеристика производителя
+   или типовой диапазон;
+
+5. candidate говорит только
+   "требуется проверить соответствие",
+   хотя evidence не содержит
+   конкретного противоречия или подозрительного факта;
+
+6. пустая ячейка, отсутствующая масса,
+   изготовитель, марка или иной реквизит
+   объявлены ошибкой без N/T/U
+   либо без явного внутреннего правила документа,
+   которое доказывает обязательность заполнения;
+
+7. candidate представляет корректное,
+   внутренне согласованное состояние
+   как нарушение.
+
+decision=keep используй, если есть
+конкретное инженерное основание:
+
+- прямое противоречие одного и того же
+  объекта/свойства на листе;
+
+- дублирование позиционного обозначения;
+
+- несовпадение наименования, типа,
+  марки или кода, явно видимое в документе;
+
+- арифметическое несоответствие,
+  которое действительно подтверждается числами;
+
+- конкретное нарушение переданного N;
+
+- конкретное невыполнение T или U;
+
+- конкретное визуальное/логическое подозрение,
+  которое не доказано окончательно,
+  но основано на реально видимом факте.
+  Такое finding можно оставить needs_review.
+
+ВАЖНО:
+
+- не отклоняй source-less engineering finding
+  только из-за отсутствия N;
+
+- не превращай conservative gate
+  в требование нормативного подтверждения
+  для любого engineering finding;
+
+- если данных недостаточно,
+  но evidence содержит конкретный
+  подозрительный факт, предпочитай keep;
+
+- reject предназначен для явного шума,
+  самоопровержения и unsupported assumptions.
+
+НОРМАТИВНОЕ ОБОГАЩЕНИЕ.
+
+Для каждого candidate, независимо от decision:
 
 1. Проверь EXISTING normative_basis.
 
-Это N-sources, которые были подобраны
-на предыдущем этапе.
-
-Оставь их в normative_source_ids
-ТОЛЬКО если текст source действительно
+Оставь source в normative_source_ids
+ТОЛЬКО если его текст действительно
 прямо подтверждает требование,
-на котором основан finding.
+на котором основан candidate.
 
 Тематического сходства недостаточно.
 
-Например:
-
-если N-source говорит о правилах прокладки
-проводника через стены,
-это само по себе НЕ означает,
-что принципиальная схема обязана содержать
-тип и количество этих проводников.
-
-Если existing N нерелевантен,
-не возвращай его source_id.
-
-FINDING ПРИ ЭТОМ НЕ УДАЛЯЕТСЯ.
-
 2. Проверь NORMATIVE CANDIDATES.
-
-Это дополнительные нормативные фрагменты,
-найденные targeted retrieval
-уже ПОСЛЕ обнаружения findings.
 
 Если candidate прямо подтверждает
 конкретное требование finding,
-добавь его source_id в normative_source_ids.
+добавь source_id в normative_source_ids.
 
 Если candidate лишь тематически похож,
 не выбирай его.
@@ -1003,28 +1091,18 @@ FINDING ПРИ ЭТОМ НЕ УДАЛЯЕТСЯ.
 
 normative_source_ids=[]
 
-Finding всё равно обязательно возвращается.
-
-Не превращай отсутствие N
-в отсутствие engineering finding.
+Это НЕ определяет decision.
 
 4. Если source-less finding получил
 подходящий candidate N:
 
 можно выбрать этот source_id.
 
-Таким образом инженерное замечание
-получит проверяемое нормативное основание,
-source_file и страницу,
-которые backend сможет показать пользователю.
+ФОРМУЛИРОВКИ ДЛЯ decision=keep:
 
-5. Формулировки.
-
-- НЕ меняй смысл finding;
+- НЕ меняй фактический смысл finding;
 - кратко переформулируй comment;
 - recommendation сделай конкретной;
-- если normative_source_ids непустой,
-  можно сослаться на действительно выбранный норматив;
 - если normative_source_ids пустой,
   не утверждай, что замечание подтверждено
   конкретным ГОСТ, СП, ПУЭ или другим нормативом;
@@ -1041,6 +1119,15 @@ source_file и страницу,
 - если опыт нерелевантен:
   experience_source_ids=[];
 - comment и recommendation:
-  максимум 1-2 предложения;
-- только JSON.
+  максимум 1-2 предложения.
+
+ДЛЯ decision=reject:
+
+- comment и recommendation оставь короткими;
+- не изобретай новую проблему
+  вместо отклонённой;
+- rejection_reason объясняет,
+  почему исходный candidate является шумом.
+
+Верни только JSON.
 """.strip()

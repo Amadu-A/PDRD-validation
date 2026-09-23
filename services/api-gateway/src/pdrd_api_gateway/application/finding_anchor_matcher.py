@@ -191,7 +191,7 @@ class FindingAnchorMatcher:
         cls,
         value: str,
     ) -> str:
-        """Убирает внешнюю пунктуацию, сохраняя структуру designation."""
+        """Убирает внешнюю пунктуацию, сохраняя structure designation."""
         normalized = cls._normalize_text(
             value,
         ).strip()
@@ -214,7 +214,7 @@ class FindingAnchorMatcher:
     def _is_strong_anchor(
         anchor: str,
     ) -> bool:
-        """Отделяет designations от обычных слов finding."""
+        """Отделяет engineering designations от обычных чисел и слов."""
         if (
             len(
                 anchor,
@@ -235,9 +235,6 @@ class FindingAnchorMatcher:
             is not None
         )
 
-        if not has_letter:
-            return False
-
         has_digit = (
             re.search(
                 r"\d",
@@ -246,12 +243,22 @@ class FindingAnchorMatcher:
             is not None
         )
 
-        if has_digit:
+        if has_letter and has_digit:
             return True
+
+        if has_letter:
+            return (
+                re.fullmatch(
+                    r"[A-Z]{2,16}",
+                    anchor,
+                )
+                is not None
+            )
 
         return (
             re.fullmatch(
-                r"[A-Z]{2,16}",
+                r"\d+(?:\.\d+){1,4}"
+                r"(?:-\d+(?:\.\d+){1,4})?",
                 anchor,
             )
             is not None

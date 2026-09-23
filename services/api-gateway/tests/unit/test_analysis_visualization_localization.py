@@ -86,12 +86,14 @@ def test_matcher_normalizes_latin_and_cyrillic_engineering_tags() -> None:
 
     assert location.status == "located"
     assert location.method == "pdf_text"
+
     assert (
         len(
             location.regions,
         )
         == 1
     )
+
     assert location.regions[0].label == "Т1.1,"
 
 
@@ -121,7 +123,7 @@ def test_absence_finding_requires_visual_refinement() -> None:
 
 
 def test_refinement_prefers_vlm_but_keeps_pdf_anchor_as_fallback() -> None:
-    """VLM уточняет absence finding, но не может уничтожить exact PDF anchor."""
+    """VLM уточняет absence finding, но не уничтожает exact PDF anchor."""
     target = _target()
 
     deterministic = _located(
@@ -144,6 +146,7 @@ def test_refinement_prefers_vlm_but_keeps_pdf_anchor_as_fallback() -> None:
     )
 
     assert refined.method == "vlm"
+
     assert refined.regions[0].bbox.x_min == 500
 
     safe_fallback = GetAnalysisVisualization._merge_location(
@@ -158,6 +161,7 @@ def test_refinement_prefers_vlm_but_keeps_pdf_anchor_as_fallback() -> None:
     )
 
     assert safe_fallback.method == "pdf_text"
+
     assert safe_fallback.regions[0].bbox.x_min == 100
 
     ordinary = GetAnalysisVisualization._merge_location(
@@ -168,3 +172,89 @@ def test_refinement_prefers_vlm_but_keeps_pdf_anchor_as_fallback() -> None:
     )
 
     assert ordinary.method == "pdf_text"
+
+
+def test_matcher_localizes_numeric_position_duplicates() -> None:
+    """Чисто числовая позиция даёт exact multi-region localization."""
+    matcher = FindingAnchorMatcher()
+
+    location = matcher.locate(
+        findings=(
+            _target(
+                evidence=(
+                    "Позиционный номер 8.5.4 дублируется "
+                    "в верхней и нижней частях схемы."
+                ),
+            ),
+        ),
+        text_words=(
+            AnalysisTextWord(
+                text="8.5.4",
+                bbox=AnalysisBoundingBox(
+                    x_min=120,
+                    y_min=180,
+                    x_max=170,
+                    y_max=210,
+                ),
+                block_no=1,
+                line_no=2,
+                word_no=3,
+            ),
+            AnalysisTextWord(
+                text="8.5.4",
+                bbox=AnalysisBoundingBox(
+                    x_min=620,
+                    y_min=620,
+                    x_max=670,
+                    y_max=650,
+                ),
+                block_no=8,
+                line_no=4,
+                word_no=2,
+            ),
+        ),
+    )[0]
+
+    assert location.status == "located"
+    assert location.method == "pdf_text"
+
+    assert (
+        len(
+            location.regions,
+        )
+        == 2
+    )
+
+    assert tuple(region.label for region in location.regions) == (
+        "8.5.4",
+        "8.5.4",
+    )
+
+
+def test_matcher_does_not_use_plain_integer_as_strong_anchor() -> None:
+    """Обычный номер страницы не должен давать ложную localization."""
+    matcher = FindingAnchorMatcher()
+
+    location = matcher.locate(
+        findings=(
+            _target(
+                evidence="На листе указано значение 3.",
+            ),
+        ),
+        text_words=(
+            AnalysisTextWord(
+                text="3",
+                bbox=AnalysisBoundingBox(
+                    x_min=900,
+                    y_min=20,
+                    x_max=920,
+                    y_max=40,
+                ),
+                block_no=1,
+                line_no=1,
+                word_no=1,
+            ),
+        ),
+    )[0]
+
+    assert location.status == "unlocated"

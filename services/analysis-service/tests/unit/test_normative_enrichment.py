@@ -1,6 +1,6 @@
 # services/analysis-service/tests/unit/test_normative_enrichment.py
 
-"""Regression tests non-destructive normative enrichment TZ-5.2."""
+"""Regression tests conservative normative enrichment TZ-5.2."""
 
 from typing import Any
 
@@ -223,6 +223,8 @@ async def test_source_less_finding_can_gain_normative_basis() -> None:
                 "findings": [
                     {
                         "finding_id": "p1-f1",
+                        "decision": "keep",
+                        "rejection_reason": "",
                         "comment": (
                             "Обозначение одного элемента на листе не согласовано."
                         ),
@@ -280,6 +282,8 @@ async def test_irrelevant_old_normative_can_be_detached_without_losing_finding()
                 "findings": [
                     {
                         "finding_id": "p2-f1",
+                        "decision": "keep",
+                        "rejection_reason": "",
                         "comment": (
                             "Необходимо проверить полноту "
                             "данных о защитных проводниках."
@@ -332,6 +336,8 @@ async def test_no_normative_match_never_deletes_engineering_finding() -> None:
                 "findings": [
                     {
                         "finding_id": "p1-f1",
+                        "decision": "keep",
+                        "rejection_reason": "",
                         "comment": ("Обозначение X1/X2 требует проверки."),
                         "recommendation": ("Уточнить правильное обозначение."),
                         "experience_source_ids": [],
@@ -398,8 +404,8 @@ async def test_finalization_error_preserves_original_finding_and_basis() -> None
     assert result_metrics["fallback_count"] == 1
 
 
-def test_finalization_prompt_declares_non_destructive_enrichment() -> None:
-    """Prompt явно запрещает удалять finding из-за N retrieval."""
+def test_finalization_prompt_declares_conservative_enrichment_gate() -> None:
+    """Prompt разрешает reject шума, но не из-за отсутствия N."""
     prompt = build_finalization_prompt(
         findings=(engineering_finding(),),
         experience_by_finding={},
@@ -407,9 +413,13 @@ def test_finalization_prompt_declares_non_destructive_enrichment() -> None:
         normative_candidates=(enrichment_source(),),
     )
 
-    assert "НИКОГДА не удаляй finding" in prompt
+    assert "decision=keep или decision=reject" in prompt
 
-    assert "Finding всё равно обязательно возвращается." in prompt
+    assert "отсутствие N-source само по себе" in prompt
+
+    assert "НЕ является причиной reject" in prompt
+
+    assert "Для каждого candidate, независимо от decision" in prompt
 
     assert "NORMATIVE CANDIDATES" in prompt
 

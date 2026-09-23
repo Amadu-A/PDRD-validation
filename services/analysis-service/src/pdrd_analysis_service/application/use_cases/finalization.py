@@ -3,6 +3,7 @@
 """Use case финализации findings."""
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -39,10 +40,14 @@ _SPLITTABLE_FINALIZATION_ERROR_MARKERS = (
     "Модель не смогла сформировать корректный JSON",
 )
 
+logger = logging.getLogger(
+    "uvicorn.error",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class _BatchOutcome:
-    """Результат одного batch с возможным безопасным split."""
+    """Результат одного batch с возможным safe split."""
 
     findings: tuple[
         FinalFinding,
@@ -61,6 +66,14 @@ class _BatchOutcome:
     failed_vlm_call_count: int
 
     split_count: int
+
+    rejected_findings: tuple[
+        dict[
+            str,
+            object,
+        ],
+        ...,
+    ]
 
 
 def _dedupe_normative_sources(
@@ -373,7 +386,7 @@ def _can_split_finalization_error(
 
 @dataclass(frozen=True, slots=True)
 class FinalizeFindings:
-    """Финализирует findings и non-destructive N enrichment."""
+    """Финализирует candidates, применяет conservative gate и N enrichment."""
 
     vision_model: StructuredVisionModel
 
@@ -417,7 +430,7 @@ class FinalizeFindings:
         ],
         dict[str, Any],
     ]:
-        """Оформляет findings, не позволяя enrichment их удалить или смешать."""
+        """Оформляет findings и удаляет только явно отклонённые candidates."""
         if self.batch_size < 1:
             raise ValueError(
                 "finalization batch_size должен быть положительным.",
@@ -435,6 +448,10 @@ class FinalizeFindings:
                     "initial_batch_count": 0,
                     "batch_execution_count": 0,
                     "fallback_count": 0,
+                    "candidate_count": 0,
+                    "kept_count": 0,
+                    "rejected_count": 0,
+                    "rejected_findings": [],
                     "vlm_call_count": 0,
                     "successful_vlm_call_count": 0,
                     "failed_vlm_call_count": 0,
@@ -497,6 +514,13 @@ class FinalizeFindings:
 
         fallback_count = 0
 
+        rejected_findings: list[
+            dict[
+                str,
+                object,
+            ]
+        ] = []
+
         vlm_call_count = 0
         successful_vlm_call_count = 0
         failed_vlm_call_count = 0
@@ -532,6 +556,10 @@ class FinalizeFindings:
 
             fallback_count += outcome.fallback_count
 
+            rejected_findings.extend(
+                outcome.rejected_findings,
+            )
+
             vlm_call_count += outcome.vlm_call_count
 
             successful_vlm_call_count += outcome.successful_vlm_call_count
@@ -565,6 +593,41 @@ class FinalizeFindings:
                 )
             )
 
+        logger.info(
+            (
+                "finalization_candidate_gate "
+                "candidates=%s kept=%s rejected=%s "
+                "fallback=%s rejected=%s"
+            ),
+            len(
+                findings,
+            ),
+            len(
+                final_items,
+            ),
+            len(
+                rejected_findings,
+            ),
+            fallback_count,
+            tuple(
+                (
+                    str(
+                        item.get(
+                            "finding_id",
+                            "",
+                        )
+                    ),
+                    str(
+                        item.get(
+                            "reason",
+                            "",
+                        )
+                    )[:180],
+                )
+                for item in rejected_findings
+            ),
+        )
+
         return (
             "Замечания сформированы по результатам инженерной проверки.",
             tuple(
@@ -582,6 +645,16 @@ class FinalizeFindings:
                     batch_metrics,
                 ),
                 "fallback_count": fallback_count,
+                "candidate_count": len(
+                    findings,
+                ),
+                "kept_count": len(
+                    final_items,
+                ),
+                "rejected_count": len(
+                    rejected_findings,
+                ),
+                "rejected_findings": rejected_findings,
                 "experience_min_score": (self.experience_min_score),
                 "isolated_normative_enrichment": (isolated_enrichment),
                 "normative_candidates_count": (normative_candidates_count),
@@ -691,7 +764,14 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
   recommendation описывает действие;
 
 - если подходящего N нет,
-  finding всё равно обязательно возвращается.
+  candidate всё равно обязательно возвращается
+  как JSON item;
+
+- отсутствие N само по себе НЕ является
+  причиной decision=reject;
+
+- decision=reject допустим только по правилам
+  candidate quality gate из основного prompt.
 """.rstrip()
 
             generation = await self.vision_model.generate_json(
@@ -777,6 +857,10 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                         1 + left.failed_vlm_call_count + right.failed_vlm_call_count
                     ),
                     split_count=(1 + left.split_count + right.split_count),
+                    rejected_findings=(
+                        *left.rejected_findings,
+                        *right.rejected_findings,
+                    ),
                 )
 
             fallback_findings = tuple(
@@ -814,6 +898,7 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                 successful_vlm_call_count=0,
                 failed_vlm_call_count=1,
                 split_count=0,
+                rejected_findings=(),
             )
 
         returned = {
@@ -837,6 +922,13 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
 
         batch_fallback_count = 0
 
+        batch_rejected_findings: list[
+            dict[
+                str,
+                object,
+            ]
+        ] = []
+
         for finding in batch:
             item = returned.get(
                 finding.finding_id,
@@ -850,6 +942,35 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                 )
 
                 batch_fallback_count += 1
+
+                continue
+
+            decision = (
+                str(
+                    item.get(
+                        "decision",
+                        "keep",
+                    )
+                )
+                .strip()
+                .casefold()
+            )
+
+            rejection_reason = str(
+                item.get(
+                    "rejection_reason",
+                    "",
+                )
+            ).strip()
+
+            if decision == "reject" and rejection_reason:
+                batch_rejected_findings.append(
+                    {
+                        "finding_id": finding.finding_id,
+                        "page": finding.page,
+                        "reason": rejection_reason,
+                    }
+                )
 
                 continue
 
@@ -889,6 +1010,15 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                     "outcome": "success",
                     "fallback": (batch_fallback_count > 0),
                     "fallback_count": (batch_fallback_count),
+                    "rejected_count": len(
+                        batch_rejected_findings,
+                    ),
+                    "rejected_finding_ids": [
+                        str(
+                            item["finding_id"],
+                        )
+                        for item in batch_rejected_findings
+                    ],
                     **generation.metrics.as_dict(),
                 },
             ),
@@ -897,6 +1027,9 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
             successful_vlm_call_count=1,
             failed_vlm_call_count=0,
             split_count=0,
+            rejected_findings=tuple(
+                batch_rejected_findings,
+            ),
         )
 
     @staticmethod
@@ -961,7 +1094,7 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
 
         available_normative = _available_normative_sources(
             finding=finding,
-            normative_candidates=normative_candidates,
+            normative_candidates=(normative_candidates),
         )
 
         if "normative_source_ids" in item:

@@ -259,6 +259,17 @@ def build_finalization_schema(
                                 finding_ids,
                             ),
                         },
+                        "decision": {
+                            "type": "string",
+                            "enum": [
+                                "keep",
+                                "reject",
+                            ],
+                        },
+                        "rejection_reason": {
+                            "type": "string",
+                            "maxLength": 300,
+                        },
                         "comment": {
                             "type": "string",
                             "minLength": 1,
@@ -284,6 +295,8 @@ def build_finalization_schema(
                     },
                     "required": [
                         "finding_id",
+                        "decision",
+                        "rejection_reason",
                         "comment",
                         "recommendation",
                         "experience_source_ids",

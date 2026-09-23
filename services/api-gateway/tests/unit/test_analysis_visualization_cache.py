@@ -24,7 +24,7 @@ from pdrd_api_gateway.infrastructure.storage.visualization_cache import (
 async def test_location_and_annotated_pdf_cache_round_trip(
     tmp_path,
 ) -> None:
-    """Cache invalidates старую localization/PDF schema и round-trip v2/v3."""
+    """Cache invalidates старую localization/PDF schema и round-trip v3/v4."""
     document_id = uuid4()
 
     document_directory = tmp_path / str(
@@ -66,6 +66,10 @@ async def test_location_and_annotated_pdf_cache_round_trip(
 
     (document_directory / "annotated-v2.pdf").write_bytes(
         b"%PDF-1.7\nlegacy-v2",
+    )
+
+    (document_directory / "annotated-v3.pdf").write_bytes(
+        b"%PDF-1.7\nlegacy-v3",
     )
 
     assert (
@@ -117,7 +121,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         )
     )
 
-    assert saved_payload["schema_version"] == 2
+    assert saved_payload["schema_version"] == 3
 
     restored = await cache.load_locations(
         document_id=document_id,
@@ -138,7 +142,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         content=pdf_content,
     )
 
-    versioned_pdf_path = document_directory / "annotated-v3.pdf"
+    versioned_pdf_path = document_directory / "annotated-v4.pdf"
 
     assert versioned_pdf_path.read_bytes() == pdf_content
 
