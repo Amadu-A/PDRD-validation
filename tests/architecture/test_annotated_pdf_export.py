@@ -206,7 +206,7 @@ def test_gateway_exposes_lazy_download_and_keeps_typed_sources_separate() -> Non
     assert any("Норматив:" in value for value in string_literals)
 
 
-def test_unlocated_findings_use_full_callout_and_v6_cache() -> None:
+def test_unlocated_findings_use_full_callout_and_v7_cache() -> None:
     """Unlocated fallback остаётся visible card без fake bbox."""
     use_case = _read(
         GATEWAY_USE_CASE,
@@ -240,9 +240,9 @@ def test_unlocated_findings_use_full_callout_and_v6_cache() -> None:
 
     assert "default_factory=list" in compact_schema
 
-    assert "annotated-v6.pdf" in cache_literals
+    assert "annotated-v7.pdf" in cache_literals
 
-    assert "_LOCATIONS_SCHEMA_VERSION=5" in _compact(
+    assert "_LOCATIONS_SCHEMA_VERSION=6" in _compact(
         cache,
     )
 

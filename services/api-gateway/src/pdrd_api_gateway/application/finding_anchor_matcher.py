@@ -34,6 +34,10 @@ _POSITION_WORDS = re.compile(
     r"позицион\w*|обозначен\w*|позици\w*|номер\w*", re.IGNORECASE
 )
 _POSITION_TAG = re.compile(r"(?<![\w.])\d+(?:\.\d+){2,4}(?![\w]|\.\d)")
+_NUMERIC_FIELD_LABEL = re.compile(
+    r"\b(?:номер\w*\s+(?:страниц\w*|лист\w*)|лист\w*|страниц\w*)\b",
+    re.IGNORECASE,
+)
 
 
 _HOMOGLYPH_TRANSLATION = str.maketrans(
@@ -233,21 +237,16 @@ class FindingAnchorMatcher:
         ...,
     ]:
         """Уточняет VLM bbox PDF-текстом только внутри самого VLM region."""
-        finding_haystack = self._normalize_text(
-            "\n".join(
-                (
-                    finding.comment,
-                    finding.evidence,
-                )
-            )
-        )
-
         result: list[AnalysisVisualRegion,] = []
 
         for region in finding.visual_regions:
             label_haystack = self._normalize_text(
                 region.label or "",
             )
+            if not label_haystack:
+                result.append(region)
+                continue
+            numeric_field_label = bool(_NUMERIC_FIELD_LABEL.search(region.label or ""))
 
             matching_words = tuple(
                 word
@@ -258,8 +257,8 @@ class FindingAnchorMatcher:
                 )
                 and self._word_matches_scoped_context(
                     word=word,
-                    finding_haystack=(finding_haystack),
                     label_haystack=(label_haystack),
+                    numeric_field_label=numeric_field_label,
                 )
             )
 
@@ -314,8 +313,8 @@ class FindingAnchorMatcher:
         self,
         *,
         word: AnalysisTextWord,
-        finding_haystack: str,
         label_haystack: str,
+        numeric_field_label: bool,
     ) -> bool:
         """Разрешает weak numeric anchor только внутри saved VLM region."""
         anchor = self._normalize_anchor(
@@ -334,13 +333,13 @@ class FindingAnchorMatcher:
             # из общего текста замечания, относящемуся к другому объекту.
             return self._anchor_in_haystack(
                 anchor=anchor,
-                haystack=label_haystack if label_haystack else finding_haystack,
+                haystack=label_haystack,
             )
 
         if re.fullmatch(r"\d{1,6}", anchor):
-            # Слабый числовой якорь разрешён только по явной подписи
-            # локальной области, иначе исходный VLM-bbox сохраняется.
-            return bool(label_haystack) and self._anchor_in_haystack(
+            # Число внутри области сравнения объектов не является точкой
+            # замечания. Уточняем только явно названное поле номера/листа.
+            return numeric_field_label and self._anchor_in_haystack(
                 anchor=anchor,
                 haystack=label_haystack,
             )

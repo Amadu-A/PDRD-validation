@@ -113,6 +113,57 @@ def test_wide_semantic_reservoir_areas_do_not_shrink_to_unrelated_number() -> No
     assert result.regions == originals
 
 
+def test_wide_reservoir_area_does_not_shrink_to_matching_count() -> None:
+    """Число в подписи сравнения не заменяет область самого резервуара."""
+    original = _region(200, 250, 250, 150, "2 резервуара на плане")
+    result = FindingAnchorMatcher().locate(
+        findings=(
+            AnalysisFindingTarget(
+                finding_id="p23-f1",
+                comment="На плане 2 резервуара, на схеме 4.",
+                evidence="Сравнить количество резервуаров.",
+                visual_regions=(original,),
+            ),
+        ),
+        text_words=(_word("2", 410, 350, 1),),
+    )[0]
+    assert result.regions == (original,)
+
+
+def test_compact_reservoir_area_is_not_treated_as_number_field() -> None:
+    """Даже тесная область объекта не сводится к цифре его количества."""
+    original = _region(400, 340, 60, 60, "2 резервуара")
+    result = FindingAnchorMatcher().locate(
+        findings=(
+            AnalysisFindingTarget(
+                finding_id="p23-f1",
+                comment="На плане 2 резервуара, на схеме 4.",
+                evidence="Сравнить количество резервуаров.",
+                visual_regions=(original,),
+            ),
+        ),
+        text_words=(_word("2", 410, 350, 1),),
+    )[0]
+    assert result.regions == (original,)
+
+
+def test_unlabelled_vlm_area_keeps_its_geometry() -> None:
+    """Описание finding не даёт права сдвигать неподписанную VLM-область."""
+    original = _region(200, 250, 250, 150, "")
+    result = FindingAnchorMatcher().locate(
+        findings=(
+            AnalysisFindingTarget(
+                finding_id="p22-f1",
+                comment="Номера 8.5.1 и 8.5.5 отличаются.",
+                evidence="Сравнить датчики в двух узлах.",
+                visual_regions=(original,),
+            ),
+        ),
+        text_words=(_word("8.5.1", 410, 350, 1),),
+    )[0]
+    assert result.regions == (original,)
+
+
 def test_same_id_changed_evidence_invalidates_visualization_cache() -> None:
     """Изменение evidence инвалидирует кэш при прежнем finding ID."""
     first = AnalysisFindingTarget(

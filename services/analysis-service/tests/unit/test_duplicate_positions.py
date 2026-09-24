@@ -4,6 +4,7 @@
 
 from pdrd_analysis_service.application.use_cases.common import (
     ViolationCandidateSelection,
+    select_violation_candidates,
 )
 from pdrd_analysis_service.application.use_cases.duplicate_positions import (
     duplicate_position_id,
@@ -79,6 +80,72 @@ def test_recovery_is_the_same_whether_vlm_saw_tag_or_not() -> None:
     assert found.selection.represented_count == found.selection.generated_count
     assert duplicate_position_id(22, "8.9.3") == "p22-dpos-8-9-3"
     assert is_protected_duplicate_id("p22-dpos-8-9-3")
+
+
+def test_pymupdf_sorted_rows_recover_page_22_position_labels() -> None:
+    """В одной PDF-строке могут оказаться несколько разнесённых подписей."""
+    extracted_text = "\n".join(
+        (
+            "22" + " " * 71 + "Принципиальная схема топливоснабжения",
+            "        8.9.3        8.3.9        8.9.1        PG        8.5.6",
+            "        8.4.8        8.9.2        LE",
+            "        8.9.1",
+            "        8.3.1        8.1.1        8.9.3",
+            "        8.4.21        инв.        8.9.2",
+            "Позиция 8.9.4 упомянута в примечании.",
+            "Повторная ссылка на 8.9.4 в примечании.",
+        )
+    )
+    expected = (("8.9.1", 2), ("8.9.2", 2), ("8.9.3", 2))
+    assert repeated_standalone_positions(extracted_text, page_type="чертёж") == expected
+
+    recovered = recover_duplicate_positions(
+        selection=_selection(),
+        extracted_text=extracted_text,
+        page_type="чертёж",
+        page_number=22,
+    )
+    assert recovered.tags == tuple(tag for tag, _ in expected)
+    assert recovered.synthetic_count == 3
+    assert any(
+        candidate.get("__duplicate_position_tag") == "8.9.3"
+        for candidate in recovered.selection.candidates
+    )
+
+
+def test_comparisons_with_same_numbers_keep_distinct_instruments() -> None:
+    """Одинаковые пары номеров не склеивают датчик PE с термометром TG."""
+    selection = select_violation_candidates(
+        [
+            _candidate(
+                "Несоответствие позиционных номеров датчика PE: 8.5.1 и 8.5.5.",
+                "У датчика PE видны оба номера 8.5.1 и 8.5.5.",
+            ),
+            _candidate(
+                "Несоответствие позиционных номеров термометра TG: 8.5.1 и 8.5.5.",
+                "У термометра TG видны оба номера 8.5.1 и 8.5.5.",
+            ),
+        ]
+    )
+    assert selection.generated_count == selection.consolidated_count == 2
+    assert selection.source_indexes_by_candidate == ((1,), (2,))
+
+
+def test_multi_position_duplicate_wording_keeps_distinct_instruments() -> None:
+    """Слово «повтор» не склеивает разные приборы с парой номеров."""
+    selection = select_violation_candidates(
+        [
+            _candidate(
+                "Повтор позиционных номеров датчика PE 8.5.1 и 8.5.5.",
+                "Для датчика PE на схеме указаны 8.5.1 и 8.5.5.",
+            ),
+            _candidate(
+                "Повтор позиционных номеров термометра TG 8.5.1 и 8.5.5.",
+                "Для термометра TG на схеме указаны 8.5.1 и 8.5.5.",
+            ),
+        ]
+    )
+    assert selection.generated_count == selection.consolidated_count == 2
 
 
 def test_repeated_vlm_paraphrases_collapse_without_losing_raw_provenance() -> None:

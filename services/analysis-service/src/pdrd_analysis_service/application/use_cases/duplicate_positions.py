@@ -18,8 +18,7 @@ from pdrd_analysis_service.application.use_cases.common import (
 
 logger = logging.getLogger("uvicorn.error")
 
-_STANDALONE_POSITION = re.compile(r"\d+(?:\.\d+){2,4}")
-_POSITION_IN_TEXT = re.compile(r"(?<![\w.])\d+(?:\.\d+){2,4}(?![\w])")
+_POSITION_IN_TEXT = re.compile(r"(?<![\w.])\d+(?:\.\d+){2,4}(?![\w]|\.\d)")
 _DUPLICATE_WORDS = re.compile(r"дублир\w*|повтор\w*", re.IGNORECASE)
 _POSITION_WORDS = re.compile(
     r"позицион\w*|обозначен\w*|позици\w*|номер\w*", re.IGNORECASE
@@ -52,8 +51,9 @@ def _scheme_context(extracted_text: str, page_type: str) -> bool:
         return True
     return (
         re.search(
-            r"(?im)^\s*(?:принципиальн\w*\s+|функциональн\w*\s+"
-            r"|технологическ\w*\s+)?схема\b",
+            r"(?im)^[ \t]*(?:\d{1,3}[ \t]{2,})?"
+            r"(?:принципиальн\w*[ \t]+|функциональн\w*[ \t]+"
+            r"|технологическ\w*[ \t]+)?схема\b",
             extracted_text,
         )
         is not None
@@ -63,7 +63,7 @@ def _scheme_context(extracted_text: str, page_type: str) -> bool:
 def repeated_standalone_positions(
     extracted_text: str, *, page_type: str
 ) -> tuple[tuple[str, int], ...]:
-    """Считает только отдельные строки исходного текста PDF-схемы."""
+    """Считает визуально отделённые подписи в текстовом слое PDF-схемы."""
     # В текст проверки может быть добавлен контекст из пояснительной записки.
     # Источником факта остаётся только текст самой PDF-страницы.
     page_marker = "=== ТЕКСТ АНАЛИЗИРУЕМОЙ СТРАНИЦЫ ===\n"
@@ -73,11 +73,19 @@ def repeated_standalone_positions(
         )[0]
     if not _scheme_context(extracted_text, page_type):
         return ()
-    counts = Counter(
-        line.strip()
-        for line in extracted_text.splitlines()
-        if _STANDALONE_POSITION.fullmatch(line.strip())
-    )
+    counts: Counter[str] = Counter()
+    for raw_line in extracted_text.splitlines():
+        line = raw_line.strip()
+        for match in _POSITION_IN_TEXT.finditer(line):
+            # PyMuPDF sort=True склеивает подписи разных объектов в одну
+            # строку с широкими пробелами. Обычные ссылки внутри фразы
+            # отделены только одним пробелом и не являются подписью схемы.
+            left_isolated = match.start() == 0 or line[: match.start()].endswith("  ")
+            right_isolated = match.end() == len(line) or line[match.end() :].startswith(
+                "  "
+            )
+            if left_isolated and right_isolated:
+                counts[match.group()] += 1
     repeated = sorted(
         ((tag, count) for tag, count in counts.items() if count >= 2),
         key=lambda item: tuple(int(part) for part in item[0].split(".")),

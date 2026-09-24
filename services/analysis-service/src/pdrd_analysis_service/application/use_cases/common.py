@@ -554,13 +554,9 @@ def _candidate_structural_identity(
 ):
     """Возвращает conservative object-aware duplicate identity.
 
-    Structural identity используется только когда одновременно известны:
-    machine category, явный object/position anchor, тип проблемы и
-    проверяемое свойство.
-
-    Поэтому похожие формулировки про 8.3.6 и 8.3.7 не объединяются,
-    а перефразирование одной проблемы по позиции 8.5.4 может быть
-    безопасно consolidated.
+    Structural identity используется только для повтора одной позиции,
+    когда известны machine category, явный anchor и свойство. Сравнения
+    нескольких номеров могут относиться к разным физическим объектам.
     """
     category_value = normalize_text(
         candidate.get(
@@ -579,6 +575,17 @@ def _candidate_structural_identity(
     property_signature = _candidate_property_signature(
         candidate,
     )
+
+    # Общие номера и тип проблемы не доказывают, что два сравнительных
+    # замечания относятся к одному физическому объекту. Нечёткое объединение
+    # оставляем только для повтора одной позиционной подписи; остальные
+    # кандидаты объединяются лишь при точном совпадении comment и evidence.
+    if (
+        issue_signature != "duplicate"
+        or "position" not in property_signature
+        or len(anchors) != 1
+    ):
+        return None
 
     if (
         not category_value
@@ -679,12 +686,8 @@ def select_violation_candidates(
     Сначала объединяются exact duplicates, когда после базовой
     нормализации совпадают одновременно comment и evidence.
 
-    Дополнительно допускается conservative object-aware consolidation,
-    только если совпадают:
-    - machine category;
-    - явный object/position anchor;
-    - тип проблемы;
-    - проверяемое свойство.
+    Дополнительно допускается conservative consolidation для повтора
+    одной и той же позиционной подписи с одинаковыми category и свойством.
 
     Разные anchors никогда не объединяются этим правилом.
     Candidates без достаточной structural identity остаются distinct.

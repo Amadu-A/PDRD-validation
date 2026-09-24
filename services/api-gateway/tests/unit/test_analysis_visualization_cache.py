@@ -46,7 +46,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
     legacy_locations.write_text(
         json.dumps(
             {
-                "schema_version": 3,
+                "schema_version": 5,
                 "pages": [],
             },
         ),
@@ -66,6 +66,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         "annotated-v3.pdf",
         "annotated-v4.pdf",
         "annotated-v5.pdf",
+        "annotated-v6.pdf",
     ):
         (document_directory / file_name).write_bytes(
             b"%PDF-1.7\nlegacy",
@@ -121,7 +122,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         )
     )
 
-    assert saved_payload["schema_version"] == 5
+    assert saved_payload["schema_version"] == 6
     assert saved_payload["pages"][0]["source_signature"] == "a" * 64
 
     restored = await cache.load_locations(
@@ -144,7 +145,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         content=pdf_content,
     )
 
-    versioned_pdf_path = document_directory / "annotated-v6.pdf"
+    versioned_pdf_path = document_directory / "annotated-v7.pdf"
 
     assert versioned_pdf_path.read_bytes() == pdf_content
 

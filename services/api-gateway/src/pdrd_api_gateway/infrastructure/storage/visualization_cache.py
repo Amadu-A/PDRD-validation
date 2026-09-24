@@ -26,9 +26,9 @@ class LocalFilesystemAnalysisVisualizationCache:
 
     _LOCATIONS_FILE = "locations.json"
 
-    _ANNOTATED_PDF_FILE = "annotated-v6.pdf"
+    _ANNOTATED_PDF_FILE = "annotated-v7.pdf"
 
-    _LOCATIONS_SCHEMA_VERSION = 5
+    _LOCATIONS_SCHEMA_VERSION = 6
 
     def __init__(
         self,
