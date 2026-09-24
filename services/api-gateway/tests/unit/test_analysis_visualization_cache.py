@@ -1,6 +1,6 @@
 # services/api-gateway/tests/unit/test_analysis_visualization_cache.py
 
-"""Unit tests filesystem derivative visualization cache."""
+"""Проверки файлового кэша координат и размеченного PDF."""
 
 import json
 from uuid import uuid4
@@ -24,7 +24,7 @@ from pdrd_api_gateway.infrastructure.storage.visualization_cache import (
 async def test_location_and_annotated_pdf_cache_round_trip(
     tmp_path,
 ) -> None:
-    """Cache invalidates legacy localization/PDF schemas and round-trips v4/v5."""
+    """Кэш отвергает старые версии и сохраняет геометрию с SHA-256."""
     document_id = uuid4()
 
     document_directory = tmp_path / str(
@@ -65,6 +65,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         "annotated-v2.pdf",
         "annotated-v3.pdf",
         "annotated-v4.pdf",
+        "annotated-v5.pdf",
     ):
         (document_directory / file_name).write_bytes(
             b"%PDF-1.7\nlegacy",
@@ -80,6 +81,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
     pages = (
         AnalysisVisualizationLocationPage(
             page_number=3,
+            source_signature="a" * 64,
             locations=(
                 AnalysisFindingLocation.located(
                     finding_id="F-1",
@@ -119,7 +121,8 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         )
     )
 
-    assert saved_payload["schema_version"] == 4
+    assert saved_payload["schema_version"] == 5
+    assert saved_payload["pages"][0]["source_signature"] == "a" * 64
 
     restored = await cache.load_locations(
         document_id=document_id,
@@ -128,6 +131,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
     assert restored is not None
 
     assert restored[0].page_number == 3
+    assert restored[0].source_signature == "a" * 64
 
     assert restored[0].locations[0].method == "analysis_vlm"
 
@@ -140,7 +144,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         content=pdf_content,
     )
 
-    versioned_pdf_path = document_directory / "annotated-v5.pdf"
+    versioned_pdf_path = document_directory / "annotated-v6.pdf"
 
     assert versioned_pdf_path.read_bytes() == pdf_content
 

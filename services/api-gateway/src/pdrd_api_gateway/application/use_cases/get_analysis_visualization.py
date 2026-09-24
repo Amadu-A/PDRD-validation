@@ -1,7 +1,9 @@
 # services/api-gateway/src/pdrd_api_gateway/application/use_cases/get_analysis_visualization.py
 
-"""Use case lazy-визуализации завершённого анализа."""
+"""Сценарий отложенной визуализации завершённого анализа."""
 
+import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -230,7 +232,10 @@ class GetAnalysisVisualization:
                 unresolved_targets = tuple(
                     target
                     for target in targets
-                    if (deterministic_by_id[target.finding_id].status != "located")
+                    if (
+                        deterministic_by_id[target.finding_id].status != "located"
+                        and self.anchor_matcher.duplicate_position_tag(target) is None
+                    )
                 )
 
                 refinement_targets = tuple(
@@ -238,6 +243,7 @@ class GetAnalysisVisualization:
                     for target in targets
                     if (
                         not target.visual_regions
+                        and self.anchor_matcher.duplicate_position_tag(target) is None
                         and self._requires_visual_refinement(
                             target,
                         )
@@ -301,6 +307,7 @@ class GetAnalysisVisualization:
                         AnalysisVisualizationLocationPage(
                             page_number=(page.page_number),
                             locations=locations,
+                            source_signature=self._target_signature(targets),
                         )
                     )
 
@@ -506,6 +513,34 @@ class GetAnalysisVisualization:
             )
 
     @staticmethod
+    def _target_signature(
+        targets: tuple[AnalysisFindingTarget, ...],
+    ) -> str:
+        """Хеширует весь упорядоченный вход локализации, а не только ID.
+
+        Если при повторной финализации изменился смысл замечания или
+        координаты VLM, прежние расположения более не считаются валидными.
+        """
+        payload = [
+            {
+                "finding_id": target.finding_id,
+                "comment": target.comment,
+                "evidence": target.evidence,
+                "visual_regions": [
+                    region.as_dict() for region in target.visual_regions
+                ],
+            }
+            for target in targets
+        ]
+        canonical = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+
+    @staticmethod
     def _cached_page_matches(
         *,
         cached_page: (AnalysisVisualizationLocationPage | None),
@@ -522,7 +557,12 @@ class GetAnalysisVisualization:
 
         expected_ids = tuple(target.finding_id for target in targets)
 
-        return cached_ids == expected_ids
+        return (
+            cached_ids == expected_ids
+            and cached_page.source_signature is not None
+            and cached_page.source_signature
+            == GetAnalysisVisualization._target_signature(targets)
+        )
 
     @staticmethod
     def _merge_location(

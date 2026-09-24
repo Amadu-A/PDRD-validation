@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/application/finding_anchor_matcher.py
 
-"""Hybrid localization findings по VLM provenance и PDF text geometry."""
+"""Гибридная локализация замечаний по VLM-областям и текстовой геометрии PDF."""
 
 import re
 import unicodedata
@@ -26,6 +26,15 @@ _DASH_TRANSLATION = str.maketrans(
         "－": "-",
     }
 )
+
+# Проверка относится к факту повторения позиционного обозначения,
+# а не к любому присутствию чисел в описании замечания.
+_DUPLICATE_WORDS = re.compile(r"дублир\w*|повтор\w*", re.IGNORECASE)
+_POSITION_WORDS = re.compile(
+    r"позицион\w*|обозначен\w*|позици\w*|номер\w*", re.IGNORECASE
+)
+_POSITION_TAG = re.compile(r"(?<![\w.])\d+(?:\.\d+){2,4}(?![\w]|\.\d)")
+
 
 _HOMOGLYPH_TRANSLATION = str.maketrans(
     {
@@ -91,6 +100,39 @@ class FindingAnchorMatcher:
         ],
     ) -> AnalysisFindingLocation:
         """Локализует finding без глобального переопределения VLM provenance."""
+        repeated_tag = self.duplicate_position_tag(finding)
+        if repeated_tag is not None:
+            # Два обозначения подтверждаются только двумя точными PDF-подписями.
+            # Ошибочные VLM-координаты не могут заменить текстовое подтверждение.
+            exact_words = tuple(
+                word
+                for word in text_words
+                if self._normalize_anchor(word.text) == repeated_tag
+            )
+            if len(exact_words) != 2:
+                return AnalysisFindingLocation.unlocated(
+                    finding_id=finding.finding_id,
+                )
+            ordered = sorted(
+                exact_words,
+                key=lambda word: (word.bbox.y_min, word.bbox.x_min),
+            )
+            regions = tuple(
+                self._region_from_group(
+                    (word,),
+                    source="pdf_text",
+                    confidence=0.99,
+                    label=repeated_tag,
+                )
+                for word in ordered
+            )
+            return AnalysisFindingLocation.located(
+                finding_id=finding.finding_id,
+                regions=regions,
+                confidence=0.99,
+                method="pdf_text",
+            )
+
         if finding.visual_regions:
             regions = self._refine_saved_regions(
                 finding=finding,
@@ -151,6 +193,32 @@ class FindingAnchorMatcher:
             confidence=0.99,
             method="pdf_text",
         )
+
+    @classmethod
+    def duplicate_position_tag(
+        cls,
+        finding: AnalysisFindingTarget,
+    ) -> str | None:
+        """Возвращает проверяемое обозначение для факта его дублирования.
+
+        Учитывается связная формулировка замечания. Упоминание насоса
+        с другим позиционным номером не переопределяет основное обозначение.
+        """
+        # Канонический ID однозначно задаёт требуемую позиционную подпись.
+        canonical = re.fullmatch(
+            r"p[1-9]\d*-dpos-(\d+(?:-\d+){2,4})",
+            finding.finding_id,
+        )
+        if canonical is not None:
+            return canonical.group(1).replace("-", ".")
+
+        for phrase in (finding.comment, finding.evidence):
+            if not (_DUPLICATE_WORDS.search(phrase) and _POSITION_WORDS.search(phrase)):
+                continue
+            match = _POSITION_TAG.search(phrase)
+            if match is not None:
+                return match.group(0)
+        return None
 
     def _refine_saved_regions(
         self,
@@ -261,24 +329,20 @@ class FindingAnchorMatcher:
             anchor,
             raw_value=word.text,
         ):
+            # Подписанная VLM-область имеет собственный semantic scope.
+            # Нельзя сузить резервуарную область по любому совпадению
+            # из общего текста замечания, относящемуся к другому объекту.
             return self._anchor_in_haystack(
                 anchor=anchor,
-                haystack=label_haystack,
-            ) or self._anchor_in_haystack(
-                anchor=anchor,
-                haystack=finding_haystack,
+                haystack=label_haystack if label_haystack else finding_haystack,
             )
 
-        if re.fullmatch(
-            r"\d{1,6}",
-            anchor,
-        ):
-            return self._anchor_in_haystack(
+        if re.fullmatch(r"\d{1,6}", anchor):
+            # Слабый числовой якорь разрешён только по явной подписи
+            # локальной области, иначе исходный VLM-bbox сохраняется.
+            return bool(label_haystack) and self._anchor_in_haystack(
                 anchor=anchor,
                 haystack=label_haystack,
-            ) or self._anchor_in_haystack(
-                anchor=anchor,
-                haystack=finding_haystack,
             )
 
         return False

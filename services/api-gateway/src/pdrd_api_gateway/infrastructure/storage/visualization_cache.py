@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/infrastructure/storage/visualization_cache.py
 
-"""Filesystem cache resolved finding locations и annotated PDF."""
+"""Файловый кэш координат замечаний и размеченного PDF."""
 
 import asyncio
 import json
@@ -20,15 +20,15 @@ from pdrd_api_gateway.application.ports.analysis_visualization_cache import (
 
 
 class LocalFilesystemAnalysisVisualizationCache:
-    """Хранит derivative artifacts рядом с analysis document."""
+    """Хранит результаты визуализации рядом с материалами анализа."""
 
     _VISUALIZATION_DIRECTORY = "visualization"
 
     _LOCATIONS_FILE = "locations.json"
 
-    _ANNOTATED_PDF_FILE = "annotated-v5.pdf"
+    _ANNOTATED_PDF_FILE = "annotated-v6.pdf"
 
-    _LOCATIONS_SCHEMA_VERSION = 4
+    _LOCATIONS_SCHEMA_VERSION = 5
 
     def __init__(
         self,
@@ -199,6 +199,7 @@ class LocalFilesystemAnalysisVisualizationCache:
                     AnalysisVisualizationLocationPage(
                         page_number=page_number,
                         locations=locations,
+                        source_signature=self._read_source_signature(raw_page),
                     )
                 )
 
@@ -216,6 +217,18 @@ class LocalFilesystemAnalysisVisualizationCache:
             raise AnalysisVisualizationCacheError(
                 "Не удалось прочитать finding location cache.",
             ) from error
+
+    @staticmethod
+    def _read_source_signature(raw_page: dict[str, object]) -> str | None:
+        """Читает подпись входных замечаний и отвергает повреждённую запись."""
+        signature = raw_page.get("source_signature")
+        if signature is None:
+            return None
+        if not isinstance(signature, str) or len(signature) != 64:
+            raise ValueError("Некорректная подпись входных замечаний в кэше.")
+        if any(symbol not in "0123456789abcdef" for symbol in signature):
+            raise ValueError("Подпись входных замечаний должна быть SHA-256.")
+        return signature
 
     def _save_locations_sync(
         self,
@@ -249,6 +262,7 @@ class LocalFilesystemAnalysisVisualizationCache:
                 "pages": [
                     {
                         "page_number": (page.page_number),
+                        "source_signature": page.source_signature,
                         "locations": [
                             location.as_dict() for location in page.locations
                         ],

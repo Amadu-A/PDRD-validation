@@ -191,6 +191,25 @@ def test_finalization_keeps_direct_same_object_mismatch_possible() -> None:
     assert "candidate может быть keep" in normalized
 
 
+def test_discovery_keeps_explicitly_related_objects_and_repeated_labels() -> None:
+    """Связанные элементы и точный повтор маркировки остаются кандидатами."""
+    prompt = build_normative_check_prompt(
+        page_number=22,
+        extracted_text="Схема: позиция 8.9.2 указана у двух элементов.",
+        page_facts=_page_facts(),
+        normative_sources=(),
+        normative_text_limit=700,
+    )
+
+    normalized = _normalize(prompt)
+    assert "документ явно задаёт обязательную связь" in normalized
+    assert "точное повторение одной позиционной подписи" in normalized
+    assert "конкретным фактом для needs_review" in normalized
+    assert "не доказывает само по себе нарушение нормы" in normalized
+    assert "разное количество разных типов оборудования" in normalized
+    assert "обязательную связь между этими количествами" in normalized
+
+
 def test_finalization_treats_retrieval_score_as_recall_only() -> None:
     """Similarity score не заменяет semantic N verification."""
     prompt = build_finalization_prompt(

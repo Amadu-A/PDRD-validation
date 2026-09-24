@@ -1,6 +1,6 @@
 # services/analysis-service/src/pdrd_analysis_service/application/use_cases/finalization.py
 
-"""Use case финализации findings."""
+"""Финализация инженерных замечаний с проверкой доказательств N/T/U."""
 
 import json
 import logging
@@ -384,6 +384,37 @@ def _can_split_finalization_error(
     return any(marker in message for marker in _SPLITTABLE_FINALIZATION_ERROR_MARKERS)
 
 
+def _is_protected_duplicate_review(finding: FindingDraft) -> bool:
+    """Пропускает через factual-review только подтверждённую текстом запись.
+
+    Обход VLM-финализатора касается факта повторения подписи, а не
+    квалификации нарушения. Исходный N/T/U-кандидат остаётся на обычном пути.
+    """
+    match = re.fullmatch(
+        r"p([1-9]\d*)-dpos-(\d+(?:-\d+){2,4})",
+        finding.finding_id,
+    )
+    if match is None or int(match.group(1)) != finding.page:
+        return False
+    if finding.status != "needs_review" or any(
+        (
+            finding.basis_sources,
+            finding.technical_assignment_basis_sources,
+            finding.user_package_basis_sources,
+        )
+    ):
+        return False
+    tag = match.group(2).replace("-", ".")
+    exact_tag = re.compile(r"(?<![\w.])" + re.escape(tag) + r"(?![\w]|\.\d)")
+    combined_text = " ".join((finding.comment, finding.evidence)).casefold()
+    return (
+        exact_tag.search(finding.comment) is not None
+        and exact_tag.search(finding.evidence) is not None
+        and "повтор" in combined_text
+        and "текст" in finding.evidence.casefold()
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class FinalizeFindings:
     """Финализирует candidates, применяет conservative gate и N enrichment."""
@@ -448,6 +479,7 @@ class FinalizeFindings:
                     "initial_batch_count": 0,
                     "batch_execution_count": 0,
                     "fallback_count": 0,
+                    "deterministic_review_count": 0,
                     "candidate_count": 0,
                     "kept_count": 0,
                     "rejected_count": 0,
@@ -459,6 +491,17 @@ class FinalizeFindings:
                     "batches": [],
                 },
             )
+
+        # Проверенная текстом запись остаётся осторожным фактическим
+        # замечанием; все прочие кандидаты проходят неизменный quality gate.
+        protected = tuple(
+            finding for finding in findings if _is_protected_duplicate_review(finding)
+        )
+        ordinary = tuple(
+            finding
+            for finding in findings
+            if not _is_protected_duplicate_review(finding)
+        )
 
         eligible_experience = {
             finding_id: tuple(
@@ -480,7 +523,7 @@ class FinalizeFindings:
         )
 
         normalized_candidate_groups = _candidate_groups(
-            findings=findings,
+            findings=ordinary,
             normative_candidates_by_finding=raw_candidate_groups,
             legacy_candidates=normative_candidates,
         )
@@ -497,7 +540,7 @@ class FinalizeFindings:
 
         initial_batch_count = (
             len(
-                findings,
+                ordinary,
             )
             + effective_batch_size
             - 1
@@ -530,11 +573,11 @@ class FinalizeFindings:
         for start in range(
             0,
             len(
-                findings,
+                ordinary,
             ),
             effective_batch_size,
         ):
-            batch = findings[start : start + effective_batch_size]
+            batch = ordinary[start : start + effective_batch_size]
 
             outcome = await self._finalize_batch(
                 batch=batch,
@@ -567,6 +610,24 @@ class FinalizeFindings:
             failed_vlm_call_count += outcome.failed_vlm_call_count
 
             split_count += outcome.split_count
+
+        # Стабильный порядок исходных findings сохраняется независимо от того,
+        # на каком этапе конкретная фактическая запись была сформирована.
+        ordinary_by_id = {item.finding_id: item for item in final_items}
+        final_items = [
+            self._fallback(finding)
+            if _is_protected_duplicate_review(finding)
+            else ordinary_by_id[finding.finding_id]
+            for finding in findings
+            if _is_protected_duplicate_review(finding)
+            or finding.finding_id in ordinary_by_id
+        ]
+        if protected:
+            logger.info(
+                "finalization_deterministic_review kept=%s ids=%s",
+                len(protected),
+                tuple(item.finding_id for item in protected),
+            )
 
         if isolated_enrichment:
             normative_candidates_count = sum(
@@ -645,6 +706,7 @@ class FinalizeFindings:
                     batch_metrics,
                 ),
                 "fallback_count": fallback_count,
+                "deterministic_review_count": len(protected),
                 "candidate_count": len(
                     findings,
                 ),

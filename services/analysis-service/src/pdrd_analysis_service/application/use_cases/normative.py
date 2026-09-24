@@ -1,6 +1,6 @@
 # services/analysis-service/src/pdrd_analysis_service/application/use_cases/normative.py
 
-"""Use cases retrieval preparation и инженерной проверки листа."""
+"""Подготовка источников и инженерная проверка физической страницы проекта."""
 
 import logging
 from dataclasses import dataclass
@@ -25,6 +25,10 @@ from pdrd_analysis_service.application.use_cases.common import (
     select_violation_candidates,
     severity,
     string_tuple,
+)
+from pdrd_analysis_service.application.use_cases.duplicate_positions import (
+    duplicate_position_id,
+    recover_duplicate_positions,
 )
 from pdrd_analysis_service.application.use_cases.finding_visual_regions import (
     parse_finding_visual_regions,
@@ -868,6 +872,24 @@ class CheckPageAgainstNorms:
             image_bytes=image_bytes,
         )
 
+        # Восстановление факта повторения маркировки не зависит от того,
+        # заметила ли модель обозначение в конкретном VLM batch.
+        # Проверяются только отдельные строки исходного текста PDF-страницы.
+        recovered = recover_duplicate_positions(
+            selection=candidate_selection,
+            extracted_text=extracted_text,
+            page_type=page_facts.page_type,
+            page_number=page_number,
+        )
+        candidate_selection = recovered.selection
+        logger.info(
+            "normative_duplicate_recovery page=%s tags=%s synthetic=%s normalized=%s",
+            page_number,
+            recovered.tags,
+            recovered.synthetic_count,
+            recovered.normalized_count,
+        )
+
         source_by_id = {source.source_id: source for source in normative_sources}
 
         technical_assignment_by_id = {
@@ -915,6 +937,11 @@ class CheckPageAgainstNorms:
             representative_index = source_indexes[0]
 
             finding_id = f"p{page_number}-f{representative_index}"
+            repeated_tag = violation.get("__duplicate_position_tag")
+            if isinstance(repeated_tag, str) and repeated_tag in recovered.tags:
+                # Стабильная идентичность проверенного факта не зависит от
+                # случайного порядка выдачи кандидатных замечаний моделью.
+                finding_id = duplicate_position_id(page_number, repeated_tag)
 
             if (
                 len(
