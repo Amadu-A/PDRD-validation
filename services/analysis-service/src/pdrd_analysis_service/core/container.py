@@ -31,6 +31,9 @@ from pdrd_analysis_service.infrastructure.analysis_progress import (
 from pdrd_analysis_service.infrastructure.vllm import (
     VllmStructuredVisionModel,
 )
+from pdrd_analysis_service.infrastructure.vllm_cache import (
+    CachedStructuredVisionModel,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,15 +69,24 @@ def build_container() -> ApplicationContainer:
     """Собирает concrete runtime dependencies."""
     settings = get_settings()
 
-    vision_model = VllmStructuredVisionModel(
+    shared_vlm = VllmStructuredVisionModel(
         base_url=settings.vlm.base_url,
         model=settings.vlm.model,
         request_timeout_seconds=(settings.vlm.request_timeout_seconds),
         connect_timeout_seconds=(settings.vlm.connect_timeout_seconds),
         health_timeout_seconds=(settings.vlm.health_timeout_seconds),
-        max_attempts=settings.vlm.max_attempts,
+        max_attempts=(settings.vlm.max_attempts),
         retry_backoff_seconds=(settings.vlm.retry_backoff_seconds),
         max_retry_num_predict=(settings.vlm.max_retry_num_predict),
+    )
+
+    vision_model = CachedStructuredVisionModel(
+        delegate=shared_vlm,
+        provider_identity=(f"{settings.vlm.base_url.rstrip('/')}|{settings.vlm.model}"),
+        root_path=(settings.vlm.cache.root_path),
+        namespace=(settings.vlm.cache.namespace),
+        ttl_seconds=(settings.vlm.cache.ttl_seconds),
+        enabled=(settings.vlm.cache.enabled),
     )
 
     progress_probe = HttpAnalysisProgressProbe(
@@ -92,11 +104,13 @@ def build_container() -> ApplicationContainer:
         build_normative_queries=BuildNormativeQueries(
             max_queries=(settings.pipeline.max_normative_queries),
         ),
-        check_page_against_norms=CheckPageAgainstNorms(
-            vision_model=vision_model,
-            num_predict=(settings.pipeline.norm_check_num_predict),
-            max_issues=settings.pipeline.max_issues,
-            normative_text_limit=(settings.pipeline.normative_text_limit),
+        check_page_against_norms=(
+            CheckPageAgainstNorms(
+                vision_model=vision_model,
+                num_predict=(settings.pipeline.norm_check_num_predict),
+                max_issues=(settings.pipeline.max_issues),
+                normative_text_limit=(settings.pipeline.normative_text_limit),
+            )
         ),
         check_page_against_technical_assignment=(
             CheckPageAgainstTechnicalAssignment(
@@ -122,18 +136,24 @@ def build_container() -> ApplicationContainer:
         check_readiness=CheckReadiness(
             vision_model=vision_model,
         ),
-        validate_project_context=ValidateProjectContext(
-            vision_model=vision_model,
-            classify_batch_size=(settings.project_context.classify_batch_size),
-            classify_num_predict=(settings.project_context.classify_num_predict),
-            min_text_length=(settings.project_context.min_text_length),
-            reject_confidence=(settings.project_context.reject_confidence),
+        validate_project_context=(
+            ValidateProjectContext(
+                vision_model=vision_model,
+                classify_batch_size=(settings.project_context.classify_batch_size),
+                classify_num_predict=(settings.project_context.classify_num_predict),
+                min_text_length=(settings.project_context.min_text_length),
+                reject_confidence=(settings.project_context.reject_confidence),
+            )
         ),
-        build_project_context_query=BuildProjectContextQuery(
-            source_text_limit=(settings.project_context.query_source_text_limit),
+        build_project_context_query=(
+            BuildProjectContextQuery(
+                source_text_limit=(settings.project_context.query_source_text_limit),
+            )
         ),
-        augment_project_context=AugmentProjectContext(
-            context_text_limit=(settings.project_context.context_text_limit),
+        augment_project_context=(
+            AugmentProjectContext(
+                context_text_limit=(settings.project_context.context_text_limit),
+            )
         ),
-        analysis_progress_probe=progress_probe,
+        analysis_progress_probe=(progress_probe),
     )

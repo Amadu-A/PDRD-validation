@@ -3,6 +3,7 @@
 """Pydantic Settings Analysis Service."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -18,6 +19,28 @@ EnvironmentName = Literal[
     "stage",
     "prod",
 ]
+
+
+class VllmCacheSettings(BaseModel):
+    """Настройки project-local exact-request VLM cache."""
+
+    enabled: bool = False
+
+    root_path: Path = Path(
+        "/data/vlm-cache",
+    )
+
+    namespace: str = Field(
+        default="v1",
+        min_length=1,
+        max_length=128,
+    )
+
+    ttl_seconds: int = Field(
+        default=30 * 24 * 60 * 60,
+        ge=60,
+        le=365 * 24 * 60 * 60,
+    )
 
 
 class VllmSettings(BaseModel):
@@ -61,6 +84,10 @@ class VllmSettings(BaseModel):
         default=14000,
         ge=1,
         le=32000,
+    )
+
+    cache: VllmCacheSettings = Field(
+        default_factory=VllmCacheSettings,
     )
 
 
