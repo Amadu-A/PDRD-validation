@@ -2,6 +2,7 @@
 
 """Regression tests conservative normative enrichment TZ-5.2."""
 
+from dataclasses import replace
 from typing import Any
 
 from pdrd_analysis_service.application.ports.vision_model import (
@@ -269,6 +270,100 @@ async def test_source_less_finding_can_gain_normative_basis() -> None:
     assert "GOST_Example.pdf" in result.basis
 
     assert result_metrics["normative_candidates_count"] == 1
+
+
+async def test_verified_duplicate_can_gain_direct_normative_basis() -> None:
+    """Проверенный факт повтора сохраняется при привязке подходящего N-source."""
+    original = replace(
+        engineering_finding(),
+        finding_id="p22-dpos-8-9-3",
+        page=22,
+        comment="Проверить повторное позиционное обозначение 8.9.3.",
+        evidence="В исходном тексте листа повторяется 8.9.3.",
+        recommendation_draft="Сопоставить обозначенные элементы.",
+    )
+    candidate = replace(
+        enrichment_source(),
+        text=(
+            "Позиционные обозначения элементов на одной схеме должны быть "
+            "однозначными; повторное обозначение разных элементов требует проверки."
+        ),
+    )
+    model = FakeVisionModel(
+        [
+            {
+                "summary": "done",
+                "findings": [
+                    {
+                        "finding_id": original.finding_id,
+                        "decision": "keep",
+                        "rejection_reason": "",
+                        "comment": "Изменённый моделью комментарий.",
+                        "recommendation": "Изменённая моделью рекомендация.",
+                        "experience_source_ids": [],
+                        "normative_source_ids": [candidate.source_id],
+                    }
+                ],
+            }
+        ]
+    )
+
+    _, finalized, result_metrics = await build_use_case(model).execute(
+        findings=(original,),
+        experience_by_finding={},
+        normative_candidates_by_finding={original.finding_id: (candidate,)},
+    )
+
+    assert len(model.prompts) == 1
+    assert len(finalized) == 1
+    assert finalized[0].basis_sources == (candidate,)
+    assert finalized[0].comment == original.comment
+    assert finalized[0].recommendation == original.recommendation_draft
+    assert finalized[0].status == original.status
+    assert result_metrics["deterministic_review_count"] == 1
+
+
+async def test_verified_duplicate_survives_normative_rejection() -> None:
+    """Отклонение N-enrichment не удаляет факт повторения с листа."""
+    original = replace(
+        engineering_finding(),
+        finding_id="p22-dpos-8-9-3",
+        page=22,
+        comment="Проверить повторное позиционное обозначение 8.9.3.",
+        evidence="В исходном тексте листа повторяется 8.9.3.",
+    )
+    candidate = enrichment_source()
+    model = FakeVisionModel(
+        [
+            {
+                "summary": "done",
+                "findings": [
+                    {
+                        "finding_id": original.finding_id,
+                        "decision": "reject",
+                        "rejection_reason": "Норма не подтверждает нарушение.",
+                        "comment": "",
+                        "recommendation": "",
+                        "experience_source_ids": [],
+                        "normative_source_ids": [],
+                    }
+                ],
+            }
+        ]
+    )
+
+    _, finalized, result_metrics = await build_use_case(model).execute(
+        findings=(original,),
+        experience_by_finding={},
+        normative_candidates_by_finding={original.finding_id: (candidate,)},
+    )
+
+    assert len(model.prompts) == 1
+    assert len(finalized) == 1
+    assert finalized[0].comment == original.comment
+    assert finalized[0].basis_sources == ()
+    assert finalized[0].status == "needs_review"
+    assert result_metrics["rejected_count"] == 0
 
 
 async def test_irrelevant_old_normative_can_be_detached_without_losing_finding() -> (

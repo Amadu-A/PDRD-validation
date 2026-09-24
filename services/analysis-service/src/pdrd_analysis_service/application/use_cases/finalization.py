@@ -5,7 +5,7 @@
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pdrd_analysis_service.application.json_schemas import (
@@ -497,12 +497,6 @@ class FinalizeFindings:
         protected = tuple(
             finding for finding in findings if _is_protected_duplicate_review(finding)
         )
-        ordinary = tuple(
-            finding
-            for finding in findings
-            if not _is_protected_duplicate_review(finding)
-        )
-
         eligible_experience = {
             finding_id: tuple(
                 source
@@ -523,9 +517,19 @@ class FinalizeFindings:
         )
 
         normalized_candidate_groups = _candidate_groups(
-            findings=ordinary,
+            findings=findings,
             normative_candidates_by_finding=raw_candidate_groups,
             legacy_candidates=normative_candidates,
+        )
+
+        # Проверенные текстом повторы проходят модель только ради finding-local
+        # нормативного обоснования. Без найденных кандидатов их путь остаётся
+        # полностью детерминированным.
+        ordinary = tuple(
+            finding
+            for finding in findings
+            if not _is_protected_duplicate_review(finding)
+            or normalized_candidate_groups.get(finding.finding_id)
         )
 
         legacy_candidates = (
@@ -615,9 +619,7 @@ class FinalizeFindings:
         # на каком этапе конкретная фактическая запись была сформирована.
         ordinary_by_id = {item.finding_id: item for item in final_items}
         final_items = [
-            self._fallback(finding)
-            if _is_protected_duplicate_review(finding)
-            else ordinary_by_id[finding.finding_id]
+            ordinary_by_id.get(finding.finding_id, self._fallback(finding))
             for finding in findings
             if _is_protected_duplicate_review(finding)
             or finding.finding_id in ordinary_by_id
@@ -1025,6 +1027,11 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                 )
             ).strip()
 
+            if _is_protected_duplicate_review(finding) and decision != "keep":
+                final_items.append(self._fallback(finding))
+                batch_fallback_count += 1
+                continue
+
             if decision == "reject" and rejection_reason:
                 batch_rejected_findings.append(
                     {
@@ -1036,25 +1043,22 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
 
                 continue
 
-            final_items.append(
-                self._build_final(
-                    finding=finding,
-                    item=item,
-                    available_experience=(
-                        eligible_experience.get(
-                            finding.finding_id,
-                            (),
-                        )
-                    ),
-                    normative_candidates=(
-                        candidate_groups.get(
-                            finding.finding_id,
-                            (),
-                        )
-                    ),
-                    guard_normative_free_text=(isolated_enrichment),
-                )
+            finalized = self._build_final(
+                finding=finding,
+                item=item,
+                available_experience=(eligible_experience.get(finding.finding_id, ())),
+                normative_candidates=(candidate_groups.get(finding.finding_id, ())),
+                guard_normative_free_text=isolated_enrichment,
             )
+            if _is_protected_duplicate_review(finding):
+                finalized = replace(
+                    finalized,
+                    category=finding.category,
+                    status=finding.status,
+                    comment=finding.comment,
+                    recommendation=_fallback_recommendation(finding),
+                )
+            final_items.append(finalized)
 
         return _BatchOutcome(
             findings=tuple(

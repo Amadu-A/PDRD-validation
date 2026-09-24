@@ -72,6 +72,14 @@ def _duplicate_candidate() -> dict[
     }
 
 
+def _repeated_position_candidate(tag: str, index: int) -> dict[str, Any]:
+    """Имитирует разные формулировки одного подтверждённого повтора."""
+    candidate = _candidate(index)
+    candidate["comment"] = f"Повторное позиционное обозначение {tag}."
+    candidate["evidence"] = f"Обозначение {tag} повторяется возле узла 8.2.{index}."
+    return candidate
+
+
 class SequentialVisionModel:
     """Возвращает заранее заданные VLM batches."""
 
@@ -214,6 +222,84 @@ async def test_sparse_probe_stops_without_extra_call() -> None:
     assert call["stage"] == "normative_check:1:probe1"
 
     assert metrics.requested_num_predict == 4000
+
+
+async def test_productive_underfull_probe_recovers_other_issue_classes() -> None:
+    """Шесть повторов маркировки не останавливают поиск ошибок приборов."""
+    repeated = [
+        _repeated_position_candidate(tag, index)
+        for index, tag in enumerate(
+            ("8.5.4", "8.5.4", "8.9.1", "8.9.2", "8.9.3", "8.9.3"),
+            start=1,
+        )
+    ]
+    instruments = [_candidate(index) for index in range(11, 19)]
+    instruments[0]["comment"] = "Датчик давления PE имеет разные номера."
+    instruments[1]["comment"] = "Термометр TG имеет разные номера."
+    model = SequentialVisionModel(
+        [
+            {"summary": "Повторные обозначения.", "violations": repeated},
+            {"summary": "Другие замечания.", "violations": instruments},
+        ]
+    )
+    extracted_text = "\n".join(
+        (
+            "Принципиальная схема",
+            "8.5.4\n8.9.1\n8.9.2\n8.9.3",
+            "8.5.4\n8.9.1\n8.9.2\n8.9.3",
+        )
+    )
+
+    _, findings, metrics = await _use_case(model).execute(
+        page_number=22,
+        extracted_text=extracted_text,
+        page_facts=_page_facts(),
+        normative_sources=(),
+        image_bytes=b"png",
+    )
+
+    assert [call["stage"] for call in model.calls] == [
+        "normative_check:22:probe1",
+        "normative_check:22:probe2",
+    ]
+    assert len(findings) == 12
+    assert {
+        finding.finding_id for finding in findings if "-dpos-" in finding.finding_id
+    } == {
+        "p22-dpos-8-5-4",
+        "p22-dpos-8-9-1",
+        "p22-dpos-8-9-2",
+        "p22-dpos-8-9-3",
+    }
+    assert any("Датчик давления PE" in finding.comment for finding in findings)
+    assert any("Термометр TG" in finding.comment for finding in findings)
+    assert "разных обозначений или свойств" in model.calls[1]["prompt"]
+    assert metrics.requested_num_predict == 8000
+
+
+async def test_productive_underfull_probe_stops_after_empty_continuation() -> None:
+    """Дополнительный поиск не зацикливается на исчерпанном листе."""
+    model = SequentialVisionModel(
+        [
+            {
+                "summary": "Первый batch.",
+                "violations": [_candidate(i) for i in range(6)],
+            },
+            {"summary": "Новых замечаний нет.", "violations": []},
+        ]
+    )
+
+    _, findings, metrics = await _use_case(model).execute(
+        page_number=22,
+        extracted_text="Тестовый лист.",
+        page_facts=_page_facts(),
+        normative_sources=(),
+        image_bytes=b"png",
+    )
+
+    assert len(model.calls) == 2
+    assert len(findings) == 6
+    assert metrics.requested_num_predict == 8000
 
 
 async def test_duplicate_saturation_requests_distinct_continuation() -> None:
