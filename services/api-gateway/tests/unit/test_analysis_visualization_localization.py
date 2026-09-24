@@ -231,6 +231,42 @@ def test_matcher_localizes_numeric_position_duplicates() -> None:
     )
 
 
+def test_matcher_localizes_all_three_confirmed_positions() -> None:
+    """Три реальные подписи 8.5.4 не превращаются в unlocated."""
+    matcher = FindingAnchorMatcher()
+    words = tuple(
+        AnalysisTextWord(
+            text="8.5.4",
+            bbox=AnalysisBoundingBox(
+                x_min=100 + index * 200,
+                y_min=180 + index * 100,
+                x_max=150 + index * 200,
+                y_max=210 + index * 100,
+            ),
+            block_no=index,
+            line_no=1,
+            word_no=1,
+        )
+        for index in range(3)
+    )
+
+    location = matcher.locate(
+        findings=(
+            AnalysisFindingTarget(
+                finding_id="p22-dpos-8-5-4",
+                comment="Проверить повторное позиционное обозначение 8.5.4.",
+                evidence="Подпись 8.5.4 встречается три раза.",
+            ),
+        ),
+        text_words=words,
+    )[0]
+
+    assert location.status == "located"
+    assert location.method == "pdf_text"
+    assert len(location.regions) == 3
+    assert all(region.label == "8.5.4" for region in location.regions)
+
+
 def test_matcher_does_not_use_plain_integer_as_strong_anchor() -> None:
     """Обычный номер страницы не должен давать ложную localization."""
     matcher = FindingAnchorMatcher()

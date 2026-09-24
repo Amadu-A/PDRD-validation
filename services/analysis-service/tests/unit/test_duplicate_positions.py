@@ -199,6 +199,42 @@ def test_no_false_claim_of_confirmed_violation() -> None:
         assert not item["normative_source_ids"]
 
 
+def test_unverified_vlm_duplicate_is_rejected_with_provenance() -> None:
+    """Одна подпись или выдуманная позиция не становится замечанием о повторе."""
+    selection = _selection(
+        _candidate("Позиционное обозначение 8.11.3 повторяется.", "Две области."),
+        _candidate("Позиционное обозначение 8.12.34 повторяется.", "Две области."),
+    )
+    result = recover_duplicate_positions(
+        selection=selection,
+        extracted_text="Принципиальная схема\n8.11.3\n",
+        page_type="scheme",
+        page_number=22,
+    )
+
+    assert result.selection.candidates == ()
+    assert result.selection.generated_count == 2
+    assert result.selection.represented_count == 0
+    assert result.selection.rejected_reasons == (
+        "unverified_duplicate_position",
+        "unverified_duplicate_position",
+    )
+
+
+def test_unverified_duplicate_rule_is_limited_to_schemes() -> None:
+    """Повтор номера вне схемы проходит прежнюю семантическую проверку."""
+    selection = _selection(
+        _candidate("Позиционное обозначение 8.11.3 повторяется.", "Таблица."),
+    )
+    result = recover_duplicate_positions(
+        selection=selection,
+        extracted_text="Спецификация\n8.11.3\n",
+        page_type="specification",
+        page_number=22,
+    )
+    assert result.selection.candidates == selection.candidates
+
+
 def test_project_note_context_cannot_manufacture_second_drawing_label() -> None:
     """Контекст пояснительной записки не создаёт подпись на листе."""
     augmented = (

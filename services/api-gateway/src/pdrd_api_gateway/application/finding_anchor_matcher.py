@@ -106,14 +106,20 @@ class FindingAnchorMatcher:
         """Локализует finding без глобального переопределения VLM provenance."""
         repeated_tag = self.duplicate_position_tag(finding)
         if repeated_tag is not None:
-            # Два обозначения подтверждаются только двумя точными PDF-подписями.
-            # Ошибочные VLM-координаты не могут заменить текстовое подтверждение.
+            # Канонический текстовый факт допускает все точные подписи.
+            # Для обычного VLM-утверждения третья подпись делает пару неясной.
             exact_words = tuple(
                 word
                 for word in text_words
                 if self._normalize_anchor(word.text) == repeated_tag
             )
-            if len(exact_words) != 2:
+            canonical_duplicate = (
+                re.fullmatch(r"p[1-9]\d*-dpos-\d+(?:-\d+){2,4}", finding.finding_id)
+                is not None
+            )
+            if len(exact_words) < 2 or (
+                len(exact_words) > 2 and not canonical_duplicate
+            ):
                 return AnalysisFindingLocation.unlocated(
                     finding_id=finding.finding_id,
                 )
@@ -128,7 +134,7 @@ class FindingAnchorMatcher:
                     confidence=0.99,
                     label=repeated_tag,
                 )
-                for word in ordered
+                for word in ordered[: self.max_regions_per_finding]
             )
             return AnalysisFindingLocation.located(
                 finding_id=finding.finding_id,

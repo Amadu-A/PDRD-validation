@@ -63,6 +63,9 @@ _VISUAL_REFINEMENT_MARKERS = (
     "not provided",
 )
 
+# Меняется при изменении правил сопоставления finding с PDF geometry.
+_LOCALIZATION_POLICY_VERSION = 2
+
 
 class AnalysisVisualizationJobNotFoundError(
     LookupError,
@@ -521,17 +524,20 @@ class GetAnalysisVisualization:
         Если при повторной финализации изменился смысл замечания или
         координаты VLM, прежние расположения более не считаются валидными.
         """
-        payload = [
-            {
-                "finding_id": target.finding_id,
-                "comment": target.comment,
-                "evidence": target.evidence,
-                "visual_regions": [
-                    region.as_dict() for region in target.visual_regions
-                ],
-            }
-            for target in targets
-        ]
+        payload = {
+            "localization_policy_version": _LOCALIZATION_POLICY_VERSION,
+            "targets": [
+                {
+                    "finding_id": target.finding_id,
+                    "comment": target.comment,
+                    "evidence": target.evidence,
+                    "visual_regions": [
+                        region.as_dict() for region in target.visual_regions
+                    ],
+                }
+                for target in targets
+            ],
+        }
         canonical = json.dumps(
             payload,
             ensure_ascii=False,

@@ -371,12 +371,6 @@ def _candidate_batch_instruction(
 Не перефразируй их как новые findings.
 Не заполняй свободные места дублями.
 
-Снова осмотри остальные объекты и связи на изображении.
-Проверь, нет ли других конкретных проблем, в том числе
-разных обозначений или свойств одного и того же прибора.
-Другой объект того же класса может быть отдельным finding.
-Добавляй его только при собственном проверяемом evidence.
-
 Если после исключения уже найденных candidates
 новых проблем меньше {capacity}, верни меньше.
 
@@ -713,30 +707,6 @@ class CheckPageAgainstNorms:
                 break
 
             if generated < current_capacity:
-                # Неполный, но продуктивный первый ответ ещё не означает,
-                # что все классы проблем на плотном листе рассмотрены.
-                # Один дополнительный малый probe даёт модели возможность
-                # найти отличающиеся от уже перечисленных несоответствия.
-                if (
-                    mode == "probe"
-                    and probe_round == 1
-                    and new_unique >= (current_capacity + 1) // 2
-                    and unique_ratio >= _NORMATIVE_DENSE_UNIQUE_RATIO
-                ):
-                    logger.info(
-                        (
-                            "normative_discovery_continue "
-                            "page=%s reason=productive_underfull_probe "
-                            "generated=%s capacity=%s "
-                            "new_unique=%s unique_ratio=%.3f"
-                        ),
-                        page_number,
-                        generated,
-                        current_capacity,
-                        new_unique,
-                        unique_ratio,
-                    )
-                    continue
                 logger.info(
                     (
                         "normative_discovery_stop "

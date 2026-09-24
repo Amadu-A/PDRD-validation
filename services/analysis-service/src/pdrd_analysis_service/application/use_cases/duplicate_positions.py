@@ -110,6 +110,28 @@ def _candidate_duplicate_tag(
     return primary if primary in observed else None
 
 
+def _unverified_duplicate_tag(
+    candidate: dict[str, Any], observed: frozenset[str]
+) -> str | None:
+    """Находит утверждение о повторе без второго текстового подтверждения."""
+    comment = str(candidate.get("comment", ""))
+    if not _DUPLICATE_WORDS.search(comment) or not _POSITION_WORDS.search(comment):
+        return None
+    matches = _POSITION_IN_TEXT.findall(comment)
+    if not matches or matches[0] in observed:
+        return None
+    if any(
+        candidate.get(key)
+        for key in (
+            "normative_source_ids",
+            "technical_assignment_source_ids",
+            "user_package_source_ids",
+        )
+    ):
+        return None
+    return matches[0]
+
+
 def _canonical_candidate(tag: str, count: int) -> dict[str, Any]:
     """Формулирует только доказанный текстом факт, не придумывая объекты."""
     return {
@@ -147,19 +169,31 @@ def recover_duplicate_positions(
     нового обозначения добавляется самостоятельный source index.
     """
     observed_pairs = repeated_standalone_positions(extracted_text, page_type=page_type)
-    if not observed_pairs:
-        return RecoveredPositions(selection, (), 0, 0)
     observed = dict(observed_pairs)
     observed_keys = frozenset(observed)
+    is_scheme = _scheme_context(extracted_text, page_type)
     found_tags: set[str] = set()
     candidates: list[dict[str, Any]] = []
     source_indexes: list[tuple[int, ...]] = []
     tag_positions: dict[str, int] = {}
     normalized_count = 0
+    rejected_reasons = list(selection.rejected_reasons)
 
     for candidate, indexes in zip(
         selection.candidates, selection.source_indexes_by_candidate, strict=True
     ):
+        unverified_tag = (
+            _unverified_duplicate_tag(candidate, observed_keys) if is_scheme else None
+        )
+        if unverified_tag is not None:
+            rejected_reasons.extend("unverified_duplicate_position" for _ in indexes)
+            logger.info(
+                "duplicate_position_unverified page=%s tag=%s raw_indexes=%s",
+                page_number,
+                unverified_tag,
+                indexes,
+            )
+            continue
         tag = _candidate_duplicate_tag(candidate, observed_keys)
         if tag is None:
             candidates.append(dict(candidate))
@@ -206,7 +240,7 @@ def recover_duplicate_positions(
         candidates=tuple(candidates),
         source_indexes_by_candidate=tuple(source_indexes),
         generated_count=selection.generated_count + synthetic_count,
-        rejected_reasons=selection.rejected_reasons,
+        rejected_reasons=tuple(rejected_reasons),
     )
     logger.info(
         "deterministic_duplicate_positions page=%s tags=%s "

@@ -2,6 +2,9 @@
 
 """Регрессии: точные позиции 8.9.2/8.9.3 и широкие области резервуаров."""
 
+import hashlib
+import json
+
 from pdrd_api_gateway.application.finding_anchor_matcher import (
     FindingAnchorMatcher,
 )
@@ -182,6 +185,41 @@ def test_same_id_changed_evidence_invalidates_visualization_cache() -> None:
     )
     assert not GetAnalysisVisualization._cached_page_matches(
         cached_page=cached, targets=(changed,)
+    )
+
+
+def test_previous_localization_policy_cache_is_invalidated() -> None:
+    """Старое unlocated не скрывает исправленные координаты после обновления."""
+    target = AnalysisFindingTarget(
+        finding_id="p22-dpos-8-5-4",
+        comment="Проверить повторное позиционное обозначение 8.5.4.",
+        evidence="Три подписи на схеме.",
+        visual_regions=(),
+    )
+    previous_payload = [
+        {
+            "finding_id": target.finding_id,
+            "comment": target.comment,
+            "evidence": target.evidence,
+            "visual_regions": [],
+        }
+    ]
+    previous_signature = hashlib.sha256(
+        json.dumps(
+            previous_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    cached = AnalysisVisualizationLocationPage(
+        page_number=22,
+        locations=(AnalysisFindingLocation.unlocated(finding_id=target.finding_id),),
+        source_signature=previous_signature,
+    )
+
+    assert not GetAnalysisVisualization._cached_page_matches(
+        cached_page=cached, targets=(target,)
     )
 
 

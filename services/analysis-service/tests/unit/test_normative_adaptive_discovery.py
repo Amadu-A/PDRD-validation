@@ -224,8 +224,8 @@ async def test_sparse_probe_stops_without_extra_call() -> None:
     assert metrics.requested_num_predict == 4000
 
 
-async def test_productive_underfull_probe_recovers_other_issue_classes() -> None:
-    """Шесть повторов маркировки не останавливают поиск ошибок приборов."""
+async def test_underfull_probe_does_not_generate_speculative_continuation() -> None:
+    """Неполный ответ не запускает дополнительный поиск на плотной схеме."""
     repeated = [
         _repeated_position_candidate(tag, index)
         for index, tag in enumerate(
@@ -233,13 +233,9 @@ async def test_productive_underfull_probe_recovers_other_issue_classes() -> None
             start=1,
         )
     ]
-    instruments = [_candidate(index) for index in range(11, 19)]
-    instruments[0]["comment"] = "Датчик давления PE имеет разные номера."
-    instruments[1]["comment"] = "Термометр TG имеет разные номера."
     model = SequentialVisionModel(
         [
             {"summary": "Повторные обозначения.", "violations": repeated},
-            {"summary": "Другие замечания.", "violations": instruments},
         ]
     )
     extracted_text = "\n".join(
@@ -260,9 +256,8 @@ async def test_productive_underfull_probe_recovers_other_issue_classes() -> None
 
     assert [call["stage"] for call in model.calls] == [
         "normative_check:22:probe1",
-        "normative_check:22:probe2",
     ]
-    assert len(findings) == 12
+    assert len(findings) == 4
     assert {
         finding.finding_id for finding in findings if "-dpos-" in finding.finding_id
     } == {
@@ -271,21 +266,17 @@ async def test_productive_underfull_probe_recovers_other_issue_classes() -> None
         "p22-dpos-8-9-2",
         "p22-dpos-8-9-3",
     }
-    assert any("Датчик давления PE" in finding.comment for finding in findings)
-    assert any("Термометр TG" in finding.comment for finding in findings)
-    assert "разных обозначений или свойств" in model.calls[1]["prompt"]
-    assert metrics.requested_num_predict == 8000
+    assert metrics.requested_num_predict == 4000
 
 
-async def test_productive_underfull_probe_stops_after_empty_continuation() -> None:
-    """Дополнительный поиск не зацикливается на исчерпанном листе."""
+async def test_underfull_probe_stops_without_continuation() -> None:
+    """Неполный ответ останавливает поиск на одном запросе."""
     model = SequentialVisionModel(
         [
             {
                 "summary": "Первый batch.",
                 "violations": [_candidate(i) for i in range(6)],
             },
-            {"summary": "Новых замечаний нет.", "violations": []},
         ]
     )
 
@@ -297,9 +288,9 @@ async def test_productive_underfull_probe_stops_after_empty_continuation() -> No
         image_bytes=b"png",
     )
 
-    assert len(model.calls) == 2
+    assert len(model.calls) == 1
     assert len(findings) == 6
-    assert metrics.requested_num_predict == 8000
+    assert metrics.requested_num_predict == 4000
 
 
 async def test_duplicate_saturation_requests_distinct_continuation() -> None:
