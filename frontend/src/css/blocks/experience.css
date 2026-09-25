@@ -1,0 +1,200 @@
+/* frontend/src/css/blocks/experience.css */
+
+/* Правая навигация и отдельная демонстрационная страница Experience. */
+.experience-nav,
+.experience-page {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+}
+
+.experience-nav {
+  align-self: start;
+  padding: var(--space-7);
+}
+
+.experience-nav__title {
+  margin: 0 0 var(--space-2);
+  font-size: 18px;
+}
+
+.experience-nav__description {
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.experience-nav__link {
+  display: inline-block;
+  margin-top: var(--space-3);
+  color: var(--color-accent);
+  font-weight: var(--font-weight-semibold);
+}
+
+.experience-page {
+  width: min(1280px, calc(100% - 32px));
+  box-sizing: border-box;
+  margin: var(--space-page) auto;
+  padding: var(--space-9);
+}
+
+.experience-page__navigation {
+  margin-bottom: var(--space-8);
+}
+
+.experience-page__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.experience-page__title {
+  margin: 0;
+}
+
+.experience-page__description {
+  color: var(--color-text-secondary);
+}
+
+.experience-page__export,
+.experience-table__edit,
+.experience-dialog button {
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+.experience-page__export:disabled {
+  background: var(--color-disabled);
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+.experience-page__notice {
+  padding: var(--space-5);
+  background: var(--color-warning-soft);
+  border-radius: var(--radius-control);
+  color: var(--color-warning);
+}
+
+.experience-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin: var(--space-9) 0;
+}
+
+.experience-filter__field,
+.experience-dialog__field {
+  display: grid;
+  gap: var(--space-2);
+  flex: 1 1 180px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.experience-filter input,
+.experience-filter select,
+.experience-dialog textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  font: inherit;
+}
+
+.experience-page__count {
+  color: var(--color-text-secondary);
+}
+
+.experience-page__table-wrap {
+  overflow-x: auto;
+}
+
+.experience-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.experience-table caption {
+  text-align: left;
+  font-weight: var(--font-weight-semibold);
+  margin-bottom: var(--space-3);
+}
+
+.experience-table th,
+.experience-table td {
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.experience-table__title,
+.experience-table__detail,
+.experience-table__text,
+.experience-table__tag {
+  display: block;
+  max-width: 350px;
+  overflow-wrap: anywhere;
+}
+
+.experience-table__detail {
+  margin-top: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.experience-table__preview {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
+.experience-table__preview img {
+  display: block;
+  width: 96px;
+  height: 60px;
+  object-fit: cover;
+  border: 1px solid var(--color-border);
+}
+
+.experience-dialog {
+  width: min(600px, calc(100% - 32px));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  padding: var(--space-9);
+}
+
+.experience-dialog::backdrop {
+  background: var(--color-overlay);
+}
+
+.experience-dialog__image {
+  display: block;
+  width: 100%;
+  margin-bottom: var(--space-5);
+}
+
+.experience-dialog__field {
+  margin-bottom: var(--space-5);
+}
+
+.experience-dialog__check {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.experience-dialog__error {
+  color: var(--color-danger);
+}
+
+.experience-dialog__actions {
+  display: flex;
+  justify-content: end;
+  gap: var(--space-3);
+}

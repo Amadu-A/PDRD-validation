@@ -1,0 +1,126 @@
+<!-- frontend/src/experience.html -->
+
+<!--
+  Демонстрационная страница управления примерами Experience.
+  Пока серверный каталог не подключён, все изменения живут только в этой вкладке.
+-->
+
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>База опыта · PDRD Validation</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script type="module" src="/js/features/experience/page.js" defer></script>
+</head>
+<body class="page">
+  <main class="experience-page">
+    <nav class="experience-page__navigation" aria-label="Навигация">
+      <a href="/">← К анализу</a>
+    </nav>
+
+    <header class="experience-page__header">
+      <div>
+        <h1 class="experience-page__title">Experienced User Base</h1>
+        <p class="experience-page__description">
+          Замечания с подтверждёнными областями и решениями инженера.
+        </p>
+      </div>
+      <button class="experience-page__export" type="button" disabled
+        title="Экспорт станет доступен после подключения серверного каталога">
+        Выгрузить замечания
+      </button>
+    </header>
+
+    <p class="experience-page__notice" role="status">
+      Демонстрация интерфейса. Показаны вымышленные примеры; изменения
+      хранятся только до закрытия или перезагрузки страницы. Серверное
+      сохранение и выгрузка пока не подключены.
+    </p>
+
+    <form class="experience-filter" data-experience-filter>
+      <label class="experience-filter__field">
+        <span>Поиск</span>
+        <input name="query" type="search" placeholder="Текст, документ, норматив">
+      </label>
+      <label class="experience-filter__field">
+        <span>Тег</span>
+        <select name="tag">
+          <option value="">Все</option>
+          <option value="wise">Wise</option>
+          <option value="bad">Bad</option>
+          <option value="edited">Edited</option>
+          <option value="gold">Gold</option>
+        </select>
+      </label>
+      <label class="experience-filter__field">
+        <span>Решение</span>
+        <select name="decision">
+          <option value="">Все</option>
+          <option value="accepted">Принято</option>
+          <option value="rejected">Отклонено</option>
+        </select>
+      </label>
+      <label class="experience-filter__field">
+        <span>Активность</span>
+        <select name="active">
+          <option value="">Все</option>
+          <option value="true">Активно</option>
+          <option value="false">Неактивно</option>
+        </select>
+      </label>
+    </form>
+
+    <p class="experience-page__count" data-experience-count role="status"></p>
+
+    <div class="experience-page__table-wrap">
+      <table class="experience-table">
+        <caption>Демонстрационные записи Experience</caption>
+        <thead>
+          <tr>
+            <th scope="col">Область</th>
+            <th scope="col">Документ и лист</th>
+            <th scope="col">Замечание и норматив</th>
+            <th scope="col">Тег / решение</th>
+            <th scope="col">Состояние</th>
+            <th scope="col">Действия</th>
+          </tr>
+        </thead>
+        <tbody data-experience-rows></tbody>
+      </table>
+    </div>
+
+    <dialog class="experience-dialog" data-experience-image-dialog
+      aria-label="Демонстрационная область замечания">
+      <img class="experience-dialog__image" data-experience-large-image alt="">
+      <button type="button" data-experience-image-close>Закрыть</button>
+    </dialog>
+
+    <dialog class="experience-dialog" data-experience-edit-dialog
+      aria-labelledby="experienceEditTitle">
+      <form method="dialog" data-experience-edit-form>
+        <h2 id="experienceEditTitle">Редактировать пример</h2>
+        <p>Идентификатор, происхождение и история решения не редактируются.</p>
+        <label class="experience-dialog__field">
+          <span>Текст замечания</span>
+          <textarea name="text" rows="5" maxlength="10000" required></textarea>
+        </label>
+        <label class="experience-dialog__field">
+          <span>Нормативное основание</span>
+          <textarea name="normative_basis" rows="3" maxlength="2000"></textarea>
+        </label>
+        <label class="experience-dialog__check">
+          <input name="active" type="checkbox">
+          <span>Активно</span>
+        </label>
+        <p class="experience-dialog__error" data-experience-edit-error role="alert"></p>
+        <div class="experience-dialog__actions">
+          <button type="button" data-experience-edit-close>Отмена</button>
+          <button type="submit">Применить локально</button>
+        </div>
+      </form>
+    </dialog>
+  </main>
+</body>
+</html>
