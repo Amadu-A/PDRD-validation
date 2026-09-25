@@ -1,0 +1,227 @@
+/* frontend/src/css/blocks/manual-annotation.css */
+
+/* Gold: ручное выделение ошибки и места карточки в пределах одного листа. */
+
+.manual-annotation__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+
+.manual-annotation__button {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-control);
+  background: var(--color-warning-soft);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.manual-annotation__button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.manual-annotation__button:focus-visible,
+.manual-editor__button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.manual-annotation__message {
+  flex: 1 1 210px;
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+}
+
+.manual-annotation__layer {
+  position: absolute;
+  z-index: 8;
+  pointer-events: none;
+}
+
+.manual-annotation__layer[data-manual-mode="issue"],
+.manual-annotation__layer[data-manual-mode="callout"] {
+  pointer-events: auto;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.manual-annotation__layer:focus-visible {
+  outline: 2px dashed var(--color-warning);
+  outline-offset: 1px;
+}
+
+.manual-annotation__draft,
+.manual-annotation__issue {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--color-warning);
+  background: color-mix(
+    in srgb,
+    var(--color-warning) 16%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+.manual-annotation__draft {
+  z-index: 4;
+  border-style: dashed;
+}
+
+.manual-annotation__draft--callout {
+  background: color-mix(
+    in srgb,
+    var(--color-warning) 8%,
+    transparent
+  );
+}
+
+.manual-annotation__draft[hidden] {
+  display: none;
+}
+
+.manual-annotation__issue {
+  z-index: 2;
+}
+
+.manual-annotation__connector {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.manual-annotation__connector polyline {
+  fill: none;
+  stroke: var(--color-warning);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.manual-annotation__card {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  gap: 3px;
+  padding: 4px;
+  overflow: auto;
+  border: 2px solid var(--color-warning);
+  border-radius: var(--radius-control);
+  background: color-mix(
+    in srgb,
+    var(--color-warning-soft) 93%,
+    white
+  );
+  box-shadow: 0 2px 8px rgb(0 0 0 / 16%);
+  color: var(--color-text-primary);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+}
+
+.manual-annotation__card[data-review-decision="accepted"] {
+  border-color: var(--color-success);
+}
+
+.manual-annotation__card[data-review-decision="rejected"] {
+  border-color: var(--color-danger);
+}
+
+.manual-annotation__card .review-controls {
+  flex: 0 0 auto;
+}
+
+.manual-annotation__text,
+.manual-annotation__norm {
+  margin: 0;
+}
+
+.manual-annotation__text {
+  font-weight: var(--font-weight-semibold);
+}
+
+.manual-annotation__norm {
+  font-size: 0.65rem;
+  color: var(--color-text-secondary);
+}
+
+.manual-editor {
+  box-sizing: border-box;
+  width: min(90vw, 620px);
+  padding: var(--space-8);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+}
+
+.manual-editor::backdrop {
+  background: var(--color-overlay);
+}
+
+.manual-editor__form {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.manual-editor__title {
+  margin: 0 0 var(--space-3);
+}
+
+.manual-editor__label {
+  font-weight: var(--font-weight-semibold);
+}
+
+.manual-editor__textarea,
+.manual-editor__input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  font: inherit;
+}
+
+.manual-editor__hint {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+
+.manual-editor__error {
+  min-height: 1em;
+  color: var(--color-danger);
+}
+
+.manual-editor__actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.manual-editor__button {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  cursor: pointer;
+  font: inherit;
+}
+
+.manual-editor__button--save {
+  background: var(--color-accent);
+  color: var(--color-surface);
+}
