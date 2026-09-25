@@ -1,8 +1,11 @@
 # services/experience-service/pyproject.toml
-# Зависимости и метаданные отдельного микросервиса Experience Service.
+# Зависимости и метаданные микросервиса Experience Service.
 #
-# Domain/application не зависят от PostgreSQL или Pydantic.
-# SQLAlchemy и Pydantic используются только во внешних слоях сервиса.
+# Назначение:
+# - определить зависимости самостоятельного HTTP-приложения;
+# - обеспечить хранение Human Review в PostgreSQL;
+# - сохранить независимость domain/application от инфраструктуры;
+# - предоставить отдельные зависимости для модульного тестирования.
 
 [build-system]
 requires = ["setuptools>=80,<82"]
@@ -17,8 +20,17 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic==1.19.1",
     "asyncpg==0.31.0",
+    "fastapi==0.141.1",
     "pydantic-settings==2.15.0",
     "SQLAlchemy==2.0.52",
+    "uvicorn[standard]==0.52.4",
+]
+
+[project.optional-dependencies]
+test = [
+    "httpx==0.28.1",
+    "pytest>=8.4,<10.0",
+    "pytest-asyncio>=1.1,<2.0",
 ]
 
 [tool.setuptools.packages.find]

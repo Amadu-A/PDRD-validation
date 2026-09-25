@@ -3,25 +3,24 @@
 """Конфигурация миграций PostgreSQL для Experience Service.
 
 Назначение файла:
-- подключает Alembic к отдельной схеме experience;
-- использует собственную таблицу версий миграций;
-- поддерживает проверку миграций без подключения к базе;
-- обеспечивает атомарное выполнение реальных миграций.
+- использовать согласованные настройки подключения;
+- изолировать таблицу версий миграций в схеме experience;
+- поддерживать offline-генерацию SQL;
+- применять реальные миграции одной атомарной транзакцией.
 
-Важно:
-создание схемы и применение миграций должны находиться
-в одной явно управляемой транзакции.
+Создание схемы и изменение таблиц происходят в одной
+транзакции. При успешном завершении выполняется commit,
+при ошибке — rollback.
 
-Если миграция завершается успешно, изменения фиксируются.
-Если возникает ошибка, PostgreSQL откатывает всю транзакцию.
-
-Миграции других микросервисов этот файл не запускает.
+Миграции других микросервисов этот модуль не запускает.
 """
 
 import asyncio
-import os
 
 from alembic import context
+from pdrd_experience_service.infrastructure.database.migration_url import (
+    resolve_migration_url,
+)
 from pdrd_experience_service.infrastructure.database.models import Base
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -29,23 +28,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 config = context.config
 
-
-# До подключения единой runtime-конфигурации сервиса
-# адрес PostgreSQL передаётся явно через переменную окружения.
-#
-# Импорт пакета Experience Service не выполняет миграции.
-database_url = os.environ.get(
-    "EXPERIENCE_SERVICE_DATABASE_URL",
-    "",
-)
-
-if not database_url:
-    raise RuntimeError("Не задан EXPERIENCE_SERVICE_DATABASE_URL.")
-
-if not database_url.startswith("postgresql+asyncpg://"):
-    raise RuntimeError(
-        "Миграции Experience Service требуют PostgreSQL и драйвер asyncpg."
-    )
+database_url = resolve_migration_url()
 
 config.set_main_option(
     "sqlalchemy.url",
@@ -56,12 +39,7 @@ config.set_main_option(
 def _configure(
     **options: object,
 ) -> None:
-    """Настраивает независимую историю миграций Experience.
-
-    Собственная таблица версий располагается в схеме experience.
-    Таким образом, миграции этого сервиса не пересекаются
-    с миграциями API Gateway и Knowledge Service.
-    """
+    """Настраивает отдельную цепочку миграций Experience Service."""
     context.configure(
         target_metadata=Base.metadata,
         include_schemas=True,
@@ -73,11 +51,7 @@ def _configure(
 
 
 def run_migrations_offline() -> None:
-    """Генерирует SQL миграций без подключения к PostgreSQL.
-
-    Используется архитектурными тестами и предварительной
-    проверкой изменений схемы.
-    """
+    """Генерирует SQL без установки соединения с PostgreSQL."""
     _configure(
         url=database_url,
         literal_binds=True,
@@ -95,14 +69,7 @@ def run_migrations_offline() -> None:
 def _migrate(
     connection: Connection,
 ) -> None:
-    """Применяет миграции внутри уже открытой транзакции.
-
-    Создание схемы выполняется до создания таблицы
-    alembic_version_experience.
-
-    Фиксацией или откатом транзакции управляет вызывающий
-    код через engine.begin().
-    """
+    """Выполняет миграции внутри транзакции вызывающего кода."""
     connection.exec_driver_sql("CREATE SCHEMA IF NOT EXISTS experience")
 
     _configure(
@@ -114,19 +81,13 @@ def _migrate(
 
 
 async def _run_migrations_online() -> None:
-    """Выполняет миграции с обязательной фиксацией транзакции.
+    """Применяет миграции с гарантированной фиксацией изменений.
 
-    Используем engine.begin(), а не engine.connect().
+    Использование engine.begin() обязательно: создание схемы
+    предварительно открывает транзакцию SQLAlchemy.
 
-    Причина:
-    предварительный CREATE SCHEMA открывает транзакцию.
-    Если использовать connect() без явного commit(),
-    при закрытии соединения все изменения могут откатиться,
-    несмотря на успешное завершение Alembic.
-
-    Контекст engine.begin():
-    - фиксирует транзакцию при успешном завершении;
-    - откатывает её при возникновении исключения.
+    Контекст engine.begin() фиксирует успешную миграцию
+    и откатывает незавершённую при возникновении исключения.
     """
     engine = async_engine_from_config(
         config.get_section(
