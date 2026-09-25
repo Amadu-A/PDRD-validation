@@ -1,5 +1,8 @@
 # services/experience-service/pyproject.toml
-# Domain/application and project-specific PostgreSQL persistence for Human Review.
+# Зависимости и метаданные отдельного микросервиса Experience Service.
+#
+# Domain/application не зависят от PostgreSQL или Pydantic.
+# SQLAlchemy и Pydantic используются только во внешних слоях сервиса.
 
 [build-system]
 requires = ["setuptools>=80,<82"]
@@ -8,11 +11,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pdrd-experience-service"
 version = "0.1.0"
-description = "PDRD human review and durable experience contracts"
+description = "Хранение Human Review и подготовка проверенной базы экспертного опыта PDRD."
 requires-python = ">=3.12"
+
 dependencies = [
     "alembic==1.19.1",
     "asyncpg==0.31.0",
+    "pydantic-settings==2.15.0",
     "SQLAlchemy==2.0.52",
 ]
 
