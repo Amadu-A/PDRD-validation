@@ -1,7 +1,19 @@
 # services/experience-service/tests/unit/test_review_persistence.py
 
-"""Tests for Experience-owned tables, exact domain roundtrips and CAS SQL shape."""
+"""Модульные проверки постоянного хранения Human Review.
 
+Назначение файла:
+- проверять преобразование доменных объектов в JSONB и обратно;
+- контролировать структуру PostgreSQL-таблиц;
+- проверять наличие атомарных операций и контроль ревизий;
+- закреплять правильный порядок INSERT родителя и дочернего события;
+- не допускать маскировки ошибок внешнего ключа ошибками конкуренции.
+
+Настоящее поведение PostgreSQL дополнительно проверяется
+отдельными интеграционными тестами.
+"""
+
+import asyncio
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -28,6 +40,7 @@ from pdrd_experience_service.infrastructure.database.repository import (
     SqlAlchemyReviewRepository,
 )
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.schema import CreateTable
 
 NOW = datetime(2026, 9, 25, tzinfo=UTC)
@@ -37,7 +50,11 @@ DOC = UUID(int=102)
 
 
 def session_with_full_history() -> ReviewSession:
-    """Make one edited VLM and accepted manual Gold with full audit history."""
+    """Формирует отчёт с исправленной VLM-находкой и принятым Gold.
+
+    Используется для проверки сохранения всех промежуточных
+    ревизий и неизменности первоначальных формулировок.
+    """
     session = ReviewSession.open(
         job_id=JOB,
         document_id=DOC,
@@ -103,10 +120,24 @@ def session_with_full_history() -> ReviewSession:
     )
 
 
+def initial_session() -> ReviewSession:
+    """Создаёт исходный отчёт без замечаний для проверки INSERT."""
+    return ReviewSession.open(
+        job_id=JOB,
+        document_id=DOC,
+        source_filename="source.pdf",
+        source_sha256="a" * 64,
+        originals=(),
+        rendered_pages=(1,),
+        actor="engineer:1",
+        at=NOW,
+    )
+
+
 def test_snapshot_roundtrip_preserves_original_edit_gold_geometry_and_approval() -> (
     None
 ):
-    """No original text, editor attribution or approved revision is lost in JSONB."""
+    """Проверяет восстановление первоначального текста, Gold и утверждения."""
     source = session_with_full_history()
 
     payload = snapshot_to_json(
@@ -133,18 +164,20 @@ def test_snapshot_roundtrip_preserves_original_edit_gold_geometry_and_approval()
     )
 
     assert restored == source
-
     assert restored.accepted_for_pdf() == source.accepted_for_pdf()
-
     assert restored.findings[0].experience_tag == "edited"
-
     assert restored.findings[1].experience_tag == "gold"
 
-    assert restored.findings[1].issue_box == Rectangle(100, 110, 200, 210)
+    assert restored.findings[1].issue_box == Rectangle(
+        100,
+        110,
+        200,
+        210,
+    )
 
 
 def test_roundtrip_rejects_naive_audit_metadata() -> None:
-    """Corrupt persisted timestamp is rejected rather than silently repaired."""
+    """Восстановление запрещает временные метки без часового пояса."""
     source = session_with_full_history()
 
     data = snapshot_to_json(
@@ -164,7 +197,7 @@ def test_roundtrip_rejects_naive_audit_metadata() -> None:
 
 
 def test_orm_uses_separate_experience_schema_and_append_only_event_key() -> None:
-    """Avoid changing Gateway/Knowledge version tables and overwriting history."""
+    """Таблицы Experience не должны изменять схемы других сервисов."""
     assert set(Base.metadata.tables) == {
         "experience.review_sessions",
         "experience.review_events",
@@ -192,7 +225,6 @@ def test_orm_uses_separate_experience_schema_and_append_only_event_key() -> None
     )
 
     assert "experience.review_sessions" in sessions_sql
-
     assert "experience.review_events" in events_sql
 
     assert "JSONB" in sessions_sql and "JSONB" in events_sql
@@ -201,10 +233,8 @@ def test_orm_uses_separate_experience_schema_and_append_only_event_key() -> None
 
 
 def test_repository_requires_one_audited_revision_per_update() -> None:
-    """Reject snapshots whose audit trail could not be committed atomically."""
-    import asyncio
-
-    repo = SqlAlchemyReviewRepository(
+    """Одна команда изменения должна создавать одну ревизию."""
+    repository = SqlAlchemyReviewRepository(
         session_factory=lambda: None,  # type: ignore[arg-type]
     )
 
@@ -212,85 +242,115 @@ def test_repository_requires_one_audited_revision_per_update() -> None:
 
     with pytest.raises(
         ValueError,
-        match="one new audited revision",
+        match="одну новую ревизию",
     ):
         asyncio.run(
-            repo.update(
+            repository.update(
                 source,
                 expected_revision=0,
             )
         )
 
 
+class FakeDriverError(Exception):
+    """Имитирует ошибку PostgreSQL с конкретным кодом SQLSTATE."""
+
+    def __init__(
+        self,
+        sqlstate: str,
+    ) -> None:
+        """Сохраняет код, используемый SQLAlchemy для классификации ошибок."""
+        super().__init__(sqlstate)
+        self.sqlstate = sqlstate
+
+
 class FakeDatabase:
-    """Capture SQL writes without pretending to emulate PostgreSQL transaction isolation."""
+    """Имитация сессии с наблюдаемым порядком операций.
+
+    Этот объект не моделирует конкурентность PostgreSQL.
+    Он нужен исключительно для проверки того, что код
+    явно выполняет flush() перед добавлением дочерней записи.
+    """
 
     def __init__(
         self,
         changed: UUID | None = JOB,
+        flush_error: IntegrityError | None = None,
     ) -> None:
-        """Select success or a stale CAS conflict."""
+        """Позволяет имитировать успешный INSERT и ошибки SQLSTATE."""
         self.changed = changed
+        self.flush_error = flush_error
 
         self.added: list[object] = []
+        self.operations: list[str] = []
+
         self.statement: object | None = None
 
     async def __aenter__(
         self,
     ) -> "FakeDatabase":
-        """Open a fake session or transaction."""
+        """Имитирует открытие сессии или транзакции."""
         return self
 
     async def __aexit__(
         self,
         *args: object,
     ) -> None:
-        """Finish a fake session or transaction."""
+        """Имитирует завершение контекста без подключения к PostgreSQL."""
 
     def begin(
         self,
     ) -> "FakeDatabase":
-        """Model the transaction boundary used by the adapter."""
+        """Имитирует границу транзакции SQLAlchemy."""
         return self
-
-    async def scalar(
-        self,
-        statement: object,
-    ) -> UUID | None:
-        """Capture the revision-guarded SQL UPDATE and its returned job."""
-        self.statement = statement
-        return self.changed
 
     def add(
         self,
         object_: object,
     ) -> None:
-        """Track rows queued within the same transaction."""
+        """Запоминает добавленный ORM-объект и порядок операций."""
         self.added.append(
             object_,
         )
 
+        self.operations.append(
+            type(object_).__name__,
+        )
+
+    async def flush(
+        self,
+    ) -> None:
+        """Фиксирует отправку накопленных ORM-операций в имитации."""
+        self.operations.append(
+            "flush",
+        )
+
+        if self.flush_error is not None:
+            raise self.flush_error
+
+    async def scalar(
+        self,
+        statement: object,
+    ) -> UUID | None:
+        """Сохраняет SQL-запрос с проверкой ревизии."""
+        self.statement = statement
+
+        return self.changed
+
 
 @pytest.mark.asyncio
-async def test_insert_queues_initial_snapshot_and_opened_event_together() -> None:
-    """Insert must not silently lose the first audited revision."""
-    initial = ReviewSession.open(
-        job_id=JOB,
-        document_id=DOC,
-        source_filename="source.pdf",
-        source_sha256="a" * 64,
-        originals=(),
-        rendered_pages=(1,),
-        actor="engineer:1",
-        at=NOW,
-    )
+async def test_insert_flushes_parent_before_adding_audit_event() -> None:
+    """Событие аудита добавляется только после отправки родителя.
 
+    Это регрессионный тест ошибки ForeignKeyViolationError,
+    обнаруженной при первом запуске на настоящем PostgreSQL.
+    """
     database = FakeDatabase()
 
     await SqlAlchemyReviewRepository(
         lambda: database,  # type: ignore[arg-type]
     ).insert(
-        initial,
+        initial_session(),
     )
 
     assert len(database.added) == 2
@@ -305,12 +365,71 @@ async def test_insert_queues_initial_snapshot_and_opened_event_together() -> Non
         ReviewEventModel,
     )
 
+    assert database.operations == [
+        "ReviewSessionModel",
+        "flush",
+        "ReviewEventModel",
+    ]
+
     assert database.added[1].session_revision == 0
 
 
 @pytest.mark.asyncio
+async def test_duplicate_insert_maps_unique_violation_to_review_conflict() -> None:
+    """Повторный job_id преобразуется в конфликт существующего отчёта."""
+    database = FakeDatabase(
+        flush_error=IntegrityError(
+            "INSERT",
+            {},
+            FakeDriverError("23505"),
+        ),
+    )
+
+    with pytest.raises(
+        ReviewConflictError,
+        match="уже существует",
+    ):
+        await SqlAlchemyReviewRepository(
+            lambda: database,  # type: ignore[arg-type]
+        ).insert(
+            initial_session(),
+        )
+
+    assert database.operations == [
+        "ReviewSessionModel",
+        "flush",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_foreign_key_error_is_not_reported_as_duplicate_review() -> None:
+    """Ошибка внешнего ключа должна сохранить первоначальную причину."""
+    database = FakeDatabase(
+        flush_error=IntegrityError(
+            "INSERT",
+            {},
+            FakeDriverError("23503"),
+        ),
+    )
+
+    with pytest.raises(
+        IntegrityError,
+    ):
+        await SqlAlchemyReviewRepository(
+            lambda: database,  # type: ignore[arg-type]
+        ).insert(
+            initial_session(),
+        )
+
+    assert database.operations == [
+        "ReviewSessionModel",
+        "flush",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_update_guards_expected_revision_and_adds_only_new_audit_event() -> None:
-    """Concurrency control is in the SQL WHERE clause, not in Python memory."""
+    """Конкурентное обновление проверяется непосредственно условием SQL."""
     approved = session_with_full_history()
 
     database = FakeDatabase()
@@ -344,7 +463,7 @@ async def test_update_guards_expected_revision_and_adds_only_new_audit_event() -
 
 @pytest.mark.asyncio
 async def test_stale_database_update_fails_before_appending_an_event() -> None:
-    """Two browser tabs cannot silently append conflicting review revisions."""
+    """Устаревшая ревизия не должна создавать новое событие аудита."""
     approved = session_with_full_history()
 
     database = FakeDatabase(
@@ -353,7 +472,7 @@ async def test_stale_database_update_fails_before_appending_an_event() -> None:
 
     with pytest.raises(
         ReviewConflictError,
-        match="Stale",
+        match="другим пользователем",
     ):
         await SqlAlchemyReviewRepository(
             lambda: database,  # type: ignore[arg-type]
