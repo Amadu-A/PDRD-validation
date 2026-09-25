@@ -2,11 +2,14 @@
 
 /**
  * UI-адаптер решений для VLM и ручных Gold-замечаний.
- * Решение и происхождение сохраняются независимо в локальной модели.
+ * Карточка на листе, текстовый список и данные экспорта используют одно решение.
+ * Пока решения локальные: серверный review не подключён.
  */
 
 import { createReviewControls } from "./controls.js";
 import { createManualAnnotationController } from "./manual.js";
+import { createManualTextList } from "./manual-list.js";
+import { createManualRecords } from "./manual-records.js";
 import { createReviewState, REVIEW_DECISIONS, REVIEW_ORIGINS } from "./state.js";
 
 const TEXT_SELECTOR = (
@@ -44,6 +47,7 @@ function createEditor(onSave) {
   error.setAttribute("role", "alert");
 
   const actions = document.createElement("div");
+
   actions.className = "review-editor__actions";
 
   const cancel = document.createElement("button");
@@ -81,20 +85,49 @@ function createEditor(onSave) {
   };
 }
 
-/** Связывает существующую визуализацию с ручным review. */
+/** Связывает существующую визуализацию с ручным review и текстовым отчётом. */
 export function createReviewController() {
   let state = createReviewState();
   let views = new Map();
   let preview = null;
   let editor = null;
   let activeFindingId = null;
+  let reportRoot = null;
+  let manualRecords = createManualRecords();
+
+  const manualList = createManualTextList();
+
+  function markManualOnPage(pageNumber) {
+    const pages = reportRoot?.querySelectorAll?.(
+      ".analysis-result__page-visualization",
+    ) ?? [];
+
+    for (const page of pages) {
+      const title = page.querySelector(".analysis-result__page-title");
+      if (title?.textContent?.trim() !== `Лист/страница ${pageNumber}`) {
+        continue;
+      }
+      const empty = page.querySelector(".analysis-result__page-empty");
+      if (empty) {
+        empty.textContent = (
+          "Автоматические замечания на этом листе отсутствуют. "
+          + "Замечание добавлено пользователем."
+        );
+      }
+      break;
+    }
+  }
 
   const manual = createManualAnnotationController({
     onCreate(note) {
-      state.register(note.findingId, note.text, {
+      const entry = state.register(note.findingId, note.text, {
         origin: REVIEW_ORIGINS.MANUAL,
         normativeSection: note.normativeSection,
       });
+
+      manualRecords.add(note, entry);
+      const textView = manualList.add(note, entry);
+      markManualOnPage(note.pageNumber);
 
       attach(
         note.card,
@@ -102,6 +135,15 @@ export function createReviewController() {
         note.textNode,
         note.onEdit,
       );
+
+      if (textView) {
+        attach(
+          textView.article,
+          note.findingId,
+          textView.textNode,
+          note.onEdit,
+        );
+      }
     },
 
     onUpdate(findingId, text, normativeSection) {
@@ -181,6 +223,8 @@ export function createReviewController() {
       );
     }
 
+    manualList.sync(entry);
+    manualRecords.sync(entry);
     updatePreview();
   }
 
@@ -237,9 +281,11 @@ export function createReviewController() {
   function mount(root) {
     state = createReviewState();
     views = new Map();
+    manualRecords = createManualRecords();
     activeFindingId = null;
     preview = null;
     editor = null;
+    reportRoot = root;
 
     const visualization = root.querySelector(
       ".analysis-result__visualization",
@@ -260,6 +306,8 @@ export function createReviewController() {
     if (!items.length && !pages.length) {
       return;
     }
+
+    manualList.mount(root);
 
     editor = createEditor((value, error, dialog) => {
       if (!activeFindingId) {
@@ -322,5 +370,10 @@ export function createReviewController() {
     updatePreview();
   }
 
-  return { mount };
+  /** Снимок Gold-данных только для будущего защищённого API, без автосохранения. */
+  function getManualSnapshot() {
+    return manualRecords.snapshot();
+  }
+
+  return { mount, getManualSnapshot };
 }

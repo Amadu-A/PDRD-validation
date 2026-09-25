@@ -1,0 +1,42 @@
+/* frontend/src/css/blocks/manual-review-list.css */
+
+/* Gold-карточки в общем текстовом отчёте используют тот же тон, что и на листе. */
+
+.manual-review-list__summary,
+.manual-review-list__overview {
+  margin: var(--space-2) 0;
+  color: var(--color-warning);
+  font-weight: var(--font-weight-semibold);
+}
+
+.manual-review-list__item,
+.manual-review-list__item[data-review-decision="accepted"],
+.manual-review-list__item[data-review-decision="rejected"] {
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.manual-review-list__gold {
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  font-weight: var(--font-weight-semibold);
+}
+
+.manual-review-list__decision {
+  background: var(--color-surface);
+}
+
+.manual-review-list__item[data-manual-decision="accepted"] .manual-review-list__decision {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.manual-review-list__item[data-manual-decision="rejected"] .manual-review-list__decision {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.manual-review-list__item > .review-controls {
+  max-width: 100%;
+}

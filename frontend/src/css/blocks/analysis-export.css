@@ -1,7 +1,7 @@
 /* frontend/src/css/blocks/analysis-export.css */
 
 /*
- * Download action итогового annotated PDF.
+ * Скачивание исходного автоматического PDF и статус review-экспорта.
  */
 
 .analysis-export {
@@ -17,13 +17,11 @@
   background: var(--color-surface);
 }
 
-
 .analysis-export__title {
   margin: 0;
 
   font-size: 1.05rem;
 }
-
 
 .analysis-export__description {
   margin: 0;
@@ -33,8 +31,8 @@
   line-height: 1.5;
 }
 
-
-.analysis-export__download {
+.analysis-export__download,
+.analysis-export__pending {
   display: inline-flex;
 
   width: fit-content;
@@ -42,52 +40,51 @@
   align-items: center;
   justify-content: center;
 
-  padding:
-    var(--space-3)
-    var(--space-5);
+  padding: var(--space-3) var(--space-5);
 
   border: 1px solid var(--color-accent);
   border-radius: var(--radius-control);
 
-  background: var(--color-accent);
-
-  color: var(--color-surface);
-
+  font: inherit;
   font-weight: var(--font-weight-semibold);
-
   text-decoration: none;
-
-  transition:
-    filter 120ms ease,
-    transform 120ms ease;
 }
 
+.analysis-export__download {
+  background: var(--color-accent);
+  color: var(--color-surface);
+
+  transition: filter 120ms ease, transform 120ms ease;
+}
 
 .analysis-export__download:hover {
   filter: brightness(0.94);
 }
 
-
 .analysis-export__download:active {
   transform: translateY(1px);
 }
-
 
 .analysis-export__download:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 3px;
 }
 
+.analysis-export__pending:disabled {
+  border-color: var(--color-border-control);
+  background: var(--color-disabled);
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
 
 @media (max-width: 640px) {
   .analysis-export {
     padding: var(--space-4);
   }
 
-
-  .analysis-export__download {
+  .analysis-export__download,
+  .analysis-export__pending {
     width: 100%;
-
     box-sizing: border-box;
   }
 }
