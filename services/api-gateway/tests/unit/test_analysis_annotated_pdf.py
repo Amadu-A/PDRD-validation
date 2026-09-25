@@ -24,6 +24,37 @@ from pdrd_api_gateway.domain.analysis_submission import (
 )
 
 
+def test_hypothesis_is_not_exported_as_annotated_pdf_finding() -> None:
+    """Непроверенный повтор не получает номер, линию или рамку в PDF."""
+    annotations, report = GetAnalysisAnnotatedPdf._build_export_payload(
+        job_id=UUID(int=1),
+        result={
+            "selected_pages": [22],
+            "findings": [
+                {
+                    "finding_id": "p22-h1",
+                    "page": 22,
+                    "status": "hypothesis",
+                    "comment": "Позиция 8.12.34 повторяется.",
+                },
+                {
+                    "finding_id": "p22-f2",
+                    "page": 22,
+                    "status": "needs_review",
+                    "comment": "Проверить маркировку.",
+                },
+            ],
+        },
+        visualization={"pages": []},
+        source_mode="pdf_only",
+        pdf_file_name="drawing.pdf",
+        cad_file_name=None,
+    )
+
+    assert [annotation.finding_id for annotation in annotations] == ["p22-f2"]
+    assert len(report.findings) == 1
+
+
 class FakeGetJob:
     """Возвращает один completed job."""
 

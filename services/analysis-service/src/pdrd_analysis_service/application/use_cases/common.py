@@ -25,6 +25,178 @@ _CANDIDATE_SOURCE_ID_FIELDS = (
     "user_package_source_ids",
 )
 
+_STRUCTURED_NUMBER_ANCHOR_RE = re.compile(
+    r"(?<![\w])"
+    r"\d+(?:\.\d+){1,4}"
+    r"(?:\s*[-–—]\s*\d+(?:\.\d+){1,4})?"
+    r"(?![\w])",
+)
+
+_TAG_ANCHOR_RE = re.compile(
+    r"(?<![\w])"
+    r"([A-ZА-ЯЁ]{1,4}\d+(?:\.\d+)*)"
+    r"(?![\w])",
+)
+
+_INSTRUMENT_ROLE_RE = re.compile(r"(?<!\w)(?:PE|TG|PG|LE)(?!\w)", re.IGNORECASE)
+
+_ISSUE_SIGNATURE_PATTERNS = (
+    (
+        "missing",
+        re.compile(
+            r"(?:"
+            r"\bотсутств\w*"
+            r"|\bне\s+указ\w*"
+            r"|\bне\s+заполн\w*"
+            r"|\bпуст\w*"
+            r")",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "duplicate",
+        re.compile(
+            r"(?:\bдублир\w*|\bповтор\w*)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "mismatch",
+        re.compile(
+            r"(?:"
+            r"\bнесоответ\w*"
+            r"|\bрасхожд\w*"
+            r"|\bпротивореч\w*"
+            r"|\bне\s+совпад\w*"
+            r")",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
+_PROPERTY_SIGNATURE_PATTERNS = (
+    (
+        "position",
+        re.compile(
+            r"(?:\bпозици\w*|\bпозицион\w*)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "marking",
+        re.compile(
+            r"\bмаркиров\w*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "type_mark",
+        re.compile(
+            r"(?:"
+            r"\bтип\w*"
+            r"|\bмарка\b"
+            r"|\bмарки\b"
+            r"|\bмарке\b"
+            r"|\bмарку\b"
+            r")",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "code",
+        re.compile(
+            r"\bкод\w*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "manufacturer",
+        re.compile(
+            r"(?:"
+            r"\bзавод\w*"
+            r"|\bизготов\w*"
+            r"|\bпроизводител\w*"
+            r")",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "mass",
+        re.compile(
+            r"\bмасс\w*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "quantity",
+        re.compile(
+            r"\bколичеств\w*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "designation",
+        re.compile(
+            r"\bобозначен\w*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "power",
+        re.compile(
+            r"\bмощност\w*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "flow",
+        re.compile(
+            r"\bрасход\w*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "pressure",
+        re.compile(
+            r"(?:\bдавлен\w*|\bперепад\w*|ΔР)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "temperature",
+        re.compile(
+            r"\bтемператур\w*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "diameter",
+        re.compile(
+            r"\bдиаметр\w*",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "volume",
+        re.compile(
+            r"(?:"
+            r"\bобъем\w*"
+            r"|\bобъём\w*"
+            r"|\bемкост\w*"
+            r"|\bёмкост\w*"
+            r")",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "sheet_number",
+        re.compile(
+            r"(?:\bномер\w*\s+лист\w*|\bлист\w*\s+\d+)",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ViolationCandidateSelection:
@@ -50,11 +222,13 @@ class ViolationCandidateSelection:
         ...,
     ] = ()
 
+    origin_assertions_by_candidate: tuple[tuple[dict[str, Any], ...], ...] = ()
+
     @property
     def consolidated_count(
         self,
     ) -> int:
-        """Возвращает количество distinct candidates после exact dedupe."""
+        """Возвращает количество distinct candidates после safe dedupe."""
         return len(
             self.candidates,
         )
@@ -75,7 +249,7 @@ class ViolationCandidateSelection:
     def duplicate_count(
         self,
     ) -> int:
-        """Возвращает количество объединённых exact duplicate candidates."""
+        """Возвращает количество объединённых duplicate candidates."""
         return max(
             self.represented_count - self.consolidated_count,
             0,
@@ -191,13 +365,7 @@ def _candidate_identity(
         str,
         Any,
     ],
-) -> (
-    tuple[
-        str,
-        str,
-    ]
-    | None
-):
+) -> tuple[str, str, tuple[tuple[int, int, int, int], ...]] | None:
     """Возвращает безопасный exact-dedupe key candidate."""
     comment = normalize_text(
         candidate.get(
@@ -214,9 +382,314 @@ def _candidate_identity(
     if not comment or not evidence:
         return None
 
+    raw_regions = candidate.get("visual_regions")
+    if not isinstance(raw_regions, list) or not raw_regions:
+        # Одинаковый текст без координат может описывать разные объекты.
+        return None
+
+    boxes: list[tuple[int, int, int, int]] = []
+    for region in raw_regions:
+        if not isinstance(region, dict):
+            return None
+        try:
+            box = tuple(
+                int(region[key]) for key in ("x_min", "y_min", "x_max", "y_max")
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+        if box[0] >= box[2] or box[1] >= box[3]:
+            return None
+        boxes.append(box)
+
     return (
         comment,
         evidence,
+        tuple(sorted(boxes)),
+    )
+
+
+def _origin_assertion(candidate: dict[str, Any], raw_index: int) -> dict[str, Any]:
+    """Сохраняет исходное утверждение вместе с его собственными источниками и областью."""
+    regions = candidate.get("visual_regions")
+    return {
+        "origin": "vlm",
+        "raw_index": raw_index,
+        "comment": str(candidate.get("comment", "")),
+        "evidence": str(candidate.get("evidence", "")),
+        "object_ref": str(candidate.get("object_ref", "")),
+        "normative_source_ids": _source_id_list(candidate.get("normative_source_ids")),
+        "technical_assignment_source_ids": _source_id_list(
+            candidate.get("technical_assignment_source_ids")
+        ),
+        "user_package_source_ids": _source_id_list(
+            candidate.get("user_package_source_ids")
+        ),
+        "visual_regions": [
+            dict(region) for region in regions if isinstance(region, dict)
+        ]
+        if isinstance(regions, list)
+        else [],
+    }
+
+
+def _candidate_anchor_signature(
+    candidate: dict[
+        str,
+        Any,
+    ],
+) -> tuple[
+    str,
+    ...,
+]:
+    """Извлекает явные object/position anchors из comment и evidence."""
+    text = " ".join(
+        (
+            str(
+                candidate.get(
+                    "comment",
+                    "",
+                )
+            ),
+            str(
+                candidate.get(
+                    "evidence",
+                    "",
+                )
+            ),
+        )
+    )
+
+    anchors: set[str] = set()
+
+    for raw_anchor in _STRUCTURED_NUMBER_ANCHOR_RE.findall(
+        text,
+    ):
+        anchors.add(
+            re.sub(
+                r"\s*[–—]\s*",
+                "-",
+                raw_anchor,
+            )
+        )
+
+    for raw_anchor in _TAG_ANCHOR_RE.findall(
+        text,
+    ):
+        normalized = raw_anchor.upper()
+
+        if re.fullmatch(
+            r"[NTUE]\d+",
+            normalized,
+        ):
+            continue
+
+        if normalized.startswith(
+            (
+                "СП",
+                "ГОСТ",
+                "ПУЭ",
+            )
+        ):
+            continue
+
+        anchors.add(
+            normalized,
+        )
+
+    return tuple(
+        sorted(
+            anchors,
+        )
+    )
+
+
+def _candidate_issue_signature(
+    candidate: dict[
+        str,
+        Any,
+    ],
+) -> str | None:
+    """Классифицирует только безопасные повторяющиеся issue patterns."""
+    text = " ".join(
+        (
+            str(
+                candidate.get(
+                    "comment",
+                    "",
+                )
+            ),
+            str(
+                candidate.get(
+                    "evidence",
+                    "",
+                )
+            ),
+        )
+    )
+
+    for (
+        signature,
+        pattern,
+    ) in _ISSUE_SIGNATURE_PATTERNS:
+        if pattern.search(
+            text,
+        ):
+            return signature
+
+    return None
+
+
+def _candidate_property_signature(
+    candidate: dict[
+        str,
+        Any,
+    ],
+) -> tuple[
+    str,
+    ...,
+]:
+    """Извлекает проверяемые свойства для защиты от false merge."""
+    text = " ".join(
+        (
+            str(
+                candidate.get(
+                    "comment",
+                    "",
+                )
+            ),
+            str(
+                candidate.get(
+                    "evidence",
+                    "",
+                )
+            ),
+        )
+    )
+
+    result = tuple(
+        signature
+        for (
+            signature,
+            pattern,
+        ) in _PROPERTY_SIGNATURE_PATTERNS
+        if pattern.search(
+            text,
+        )
+    )
+
+    return result
+
+
+def _candidate_structural_identity(
+    candidate: dict[
+        str,
+        Any,
+    ],
+) -> (
+    tuple[
+        str,
+        str,
+        tuple[str, ...],
+        tuple[str, ...],
+    ]
+    | None
+):
+    """Возвращает conservative object-aware duplicate identity.
+
+    Structural identity используется только для повтора одной позиции,
+    когда известны machine category, явный anchor и свойство. Сравнения
+    нескольких номеров могут относиться к разным физическим объектам.
+    """
+    category_value = normalize_text(
+        candidate.get(
+            "category",
+        )
+    )
+
+    anchors = _candidate_anchor_signature(
+        candidate,
+    )
+
+    issue_signature = _candidate_issue_signature(
+        candidate,
+    )
+
+    property_signature = _candidate_property_signature(
+        candidate,
+    )
+
+    # Общие номера и тип проблемы не доказывают, что два сравнительных
+    # замечания относятся к одному физическому объекту. Нечёткое объединение
+    # оставляем только для повтора одной позиционной подписи; остальные
+    # кандидаты объединяются лишь при точном совпадении comment и evidence.
+    if (
+        issue_signature != "duplicate"
+        or "position" not in property_signature
+        or len(anchors) != 1
+    ):
+        return None
+
+    if (
+        not category_value
+        or not anchors
+        or issue_signature is None
+        or not property_signature
+    ):
+        return None
+
+    return (
+        category_value,
+        issue_signature,
+        anchors,
+        property_signature,
+    )
+
+
+def _candidate_object_semantic_identity(
+    candidate: dict[str, Any],
+) -> tuple[str, str, str, tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None:
+    """Возвращает identity одного дефекта только при явном объекте и anchor."""
+    object_ref = normalize_text(candidate.get("object_ref"))
+    anchors = _candidate_anchor_signature(candidate)
+    issue = _candidate_issue_signature(candidate)
+    properties = _candidate_property_signature(candidate)
+    if not object_ref or not anchors or not issue or not properties:
+        return None
+    text = f"{candidate.get('comment', '')} {candidate.get('evidence', '')}"
+    roles = tuple(sorted({role.upper() for role in _INSTRUMENT_ROLE_RE.findall(text)}))
+    return (
+        normalize_text(candidate.get("category")),
+        object_ref,
+        issue,
+        properties,
+        anchors,
+        roles,
+    )
+
+
+def _candidate_regions_are_near(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """Проверяет близость доказательств после совпадения object identity."""
+
+    def boxes(candidate: dict[str, Any]) -> list[tuple[int, int, int, int]]:
+        result: list[tuple[int, int, int, int]] = []
+        for region in candidate.get("visual_regions", []):
+            if not isinstance(region, dict):
+                continue
+            try:
+                box = tuple(
+                    int(region[key]) for key in ("x_min", "y_min", "x_max", "y_max")
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+            if box[0] < box[2] and box[1] < box[3]:
+                result.append(box)
+        return result
+
+    return any(
+        max(a[0] - b[2], b[0] - a[2], 0) <= 25
+        and max(a[1] - b[3], b[1] - a[3], 0) <= 25
+        for a in boxes(left)
+        for b in boxes(right)
     )
 
 
@@ -263,7 +736,7 @@ def _merge_candidate_source_ids(
         Any,
     ],
 ) -> None:
-    """Объединяет N/T/U source IDs exact duplicate candidates."""
+    """Объединяет N/T/U source IDs duplicate candidates."""
     for field_name in _CANDIDATE_SOURCE_ID_FIELDS:
         merged: list[str] = []
         seen: set[str] = set()
@@ -295,16 +768,46 @@ def _merge_candidate_source_ids(
             target[field_name] = merged
 
 
+def _merge_candidate_regions(
+    *, target: dict[str, Any], duplicate: dict[str, Any]
+) -> None:
+    """Сохраняет все исходные области при безопасном объединении кандидатов."""
+    regions: list[dict[str, Any]] = []
+    seen: set[tuple[tuple[str, str], ...]] = set()
+    for candidate in (target, duplicate):
+        raw_regions = candidate.get("visual_regions")
+        if not isinstance(raw_regions, list):
+            continue
+        for region in raw_regions:
+            if not isinstance(region, dict):
+                continue
+            key = tuple(
+                (name, str(region.get(name, "")))
+                for name in ("x_min", "y_min", "x_max", "y_max")
+            )
+            if key not in seen:
+                regions.append(dict(region))
+                seen.add(key)
+    if regions:
+        target["visual_regions"] = regions
+
+
 def select_violation_candidates(
     violations: Any,
 ) -> ViolationCandidateSelection:
-    """Объединяет только exact duplicates без semantic filtering.
+    """Выполняет lossless deterministic candidate consolidation.
 
-    Два candidate считаются exact duplicate только когда после
-    нормализации совпадают одновременно comment и evidence.
+    Сначала объединяются exact duplicates, когда совпадают comment,
+    evidence и исходные области. Без областей текст не доказывает
+    принадлежность одному физическому объекту.
 
-    Один comment с различным evidence остаётся двумя findings.
-    Candidates с пустым comment/evidence также не объединяются.
+    Дополнительно допускается conservative consolidation для повтора
+    одной и той же позиционной подписи с одинаковыми category и свойством.
+    Для иных перефразировок требуется явный object_ref, совпадение
+    object/issue/property/anchors и близость областей доказательства.
+
+    Разные anchors никогда не объединяются этим правилом.
+    Candidates без достаточной structural identity остаются distinct.
 
     Для каждой итоговой записи сохраняются 1-based индексы всех
     исходных candidates, поэтому consolidation остаётся auditable.
@@ -334,11 +837,24 @@ def select_violation_candidates(
     source_indexes_by_candidate: list[list[int]] = []
 
     candidate_position_by_identity: dict[
+        tuple[str, str, tuple[tuple[int, int, int, int], ...]], int
+    ] = {}
+
+    origins_by_candidate: list[list[dict[str, Any]]] = []
+
+    candidate_position_by_structural_identity: dict[
         tuple[
             str,
             str,
+            tuple[str, ...],
+            tuple[str, ...],
         ],
         int,
+    ] = {}
+
+    candidate_positions_by_object_identity: dict[
+        tuple[str, str, str, tuple[str, ...], tuple[str, ...], tuple[str, ...]],
+        list[int],
     ] = {}
 
     for raw_index, violation in enumerate(
@@ -362,48 +878,108 @@ def select_violation_candidates(
             candidate,
         )
 
-        if identity is None:
-            candidates.append(
+        structural_identity = (
+            _candidate_structural_identity(
                 candidate,
             )
+            if identity is not None
+            else None
+        )
 
-            source_indexes_by_candidate.append(
-                [
-                    raw_index,
-                ]
+        object_identity = (
+            _candidate_object_semantic_identity(candidate)
+            if identity is not None
+            else None
+        )
+
+        existing_position = (
+            candidate_position_by_identity.get(
+                identity,
             )
+            if identity is not None
+            else None
+        )
+
+        if existing_position is None and structural_identity is not None:
+            existing_position = candidate_position_by_structural_identity.get(
+                structural_identity,
+            )
+
+        if existing_position is None and object_identity is not None:
+            existing_position = next(
+                (
+                    position
+                    for position in candidate_positions_by_object_identity.get(
+                        object_identity, []
+                    )
+                    if _candidate_regions_are_near(candidate, candidates[position])
+                ),
+                None,
+            )
+
+        if existing_position is not None:
+            _merge_candidate_source_ids(
+                target=candidates[existing_position],
+                duplicate=candidate,
+            )
+            _merge_candidate_regions(
+                target=candidates[existing_position],
+                duplicate=candidate,
+            )
+
+            source_indexes_by_candidate[existing_position].append(
+                raw_index,
+            )
+
+            origins_by_candidate[existing_position].append(
+                _origin_assertion(violation, raw_index)
+            )
+
+            if identity is not None:
+                candidate_position_by_identity[identity] = existing_position
+
+            if structural_identity is not None:
+                candidate_position_by_structural_identity[structural_identity] = (
+                    existing_position
+                )
+
+            if object_identity is not None:
+                positions = candidate_positions_by_object_identity.setdefault(
+                    object_identity, []
+                )
+                if existing_position not in positions:
+                    positions.append(existing_position)
 
             continue
 
-        existing_position = candidate_position_by_identity.get(
-            identity,
+        candidate_position = len(
+            candidates,
         )
 
-        if existing_position is None:
-            candidate_position_by_identity[identity] = len(
-                candidates,
-            )
-
-            candidates.append(
-                candidate,
-            )
-
-            source_indexes_by_candidate.append(
-                [
-                    raw_index,
-                ]
-            )
-
-            continue
-
-        _merge_candidate_source_ids(
-            target=candidates[existing_position],
-            duplicate=candidate,
+        candidates.append(
+            candidate,
         )
 
-        source_indexes_by_candidate[existing_position].append(
-            raw_index,
+        source_indexes_by_candidate.append(
+            [
+                raw_index,
+            ]
         )
+
+        origins_by_candidate.append([_origin_assertion(violation, raw_index)])
+
+        if identity is not None:
+            candidate_position_by_identity[identity] = candidate_position
+
+        if structural_identity is not None:
+            candidate_position_by_structural_identity[structural_identity] = (
+                candidate_position
+            )
+
+        if object_identity is not None:
+            candidate_positions_by_object_identity.setdefault(
+                object_identity, []
+            ).append(candidate_position)
 
     return ViolationCandidateSelection(
         candidates=tuple(
@@ -417,6 +993,9 @@ def select_violation_candidates(
         ),
         generated_count=len(
             violations,
+        ),
+        origin_assertions_by_candidate=tuple(
+            tuple(origins) for origins in origins_by_candidate
         ),
     )
 

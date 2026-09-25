@@ -1,10 +1,11 @@
 # services/analysis-service/src/pdrd_analysis_service/application/use_cases/finalization.py
 
-"""Use case финализации findings."""
+"""Финализация инженерных замечаний с проверкой доказательств N/T/U."""
 
 import json
+import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pdrd_analysis_service.application.json_schemas import (
@@ -39,10 +40,14 @@ _SPLITTABLE_FINALIZATION_ERROR_MARKERS = (
     "Модель не смогла сформировать корректный JSON",
 )
 
+logger = logging.getLogger(
+    "uvicorn.error",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class _BatchOutcome:
-    """Результат одного batch с возможным безопасным split."""
+    """Результат одного batch с возможным safe split."""
 
     findings: tuple[
         FinalFinding,
@@ -61,6 +66,14 @@ class _BatchOutcome:
     failed_vlm_call_count: int
 
     split_count: int
+
+    rejected_findings: tuple[
+        dict[
+            str,
+            object,
+        ],
+        ...,
+    ]
 
 
 def _dedupe_normative_sources(
@@ -371,9 +384,40 @@ def _can_split_finalization_error(
     return any(marker in message for marker in _SPLITTABLE_FINALIZATION_ERROR_MARKERS)
 
 
+def _is_protected_duplicate_review(finding: FindingDraft) -> bool:
+    """Пропускает через factual-review только подтверждённую текстом запись.
+
+    Обход VLM-финализатора касается факта повторения подписи, а не
+    квалификации нарушения. Исходный N/T/U-кандидат остаётся на обычном пути.
+    """
+    match = re.fullmatch(
+        r"p([1-9]\d*)-dpos-(\d+(?:-\d+){2,4})",
+        finding.finding_id,
+    )
+    if match is None or int(match.group(1)) != finding.page:
+        return False
+    if finding.status != "needs_review" or any(
+        (
+            finding.basis_sources,
+            finding.technical_assignment_basis_sources,
+            finding.user_package_basis_sources,
+        )
+    ):
+        return False
+    tag = match.group(2).replace("-", ".")
+    exact_tag = re.compile(r"(?<![\w.])" + re.escape(tag) + r"(?![\w]|\.\d)")
+    combined_text = " ".join((finding.comment, finding.evidence)).casefold()
+    return (
+        exact_tag.search(finding.comment) is not None
+        and exact_tag.search(finding.evidence) is not None
+        and "повтор" in combined_text
+        and "текст" in finding.evidence.casefold()
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class FinalizeFindings:
-    """Финализирует findings и non-destructive N enrichment."""
+    """Финализирует candidates, применяет conservative gate и N enrichment."""
 
     vision_model: StructuredVisionModel
 
@@ -417,7 +461,7 @@ class FinalizeFindings:
         ],
         dict[str, Any],
     ]:
-        """Оформляет findings, не позволяя enrichment их удалить или смешать."""
+        """Оформляет findings и удаляет только явно отклонённые candidates."""
         if self.batch_size < 1:
             raise ValueError(
                 "finalization batch_size должен быть положительным.",
@@ -435,6 +479,11 @@ class FinalizeFindings:
                     "initial_batch_count": 0,
                     "batch_execution_count": 0,
                     "fallback_count": 0,
+                    "deterministic_review_count": 0,
+                    "candidate_count": 0,
+                    "kept_count": 0,
+                    "rejected_count": 0,
+                    "rejected_findings": [],
                     "vlm_call_count": 0,
                     "successful_vlm_call_count": 0,
                     "failed_vlm_call_count": 0,
@@ -443,6 +492,11 @@ class FinalizeFindings:
                 },
             )
 
+        # Проверенная текстом запись остаётся осторожным фактическим
+        # замечанием; все прочие кандидаты проходят неизменный quality gate.
+        protected = tuple(
+            finding for finding in findings if _is_protected_duplicate_review(finding)
+        )
         eligible_experience = {
             finding_id: tuple(
                 source
@@ -468,6 +522,19 @@ class FinalizeFindings:
             legacy_candidates=normative_candidates,
         )
 
+        # Проверенные текстом повторы проходят модель только ради finding-local
+        # нормативного обоснования. Без найденных кандидатов их путь остаётся
+        # полностью детерминированным.
+        ordinary = tuple(
+            finding
+            for finding in findings
+            if finding.status != "hypothesis"
+            and (
+                not _is_protected_duplicate_review(finding)
+                or normalized_candidate_groups.get(finding.finding_id)
+            )
+        )
+
         legacy_candidates = (
             ()
             if isolated_enrichment
@@ -480,7 +547,7 @@ class FinalizeFindings:
 
         initial_batch_count = (
             len(
-                findings,
+                ordinary,
             )
             + effective_batch_size
             - 1
@@ -497,6 +564,13 @@ class FinalizeFindings:
 
         fallback_count = 0
 
+        rejected_findings: list[
+            dict[
+                str,
+                object,
+            ]
+        ] = []
+
         vlm_call_count = 0
         successful_vlm_call_count = 0
         failed_vlm_call_count = 0
@@ -506,11 +580,11 @@ class FinalizeFindings:
         for start in range(
             0,
             len(
-                findings,
+                ordinary,
             ),
             effective_batch_size,
         ):
-            batch = findings[start : start + effective_batch_size]
+            batch = ordinary[start : start + effective_batch_size]
 
             outcome = await self._finalize_batch(
                 batch=batch,
@@ -532,6 +606,10 @@ class FinalizeFindings:
 
             fallback_count += outcome.fallback_count
 
+            rejected_findings.extend(
+                outcome.rejected_findings,
+            )
+
             vlm_call_count += outcome.vlm_call_count
 
             successful_vlm_call_count += outcome.successful_vlm_call_count
@@ -539,6 +617,23 @@ class FinalizeFindings:
             failed_vlm_call_count += outcome.failed_vlm_call_count
 
             split_count += outcome.split_count
+
+        # Стабильный порядок исходных findings сохраняется независимо от того,
+        # на каком этапе конкретная фактическая запись была сформирована.
+        ordinary_by_id = {item.finding_id: item for item in final_items}
+        final_items = [
+            ordinary_by_id.get(finding.finding_id, self._fallback(finding))
+            for finding in findings
+            if _is_protected_duplicate_review(finding)
+            or finding.status == "hypothesis"
+            or finding.finding_id in ordinary_by_id
+        ]
+        if protected:
+            logger.info(
+                "finalization_deterministic_review kept=%s ids=%s",
+                len(protected),
+                tuple(item.finding_id for item in protected),
+            )
 
         if isolated_enrichment:
             normative_candidates_count = sum(
@@ -565,6 +660,41 @@ class FinalizeFindings:
                 )
             )
 
+        logger.info(
+            (
+                "finalization_candidate_gate "
+                "candidates=%s kept=%s rejected=%s "
+                "fallback=%s rejected=%s"
+            ),
+            len(
+                findings,
+            ),
+            len(
+                final_items,
+            ),
+            len(
+                rejected_findings,
+            ),
+            fallback_count,
+            tuple(
+                (
+                    str(
+                        item.get(
+                            "finding_id",
+                            "",
+                        )
+                    ),
+                    str(
+                        item.get(
+                            "reason",
+                            "",
+                        )
+                    )[:180],
+                )
+                for item in rejected_findings
+            ),
+        )
+
         return (
             "Замечания сформированы по результатам инженерной проверки.",
             tuple(
@@ -582,6 +712,17 @@ class FinalizeFindings:
                     batch_metrics,
                 ),
                 "fallback_count": fallback_count,
+                "deterministic_review_count": len(protected),
+                "candidate_count": len(
+                    findings,
+                ),
+                "kept_count": len(
+                    final_items,
+                ),
+                "rejected_count": len(
+                    rejected_findings,
+                ),
+                "rejected_findings": rejected_findings,
                 "experience_min_score": (self.experience_min_score),
                 "isolated_normative_enrichment": (isolated_enrichment),
                 "normative_candidates_count": (normative_candidates_count),
@@ -691,7 +832,14 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
   recommendation описывает действие;
 
 - если подходящего N нет,
-  finding всё равно обязательно возвращается.
+  candidate всё равно обязательно возвращается
+  как JSON item;
+
+- отсутствие N само по себе НЕ является
+  причиной decision=reject;
+
+- decision=reject допустим только по правилам
+  candidate quality gate из основного prompt.
 """.rstrip()
 
             generation = await self.vision_model.generate_json(
@@ -777,6 +925,10 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                         1 + left.failed_vlm_call_count + right.failed_vlm_call_count
                     ),
                     split_count=(1 + left.split_count + right.split_count),
+                    rejected_findings=(
+                        *left.rejected_findings,
+                        *right.rejected_findings,
+                    ),
                 )
 
             fallback_findings = tuple(
@@ -814,6 +966,7 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                 successful_vlm_call_count=0,
                 failed_vlm_call_count=1,
                 split_count=0,
+                rejected_findings=(),
             )
 
         returned = {
@@ -837,6 +990,13 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
 
         batch_fallback_count = 0
 
+        batch_rejected_findings: list[
+            dict[
+                str,
+                object,
+            ]
+        ] = []
+
         for finding in batch:
             item = returned.get(
                 finding.finding_id,
@@ -853,25 +1013,56 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
 
                 continue
 
-            final_items.append(
-                self._build_final(
-                    finding=finding,
-                    item=item,
-                    available_experience=(
-                        eligible_experience.get(
-                            finding.finding_id,
-                            (),
-                        )
-                    ),
-                    normative_candidates=(
-                        candidate_groups.get(
-                            finding.finding_id,
-                            (),
-                        )
-                    ),
-                    guard_normative_free_text=(isolated_enrichment),
+            decision = (
+                str(
+                    item.get(
+                        "decision",
+                        "keep",
+                    )
                 )
+                .strip()
+                .casefold()
             )
+
+            rejection_reason = str(
+                item.get(
+                    "rejection_reason",
+                    "",
+                )
+            ).strip()
+
+            if _is_protected_duplicate_review(finding) and decision != "keep":
+                final_items.append(self._fallback(finding))
+                batch_fallback_count += 1
+                continue
+
+            if decision == "reject" and rejection_reason:
+                batch_rejected_findings.append(
+                    {
+                        "finding_id": finding.finding_id,
+                        "page": finding.page,
+                        "reason": rejection_reason,
+                    }
+                )
+
+                continue
+
+            finalized = self._build_final(
+                finding=finding,
+                item=item,
+                available_experience=(eligible_experience.get(finding.finding_id, ())),
+                normative_candidates=(candidate_groups.get(finding.finding_id, ())),
+                guard_normative_free_text=isolated_enrichment,
+            )
+            if _is_protected_duplicate_review(finding):
+                finalized = replace(
+                    finalized,
+                    category=finding.category,
+                    status=finding.status,
+                    comment=finding.comment,
+                    recommendation=_fallback_recommendation(finding),
+                )
+            final_items.append(finalized)
 
         return _BatchOutcome(
             findings=tuple(
@@ -889,6 +1080,15 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                     "outcome": "success",
                     "fallback": (batch_fallback_count > 0),
                     "fallback_count": (batch_fallback_count),
+                    "rejected_count": len(
+                        batch_rejected_findings,
+                    ),
+                    "rejected_finding_ids": [
+                        str(
+                            item["finding_id"],
+                        )
+                        for item in batch_rejected_findings
+                    ],
                     **generation.metrics.as_dict(),
                 },
             ),
@@ -897,6 +1097,9 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
             successful_vlm_call_count=1,
             failed_vlm_call_count=0,
             split_count=0,
+            rejected_findings=tuple(
+                batch_rejected_findings,
+            ),
         )
 
     @staticmethod
@@ -926,6 +1129,8 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                 finding.technical_assignment_basis_sources
             ),
             user_package_basis_sources=(finding.user_package_basis_sources),
+            origin_assertions=finding.origin_assertions,
+            object_ref=finding.object_ref,
         )
 
     @staticmethod
@@ -961,7 +1166,7 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
 
         available_normative = _available_normative_sources(
             finding=finding,
-            normative_candidates=normative_candidates,
+            normative_candidates=(normative_candidates),
         )
 
         if "normative_source_ids" in item:
@@ -1065,4 +1270,6 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                 finding.technical_assignment_basis_sources
             ),
             user_package_basis_sources=(finding.user_package_basis_sources),
+            origin_assertions=finding.origin_assertions,
+            object_ref=finding.object_ref,
         )

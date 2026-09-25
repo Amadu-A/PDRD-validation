@@ -7,6 +7,7 @@ from typing import Literal
 
 from pdrd_analysis_service.domain.analysis import (
     FindingSeverity,
+    FindingVisualRegion,
 )
 
 TechnicalAssignmentRequirementStrength = Literal[
@@ -68,3 +69,8 @@ class TechnicalAssignmentDecision:
     recommendation_draft: str
 
     confidence: float
+
+    visual_regions: tuple[
+        FindingVisualRegion,
+        ...,
+    ] = ()

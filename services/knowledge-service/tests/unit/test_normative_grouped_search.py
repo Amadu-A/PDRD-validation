@@ -4,9 +4,13 @@
 
 from typing import Any
 
+import pytest
 from pdrd_knowledge_service.application.use_cases.normative import (
     NORMATIVE_QUERY_INSTRUCTION,
     SearchNormative,
+)
+from pdrd_knowledge_service.domain.normative_catalog import (
+    CatalogArea,
 )
 from pdrd_knowledge_service.domain.search import (
     NormativeSearchResult,
@@ -247,10 +251,71 @@ class RecordingVectorStore:
         return collection == "normative-test"
 
 
+class ThresholdVectorStore(RecordingVectorStore):
+    """Fake Qdrant с points по обе стороны retrieval threshold."""
+
+    async def search(
+        self,
+        *,
+        collection: str,
+        vector: list[float],
+        limit: int,
+    ) -> list[VectorPoint]:
+        """Возвращает high, boundary и low score points."""
+        assert collection == "normative-test"
+        assert limit == 4
+
+        self.search_vectors.append(
+            tuple(
+                vector,
+            )
+        )
+
+        return [
+            VectorPoint(
+                point_id="high",
+                score=0.51,
+                payload={
+                    "document_id": "document-high",
+                    "section_id": "section",
+                    "source_file": "high.pdf",
+                    "page": 1,
+                    "chunk_index": 1,
+                    "text": "Прямо применимое требование.",
+                },
+            ),
+            VectorPoint(
+                point_id="boundary",
+                score=0.48,
+                payload={
+                    "document_id": "document-boundary",
+                    "section_id": "section",
+                    "source_file": "boundary.pdf",
+                    "page": 2,
+                    "chunk_index": 2,
+                    "text": "Требование на границе порога.",
+                },
+            ),
+            VectorPoint(
+                point_id="low",
+                score=0.4799,
+                payload={
+                    "document_id": "document-low",
+                    "section_id": "section",
+                    "source_file": "low.pdf",
+                    "page": 3,
+                    "chunk_index": 3,
+                    "text": "Слабое тематическое совпадение.",
+                },
+            ),
+        ]
+
+
 def _use_case(
     *,
     embedding: RecordingEmbeddingProvider,
     vector_store: RecordingVectorStore,
+    min_score: float = 0.0,
 ) -> SearchNormative:
     """Создаёт grouped SearchNormative fixture."""
     return SearchNormative(
@@ -260,6 +325,7 @@ def _use_case(
         embedding_model="test-embedding",
         top_k=4,
         max_sources=12,
+        min_score=min_score,
     )
 
 
@@ -406,6 +472,98 @@ async def test_grouped_use_case_never_merges_source_groups() -> None:
     assert {source.point_id for source in results[1].sources} == {
         "point-2",
     }
+
+
+async def test_normative_min_score_filters_primary_search() -> None:
+    """Primary N retrieval отбрасывает points ниже configured threshold."""
+    embedding = RecordingEmbeddingProvider()
+
+    vector_store = ThresholdVectorStore()
+
+    result = await _use_case(
+        embedding=embedding,
+        vector_store=vector_store,
+        min_score=0.48,
+    ).execute(
+        [
+            "первичный поиск нормативного требования",
+        ]
+    )
+
+    assert tuple(source.point_id for source in result.sources) == (
+        "high",
+        "boundary",
+    )
+
+
+async def test_normative_min_score_filters_grouped_search() -> None:
+    """Grouped N enrichment использует тот же threshold."""
+    embedding = RecordingEmbeddingProvider()
+
+    vector_store = ThresholdVectorStore()
+
+    results = await _use_case(
+        embedding=embedding,
+        vector_store=vector_store,
+        min_score=0.48,
+    ).execute_grouped(
+        [
+            "проверить нормативное основание",
+        ]
+    )
+
+    assert (
+        len(
+            results,
+        )
+        == 1
+    )
+
+    assert tuple(source.point_id for source in results[0].sources) == (
+        "high",
+        "boundary",
+    )
+
+
+async def test_normative_min_score_does_not_filter_user_package_area() -> None:
+    """N threshold не затрагивает U retrieval через managed SearchNormative."""
+    embedding = RecordingEmbeddingProvider()
+
+    vector_store = ThresholdVectorStore()
+
+    result = await _use_case(
+        embedding=embedding,
+        vector_store=vector_store,
+        min_score=0.48,
+    ).execute(
+        [
+            "поиск требования пользовательского пакета",
+        ],
+        expected_area=CatalogArea.USER_PACKAGE,
+    )
+
+    assert tuple(source.point_id for source in result.sources) == (
+        "high",
+        "boundary",
+        "low",
+    )
+
+
+def test_normative_min_score_must_be_bounded() -> None:
+    """Некорректный N threshold отклоняется при сборке use case."""
+    embedding = RecordingEmbeddingProvider()
+
+    vector_store = RecordingVectorStore()
+
+    with pytest.raises(
+        ValueError,
+        match="min_score",
+    ):
+        _use_case(
+            embedding=embedding,
+            vector_store=vector_store,
+            min_score=1.01,
+        )
 
 
 async def test_fifty_grouped_queries_use_one_embedding_batch() -> None:

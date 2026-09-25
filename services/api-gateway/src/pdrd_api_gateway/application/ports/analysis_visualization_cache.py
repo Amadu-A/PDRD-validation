@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/application/ports/analysis_visualization_cache.py
 
-"""Port хранения производных visualization/export artifacts."""
+"""Контракты хранения производных материалов визуализации и экспорта."""
 
 from dataclasses import dataclass
 from typing import Protocol
@@ -14,12 +14,12 @@ from pdrd_api_gateway.application.ports.analysis_visualization import (
 class AnalysisVisualizationCacheError(
     RuntimeError,
 ):
-    """Ошибка derivative visualization cache."""
+    """Ошибка чтения или записи кэша визуализации."""
 
 
 @dataclass(frozen=True, slots=True)
 class AnalysisVisualizationLocationPage:
-    """Закэшированные locations одной physical PDF page."""
+    """Координаты одной физической страницы и подпись входных замечаний."""
 
     page_number: int
 
@@ -27,6 +27,8 @@ class AnalysisVisualizationLocationPage:
         AnalysisFindingLocation,
         ...,
     ]
+
+    source_signature: str | None = None
 
 
 class AnalysisVisualizationCache(

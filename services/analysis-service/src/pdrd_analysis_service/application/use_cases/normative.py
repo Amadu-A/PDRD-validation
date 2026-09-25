@@ -1,6 +1,6 @@
 # services/analysis-service/src/pdrd_analysis_service/application/use_cases/normative.py
 
-"""Use cases retrieval preparation и инженерной проверки листа."""
+"""Подготовка источников и инженерная проверка физической страницы проекта."""
 
 import logging
 from dataclasses import dataclass
@@ -26,6 +26,13 @@ from pdrd_analysis_service.application.use_cases.common import (
     severity,
     string_tuple,
 )
+from pdrd_analysis_service.application.use_cases.duplicate_positions import (
+    duplicate_position_id,
+    recover_duplicate_positions,
+)
+from pdrd_analysis_service.application.use_cases.finding_visual_regions import (
+    parse_finding_visual_regions,
+)
 from pdrd_analysis_service.domain.analysis import (
     FindingDraft,
     GenerationMetrics,
@@ -40,22 +47,9 @@ logger = logging.getLogger(
     "uvicorn.error",
 )
 
-# Первый вызов VLM intentionally небольшой.
-#
-# Для типичного листа это не даёт модели заполнить все 50 slots
-# одним повторяющимся finding и потратить на это весь output budget.
 _NORMATIVE_PROBE_BATCH_SIZE = 10
-
-# Десяти компактным findings достаточно существенно меньшего output
-# budget, чем прежние 14k tokens.
 _NORMATIVE_PROBE_NUM_PREDICT = 4000
-
-# Если модель зацикливается на похожих candidates, разрешаем несколько
-# continuation probes с явным exclusion уже найденных findings.
 _NORMATIVE_MAX_PROBE_ROUNDS = 3
-
-# Если probe заполнен в основном действительно distinct findings,
-# лист считаем dense и разрешаем один большой continuation до MAX_ISSUES.
 _NORMATIVE_DENSE_UNIQUE_RATIO = 0.70
 
 _HIGH_RECALL_FINDING_POLICY = """
@@ -137,6 +131,199 @@ Semantic filtering после VLM не используется.
 - не повторяй один и тот же нормативный текст одновременно
   в comment и evidence;
 - source IDs перечисляй только в соответствующих массивах.
+
+BUSINESS CHECK MATRIX.
+
+Для каждого листа применяй только реально относящиеся
+к его дисциплине, типу и содержимому проверки:
+
+1. НОРМОКОНТРОЛЬ И ОФОРМЛЕНИЕ:
+   - внутренняя согласованность основной надписи,
+     номеров листов, обозначений, шифров и марок;
+   - состав и заполнение спецификаций;
+   - внешние требования ГОСТ/СП применяй только
+     при наличии прямого N-source.
+
+2. ОБОРУДОВАНИЕ И УСЛОВИЯ СРЕДЫ:
+   - IP, климатическое исполнение, температура,
+     огнестойкость и свойства кабелей проверяй только,
+     если условия и требуемая характеристика видимы
+     на листе либо подтверждены N/T/U source;
+   - не подставляй паспортные данные производителя
+     или условия эксплуатации из памяти модели.
+
+3. ЛОГИКА РАБОТЫ И СХЕМЫ:
+   - АК: прослеживай цепочку
+     датчик -> вход -> контроллер/алгоритм ->
+     выход -> исполнительный механизм ->
+     обратная связь и блокировки;
+   - ЭОМ: проверяй согласованность
+     источник -> защита -> кабель -> нагрузка,
+     фазность и номиналы; селективность
+     и падение напряжения оценивай только
+     при достаточных исходных данных;
+   - ПС/СКУД: прослеживай пожарный сигнал,
+     управляющую команду, разблокировку,
+     fail-safe и путь эвакуации;
+   - СКС и другие слаботочные схемы:
+     проверяй топологию, связь узлов,
+     маркировку и внутреннюю согласованность;
+   - не создавай finding только потому,
+     что часть цепочки находится на другом листе,
+     если текущий лист этого не опровергает.
+
+4. ОПТИМИЗАЦИЯ И ДОСТУПНОСТЬ:
+   - унификацию, замены брендов и доступность
+     оценивай только при наличии T/U или другого
+     явного проектного контекста;
+   - не используй знания о рынке и брендах
+     из памяти модели как доказательство.
+
+5. СООТВЕТСТВИЕ ТЗ:
+   - T-source является отдельным проектным требованием;
+   - не смешивай T с нормативным N;
+   - independent T-first остаётся основным exhaustive
+     механизмом проверки требований ТЗ.
+
+6. ТЕКСТОВЫЕ КОММЕНТАРИИ И ПОЯСНЕНИЯ:
+   - проверяй внутреннюю достаточность описания
+     алгоритмов, монтажа и смежных требований,
+     только когда обязательность можно вывести
+     из самого листа либо N/T/U context;
+   - отсутствие внешней информации само по себе
+     не является нарушением.
+
+SEMANTIC EVIDENCE DISCIPLINE.
+
+Визуальная форма, ориентация, заливка или стиль символа
+сами по себе НЕ доказывают скрытую инженерную классификацию,
+если её смысл не задан явно на текущем листе, в легенде
+либо переданным N/T/U source.
+
+Не выводи только по внешнему виду условного обозначения,
+что объект является:
+- наземным или подземным;
+- рабочим или резервным;
+- открытым или закрытым;
+- конкретным типом, исполнением или состоянием оборудования.
+
+Если такое значение прямо подписано, определено легендой
+или подтверждено N/T/U source, используй его как evidence.
+
+Если у одного символа остаются несколько правдоподобных
+трактовок, не создавай finding, противоречие которого
+возникает только после выбора одной из этих трактовок.
+
+Для сравнительного finding отдельно проверь,
+что сравниваются один и тот же объект/класс объектов,
+одно и то же свойство и один и тот же смысловой scope.
+
+TRANSPORT / PROJECT PAGE NUMBERING.
+
+page_number, physical PDF page, физический индекс страницы
+и аналогичные backend metadata НЕ являются автоматически
+значением проектного поля "Лист" или "Листов".
+
+Не создавай finding только потому,
+что физический номер PDF-страницы отличается
+от значения "Лист" в основной надписи.
+
+Backend page_number используется для маршрутизации
+и локализации результата, а не как инженерное evidence.
+
+Два ВИДИМЫХ проектных номера допустимо сравнивать
+только если сам документ явно показывает,
+что они принадлежат одной системе проектной нумерации
+и описывают одно и то же свойство.
+
+QUANTITY / CHARACTERISTIC RELATIONSHIP.
+
+Различное количество РАЗНЫХ типов оборудования
+само по себе НЕ является противоречием.
+
+Перед finding вида
+"количество X не совпадает с количеством Y"
+обязательно установи по самому листу или N/T/U,
+что между X и Y существует конкретная обязательная связь:
+например one-to-one, один комплект на объект,
+заданная кратность или явно указанное равенство количества.
+
+Без такой связи НЕ создавай finding только потому, что:
+- насосов 3, а виброкомпенсаторов 4;
+- насосов 3, а кранов 12;
+- котлов 5, а арматуры другого типа 4;
+- количества разных строк спецификации различаются.
+
+То же относится к характеристикам разных объектов.
+
+Разные значения IP, напряжения, диаметра, мощности,
+давления, температуры и других параметров
+НЕ являются противоречием сами по себе,
+если не доказано, что это характеристика
+ОДНОГО И ТОГО ЖЕ объекта или одно обязательное требование.
+
+Если один и тот же tagged object действительно имеет
+разные значения одного свойства в двух местах документа,
+это допустимое основание для finding.
+
+VISUAL EVIDENCE REGIONS.
+
+Для каждого candidate укажи object_ref: точное обозначение физического
+объекта или узла на листе (например «Узел Д2»), только если принадлежность
+непосредственно видна. Если она неизвестна, верни пустую строку.
+Общая близость на плотной схеме не доказывает общий object_ref.
+
+Одновременно с каждым candidate сохрани место,
+ГДЕ ИМЕННО на текущем изображении ты увидел evidence.
+
+Поле visual_regions:
+- массив от 0 до 4 прямоугольных областей;
+- координаты нормализованы в диапазоне 0..1000;
+- x_min/y_min — левый верхний угол;
+- x_max/y_max — правый нижний угол;
+- bbox должен быть максимально тесным вокруг
+  конкретного текста, символа, узла, линии,
+  таблицы или другого evidence;
+- confidence относится именно к точности локализации;
+- label кратко называет то, что находится в bbox.
+
+Если finding сравнивает два или несколько
+ДЕЙСТВИТЕЛЬНО СОПОСТАВИМЫХ мест одного листа,
+верни отдельную visual_region
+для КАЖДОГО сравниваемого места.
+
+Например если один и тот же tagged object
+имеет два явно различающихся значения
+одной характеристики в двух таблицах,
+верни region для каждого из этих значений.
+
+НЕ локализуй finding по всем словам,
+которые случайно встречаются в evidence.
+
+Visual region должна указывать именно
+на объект или участок, из-за которого создан finding.
+
+Для графической ошибки допустим bbox линии,
+узла или соединения даже без текста.
+
+visual_regions=[] допустим только когда:
+- finding относится к отсутствующему элементу
+  и невозможно честно указать локальную область,
+  где он должен находиться;
+- evidence относится ко всему листу;
+- точное место действительно нельзя определить
+  по текущему изображению.
+
+Не выдумывай координаты ради заполнения массива.
+
+В PDF + CAD combined mode visual_regions
+должны описывать evidence на ЛЕВОМ PDF-представлении
+и использовать координатное пространство самого
+PDF-представления 0..1000.
+
+Если evidence существует только на CAD-render справа
+и не имеет честной PDF-области,
+верни visual_regions=[].
 
 Ответственность за то, что в массив попадают именно
 реальные distinct candidate findings, остаётся на этом этапе.
@@ -300,9 +487,9 @@ class BuildNormativeQueries:
                 "Подобрать применимые нормативные требования: " + extracted_text[:1800]
             )
 
-        result: list[str] = []
+        result: list[str,] = []
 
-        seen: set[str] = set()
+        seen: set[str,] = set()
 
         for query in queries:
             normalized = query.strip()
@@ -385,9 +572,7 @@ class CheckPageAgainstNorms:
 
             if mode == "bulk":
                 current_capacity = remaining_capacity
-
                 current_num_predict = self.num_predict
-
                 stage_suffix = "bulk"
 
             else:
@@ -421,12 +606,12 @@ class CheckPageAgainstNorms:
             generation = await self.vision_model.generate_json(
                 prompt=batch_prompt,
                 schema=build_normative_check_schema(
-                    source_ids=(normative_source_ids),
+                    source_ids=normative_source_ids,
                     technical_assignment_source_ids=(technical_assignment_source_ids),
                     user_package_source_ids=(user_package_source_ids),
                     max_issues=current_capacity,
                 ),
-                num_predict=(current_num_predict),
+                num_predict=current_num_predict,
                 seed=200 + call_index,
                 stage=(f"normative_check:{page_number}:{stage_suffix}"),
                 image_bytes=image_bytes,
@@ -480,7 +665,7 @@ class CheckPageAgainstNorms:
 
             generated = round_selection.generated_count
 
-            unique_ratio = (new_unique / generated) if generated > 0 else 0.0
+            unique_ratio = new_unique / generated if generated > 0 else 0.0
 
             duplicate_ratio = 1.0 - unique_ratio if generated > 0 else 0.0
 
@@ -505,7 +690,7 @@ class CheckPageAgainstNorms:
                 generated,
                 round_selection.consolidated_count,
                 new_unique,
-                (candidate_selection.consolidated_count),
+                candidate_selection.consolidated_count,
                 unique_ratio,
                 duplicate_ratio,
             )
@@ -518,7 +703,7 @@ class CheckPageAgainstNorms:
                         "unique=%s raw=%s"
                     ),
                     page_number,
-                    (candidate_selection.consolidated_count),
+                    candidate_selection.consolidated_count,
                     len(
                         raw_candidates,
                     ),
@@ -537,7 +722,7 @@ class CheckPageAgainstNorms:
                     page_number,
                     generated,
                     current_capacity,
-                    (candidate_selection.consolidated_count),
+                    candidate_selection.consolidated_count,
                     len(
                         raw_candidates,
                     ),
@@ -553,7 +738,7 @@ class CheckPageAgainstNorms:
                         "unique=%s raw=%s"
                     ),
                     page_number,
-                    (candidate_selection.consolidated_count),
+                    candidate_selection.consolidated_count,
                     len(
                         raw_candidates,
                     ),
@@ -569,7 +754,7 @@ class CheckPageAgainstNorms:
                         "unique=%s raw=%s"
                     ),
                     page_number,
-                    (candidate_selection.consolidated_count),
+                    candidate_selection.consolidated_count,
                     len(
                         raw_candidates,
                     ),
@@ -589,7 +774,7 @@ class CheckPageAgainstNorms:
                     ),
                     page_number,
                     unique_ratio,
-                    (candidate_selection.consolidated_count),
+                    candidate_selection.consolidated_count,
                 )
 
                 continue
@@ -604,7 +789,7 @@ class CheckPageAgainstNorms:
                     ),
                     page_number,
                     probe_round,
-                    (candidate_selection.consolidated_count),
+                    candidate_selection.consolidated_count,
                     len(
                         raw_candidates,
                     ),
@@ -631,7 +816,7 @@ class CheckPageAgainstNorms:
             ...,
         ],
         image_bytes: bytes,
-        normative_system_prompt: (str | None) = None,
+        normative_system_prompt: str | None = None,
         technical_assignment_sources: tuple[
             TechnicalAssignmentSource,
             ...,
@@ -671,10 +856,10 @@ class CheckPageAgainstNorms:
             page_number=page_number,
             extracted_text=extracted_text,
             page_facts=page_facts,
-            normative_sources=(normative_sources),
+            normative_sources=normative_sources,
             technical_assignment_sources=(technical_assignment_sources),
-            conflict_candidates=(conflict_candidates),
-            user_package_sources=(user_package_sources),
+            conflict_candidates=conflict_candidates,
+            user_package_sources=user_package_sources,
             normative_text_limit=(self.normative_text_limit),
             normative_system_prompt=(normative_system_prompt),
         )
@@ -686,10 +871,28 @@ class CheckPageAgainstNorms:
         ) = await self._discover_candidates(
             page_number=page_number,
             prompt=prompt,
-            normative_source_ids=(normative_source_ids),
+            normative_source_ids=normative_source_ids,
             technical_assignment_source_ids=(technical_assignment_source_ids),
             user_package_source_ids=(user_package_source_ids),
             image_bytes=image_bytes,
+        )
+
+        # Восстановление факта повторения маркировки не зависит от того,
+        # заметила ли модель обозначение в конкретном VLM batch.
+        # Проверяются только отдельные строки исходного текста PDF-страницы.
+        recovered = recover_duplicate_positions(
+            selection=candidate_selection,
+            extracted_text=extracted_text,
+            page_type=page_facts.page_type,
+            page_number=page_number,
+        )
+        candidate_selection = recovered.selection
+        logger.info(
+            "normative_duplicate_recovery page=%s tags=%s synthetic=%s normalized=%s",
+            page_number,
+            recovered.tags,
+            recovered.synthetic_count,
+            recovered.normalized_count,
         )
 
         source_by_id = {source.source_id: source for source in normative_sources}
@@ -726,19 +929,33 @@ class CheckPageAgainstNorms:
             provenance_lossless,
         )
 
-        findings: list[FindingDraft] = []
+        findings: list[FindingDraft,] = []
+
+        origin_groups = candidate_selection.origin_assertions_by_candidate or tuple(
+            () for _ in candidate_selection.candidates
+        )
 
         for (
             violation,
             source_indexes,
+            origin_assertions,
         ) in zip(
             candidate_selection.candidates,
-            (candidate_selection.source_indexes_by_candidate),
+            candidate_selection.source_indexes_by_candidate,
+            origin_groups,
             strict=True,
         ):
             representative_index = source_indexes[0]
 
             finding_id = f"p{page_number}-f{representative_index}"
+            is_hypothesis = bool(violation.get("__hypothesis_reason"))
+            if is_hypothesis:
+                finding_id = f"p{page_number}-h{representative_index}"
+            repeated_tag = violation.get("__duplicate_position_tag")
+            if isinstance(repeated_tag, str) and repeated_tag in recovered.tags:
+                # Стабильная идентичность проверенного факта не зависит от
+                # случайного порядка выдачи кандидатных замечаний моделью.
+                finding_id = duplicate_position_id(page_number, repeated_tag)
 
             if (
                 len(
@@ -793,14 +1010,21 @@ class CheckPageAgainstNorms:
             selected_technical_assignment_sources = tuple(
                 technical_assignment_by_id[source_id]
                 for source_id in requested_technical_assignment_ids
-                if (source_id in technical_assignment_by_id)
+                if source_id in technical_assignment_by_id
             )
 
             selected_user_package_sources = tuple(
                 user_package_by_id[source_id]
                 for source_id in requested_user_package_ids
-                if (source_id in user_package_by_id)
+                if source_id in user_package_by_id
             )
+
+            if is_hypothesis:
+                # Исходные запрошенные IDs остаются в origin_assertions, но
+                # тематический документ не подтверждает сам факт повтора.
+                selected_normative_sources = ()
+                selected_technical_assignment_sources = ()
+                selected_user_package_sources = ()
 
             detached_normative_ids = tuple(
                 source_id
@@ -811,13 +1035,13 @@ class CheckPageAgainstNorms:
             detached_technical_assignment_ids = tuple(
                 source_id
                 for source_id in requested_technical_assignment_ids
-                if (source_id not in technical_assignment_by_id)
+                if source_id not in technical_assignment_by_id
             )
 
             detached_user_package_ids = tuple(
                 source_id
                 for source_id in requested_user_package_ids
-                if (source_id not in user_package_by_id)
+                if source_id not in user_package_by_id
             )
 
             if (
@@ -839,13 +1063,13 @@ class CheckPageAgainstNorms:
                     finding_id,
                     source_indexes,
                     detached_normative_ids,
-                    (detached_technical_assignment_ids),
+                    detached_technical_assignment_ids,
                     detached_user_package_ids,
                 )
 
             selected_any_source = bool(
                 selected_normative_sources
-                or (selected_technical_assignment_sources)
+                or selected_technical_assignment_sources
                 or selected_user_package_sources
             )
 
@@ -901,11 +1125,14 @@ class CheckPageAgainstNorms:
             if not selected_any_source:
                 normalized_status = "needs_review"
 
+            if is_hypothesis:
+                normalized_status = "hypothesis"
+
             findings.append(
                 FindingDraft(
                     finding_id=finding_id,
                     page=page_number,
-                    page_type=(page_facts.page_type),
+                    page_type=page_facts.page_type,
                     category=finding_category,
                     severity=severity(
                         violation.get(
@@ -930,17 +1157,15 @@ class CheckPageAgainstNorms:
                     basis_sources=(selected_normative_sources),
                     experience_query=(
                         build_experience_query(
-                            category=(finding_category),
+                            category=finding_category,
                             comment=comment,
                             evidence=evidence,
                             recommendation_draft=(recommendation_draft),
                         )
                     ),
-                    technical_assignment_source_ids=(
-                        tuple(
-                            source.source_id
-                            for source in (selected_technical_assignment_sources)
-                        )
+                    technical_assignment_source_ids=tuple(
+                        source.source_id
+                        for source in selected_technical_assignment_sources
                     ),
                     technical_assignment_basis_sources=(
                         selected_technical_assignment_sources
@@ -949,6 +1174,15 @@ class CheckPageAgainstNorms:
                         source.source_id for source in selected_user_package_sources
                     ),
                     user_package_basis_sources=(selected_user_package_sources),
+                    visual_regions=(
+                        parse_finding_visual_regions(
+                            violation.get(
+                                "visual_regions",
+                            )
+                        )
+                    ),
+                    origin_assertions=origin_assertions,
+                    object_ref=str(violation.get("object_ref", "")).strip()[:80],
                 )
             )
 

@@ -321,6 +321,7 @@ def build_container() -> ApplicationContainer:
         embedding_model=(settings.embedding_model),
         top_k=(settings.search.normative_top_k),
         max_sources=(settings.search.normative_max_sources),
+        min_score=(settings.search.normative_min_score),
         unit_of_work_factory=(normative_catalog_uow_factory),
     )
 

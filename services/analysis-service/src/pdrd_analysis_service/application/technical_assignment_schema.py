@@ -6,6 +6,7 @@ from typing import Any
 
 from pdrd_analysis_service.application.json_schemas import (
     FINDING_SEVERITIES,
+    build_finding_visual_regions_schema,
 )
 
 TECHNICAL_ASSIGNMENT_DECISION_STATUSES = (
@@ -91,6 +92,7 @@ def build_technical_assignment_check_schema(
                 "type": "string",
                 "maxLength": 420,
             },
+            "visual_regions": (build_finding_visual_regions_schema()),
         },
         "required": [
             "requirement_id",
@@ -98,6 +100,7 @@ def build_technical_assignment_check_schema(
             "comment",
             "evidence",
             "recommendation_draft",
+            "visual_regions",
         ],
     }
 

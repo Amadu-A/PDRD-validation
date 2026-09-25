@@ -1,7 +1,8 @@
 # services/analysis-service/tests/unit/test_normative_enrichment.py
 
-"""Regression tests non-destructive normative enrichment TZ-5.2."""
+"""Regression tests conservative normative enrichment TZ-5.2."""
 
+from dataclasses import replace
 from typing import Any
 
 from pdrd_analysis_service.application.ports.vision_model import (
@@ -223,6 +224,8 @@ async def test_source_less_finding_can_gain_normative_basis() -> None:
                 "findings": [
                     {
                         "finding_id": "p1-f1",
+                        "decision": "keep",
+                        "rejection_reason": "",
                         "comment": (
                             "Обозначение одного элемента на листе не согласовано."
                         ),
@@ -269,6 +272,100 @@ async def test_source_less_finding_can_gain_normative_basis() -> None:
     assert result_metrics["normative_candidates_count"] == 1
 
 
+async def test_verified_duplicate_can_gain_direct_normative_basis() -> None:
+    """Проверенный факт повтора сохраняется при привязке подходящего N-source."""
+    original = replace(
+        engineering_finding(),
+        finding_id="p22-dpos-8-9-3",
+        page=22,
+        comment="Проверить повторное позиционное обозначение 8.9.3.",
+        evidence="В исходном тексте листа повторяется 8.9.3.",
+        recommendation_draft="Сопоставить обозначенные элементы.",
+    )
+    candidate = replace(
+        enrichment_source(),
+        text=(
+            "Позиционные обозначения элементов на одной схеме должны быть "
+            "однозначными; повторное обозначение разных элементов требует проверки."
+        ),
+    )
+    model = FakeVisionModel(
+        [
+            {
+                "summary": "done",
+                "findings": [
+                    {
+                        "finding_id": original.finding_id,
+                        "decision": "keep",
+                        "rejection_reason": "",
+                        "comment": "Изменённый моделью комментарий.",
+                        "recommendation": "Изменённая моделью рекомендация.",
+                        "experience_source_ids": [],
+                        "normative_source_ids": [candidate.source_id],
+                    }
+                ],
+            }
+        ]
+    )
+
+    _, finalized, result_metrics = await build_use_case(model).execute(
+        findings=(original,),
+        experience_by_finding={},
+        normative_candidates_by_finding={original.finding_id: (candidate,)},
+    )
+
+    assert len(model.prompts) == 1
+    assert len(finalized) == 1
+    assert finalized[0].basis_sources == (candidate,)
+    assert finalized[0].comment == original.comment
+    assert finalized[0].recommendation == original.recommendation_draft
+    assert finalized[0].status == original.status
+    assert result_metrics["deterministic_review_count"] == 1
+
+
+async def test_verified_duplicate_survives_normative_rejection() -> None:
+    """Отклонение N-enrichment не удаляет факт повторения с листа."""
+    original = replace(
+        engineering_finding(),
+        finding_id="p22-dpos-8-9-3",
+        page=22,
+        comment="Проверить повторное позиционное обозначение 8.9.3.",
+        evidence="В исходном тексте листа повторяется 8.9.3.",
+    )
+    candidate = enrichment_source()
+    model = FakeVisionModel(
+        [
+            {
+                "summary": "done",
+                "findings": [
+                    {
+                        "finding_id": original.finding_id,
+                        "decision": "reject",
+                        "rejection_reason": "Норма не подтверждает нарушение.",
+                        "comment": "",
+                        "recommendation": "",
+                        "experience_source_ids": [],
+                        "normative_source_ids": [],
+                    }
+                ],
+            }
+        ]
+    )
+
+    _, finalized, result_metrics = await build_use_case(model).execute(
+        findings=(original,),
+        experience_by_finding={},
+        normative_candidates_by_finding={original.finding_id: (candidate,)},
+    )
+
+    assert len(model.prompts) == 1
+    assert len(finalized) == 1
+    assert finalized[0].comment == original.comment
+    assert finalized[0].basis_sources == ()
+    assert finalized[0].status == "needs_review"
+    assert result_metrics["rejected_count"] == 0
+
+
 async def test_irrelevant_old_normative_can_be_detached_without_losing_finding() -> (
     None
 ):
@@ -280,6 +377,8 @@ async def test_irrelevant_old_normative_can_be_detached_without_losing_finding()
                 "findings": [
                     {
                         "finding_id": "p2-f1",
+                        "decision": "keep",
+                        "rejection_reason": "",
                         "comment": (
                             "Необходимо проверить полноту "
                             "данных о защитных проводниках."
@@ -332,6 +431,8 @@ async def test_no_normative_match_never_deletes_engineering_finding() -> None:
                 "findings": [
                     {
                         "finding_id": "p1-f1",
+                        "decision": "keep",
+                        "rejection_reason": "",
                         "comment": ("Обозначение X1/X2 требует проверки."),
                         "recommendation": ("Уточнить правильное обозначение."),
                         "experience_source_ids": [],
@@ -398,8 +499,8 @@ async def test_finalization_error_preserves_original_finding_and_basis() -> None
     assert result_metrics["fallback_count"] == 1
 
 
-def test_finalization_prompt_declares_non_destructive_enrichment() -> None:
-    """Prompt явно запрещает удалять finding из-за N retrieval."""
+def test_finalization_prompt_declares_conservative_enrichment_gate() -> None:
+    """Prompt разрешает reject шума, но не из-за отсутствия N."""
     prompt = build_finalization_prompt(
         findings=(engineering_finding(),),
         experience_by_finding={},
@@ -407,9 +508,13 @@ def test_finalization_prompt_declares_non_destructive_enrichment() -> None:
         normative_candidates=(enrichment_source(),),
     )
 
-    assert "НИКОГДА не удаляй finding" in prompt
+    assert "decision=keep или decision=reject" in prompt
 
-    assert "Finding всё равно обязательно возвращается." in prompt
+    assert "отсутствие N-source само по себе" in prompt
+
+    assert "НЕ является причиной reject" in prompt
+
+    assert "Для каждого candidate, независимо от decision" in prompt
 
     assert "NORMATIVE CANDIDATES" in prompt
 

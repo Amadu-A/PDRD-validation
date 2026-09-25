@@ -13,6 +13,7 @@ from pydantic import (
 from pdrd_analysis_service.domain.analysis import (
     ExperienceSource,
     FindingDraft,
+    FindingVisualRegion,
     NormativeSource,
     PageFacts,
     TechnicalAssignmentConflictCandidate,
@@ -65,7 +66,7 @@ class PageFactsPayload(BaseModel):
 
 
 class NormativeSourcePayload(BaseModel):
-    """Нормативный source от Knowledge Service."""
+    """HTTP representation managed normative source."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -109,7 +110,7 @@ class NormativeSourcePayload(BaseModel):
 
 
 class TechnicalAssignmentSourcePayload(BaseModel):
-    """T-source от Knowledge Service."""
+    """HTTP representation T-source."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -183,7 +184,7 @@ class TechnicalAssignmentConflictCandidatePayload(
 
 
 class UserPackageSourcePayload(BaseModel):
-    """User-package source от Knowledge Service."""
+    """HTTP representation user-package source."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -227,7 +228,7 @@ class UserPackageSourcePayload(BaseModel):
 
 
 class ExperienceSourcePayload(BaseModel):
-    """Experience source от Knowledge Service."""
+    """HTTP representation Experience source."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -270,6 +271,57 @@ class ExperienceSourcePayload(BaseModel):
         )
 
 
+class FindingVisualRegionPayload(BaseModel):
+    """HTTP representation visual evidence region finding."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    x_min: int = Field(
+        ge=0,
+        le=1000,
+    )
+
+    y_min: int = Field(
+        ge=0,
+        le=1000,
+    )
+
+    x_max: int = Field(
+        ge=0,
+        le=1000,
+    )
+
+    y_max: int = Field(
+        ge=0,
+        le=1000,
+    )
+
+    confidence: float = Field(
+        ge=0,
+        le=1,
+    )
+
+    label: str = Field(
+        default="",
+        max_length=120,
+    )
+
+    def to_domain(
+        self,
+    ) -> FindingVisualRegion:
+        """Преобразует visual region в Domain."""
+        return FindingVisualRegion(
+            x_min=self.x_min,
+            y_min=self.y_min,
+            x_max=self.x_max,
+            y_max=self.y_max,
+            confidence=self.confidence,
+            label=self.label,
+        )
+
+
 class FindingDraftPayload(BaseModel):
     """Finding между requirement-check и experience stages."""
 
@@ -294,25 +346,33 @@ class FindingDraftPayload(BaseModel):
 
     normative_source_ids: list[str]
     basis: str
-    basis_sources: list[NormativeSourcePayload]
+    basis_sources: list[NormativeSourcePayload,]
 
     experience_query: str
 
-    technical_assignment_source_ids: list[str] = Field(
+    technical_assignment_source_ids: list[str,] = Field(
         default_factory=list,
     )
 
-    technical_assignment_basis_sources: list[TechnicalAssignmentSourcePayload] = Field(
+    technical_assignment_basis_sources: list[TechnicalAssignmentSourcePayload,] = Field(
         default_factory=list,
     )
 
-    user_package_source_ids: list[str] = Field(
+    user_package_source_ids: list[str,] = Field(
         default_factory=list,
     )
 
-    user_package_basis_sources: list[UserPackageSourcePayload] = Field(
+    user_package_basis_sources: list[UserPackageSourcePayload,] = Field(
         default_factory=list,
     )
+
+    visual_regions: list[FindingVisualRegionPayload,] = Field(
+        default_factory=list,
+    )
+
+    origin_assertions: list[dict[str, Any]] = Field(default_factory=list)
+
+    object_ref: str = ""
 
     def to_domain(
         self,
@@ -334,7 +394,7 @@ class FindingDraftPayload(BaseModel):
             ),
             basis=self.basis,
             basis_sources=tuple(source.to_domain() for source in self.basis_sources),
-            experience_query=self.experience_query,
+            experience_query=(self.experience_query),
             technical_assignment_source_ids=tuple(
                 self.technical_assignment_source_ids,
             ),
@@ -347,6 +407,9 @@ class FindingDraftPayload(BaseModel):
             user_package_basis_sources=tuple(
                 source.to_domain() for source in self.user_package_basis_sources
             ),
+            visual_regions=tuple(region.to_domain() for region in self.visual_regions),
+            origin_assertions=tuple(self.origin_assertions),
+            object_ref=self.object_ref,
         )
 
 
@@ -417,17 +480,17 @@ class CheckNormsRequest(BaseModel):
 
     page_facts: PageFactsPayload
 
-    normative_sources: list[NormativeSourcePayload]
+    normative_sources: list[NormativeSourcePayload,]
 
-    technical_assignment_sources: list[TechnicalAssignmentSourcePayload] = Field(
+    technical_assignment_sources: list[TechnicalAssignmentSourcePayload,] = Field(
         default_factory=list,
     )
 
-    conflict_candidates: list[TechnicalAssignmentConflictCandidatePayload] = Field(
+    conflict_candidates: list[TechnicalAssignmentConflictCandidatePayload,] = Field(
         default_factory=list,
     )
 
-    user_package_sources: list[UserPackageSourcePayload] = Field(
+    user_package_sources: list[UserPackageSourcePayload,] = Field(
         default_factory=list,
     )
 
@@ -443,7 +506,7 @@ class CheckNormsResponse(BaseModel):
 
     summary: str
 
-    findings: list[FindingDraftPayload]
+    findings: list[FindingDraftPayload,]
 
     metrics: dict[
         str,
@@ -454,7 +517,7 @@ class CheckNormsResponse(BaseModel):
 class FindingLocalizationTargetPayload(
     BaseModel,
 ):
-    """Финальный finding для visual localization."""
+    """Финальный finding для legacy visual localization."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -480,7 +543,7 @@ class FindingLocalizationTargetPayload(
 
 
 class FindingLocalizationRequest(BaseModel):
-    """Запрос bbox-localization одного PDF-листа."""
+    """Запрос legacy bbox-localization одного PDF-листа."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -496,7 +559,7 @@ class FindingLocalizationRequest(BaseModel):
         min_length=1,
     )
 
-    findings: list[FindingLocalizationTargetPayload]
+    findings: list[FindingLocalizationTargetPayload,]
 
 
 class FindingBoundingBoxPayload(BaseModel):
@@ -524,7 +587,7 @@ class FindingBoundingBoxPayload(BaseModel):
 
 
 class FindingLocationPayload(BaseModel):
-    """HTTP representation finding location."""
+    """HTTP representation legacy finding location."""
 
     finding_id: str
 
@@ -539,9 +602,9 @@ class FindingLocationPayload(BaseModel):
 
 
 class FindingLocalizationResponse(BaseModel):
-    """Ответ visual localization."""
+    """Ответ legacy visual localization."""
 
-    locations: list[FindingLocationPayload]
+    locations: list[FindingLocationPayload,]
 
     metrics: dict[
         str,
@@ -556,22 +619,20 @@ class FinalizeRequest(BaseModel):
         extra="forbid",
     )
 
-    findings: list[FindingDraftPayload]
+    findings: list[FindingDraftPayload,]
 
     experience_by_finding: dict[
         str,
-        list[ExperienceSourcePayload],
+        list[ExperienceSourcePayload,],
     ]
 
-    # Legacy single-finding contract оставляем для безопасного
-    # завершения возможных старых in-flight execution.
-    normative_candidates: list[NormativeSourcePayload] = Field(
+    normative_candidates: list[NormativeSourcePayload,] = Field(
         default_factory=list,
     )
 
     normative_candidates_by_finding: dict[
         str,
-        list[NormativeSourcePayload],
+        list[NormativeSourcePayload,],
     ] = Field(
         default_factory=dict,
     )
@@ -597,17 +658,25 @@ class FinalFindingPayload(BaseModel):
 
     basis: str
 
-    basis_sources: list[NormativeSourcePayload]
+    basis_sources: list[NormativeSourcePayload,]
 
-    experience_sources: list[ExperienceSourcePayload]
+    experience_sources: list[ExperienceSourcePayload,]
 
-    technical_assignment_basis_sources: list[TechnicalAssignmentSourcePayload] = Field(
+    technical_assignment_basis_sources: list[TechnicalAssignmentSourcePayload,] = Field(
         default_factory=list,
     )
 
-    user_package_basis_sources: list[UserPackageSourcePayload] = Field(
+    user_package_basis_sources: list[UserPackageSourcePayload,] = Field(
         default_factory=list,
     )
+
+    visual_regions: list[FindingVisualRegionPayload,] = Field(
+        default_factory=list,
+    )
+
+    origin_assertions: list[dict[str, Any]] = Field(default_factory=list)
+
+    object_ref: str = ""
 
 
 class FinalizeResponse(BaseModel):
@@ -615,7 +684,7 @@ class FinalizeResponse(BaseModel):
 
     summary: str
 
-    findings: list[FinalFindingPayload]
+    findings: list[FinalFindingPayload,]
 
     metrics: dict[
         str,

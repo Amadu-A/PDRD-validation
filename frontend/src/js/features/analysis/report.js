@@ -841,6 +841,31 @@ function appendFinding(
     recommendation,
   );
 
+  const origins = Array.isArray(finding.origin_assertions)
+    ? finding.origin_assertions
+    : [];
+  if (origins.length) {
+    const details = createElement("details", "analysis-result__hypotheses");
+    details.append(createElement(
+      "summary",
+      "analysis-result__hypotheses-summary",
+      `Исходные утверждения VLM (${origins.length})`,
+    ));
+    origins.forEach((origin, originIndex) => {
+      const item = createElement("div", "analysis-result__hypothesis");
+      item.append(createElement("strong", "", `${originIndex + 1}. ${origin.comment ?? ""}`));
+      appendTextBlock(item, "Основание", origin.evidence);
+      appendTextBlock(item, "N/T/U ID", [
+        ...(origin.normative_source_ids ?? []),
+        ...(origin.technical_assignment_source_ids ?? []),
+        ...(origin.user_package_source_ids ?? []),
+      ].join(", "));
+      appendTextBlock(item, "Области VLM", JSON.stringify(origin.visual_regions ?? []));
+      details.append(item);
+    });
+    article.append(details);
+  }
+
   if (
     finding.confidence !== null
     && finding.confidence !== undefined
@@ -1132,7 +1157,14 @@ function appendFindings(
       : []
   );
 
-  if (!findings.length) {
+  const mainFindings = findings.filter(
+    (finding) => finding.status !== "hypothesis",
+  );
+  const hypotheses = findings.filter(
+    (finding) => finding.status === "hypothesis",
+  );
+
+  if (!mainFindings.length) {
     section.append(
       createElement(
         "p",
@@ -1141,36 +1173,57 @@ function appendFindings(
       ),
     );
 
-    parent.append(
-      section,
+  } else {
+    const defaultPage = (
+      payload.page?.page_number
+      ?? payload.selected_pages?.[0]
+      ?? 1
     );
 
-    return;
+    mainFindings.forEach(
+      (finding, index) => {
+        appendFinding(finding, index, defaultPage, section);
+      },
+    );
   }
-
-  const defaultPage = (
-    payload.page?.page_number
-    ?? payload.selected_pages?.[0]
-    ?? 1
-  );
-
-  findings.forEach(
-    (
-      finding,
-      index,
-    ) => {
-      appendFinding(
-        finding,
-        index,
-        defaultPage,
-        section,
-      );
-    },
-  );
 
   parent.append(
     section,
   );
+
+  if (hypotheses.length) {
+    const details = createElement(
+      "details",
+      "analysis-result__hypotheses",
+    );
+    details.append(
+      createElement(
+        "summary",
+        "analysis-result__hypotheses-summary",
+        `Неподтверждённые гипотезы (${hypotheses.length})`,
+      ),
+    );
+    hypotheses.forEach((finding) => {
+      const item = createElement("article", "analysis-result__hypothesis");
+      item.append(
+        createElement("strong", "", `Лист ${finding.page ?? finding.page_number ?? "—"}: ${finding.comment ?? "Гипотеза"}`),
+      );
+      appendTextBlock(item, "Исходное основание", finding.evidence);
+      appendTextBlock(item, "Исходные области VLM (не проверены)", JSON.stringify(finding.visual_regions ?? []));
+      const origins = Array.isArray(finding.origin_assertions)
+        ? finding.origin_assertions
+        : [];
+      origins.forEach((origin) => {
+        appendTextBlock(item, "Исходные N/T/U ID", [
+          ...(origin.normative_source_ids ?? []),
+          ...(origin.technical_assignment_source_ids ?? []),
+          ...(origin.user_package_source_ids ?? []),
+        ].join(", "));
+      });
+      details.append(item);
+    });
+    parent.append(details);
+  }
 }
 
 

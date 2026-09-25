@@ -1,6 +1,6 @@
 # services/api-gateway/tests/unit/test_analysis_visualization_cache.py
 
-"""Unit tests filesystem derivative visualization cache."""
+"""Проверки файлового кэша координат и размеченного PDF."""
 
 import json
 from uuid import uuid4
@@ -24,7 +24,7 @@ from pdrd_api_gateway.infrastructure.storage.visualization_cache import (
 async def test_location_and_annotated_pdf_cache_round_trip(
     tmp_path,
 ) -> None:
-    """Cache invalidates старую localization/PDF schema и round-trip v2/v3."""
+    """Кэш отвергает старые версии и сохраняет геометрию с SHA-256."""
     document_id = uuid4()
 
     document_directory = tmp_path / str(
@@ -46,7 +46,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
     legacy_locations.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 5,
                 "pages": [],
             },
         ),
@@ -60,13 +60,17 @@ async def test_location_and_annotated_pdf_cache_round_trip(
             document_id=document_id,
         )
 
-    (document_directory / "annotated.pdf").write_bytes(
-        b"%PDF-1.7\nlegacy-v1",
-    )
-
-    (document_directory / "annotated-v2.pdf").write_bytes(
-        b"%PDF-1.7\nlegacy-v2",
-    )
+    for file_name in (
+        "annotated.pdf",
+        "annotated-v2.pdf",
+        "annotated-v3.pdf",
+        "annotated-v4.pdf",
+        "annotated-v5.pdf",
+        "annotated-v6.pdf",
+    ):
+        (document_directory / file_name).write_bytes(
+            b"%PDF-1.7\nlegacy",
+        )
 
     assert (
         await cache.load_annotated_pdf(
@@ -78,6 +82,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
     pages = (
         AnalysisVisualizationLocationPage(
             page_number=3,
+            source_signature="a" * 64,
             locations=(
                 AnalysisFindingLocation.located(
                     finding_id="F-1",
@@ -91,13 +96,13 @@ async def test_location_and_annotated_pdf_cache_round_trip(
                                     y_max=400,
                                 )
                             ),
-                            source="pdf_text",
-                            confidence=1.0,
+                            source="analysis_vlm",
+                            confidence=0.95,
                             label="XT1",
                         ),
                     ),
-                    confidence=1.0,
-                    method="pdf_text",
+                    confidence=0.95,
+                    method="analysis_vlm",
                 ),
                 AnalysisFindingLocation.unlocated(
                     finding_id="F-2",
@@ -117,7 +122,8 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         )
     )
 
-    assert saved_payload["schema_version"] == 2
+    assert saved_payload["schema_version"] == 6
+    assert saved_payload["pages"][0]["source_signature"] == "a" * 64
 
     restored = await cache.load_locations(
         document_id=document_id,
@@ -126,8 +132,9 @@ async def test_location_and_annotated_pdf_cache_round_trip(
     assert restored is not None
 
     assert restored[0].page_number == 3
+    assert restored[0].source_signature == "a" * 64
 
-    assert restored[0].locations[0].method == "pdf_text"
+    assert restored[0].locations[0].method == "analysis_vlm"
 
     assert restored[0].locations[1].status == "unlocated"
 
@@ -138,7 +145,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         content=pdf_content,
     )
 
-    versioned_pdf_path = document_directory / "annotated-v3.pdf"
+    versioned_pdf_path = document_directory / "annotated-v7.pdf"
 
     assert versioned_pdf_path.read_bytes() == pdf_content
 

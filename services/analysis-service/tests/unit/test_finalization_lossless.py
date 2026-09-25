@@ -1,6 +1,6 @@
 # services/analysis-service/tests/unit/test_finalization_lossless.py
 
-"""Regression tests lossless finalization."""
+"""Regression tests conservative finalization gate."""
 
 from typing import Any
 
@@ -80,6 +80,78 @@ class PartialFinalizationModel:
         return True
 
 
+class CandidateGateModel:
+    """Имитирует явное keep/reject решение finalization."""
+
+    async def generate_json(
+        self,
+        *,
+        prompt: str,
+        schema: dict[str, Any],
+        num_predict: int,
+        seed: int,
+        stage: str,
+        image_bytes: bytes | None = None,
+    ) -> GenerationResult:
+        """Возвращает один keep и один reject."""
+        del num_predict
+        del seed
+        del stage
+        del image_bytes
+
+        assert "decision=keep" in prompt
+        assert "decision=reject" in prompt
+        assert "отсутствие N-source само по себе" in prompt
+
+        item_schema = schema["properties"]["findings"]["items"]
+
+        assert item_schema["properties"]["decision"]["enum"] == [
+            "keep",
+            "reject",
+        ]
+
+        finding_ids = item_schema["properties"]["finding_id"]["enum"]
+
+        return GenerationResult(
+            payload={
+                "summary": "candidate gate",
+                "findings": [
+                    {
+                        "finding_id": str(
+                            finding_ids[0],
+                        ),
+                        "decision": "keep",
+                        "rejection_reason": "",
+                        "comment": "Сохранённое замечание.",
+                        "recommendation": ("Проверить проектное решение."),
+                        "experience_source_ids": [],
+                        "normative_source_ids": [],
+                    },
+                    {
+                        "finding_id": str(
+                            finding_ids[1],
+                        ),
+                        "decision": "reject",
+                        "rejection_reason": (
+                            "Evidence показывает согласованные значения."
+                        ),
+                        "comment": "Шумовой candidate.",
+                        "recommendation": ("Корректировка не требуется."),
+                        "experience_source_ids": [],
+                        "normative_source_ids": [],
+                    },
+                ],
+            },
+            metrics=_metrics(),
+        )
+
+    async def is_ready(
+        self,
+    ) -> bool:
+        """Возвращает readiness."""
+        return True
+
+
 def _finding(
     finding_id: str,
     *,
@@ -146,9 +218,11 @@ async def test_finalization_preserves_every_input_finding_when_model_omits_items
         input_findings,
     )
 
-    assert finalized[0].comment == "Финализированное замечание."
-    assert finalized[1].comment == "Исходное замечание 2."
-    assert finalized[2].comment == "Исходное замечание 3."
+    assert finalized[0].comment == ("Финализированное замечание.")
+
+    assert finalized[1].comment == ("Исходное замечание 2.")
+
+    assert finalized[2].comment == ("Исходное замечание 3.")
 
     assert metrics["fallback_count"] == 2
 
@@ -186,3 +260,47 @@ async def test_finalization_preserves_order_for_multiple_batches() -> None:
     # В каждом batch модель возвращает один finding;
     # остальные обязаны сохраниться через fallback.
     assert metrics["fallback_count"] == 2
+
+
+async def test_finalization_rejects_only_explicit_candidate_with_reason() -> None:
+    """Явный reject удаляет шум, а keep сохраняет survivor."""
+    input_findings = (
+        _finding(
+            "p14-f1",
+            index=1,
+        ),
+        _finding(
+            "p14-f2",
+            index=2,
+        ),
+    )
+
+    use_case = FinalizeFindings(
+        vision_model=CandidateGateModel(),
+        num_predict=1800,
+        batch_size=2,
+        experience_context_limit=600,
+        experience_min_score=0.55,
+    )
+
+    _, finalized, metrics = await use_case.execute(
+        findings=input_findings,
+        experience_by_finding={},
+    )
+
+    assert tuple(finding.finding_id for finding in finalized) == ("p14-f1",)
+
+    assert finalized[0].comment == ("Сохранённое замечание.")
+
+    assert metrics["candidate_count"] == 2
+    assert metrics["kept_count"] == 1
+    assert metrics["rejected_count"] == 1
+    assert metrics["fallback_count"] == 0
+
+    assert metrics["rejected_findings"] == [
+        {
+            "finding_id": "p14-f2",
+            "page": 14,
+            "reason": ("Evidence показывает согласованные значения."),
+        }
+    ]

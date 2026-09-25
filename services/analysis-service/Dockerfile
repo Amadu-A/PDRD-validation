@@ -34,8 +34,8 @@ RUN useradd \
     --create-home \
     --uid 1000 \
     app \
-    && mkdir -p /var/lock/pdrd-gpu \
-    && chown -R app:app /var/lock/pdrd-gpu
+    && mkdir -p /var/lock/pdrd-gpu /data/vlm-cache \
+    && chown -R app:app /var/lock/pdrd-gpu /data/vlm-cache
 
 USER app
 

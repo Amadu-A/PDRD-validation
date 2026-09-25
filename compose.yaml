@@ -550,6 +550,9 @@ services:
 
     env_file: *app-env-files
 
+    volumes:
+      - analysis_vlm_cache:/data/vlm-cache
+
     ports:
       - "${ANALYSIS_SERVICE_BIND_IP:-127.0.0.1}:${ANALYSIS_SERVICE_HOST_PORT:-8501}:8501"
 
@@ -623,6 +626,7 @@ volumes:
   postgres_data:
   qdrant_data:
   analysis_artifacts:
+  analysis_vlm_cache:
   normative_documents:
   technical_assignment_documents:
 

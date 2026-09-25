@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/infrastructure/storage/visualization_cache.py
 
-"""Filesystem cache resolved finding locations и annotated PDF."""
+"""Файловый кэш координат замечаний и размеченного PDF."""
 
 import asyncio
 import json
@@ -20,15 +20,15 @@ from pdrd_api_gateway.application.ports.analysis_visualization_cache import (
 
 
 class LocalFilesystemAnalysisVisualizationCache:
-    """Хранит derivative artifacts рядом с analysis document."""
+    """Хранит результаты визуализации рядом с материалами анализа."""
 
     _VISUALIZATION_DIRECTORY = "visualization"
 
     _LOCATIONS_FILE = "locations.json"
 
-    _ANNOTATED_PDF_FILE = "annotated-v3.pdf"
+    _ANNOTATED_PDF_FILE = "annotated-v7.pdf"
 
-    _LOCATIONS_SCHEMA_VERSION = 2
+    _LOCATIONS_SCHEMA_VERSION = 6
 
     def __init__(
         self,
@@ -152,9 +152,9 @@ class LocalFilesystemAnalysisVisualizationCache:
                     "Location cache pages должен быть array.",
                 )
 
-            pages: list[AnalysisVisualizationLocationPage] = []
+            pages: list[AnalysisVisualizationLocationPage,] = []
 
-            seen_pages: set[int] = set()
+            seen_pages: set[int,] = set()
 
             for raw_page in raw_pages:
                 if not isinstance(
@@ -199,6 +199,7 @@ class LocalFilesystemAnalysisVisualizationCache:
                     AnalysisVisualizationLocationPage(
                         page_number=page_number,
                         locations=locations,
+                        source_signature=self._read_source_signature(raw_page),
                     )
                 )
 
@@ -213,11 +214,21 @@ class LocalFilesystemAnalysisVisualizationCache:
             ValueError,
             json.JSONDecodeError,
         ) as error:
-            raise (
-                AnalysisVisualizationCacheError(
-                    "Не удалось прочитать finding location cache.",
-                )
+            raise AnalysisVisualizationCacheError(
+                "Не удалось прочитать finding location cache.",
             ) from error
+
+    @staticmethod
+    def _read_source_signature(raw_page: dict[str, object]) -> str | None:
+        """Читает подпись входных замечаний и отвергает повреждённую запись."""
+        signature = raw_page.get("source_signature")
+        if signature is None:
+            return None
+        if not isinstance(signature, str) or len(signature) != 64:
+            raise ValueError("Некорректная подпись входных замечаний в кэше.")
+        if any(symbol not in "0123456789abcdef" for symbol in signature):
+            raise ValueError("Подпись входных замечаний должна быть SHA-256.")
+        return signature
 
     def _save_locations_sync(
         self,
@@ -232,10 +243,8 @@ class LocalFilesystemAnalysisVisualizationCache:
         )
 
         if not document_directory.is_dir():
-            raise (
-                AnalysisVisualizationCacheError(
-                    ("Analysis artifacts для location cache не найдены."),
-                )
+            raise AnalysisVisualizationCacheError(
+                "Analysis artifacts для location cache не найдены.",
             )
 
         target_directory = self._visualization_directory(
@@ -252,7 +261,8 @@ class LocalFilesystemAnalysisVisualizationCache:
                 "schema_version": (self._LOCATIONS_SCHEMA_VERSION),
                 "pages": [
                     {
-                        "page_number": page.page_number,
+                        "page_number": (page.page_number),
+                        "source_signature": page.source_signature,
                         "locations": [
                             location.as_dict() for location in page.locations
                         ],
@@ -271,10 +281,8 @@ class LocalFilesystemAnalysisVisualizationCache:
             TypeError,
             ValueError,
         ) as error:
-            raise (
-                AnalysisVisualizationCacheError(
-                    ("Не удалось сохранить finding location cache."),
-                )
+            raise AnalysisVisualizationCacheError(
+                "Не удалось сохранить finding location cache.",
             ) from error
 
     def _load_annotated_pdf_sync(
@@ -295,19 +303,15 @@ class LocalFilesystemAnalysisVisualizationCache:
             content = path.read_bytes()
 
         except OSError as error:
-            raise (
-                AnalysisVisualizationCacheError(
-                    ("Не удалось прочитать cached annotated PDF."),
-                )
+            raise AnalysisVisualizationCacheError(
+                "Не удалось прочитать cached annotated PDF.",
             ) from error
 
         if not content.startswith(
             b"%PDF-",
         ):
-            raise (
-                AnalysisVisualizationCacheError(
-                    ("Cached annotated artifact повреждён."),
-                )
+            raise AnalysisVisualizationCacheError(
+                "Cached annotated artifact повреждён.",
             )
 
         return content
@@ -322,19 +326,15 @@ class LocalFilesystemAnalysisVisualizationCache:
         )
 
         if not document_directory.is_dir():
-            raise (
-                AnalysisVisualizationCacheError(
-                    ("Analysis artifacts для annotated PDF не найдены."),
-                )
+            raise AnalysisVisualizationCacheError(
+                "Analysis artifacts для annotated PDF не найдены.",
             )
 
         if not content.startswith(
             b"%PDF-",
         ):
-            raise (
-                AnalysisVisualizationCacheError(
-                    ("Нельзя сохранить не-PDF annotated artifact."),
-                )
+            raise AnalysisVisualizationCacheError(
+                "Нельзя сохранить не-PDF annotated artifact.",
             )
 
         try:
@@ -344,10 +344,8 @@ class LocalFilesystemAnalysisVisualizationCache:
             )
 
         except OSError as error:
-            raise (
-                AnalysisVisualizationCacheError(
-                    ("Не удалось сохранить annotated PDF."),
-                )
+            raise AnalysisVisualizationCacheError(
+                "Не удалось сохранить annotated PDF.",
             ) from error
 
     @classmethod
@@ -452,10 +450,18 @@ class LocalFilesystemAnalysisVisualizationCache:
 
         return AnalysisVisualRegion(
             bbox=AnalysisBoundingBox(
-                x_min=int(raw_bbox["x_min"]),
-                y_min=int(raw_bbox["y_min"]),
-                x_max=int(raw_bbox["x_max"]),
-                y_max=int(raw_bbox["y_max"]),
+                x_min=int(
+                    raw_bbox["x_min"],
+                ),
+                y_min=int(
+                    raw_bbox["y_min"],
+                ),
+                x_max=int(
+                    raw_bbox["x_max"],
+                ),
+                y_max=int(
+                    raw_bbox["y_max"],
+                ),
             ),
             source=str(
                 raw_region.get(

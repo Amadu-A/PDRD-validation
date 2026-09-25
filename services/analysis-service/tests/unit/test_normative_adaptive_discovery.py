@@ -22,7 +22,7 @@ def _metrics(
     return GenerationMetrics(
         attempt=1,
         done_reason="stop",
-        requested_num_predict=(requested_num_predict),
+        requested_num_predict=requested_num_predict,
         total_duration_ms=10.0,
         load_duration_ms=1.0,
         prompt_eval_count=100,
@@ -50,6 +50,7 @@ def _candidate(
         "normative_source_ids": [],
         "technical_assignment_source_ids": [],
         "user_package_source_ids": [],
+        "visual_regions": [{"x_min": 100, "y_min": 100, "x_max": 140, "y_max": 130}],
     }
 
 
@@ -69,7 +70,16 @@ def _duplicate_candidate() -> dict[
         "normative_source_ids": [],
         "technical_assignment_source_ids": [],
         "user_package_source_ids": [],
+        "visual_regions": [{"x_min": 100, "y_min": 100, "x_max": 140, "y_max": 130}],
     }
+
+
+def _repeated_position_candidate(tag: str, index: int) -> dict[str, Any]:
+    """Имитирует разные формулировки одного подтверждённого повтора."""
+    candidate = _candidate(index)
+    candidate["comment"] = f"Повторное позиционное обозначение {tag}."
+    candidate["evidence"] = f"Обозначение {tag} повторяется возле узла 8.2.{index}."
+    return candidate
 
 
 class SequentialVisionModel:
@@ -111,7 +121,7 @@ class SequentialVisionModel:
             {
                 "prompt": prompt,
                 "schema": schema,
-                "num_predict": (num_predict),
+                "num_predict": num_predict,
                 "seed": seed,
                 "stage": stage,
                 "image_bytes": image_bytes,
@@ -128,7 +138,7 @@ class SequentialVisionModel:
                 0,
             ),
             metrics=_metrics(
-                requested_num_predict=(num_predict),
+                requested_num_predict=num_predict,
             ),
         )
 
@@ -216,6 +226,75 @@ async def test_sparse_probe_stops_without_extra_call() -> None:
     assert metrics.requested_num_predict == 4000
 
 
+async def test_underfull_probe_does_not_generate_speculative_continuation() -> None:
+    """Неполный ответ не запускает дополнительный поиск на плотной схеме."""
+    repeated = [
+        _repeated_position_candidate(tag, index)
+        for index, tag in enumerate(
+            ("8.5.4", "8.5.4", "8.9.1", "8.9.2", "8.9.3", "8.9.3"),
+            start=1,
+        )
+    ]
+    model = SequentialVisionModel(
+        [
+            {"summary": "Повторные обозначения.", "violations": repeated},
+        ]
+    )
+    extracted_text = "\n".join(
+        (
+            "Принципиальная схема",
+            "8.5.4\n8.9.1\n8.9.2\n8.9.3",
+            "8.5.4\n8.9.1\n8.9.2\n8.9.3",
+        )
+    )
+
+    _, findings, metrics = await _use_case(model).execute(
+        page_number=22,
+        extracted_text=extracted_text,
+        page_facts=_page_facts(),
+        normative_sources=(),
+        image_bytes=b"png",
+    )
+
+    assert [call["stage"] for call in model.calls] == [
+        "normative_check:22:probe1",
+    ]
+    assert len(findings) == 4
+    assert {
+        finding.finding_id for finding in findings if "-dpos-" in finding.finding_id
+    } == {
+        "p22-dpos-8-5-4",
+        "p22-dpos-8-9-1",
+        "p22-dpos-8-9-2",
+        "p22-dpos-8-9-3",
+    }
+    assert metrics.requested_num_predict == 4000
+
+
+async def test_underfull_probe_stops_without_continuation() -> None:
+    """Неполный ответ останавливает поиск на одном запросе."""
+    model = SequentialVisionModel(
+        [
+            {
+                "summary": "Первый batch.",
+                "violations": [_candidate(i) for i in range(6)],
+            },
+        ]
+    )
+
+    _, findings, metrics = await _use_case(model).execute(
+        page_number=22,
+        extracted_text="Тестовый лист.",
+        page_facts=_page_facts(),
+        normative_sources=(),
+        image_bytes=b"png",
+    )
+
+    assert len(model.calls) == 1
+    assert len(findings) == 6
+    assert metrics.requested_num_predict == 4000
+
+
 async def test_duplicate_saturation_requests_distinct_continuation() -> None:
     """Десять дублей не расходуют оставшиеся сорок slots."""
     repeated = [
@@ -276,7 +355,9 @@ async def test_duplicate_saturation_requests_distinct_continuation() -> None:
 
     assert model.calls[1]["num_predict"] == 4000
 
-    continuation_prompt = str(model.calls[1]["prompt"])
+    continuation_prompt = str(
+        model.calls[1]["prompt"],
+    )
 
     assert "ALREADY FOUND DISTINCT CANDIDATES" in continuation_prompt
 
@@ -365,7 +446,9 @@ async def test_dense_probe_switches_to_one_bulk_continuation() -> None:
 
     assert second_call["stage"] == "normative_check:7:bulk"
 
-    assert "Замечание 1." in str(second_call["prompt"])
+    assert "Замечание 1." in str(
+        second_call["prompt"],
+    )
 
     assert metrics.requested_num_predict == 18000
 
@@ -441,3 +524,52 @@ async def test_repeated_saturation_stops_after_three_probes() -> None:
     ]
 
     assert metrics.requested_num_predict == 12000
+
+
+async def test_high_recall_policy_contains_semantic_guardrails() -> None:
+    """Discovery запрещает transport-page и unsupported relation assumptions."""
+    model = SequentialVisionModel(
+        [
+            {
+                "summary": ("Замечаний нет."),
+                "violations": [],
+            },
+        ]
+    )
+
+    await _use_case(
+        model,
+    ).execute(
+        page_number=23,
+        extracted_text=("Лист 5. Насосы 3 шт. Виброкомпенсаторы 4 шт."),
+        page_facts=_page_facts(),
+        normative_sources=(),
+        image_bytes=b"png",
+    )
+
+    prompt = str(
+        model.calls[0]["prompt"],
+    )
+
+    assert "SEMANTIC EVIDENCE DISCIPLINE" in prompt
+
+    assert "TRANSPORT / PROJECT PAGE NUMBERING" in prompt
+
+    assert "page_number" in prompt
+
+    assert 'проектного поля "Лист"' in prompt
+
+    assert "QUANTITY / CHARACTERISTIC RELATIONSHIP" in prompt
+
+    assert "насосов 3, а виброкомпенсаторов 4" in prompt
+
+    assert "один и тот же tagged object" in prompt
+
+    assert "Например несоответствие номера листа в верхнем углу" not in prompt
+
+    assert (
+        len(
+            model.calls,
+        )
+        == 1
+    )

@@ -5,9 +5,10 @@
  *
  * BBox приходит в нормализованных координатах 0..1000.
  * Один finding может содержать несколько visual regions.
- * Карточки замечаний размещаются поверх листа автоматически,
- * а каждая region соединяется с одной общей карточкой finding.
- * Полный текст finding доступен через detail tooltip.
+ * Несколько findings одного явно обозначенного объекта могут делить
+ * одну карточку; каждый подпункт сохраняет свой ID, sources и подсветку.
+ * Карточки размещаются поверх листа автоматически.
+ * Неподтверждённые гипотезы не получают рамки локализации.
  * Текст и source data вставляются только через textContent.
  */
 
@@ -16,6 +17,7 @@ const CALLOUT_GAP_PX = 14;
 const CARD_OVERLAP_WEIGHT = 12;
 const REGION_OVERLAP_WEIGHT = 5;
 const DISTANCE_WEIGHT = 0.015;
+const GROUP_AREA_GAP = 100;
 
 const GENERIC_FINDING_PREFIX = (
   "на листе выявлено несоответствие"
@@ -236,6 +238,7 @@ function findingsForPage(
   );
 
   return payload.findings
+    .filter((finding) => finding.status !== "hypothesis")
     .map(
       (
         finding,
@@ -1893,6 +1896,10 @@ function setFindingActive(
     "analysis-result__annotation--active",
     active,
   );
+  item.callout.classList.toggle(
+    "analysis-result__group-member--active",
+    active,
+  );
 
   item.bboxEntries.forEach(
     ({
@@ -1921,7 +1928,11 @@ function setFindingActive(
 function bindFindingInteractions(
   item,
 ) {
-  const activate = () => {
+  const activate = (event) => {
+    if (event?.target?.closest?.(".analysis-result__hypotheses")) {
+      setFindingActive(item, false);
+      return;
+    }
     setFindingActive(
       item,
       true,
@@ -1966,6 +1977,16 @@ function bindFindingInteractions(
     },
   );
 
+  if (item.callout.classList.contains("analysis-result__annotation")) {
+    item.callout.querySelectorAll(".analysis-result__hypotheses")
+      .forEach((details) => {
+        details.addEventListener("pointerenter", deactivate);
+        details.addEventListener("focusin", deactivate);
+      });
+    item.callout.querySelector(".analysis-result__annotation-header")
+      ?.addEventListener("pointerenter", activate);
+  }
+
   item.bboxEntries.forEach(
     ({
       node,
@@ -1981,6 +2002,95 @@ function bindFindingInteractions(
       );
     },
   );
+}
+
+
+function findingObjectAnchor(finding) {
+  const explicit = String(finding.object_ref ?? "").trim();
+  return explicit.toLocaleLowerCase("ru-RU");
+}
+
+
+function boxesAreNear(left, right) {
+  return left.some((a) => right.some((b) => (
+    Math.max(a.xMin - b.xMax, b.xMin - a.xMax, 0) <= GROUP_AREA_GAP
+    && Math.max(a.yMin - b.yMax, b.yMin - a.yMax, 0) <= GROUP_AREA_GAP
+  )));
+}
+
+
+function findingGroups(findings) {
+  const groups = [];
+  findings.forEach((entry) => {
+    const anchor = findingObjectAnchor(entry.finding);
+    const boxes = normalizedBoxes(entry.finding);
+    const existing = anchor && boxes.length
+      ? groups.find((group) => (
+        group.anchor === anchor
+        && group.members.every((member) => boxesAreNear(
+          boxes,
+          normalizedBoxes(member.finding),
+        ))
+      ))
+      : null;
+    if (existing) {
+      existing.members.push(entry);
+    } else {
+      groups.push({ anchor, members: [entry], hypotheses: [] });
+    }
+  });
+  return groups;
+}
+
+
+function createHypothesisDetails(hypotheses) {
+  const details = createElement("details", "analysis-result__hypotheses");
+  details.append(createElement(
+    "summary",
+    "analysis-result__hypotheses-summary",
+    `Неподтверждённые гипотезы (${hypotheses.length})`,
+  ));
+  hypotheses.forEach((finding) => {
+    const item = createElement("div", "analysis-result__hypothesis");
+    item.append(createElement("strong", "", findingComment(finding)));
+    if (finding.evidence) {
+      item.append(createElement("p", "", finding.evidence));
+    }
+    item.append(createElement(
+      "small",
+      "",
+      `Исходные области VLM, не подтверждены: ${JSON.stringify(finding.visual_regions ?? [])}`,
+    ));
+    details.append(item);
+  });
+  return details;
+}
+
+
+function createGroupedCallout(group, dependencies) {
+  const callout = createElement("article", "analysis-result__annotation analysis-result__annotation--group");
+  callout.tabIndex = 0;
+  callout.append(createElement(
+    "strong",
+    "analysis-result__group-title",
+    `${String(group.members[0].finding.object_ref).trim()}: ${group.members.length} замечания`,
+  ));
+  const rows = [];
+  group.members.forEach(({ finding, findingIndex }) => {
+    const row = createElement("div", "analysis-result__group-member");
+    row.tabIndex = 0;
+    row.dataset.findingId = String(finding.finding_id ?? "");
+    row.append(createElement("span", "analysis-result__annotation-number", findingIndex + 1));
+    row.append(createElement("span", "analysis-result__group-member-text", findingDisplayText(finding)));
+    row.append(createFindingDetailControl(finding, findingIndex, dependencies));
+    appendNormativeLinks(row, finding, dependencies);
+    callout.append(row);
+    rows.push(row);
+  });
+  if (group.hypotheses.length) {
+    callout.append(createHypothesisDetails(group.hypotheses));
+  }
+  return { callout, rows };
 }
 
 
@@ -2086,35 +2196,66 @@ function appendPageVisualization(
     page,
   );
 
+  const groups = findingGroups(findings);
+  const hypotheses = (Array.isArray(payload.findings) ? payload.findings : [])
+    .filter((finding) => (
+      finding.status === "hypothesis"
+      && normalizedPage(finding.page ?? finding.page_number) === pageNumber
+    ));
+  const unattachedHypotheses = [];
+  hypotheses.forEach((hypothesis) => {
+    const anchor = findingObjectAnchor(hypothesis);
+    const matches = anchor
+      ? groups.filter((group) => group.anchor === anchor)
+      : [];
+    if (matches.length === 1) {
+      matches[0].hypotheses.push(hypothesis);
+    } else {
+      unattachedHypotheses.push(hypothesis);
+    }
+  });
+
   const items = [];
 
-  findings.forEach(
-    ({
-      finding,
-      findingIndex,
-    }) => {
-      const bboxEntries = (
-        createBoundingBoxes(
-          finding,
-          findingIndex,
-        )
-      );
+  groups.forEach((group) => {
+      const isGrouped = group.members.length > 1;
+      const groupControl = isGrouped
+        ? createGroupedCallout(group, dependencies)
+        : null;
+      const { finding, findingIndex } = group.members[0];
+      const callout = groupControl?.callout
+        ?? createCallout(finding, findingIndex, dependencies);
+      if (!isGrouped && group.hypotheses.length) {
+        callout.append(createHypothesisDetails(group.hypotheses));
+      }
 
-      bboxEntries.forEach(
-        ({
-          node,
-        }) => {
-          imagePane.append(
-            node,
+      const bboxEntries = [];
+      const connectorEntries = [];
+      group.members.forEach((member, memberIndex) => {
+        const memberBoxes = createBoundingBoxes(
+          member.finding,
+          member.findingIndex,
+        );
+        const memberConnectors = memberBoxes.map(({ node }) => {
+          imagePane.append(node);
+          const polyline = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "polyline",
           );
-        },
-      );
-
-      const callout = createCallout(
-        finding,
-        findingIndex,
-        dependencies,
-      );
+          polyline.classList.add("analysis-result__connector");
+          svg.append(polyline);
+          return { bboxNode: node, polyline };
+        });
+        bboxEntries.push(...memberBoxes);
+        connectorEntries.push(...memberConnectors);
+        if (isGrouped) {
+          bindFindingInteractions({
+            callout: groupControl.rows[memberIndex],
+            bboxEntries: memberBoxes,
+            connectorEntries: memberConnectors,
+          });
+        }
+      });
 
       callout.style.left = "0";
       callout.style.top = "0";
@@ -2126,37 +2267,6 @@ function appendPageVisualization(
         callout,
       );
 
-      const connectorEntries = (
-        bboxEntries.map(
-          ({
-            node,
-          }) => {
-            const polyline = (
-              document.createElementNS(
-                (
-                  "http://www.w3.org/"
-                  + "2000/svg"
-                ),
-                "polyline",
-              )
-            );
-
-            polyline.classList.add(
-              "analysis-result__connector",
-            );
-
-            svg.append(
-              polyline,
-            );
-
-            return {
-              bboxNode: node,
-              polyline,
-            };
-          },
-        )
-      );
-
       const item = {
         finding,
         findingIndex,
@@ -2165,15 +2275,14 @@ function appendPageVisualization(
         connectorEntries,
       };
 
-      bindFindingInteractions(
-        item,
-      );
+      if (!isGrouped) {
+        bindFindingInteractions(item);
+      }
 
       items.push(
         item,
       );
-    },
-  );
+  });
 
   if (!findings.length) {
     annotationOverlay.append(
@@ -2201,6 +2310,10 @@ function appendPageVisualization(
   section.append(
     stage,
   );
+
+  if (unattachedHypotheses.length) {
+    section.append(createHypothesisDetails(unattachedHypotheses));
+  }
 
   parent.append(
     section,
@@ -2244,6 +2357,8 @@ function appendPageVisualization(
       redraw,
     );
   };
+
+  annotationOverlay.addEventListener("toggle", scheduleRedraw, true);
 
   image.addEventListener(
     "load",

@@ -542,6 +542,16 @@ class SearchSettings(BaseModel):
         le=500,
     )
 
+    normative_min_score: float = Field(
+        default=0.48,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Минимальный cosine score только для N retrieval. "
+            "T/U retrieval этим порогом не фильтруется."
+        ),
+    )
+
     experience_enabled: bool = Field(
         default=False,
         description=(

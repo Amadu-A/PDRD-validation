@@ -146,14 +146,18 @@ def test_result_nodes_take_all_finalization_findings() -> None:
         assert ".map((finding)" in code, path
 
         if path.name == "analysis-v2-pdf-cad.json":
-            assert "findings_count: findings.length" in code, path
+            assert "findings_count: reportFindings.length" in code, path
+
+            assert (
+                "hypotheses_count: findings.length - reportFindings.length" in code
+            ), path
 
         else:
             assert "findings," in code, path
 
 
 def test_pdf_aggregate_counts_every_page_finding() -> None:
-    """PDF aggregate flatMap-ит page findings без semantic shortlist."""
+    """PDF aggregate хранит все findings, считая гипотезы отдельно."""
     workflow = _workflow(
         ROOT / "n8n" / "workflows" / "analysis-v2-pdf.json",
     )
@@ -167,7 +171,11 @@ def test_pdf_aggregate_counts_every_page_finding() -> None:
 
     assert "page.findings" in code
 
-    assert "findings_count: findings.length" in code
+    assert "findings_count: reportFindings.length" in code
+
+    assert "hypotheses_count: findings.length - reportFindings.length" in code
+
+    assert "findings," in code
 
 
 def test_finalization_source_contains_per_finding_fallback() -> None:
