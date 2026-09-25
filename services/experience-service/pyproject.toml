@@ -1,5 +1,5 @@
 # services/experience-service/pyproject.toml
-# Isolated domain/application package; HTTP, DB and deployment follow later.
+# Domain/application and project-specific PostgreSQL persistence for Human Review.
 
 [build-system]
 requires = ["setuptools>=80,<82"]
@@ -8,8 +8,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pdrd-experience-service"
 version = "0.1.0"
-description = "PDRD human review and experience data contracts"
+description = "PDRD human review and durable experience contracts"
 requires-python = ">=3.12"
+dependencies = [
+    "alembic==1.19.1",
+    "asyncpg==0.31.0",
+    "SQLAlchemy==2.0.52",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
