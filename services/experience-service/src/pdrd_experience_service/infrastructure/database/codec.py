@@ -11,6 +11,7 @@ from pdrd_experience_service.domain.review import (
     Action,
     Decision,
     Origin,
+    ProposedRegion,
     Rectangle,
     ReviewedFinding,
     ReviewEvent,
@@ -49,6 +50,19 @@ def _rectangle(
     return Rectangle(**value) if value is not None else None
 
 
+def _proposed_regions(value: list[dict[str, Any]]) -> tuple[ProposedRegion, ...]:
+    """Восстанавливает кандидаты областей без повышения их до подтверждений."""
+    return tuple(
+        ProposedRegion(
+            bbox=Rectangle(**item["bbox"]),
+            source=item["source"],
+            confidence=item["confidence"],
+            method=item["method"],
+        )
+        for item in value
+    )
+
+
 def finding_to_json(
     finding: ReviewedFinding,
 ) -> dict[str, Any]:
@@ -78,6 +92,7 @@ def finding_from_json(
         updated_by=value["updated_by"],
         updated_at=_timestamp(value["updated_at"]),
         revision=value["revision"],
+        proposed_regions=_proposed_regions(value.get("proposed_regions", [])),
     )
 
 

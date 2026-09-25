@@ -92,6 +92,31 @@ class Rectangle:
 
 
 @dataclass(frozen=True, slots=True)
+class ProposedRegion:
+    """Автоматическая область визуализации, ожидающая проверки инженером."""
+
+    bbox: Rectangle
+    source: str
+    confidence: float
+    method: str
+
+    def __post_init__(self) -> None:
+        """Не допускает пустую provenance или некорректную уверенность."""
+        if (
+            not isinstance(self.bbox, Rectangle)
+            or not isinstance(self.source, str)
+            or not self.source.strip()
+            or not isinstance(self.method, str)
+            or not self.method.strip()
+            or not isinstance(self.confidence, (int, float))
+            or isinstance(self.confidence, bool)
+            or not math.isfinite(self.confidence)
+            or not 0 <= self.confidence <= 1
+        ):
+            raise ReviewError("Некорректная предложенная область визуализации.")
+
+
+@dataclass(frozen=True, slots=True)
 class OriginalFinding:
     """Authoritative, non-hypothesis finding from the completed analysis."""
 
@@ -99,6 +124,7 @@ class OriginalFinding:
     page_number: int
     text: str
     normative_basis: str = ""
+    proposed_regions: tuple[ProposedRegion, ...] = ()
 
     def __post_init__(self) -> None:
         """Validate original source data before opening a review."""
@@ -112,6 +138,11 @@ class OriginalFinding:
 
         _text(self.text)
         _text(self.normative_basis, limit=2000, required=False)
+
+        if not isinstance(self.proposed_regions, tuple) or any(
+            not isinstance(region, ProposedRegion) for region in self.proposed_regions
+        ):
+            raise ReviewError("Области VLM должны быть валидными объектами.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +164,7 @@ class ReviewedFinding:
     updated_by: str
     updated_at: datetime
     revision: int = 0
+    proposed_regions: tuple[ProposedRegion, ...] = ()
 
     @property
     def experience_tag(self) -> str | None:
@@ -228,6 +260,12 @@ class ReviewSession:
         if len(ids) != len(set(ids)):
             raise ReviewError("Duplicate authoritative VLM finding IDs.")
 
+        if any(
+            item.proposed_regions and item.page_number not in rendered_pages
+            for item in originals
+        ):
+            raise ReviewError("Область VLM привязана к неотрендеренному листу.")
+
         findings = tuple(
             ReviewedFinding(
                 finding_id=item.finding_id,
@@ -244,6 +282,7 @@ class ReviewSession:
                 created_at=at,
                 updated_by=actor,
                 updated_at=at,
+                proposed_regions=item.proposed_regions,
             )
             for item in originals
         )

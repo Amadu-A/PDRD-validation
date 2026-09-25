@@ -332,9 +332,9 @@ Snapshot содержит независимо:
 
 ### Experience Service
 
-**Контракт текущего этапа:** `experience.review_sessions` хранит последний JSONB-снимок одного `job_id` с `revision` и `approved_revision`; `experience.review_events` хранит неизменяемую последовательность действий `(job_id, session_revision)` с before/after и автором. Каждая запись в транзакции проходит optimistic CAS по `expected_revision`. В `ReviewSession` хранятся также замечания без координат — для полного аудита и итогового **текстового** PDF. Отбор обучающих примеров — отдельная операция, **не** копия всей таблицы Review.
+**Контракт текущего этапа:** `experience.review_sessions` хранит последний JSONB-снимок одного `job_id` с `revision` и `approved_revision`; `experience.review_events` хранит неизменяемую последовательность действий `(job_id, session_revision)` с before/after и автором. Каждая запись в транзакции проходит optimistic CAS по `expected_revision`. В `ReviewSession` хранятся также замечания без координат — для полного аудита и итогового **текстового** PDF. Отбор обучающих примеров — отдельная операция, **не** копия всей таблицы Review. Предложенные визуализацией области VLM переносятся как `proposed_regions` с источником и уверенностью; `issue_box` остаётся пустой до явного подтверждения. Старые JSONB-снимки без `proposed_regions` продолжают читаться.
 
-**Следующие этапы:** отдельные подтверждения областей, полноценные Experience records/crops, HTTP, экспорт и индексация. На сервере новые tables отсутствуют до явного применения миграции.
+**Следующие этапы:** подключение доверенного источника завершённого анализа к mapper, бизнес-маршруты HTTP, отдельные подтверждения областей, полноценные Experience records/crops, экспорт и индексация. Наличие миграции в Git не означает её применения на рабочем сервере.
 
 ## 7. Qdrant — stable aliases и physical collections
 
@@ -595,7 +595,7 @@ flowchart TD
     INDEX --> QD[("dva_experience_active, guarded by feature flag")]
 ```
 
-**Статусы внедрения:** UI, domain `ReviewSession`, `SelectExperience` реализованы; отдельные DB adapter/Alembic schema составляют ближайший этап; HTTP, реальное подтверждение координат, crop, reviewed PDF и E indexing пока не подключены. Пунктир/слово `planned` означает архитектурный план, не существующую рабочую функциональность.
+**Статусы внедрения:** локальный Human Review UI, демонстрационная страница Experience, domain `ReviewSession`, `SelectExperience`, PostgreSQL adapter/Alembic schema и HTTP bootstrap с health/readiness реализованы. Серверный mapper переносит визуальные области в `proposed_regions`, не подтверждая их автоматически. Бизнес-маршруты Review, сохранение подтверждений координат, crop, reviewed PDF и E indexing пока не подключены. Пунктир/слово `planned` означает архитектурный план, не существующую рабочую функциональность.
 
 ## 12. Подтверждение и исправление областей
 
@@ -616,7 +616,7 @@ flowchart TD
     A -->|да| PICK
 ```
 
-`status=located` от автоматического локализатора не равен подтверждению инженера. Подтверждение проверяется отдельно от `decision=accepted`. Никаких выдуманных координат или перехода Gold на другой лист. Достоверная привязка подтверждения к актуальной редакции finding будет enforced в persistent confirmed-areas adapter.
+`status=located` от автоматического локализатора не равен подтверждению инженера. Mapper читает только серверные артефакты задания и сохраняет такую область как `proposed_regions`; отсутствие, неверная геометрия или неоднозначная локализация оставляют находку текстовой. Подтверждение проверяется отдельно от `decision=accepted`. Никаких выдуманных координат или перехода Gold на другой лист. Достоверная привязка подтверждения к актуальной редакции finding будет enforced в persistent confirmed-areas adapter.
 
 ## 13. Как будет происходить отбор, отсечение и классификация
 
@@ -1471,7 +1471,7 @@ Shared runtime checks осуществляются через опубликов
 - frontend нормативного каталога, пользовательских пакетов и ТЗ;
 - Human Review frontend: Wise/Bad/Edited/Gold, независимые решения сгруппированных findings, создание Gold с двумя областями и общим текстовым списком;
 - доменная модель `ReviewSession`, журнал редакций, optimistic revisions, подтверждаемая геометрия и `SelectExperience` (пока только подготовка кандидатов);
-- текущий этап: отдельная SQLAlchemy PostgreSQL persistence и Experience Alembic migration, ещё без live HTTP/Compose;
+- отдельная SQLAlchemy PostgreSQL persistence и Experience Alembic migration, HTTP bootstrap без бизнес-маршрутов, серверный mapper предложенных VLM-областей;
 - автоматический PDF существует, reviewed PDF после Human Review пока заблокирован;
 - unit/integration/architecture/runtime test layers.
 
