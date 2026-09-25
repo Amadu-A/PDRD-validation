@@ -16,6 +16,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.codex-test-temp/
+
 
 .coverage
 coverage.xml
