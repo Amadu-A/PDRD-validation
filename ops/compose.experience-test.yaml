@@ -1,0 +1,81 @@
+# ops/compose.experience-test.yaml
+#
+# Изолированное окружение для проверки PostgreSQL Experience Service.
+#
+# Назначение:
+# - проверить первую миграцию Alembic на реальном PostgreSQL;
+# - испытать атомарное сохранение снимков и журнала изменений;
+# - проверить конкурентное обновление одного отчёта;
+# - исключить любое обращение к рабочей базе PDRD.
+#
+# Этот Compose НЕ включается в основной стек приложения.
+# Все учётные данные ниже предназначены исключительно для тестов.
+
+services:
+  experience-test-postgres:
+    image: postgres:16-alpine
+    restart: "no"
+
+    environment:
+      POSTGRES_DB: pdrd_experience_test
+      POSTGRES_USER: experience_test
+      POSTGRES_PASSWORD: experience-test-only
+
+    # Данные существуют только пока работает тестовый контейнер.
+    # Рабочие Docker volumes проекта здесь не используются.
+    tmpfs:
+      - /var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U experience_test -d pdrd_experience_test
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+    networks:
+      - experience-test-only
+
+  experience-test-runner:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.quality
+
+    restart: "no"
+
+    depends_on:
+      experience-test-postgres:
+        condition: service_healthy
+
+    environment:
+      # Флаг разрешает только явно выбранные интеграционные тесты.
+      PDRD_RUN_DATABASE_TESTS: "1"
+
+      # Один и тот же URL используется миграцией и тестами.
+      EXPERIENCE_SERVICE_DATABASE_URL: &test_url postgresql+asyncpg://experience_test:experience-test-only@experience-test-postgres:5432/pdrd_experience_test
+      EXPERIENCE_SERVICE_TEST_DATABASE_URL: *test_url
+
+    entrypoint:
+      - /bin/sh
+      - -ec
+
+    command:
+      - |
+        echo "=== МИГРАЦИЯ ТЕСТОВОЙ БАЗЫ ==="
+        cd /workspace/services/experience-service
+        python -m alembic -c alembic.ini upgrade head
+
+        echo "=== ПРОВЕРКА ВЕРСИИ МИГРАЦИИ ==="
+        python -m alembic -c alembic.ini current
+
+        echo "=== ИНТЕГРАЦИОННЫЕ ТЕСТЫ ==="
+        cd /workspace
+        python -m pytest -q services/experience-service/tests/integration/test_review_database.py
+
+    networks:
+      - experience-test-only
+
+networks:
+  experience-test-only:
+    internal: true
