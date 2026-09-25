@@ -28,7 +28,9 @@ PDRD Validation — локальный сервис проверки проек�
 - отдельный system prompt нормативного раздела;
 - transient working prompt;
 - кликабельные нормативные и T sources;
-- База Опыта;
+- Human Review в браузере: Wise/Bad/Edited/Gold, выделение Gold на листе и синхронизация с текстовым списком;
+- серверная доменная модель Human Review, утверждение ревизий и отбор подтверждённых областей для будущей Базы Опыта;
+- База Опыта (достоверное сохранение, HTTP и E indexing вводятся поэтапно; поиск E отключён до завершения контура);
 - единая embedding model для N/T/U/E/PZ;
 - blue/green переиндексация Qdrant при смене embedding identity;
 - cross-process GPU lease и RAM/VRAM admission;
@@ -54,7 +56,7 @@ PDRD Validation — локальный сервис проверки проек�
 - `T` является самостоятельным project/customer requirement и может подтверждать `customer_requirements`;
 - `T` может содержать ссылки на нормативы и направлять targeted N retrieval, но не превращается в норматив;
 - `U` является самостоятельным пользовательским/project source, но не нормативным доказательством;
-- `E` используется только для опыта, finalization и рекомендаций;
+- `E` является опытом, а не нормативным доказательством. Контракт retrieval существует, но `KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_ENABLED=false` до trusted ingestion и оценки качества;
 - finding без N/T/U не удаляется автоматически: инженерное/визуальное замечание может остаться `needs_review`;
 - `normative_control` без валидного `N` не должен сохраняться только на основании `T` или `U`.
 
@@ -76,8 +78,8 @@ experience_sources                  = E
 | Очередь | RabbitMQ, Celery |
 | Orchestration | n8n |
 | Vector DB | Qdrant |
-| VLM | Ollama + `qwen3-vl:8b-instruct` |
-| Embeddings | dedicated service + `Qwen/Qwen3-VL-Embedding-8B` |
+| VLM | shared vLLM OpenAI-compatible endpoint `http://shared-vlm:8000/v1`, logical model `shared-vlm` |
+| Embeddings | shared vLLM endpoint `http://shared-embedding:8000/v1`, logical model `shared-embedding` |
 | Embedding dimension | `4096` |
 | PDF | PyMuPDF |
 | Word | LibreOffice headless |
@@ -93,25 +95,25 @@ Bounded contexts:
 - **API Gateway** — публичный API, job state, immutable analysis snapshot, Outbox, Celery, analysis artifacts и public content proxy для managed sources.
 - **Document Service** — PDF/CAD extraction, render, DWG -> DXF.
 - **Knowledge Service** — managed catalog, ТЗ lifecycle, PostgreSQL metadata, Qdrant, N/T/U/E retrieval и Project Context.
-- **Multimodal Embedding Service** — единый text/image/mixed embedding runtime `Qwen3-VL-Embedding-8B`.
+- **Experience Service** — отдельный bounded context: Human Review, versioned decisions/audit, verified region selection, будущие Experience metadata/crops; на текущем этапе реализованы domain/application и PostgreSQL-контракт, HTTP/развёртывание впереди.
+- **Shared Embedding Runtime** — общий external endpoint `shared-embedding`; локальный каталог `multimodal-embedding-service` сохраняется в репозитории как legacy/test code, но не поднимает второй runtime в Compose.
 - **Analysis Service** — VLM page understanding, requirement check, N/T/U policy и finalization.
 - **n8n** — orchestration внутренних вызовов.
 - **Frontend** — Browser -> API Gateway; прямого доступа к n8n и внутренним сервисам нет.
 
-Shared infrastructure:
+Shared infrastructure (самостоятельный lifecycle, сеть `ai-shared`):
 
-- Ollama;
+- `shared-vlm` (vLLM);
+- `shared-embedding` (vLLM);
 - RabbitMQ;
 - n8n.
 
 Project infrastructure:
 
-- PostgreSQL;
-- Qdrant;
-- Multimodal Embedding Service;
-- application services;
-- project Docker volumes;
-- общий GPU coordination volume.
+- PostgreSQL (`analysis_jobs`/`knowledge` и отдельная схема Experience после миграции);
+- Qdrant и проектные application services;
+- analysis/document/knowledge volumes;
+- Experience Service включится в Compose после transport/config этапа, без копирования shared GPU runtimes.
 
 Направление зависимостей backend:
 
@@ -135,37 +137,32 @@ Infrastructure ──implements──> Application ports
 flowchart TD
     U["Пользователь"] --> FE["Frontend :8080"]
     FE --> GW["API Gateway :8200"]
-
     GW --> FS["Analysis Artifact Store"]
     GW --> KS["Knowledge Service"]
-    KS --> RESOLVE["Resolve immutable analysis selection"]
+    KS --> RESOLVE["Immutable N/T/U selection"]
     RESOLVE --> GW
-
     GW --> PG[("PostgreSQL")]
     PG --> O["API Gateway Outbox"]
-    O --> RMQ["RabbitMQ pdrd.analysis"]
-    RMQ --> W["Celery worker concurrency=1"]
-    W --> N8N["n8n V2"]
-
+    O --> RMQ["Shared RabbitMQ"]
+    RMQ --> W["Project Celery worker"]
+    W --> N8N["Shared n8n: stage-scoped V2 workflows"]
     N8N --> DS["Document Service"]
     N8N --> KS2["Knowledge Service"]
     N8N --> AS["Analysis Service"]
-
-    KS2 --> QD[("Qdrant")]
-    KS2 --> EMB["Unified Embedding Service\nQwen3-VL-Embedding-8B"]
-    AS --> VLM["Ollama VLM\nqwen3-vl:8b-instruct"]
-
-    EMB --> GLOCK["Global GPU lease"]
-    VLM --> GLOCK
-    GLOCK --> GPU["NVIDIA GPU"]
-
+    KS2 --> QD[("Project Qdrant")]
+    KS2 --> EMB["Shared vLLM embedding endpoint"]
+    AS --> VLM["Shared vLLM vision endpoint"]
     N8N --> W
     W --> PG
     W --> FS
-
-    FE --> POLL["Status / result polling"]
+    FE --> POLL["Status / result / visualization polling"]
     POLL --> GW
+    GW --> DS2["Automatic annotated PDF renderer"]
+    GW -. "review transport planned" .-> EXP["Experience Service"]
+    EXP -. "approved review PDF planned" .-> DS2
 ```
+
+Точки и модели shared-inference задаются logical endpoints/переменными окружения, а не физическими ID модели в коде проекта. Пунктир обозначает ещё не подключённый runtime. Текущее создание Gold, review-контролы и текстовые карточки работают в браузере, а действующий `annotated-pdf` остаётся **автоматической исходной версией**.
 
 ## 2. Managed N/U catalog и индексация
 
@@ -227,127 +224,91 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    DOC["Document extraction"] --> FACTS["Page understanding"]
-
+    DOC["Document extraction"] --> FACTS["Page understanding (stage-scoped)"]
     FACTS --> PZQ["Project Context query"]
     PZQ --> PZ{"ПЗ включена?"}
-    PZ -->|да| PZS["Search temporary Project Context"]
-    PZ -->|нет| EMPTY["Без Project Context"]
-    PZS --> AUG["Augmented project context"]
-    EMPTY --> AUG
-
-    FACTS --> Q["Build retrieval queries"]
-    AUG --> Q
-
+    PZ -->|да| PZS["Temporary Project Context"]
+    PZ -->|нет| EMPTY["Без ПЗ"]
+    PZS --> Q["Grouped/typed retrieval queries"]
+    EMPTY --> Q
+    FACTS --> Q
     Q --> REQ{"ТЗ подключено?"}
     REQ -->|нет| NS["General N retrieval"]
     REQ -->|да| TS["T multimodal retrieval"]
     TS --> TN["T-guided N retrieval"]
-    NS --> MERGE["Typed requirement context"]
-    TN --> MERGE
+    TN --> MERGE["Typed requirement context"]
+    NS --> MERGE
     TS --> MERGE
-
     Q --> US["Search User Packages"]
-
     MERGE --> NCTX["N1, N2, ..."]
     MERGE --> TCTX["T1, T2, ..."]
     US --> UCTX["U1, U2, ..."]
-
-    NCTX --> CHECK["VLM requirement check"]
+    NCTX --> CHECK["VLM requirements check"]
     TCTX --> CHECK
     UCTX --> CHECK
-
     CHECK --> FQ["Finding-local normative queries"]
     FQ --> FN["Finding-local N retrieval"]
     FN --> FINALCTX["Normative enrichment"]
-
-    CHECK --> EQ["Experience queries"]
+    CHECK --> EQ["Optional Experience queries"]
     FINALCTX --> EQ
-    EQ --> ES["Experience search"]
-
-    ES --> FINAL["Finalization"]
-    FINAL --> RESULT["Final findings\nN/T/U/E separated"]
+    EQ --> ENABLED{"Experience enabled?"}
+    ENABLED -->|нет: текущий default| EMPTY_E["No E evidence"]
+    ENABLED -->|да: после trusted ingestion| ES["Trusted E retrieval"]
+    EMPTY_E --> FINAL["Finalization"]
+    ES --> FINAL
+    FINAL --> RESULT["Final findings: N/T/U/E separately"]
 ```
+
+`E` в `.env.example` отключён: наличие в workflow шага Experience не означает работающую доверенную базу. Промежуточные гипотезы не удаляются, но не становятся подтверждёнными замечаниями без дополнительной проверки.
 
 ## 5. GPU coordination
 
 ```mermaid
 flowchart TD
-    REQ["GPU operation"] --> LOCK["Acquire cross-process GPU lease"]
-    LOCK --> ADMISSION["Check available RAM / VRAM"]
-    ADMISSION --> ENOUGH{"Resources enough?"}
-
-    ENOUGH -->|нет| WAIT["Bounded wait"]
-    WAIT --> ADMISSION
-
-    ENOUGH -->|да| LOAD{"Runtime"}
-    LOAD -->|Embedding| EMB["Load Qwen3-VL-Embedding-8B"]
-    LOAD -->|Analysis| VLM["Load qwen3-vl:8b-instruct"]
-
-    EMB --> INF["Inference"]
-    VLM --> INF
-    INF --> UNLOAD["Release / unload model"]
-    UNLOAD --> FREE["Release GPU lease"]
+    Q["Project stage requests"] --> SERVICE{"Workload"}
+    SERVICE -->|Vision| V["shared-vlm :8000/v1"]
+    SERVICE -->|Embedding| E["shared-embedding :8000/v1"]
+    V --> CONFIG["Shared vLLM GPU placement and model residency"]
+    E --> CONFIG
+    SERVICE -->|Project-specific GPU-heavy stage if used| LEASE["Cross-process GPU lease"]
+    LEASE --> WAIT["Resource admission and bounded wait"]
+    WAIT --> WORK["Stage execution with exclusive lease"]
+    WORK --> RELEASE["Release lease"]
 ```
 
-Общий lock path:
-
-```text
-/var/lock/pdrd-gpu/gpu.lock
-```
-
-Analysis Service и Multimodal Embedding Service монтируют один `gpu_coordination` volume.
-
-Порядок принципиален:
-
-```text
-acquire global lease
-  -> check free resources
-  -> load model
-  -> inference
-  -> unload/release model
-  -> release lease
-```
-
-Обычный preflight `nvidia-smi` без lease не используется как механизм координации, потому что он оставляет TOCTOU race.
+Shared runtimes управляют собственным размещением GPU и residency; приложение использует stable logical endpoints. Проектный lock `/var/lock/pdrd-gpu/gpu.lock` остаётся контрактом только для операций, действительно использующих project-side GPU lease; **его нельзя представлять как lock, который гарантированно управляет shared vLLM из другого стека**. Конкретные GPU/TP/DP/model IDs берутся из конфигурации shared infrastructure.
 
 ## 6. PostgreSQL — таблицы и связи
 
-Один PostgreSQL instance используется API Gateway и Knowledge Service. Knowledge Service хранит свои таблицы в схеме `knowledge`.
+Один project PostgreSQL instance; сервисы владеют независимыми bounded contexts. У Experience собственная схема `experience` и отдельная таблица Alembic `experience.alembic_version_experience`, не изменяющая цепочки миграций Gateway/Knowledge. Миграцию Experience следует выполнять только после отдельной проверки подключения и backup; **наличие миграции в Git не означает, что она применена на рабочем сервере**.
 
 ```mermaid
 erDiagram
     ANALYSIS_JOBS ||--o{ OUTBOX_MESSAGES : publishes
-
+    ANALYSIS_JOBS ||..o| EXPERIENCE_REVIEW_SESSIONS : "logical job_id, no cross-schema FK"
+    EXPERIENCE_REVIEW_SESSIONS ||--o{ EXPERIENCE_REVIEW_EVENTS : audits
+    EXPERIENCE_REVIEW_SESSIONS ||..o{ CONFIRMED_AREAS : "planned separate confirmation"
+    EXPERIENCE_REVIEW_SESSIONS ||..o{ EXPERIENCE_CANDIDATES : "planned verified selection"
     NORMATIVE_SECTIONS ||--o{ NORMATIVE_CATEGORIES : contains
     NORMATIVE_SECTIONS ||--o{ NORMATIVE_DOCUMENTS : contains
     NORMATIVE_CATEGORIES ||--o{ NORMATIVE_CATEGORIES : parent
     NORMATIVE_CATEGORIES ||--o{ NORMATIVE_DOCUMENTS : groups
     NORMATIVE_DOCUMENTS ||--o{ NORMATIVE_OUTBOX_MESSAGES : indexes
-
     NORMATIVE_SECTIONS ||--o{ TECHNICAL_ASSIGNMENTS : scopes
     TECHNICAL_ASSIGNMENTS ||--o{ TECHNICAL_ASSIGNMENT_OUTBOX_MESSAGES : indexes
 ```
 
 ### API Gateway
 
-`analysis_jobs`
-
-- lifecycle задания;
-- `normative_snapshot` — immutable JSONB настроек на момент создания job;
-- изменение UI, раздела, prompt, T или checkbox после запуска не изменяет уже созданный job.
+`analysis_jobs` — lifecycle задания; `normative_snapshot` является immutable JSONB. Изменение frontend после запуска не модифицирует существующий job.
 
 Snapshot содержит независимо:
 
 ```json
 {
   "section_id": "<uuid>",
-  "document_ids": [
-    "<normative-uuid>"
-  ],
-  "user_package_document_ids": [
-    "<user-package-uuid>"
-  ],
+  "document_ids": ["<normative-uuid>"],
+  "user_package_document_ids": ["<user-package-uuid>"],
   "system_prompt": "<exact resolved prompt>",
   "technical_assignment": {
     "technical_assignment_id": "<uuid>",
@@ -357,54 +318,23 @@ Snapshot содержит независимо:
 }
 ```
 
-`technical_assignment` отсутствует, если ТЗ не подключено.
-
-`outbox_messages`
-
-- transactional outbox анализа;
-- dispatcher публикует событие в RabbitMQ только после SQL commit.
+`technical_assignment` отсутствует без ТЗ. `outbox_messages` — transactional outbox анализа, публикуемый только после SQL commit.
 
 ### Knowledge Service
 
-`knowledge.normative_sections`
+- `knowledge.normative_sections` — разделы и system prompt;
+- `knowledge.normative_categories` — дерево N/U (`parent_id`, `catalog_area`);
+- `knowledge.normative_documents` — metadata, storage key, durable index statuses;
+- `knowledge.normative_outbox_messages` — события N/U indexing;
+- `knowledge.technical_assignments` — metadata и lifecycle T;
+- `knowledge.technical_assignment_outbox_messages` — отдельная durable T queue;
+- `alembic_version_knowledge` — собственная цепочка миграций.
 
-- разделы;
-- сохранённый system prompt.
+### Experience Service
 
-`knowledge.normative_categories`
+**Контракт текущего этапа:** `experience.review_sessions` хранит последний JSONB-снимок одного `job_id` с `revision` и `approved_revision`; `experience.review_events` хранит неизменяемую последовательность действий `(job_id, session_revision)` с before/after и автором. Каждая запись в транзакции проходит optimistic CAS по `expected_revision`. В `ReviewSession` хранятся также замечания без координат — для полного аудита и итогового **текстового** PDF. Отбор обучающих примеров — отдельная операция, **не** копия всей таблицы Review.
 
-- дерево папок;
-- `parent_id` — вложенность;
-- `catalog_area` — `normative` или `user_package`.
-
-`knowledge.normative_documents`
-
-- metadata PDF/DOC/DOCX;
-- bytes хранятся в filesystem volume;
-- `storage_key` указывает на physical file;
-- `index_status`: `uploaded`, `queued`, `indexing`, `ready`, `failed`, `deleting`;
-- `catalog_area` является source of truth для разделения N и U.
-
-`knowledge.normative_outbox_messages`
-
-- durable события managed N/U indexing.
-
-`knowledge.technical_assignments`
-
-- metadata ТЗ конкретного analysis document;
-- lifecycle T indexing;
-- `index_status`: upload/index queue/indexing/ready/failed состояния.
-
-`knowledge.technical_assignment_outbox_messages`
-
-- отдельный durable outbox для T indexing;
-- не смешивается с normative outbox.
-
-Knowledge Service использует отдельную Alembic version table:
-
-```text
-alembic_version_knowledge
-```
+**Следующие этапы:** отдельные подтверждения областей, полноценные Experience records/crops, HTTP, экспорт и индексация. На сервере новые tables отсутствуют до явного применения миграции.
 
 ## 7. Qdrant — stable aliases и physical collections
 
@@ -441,13 +371,15 @@ Physical collection name определяется fingerprint:
 fingerprint = sha256(model | dimension | schema_version)[:16]
 ```
 
-Для текущих default settings:
+Для текущей `.env.example` логической identity:
 
 ```text
-PDRD_EMBEDDING_MODEL=Qwen/Qwen3-VL-Embedding-8B
+PDRD_EMBEDDING_MODEL=shared-embedding
 PDRD_EMBEDDING_DIMENSION=4096
-PDRD_EMBEDDING_SCHEMA_VERSION=1
+PDRD_EMBEDDING_SCHEMA_VERSION=2
 ```
+
+Физический checkpoint и hardware layout задаются shared-infrastructure; изменение логической identity или схемы векторов требует контролируемой миграции.
 
 ### Managed N/U payload
 
@@ -502,21 +434,30 @@ PDRD_EMBEDDING_SCHEMA_VERSION=1
 
 ### Experience payload
 
+Текущий domain `ExperienceCandidate` описывает **подготовку записи**, но действующая E-коллекция пока не пополняется из Human Review. Планируемый payload после сохранения изображения и проверки прав:
+
 ```json
 {
-  "project_id": "<project>",
-  "issue_id": "<issue>",
-  "issue_text": "<expert comment>",
-  "category": "<category>",
-  "status": "<status>",
-  "verified_fixed": true,
-  "before_page": 5,
-  "after_page": 5,
-  "before_context": "<before>",
-  "after_context": "<after>",
-  "text": "<embedding text>"
+  "job_id": "<uuid>",
+  "document_id": "<uuid>",
+  "source_sha256": "<sha256>",
+  "finding_id": "<stable source finding id>",
+  "approved_revision": 4,
+  "origin": "vlm",
+  "tag": "edited",
+  "decision": "rejected",
+  "learning_use": "needs_adjudication",
+  "page_number": 22,
+  "issue_regions": [{"x_min": 100, "y_min": 150, "x_max": 300, "y_max": 380}],
+  "original_text": "<original VLM interpretation>",
+  "text": "<engineer correction>",
+  "normative_basis": "<verified or explicitly unverified reference>",
+  "crop_asset_id": "<object storage reference>",
+  "embedding_text": "<selected trusted search text>"
 }
 ```
+
+`tag=edited` и `decision=rejected` показываются как **Edited · Bad**; они не становятся автоматически положительными/отрицательными обучающими примерами (`needs_adjudication`). `E` не нормативный basis. Pending и записи без подтверждённой области не индексируются. `KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_ENABLED=false` остаётся до завершения индексации и слепой оценки.
 
 ### Project Context
 
@@ -555,7 +496,7 @@ flowchart TD
 
     CREATE --> NU["Reindex persisted N/U files"]
     CREATE --> T["Reindex persisted READY T files"]
-    CREATE --> E["Re-embed persisted Experience payload"]
+    CREATE --> E["Re-embed persisted trusted Experience only if available"]
 
     NU --> CHECK["All rebuilds succeeded"]
     T --> CHECK
@@ -570,7 +511,7 @@ Source documents не восстанавливаются из старых vecto
 - N/U перечитываются из `normative_documents`;
 - T перечитывается из `technical_assignment_documents`;
 - metadata читаются из PostgreSQL;
-- E переэмбеддится из сохранённых payload;
+- E после включения доверенного контура переэмбеддится только из сохранённых проверенных payload (в текущем режиме E выключен);
 - временные Project Context создаются заново в конкретном analysis run.
 
 Если rebuild падает до cutover:
@@ -583,41 +524,149 @@ Source documents не восстанавливаются из старых vecto
 
 ```mermaid
 flowchart TD
-    PG[("PostgreSQL")] --> PGV["postgres_data"]
-    QD[("Qdrant")] --> QDV["qdrant_data"]
+    PG[("Project PostgreSQL")] --> PGV["postgres_data"]
+    QD[("Project Qdrant")] --> QDV["qdrant_data"]
     GW["API Gateway / worker"] --> AV["analysis_artifacts"]
     KS["Knowledge Service / indexer"] --> NV["normative_documents"]
     TIDX["T indexer"] --> TV["technical_assignment_documents"]
-    EMB["Embedding Service"] --> MC["multimodal_model_cache"]
-    AS["Analysis Service"] --> GL["gpu_coordination"]
-    EMB --> GL
-
+    EX["Experience metadata and review"] --> PGV
+    EX -. "future crop asset contract" .-> CROP["Versioned crop storage: design pending"]
     PGV --> PGP["/var/lib/postgresql/data"]
     QDV --> QDP["/qdrant/storage"]
     AV --> AP["/data/analyses"]
     NV --> NP["/data/normative"]
     TV --> TP["/data/technical-assignments"]
-    MC --> MCP["/models/huggingface"]
-    GL --> GP["/var/lock/pdrd-gpu"]
+    VLM["shared-vlm/shared-embedding"] --> SHARED["Shared runtime storage: separate stack"]
 ```
 
-| Данные | Docker volume | Путь |
+| Данные | Docker volume / owner | Путь |
 |---|---|---|
-| PostgreSQL | `postgres_data` | `/var/lib/postgresql/data` |
+| PostgreSQL (включая будущую `experience` schema) | `postgres_data` | `/var/lib/postgresql/data` |
 | Qdrant | `qdrant_data` | `/qdrant/storage` |
 | Analysis artifacts | `analysis_artifacts` | `/data/analyses` |
 | Managed N/U files | `normative_documents` | `/data/normative` |
 | T files | `technical_assignment_documents` | `/data/technical-assignments` |
-| HF embedding checkpoint cache | `multimodal_model_cache` | `/models/huggingface` |
-| GPU lease | `gpu_coordination` | `/var/lock/pdrd-gpu` |
+| Shared vLLM/embedding weights | `shared-infrastructure` | Не является volume проекта |
+| Experience image crops | отдельный versioned storage — план | Путь определяется на этапе storage adapter |
 
-Обычный deploy/restart не должен использовать:
+Не использовать `docker compose down -v` в обычном деплое: он уничтожает постоянные данные.
 
-```bash
-docker compose down -v
+## 10. Группировка и локализация замечаний
+
+```mermaid
+flowchart TD
+    RAW["Completed analysis findings"] --> CLASS{"status=hypothesis?"}
+    CLASS -->|да| H["Unverified hypothesis disclosure: no bbox/callout"]
+    CLASS -->|нет| LOC["Server-owned page localization"]
+    LOC --> HAS{"regions found?"}
+    HAS -->|нет| TEXT["Textual review item without invented bbox"]
+    HAS -->|да| GROUP["Nearby visual groups: page + object_ref/geometry"]
+    GROUP --> SHARED["Shared callout frame for nearby same-object findings"]
+    SHARED --> IDS["Each member retains own finding_id, controls and decision"]
+    TEXT --> REVIEW["Human Review"]
+    IDS --> REVIEW
 ```
 
-потому что `-v` удаляет persistent volumes.
+**Реализовано во frontend:** пространственная группировка влияет только на отображение; каждый `finding_id` остаётся независимым в review/DB. Hypothesis не создаёт ложную рамку. Группировка не объединяет доказательства, решения или оригинальные тексты в одну запись. Gold всегда имеет отдельный собственный `finding_id` и исходно выбранные пользователем две области.
+
+## 11. Полный бизнес-процесс Experience Service
+
+```mermaid
+flowchart TD
+    A["Completed analysis: immutable source findings"] --> V["Lazy visualization and source PDF"]
+    V --> GW["API Gateway review boundary — planned"]
+    GW --> OPEN["Experience OpenReview: original VLM findings pending"]
+    OPEN --> UI["Human Review UI: Wise / Bad / Edited / Gold"]
+    UI --> EDIT["Edit VLM: original + corrected version; decision resets"]
+    UI --> MANUAL["Add Gold: same-page issue and callout rectangles"]
+    UI --> DECIDE["Independent decision for every finding"]
+    EDIT --> DECIDE
+    MANUAL --> DECIDE
+    DECIDE --> CAS["ReviewRepository: revision CAS + append-only events"]
+    CAS --> ALL{"All decisions recorded?"}
+    ALL -->|нет| UI
+    ALL -->|да| APPROVE["Explicit approval of current review revision"]
+    APPROVE --> PDF["Reviewed PDF renderer — planned"]
+    PDF --> PAGE["Accepted with location: annotation on original page"]
+    PDF --> TEXT["All accepted: textual appended list, including unlocated"]
+    APPROVE --> PICK["SelectExperience: separate trusted selection"]
+    PICK --> STORE["Validated metadata and crop assets — planned"]
+    STORE --> INDEX["Knowledge Service: E indexing only after evaluation"]
+    INDEX --> QD[("dva_experience_active, guarded by feature flag")]
+```
+
+**Статусы внедрения:** UI, domain `ReviewSession`, `SelectExperience` реализованы; отдельные DB adapter/Alembic schema составляют ближайший этап; HTTP, реальное подтверждение координат, crop, reviewed PDF и E indexing пока не подключены. Пунктир/слово `planned` означает архитектурный план, не существующую рабочую функциональность.
+
+## 12. Подтверждение и исправление областей
+
+```mermaid
+flowchart TD
+    F["VLM finding, stable finding_id"] --> S{"Server-localized region exists?"}
+    S -->|нет| U["Unlocated: text-only Review/PDF; no Experience"]
+    S -->|да| C["Show candidate region to engineer"]
+    C --> CONF{"Engineer confirms correct location?"}
+    CONF -->|нет| FIX["Engineer redraws / corrects region"]
+    FIX --> RECONF["Validate page, coordinates, actor, revision"]
+    CONF -->|да| RECONF
+    RECONF --> AREA["ConfirmedFindingArea, server-owned audit — planned"]
+    AREA --> PICK["SelectExperience candidate"]
+    G["Manual Gold"] --> M["User draws issue+callout on the same page"]
+    M --> A{"Gold explicitly accepted?"}
+    A -->|нет| LOG["Review audit only"]
+    A -->|да| PICK
+```
+
+`status=located` от автоматического локализатора не равен подтверждению инженера. Подтверждение проверяется отдельно от `decision=accepted`. Никаких выдуманных координат или перехода Gold на другой лист. Достоверная привязка подтверждения к актуальной редакции finding будет enforced в persistent confirmed-areas adapter.
+
+## 13. Как будет происходить отбор, отсечение и классификация
+
+```mermaid
+flowchart TD
+    START["Approved current Review revision"] --> COMPLETE{"Review complete and explicitly approved?"}
+    COMPLETE -->|нет| STOP["Stop: no Experience candidates"]
+    COMPLETE -->|да| SOURCE{"Source?"}
+    SOURCE -->|VLM| VA{"Explicitly confirmed regions?"}
+    VA -->|нет| AUDIT["Review audit, optional accepted text PDF; no Experience"]
+    VA -->|да| DEC{"Decision and correction"}
+    SOURCE -->|Manual Gold| GA{"Gold accepted with valid same-page geometry?"}
+    GA -->|нет| AUDIT
+    GA -->|да| GOLD["tag=gold, positive candidate"]
+    DEC -->|Original accepted| WISE["tag=wise, positive candidate"]
+    DEC -->|Original rejected| BAD["tag=bad, negative candidate"]
+    DEC -->|Edited accepted| EDIT["tag=edited, positive candidate"]
+    DEC -->|Edited rejected| ADJ["tag=edited, decision=rejected: needs_adjudication"]
+    WISE --> ASSET["Versioned crop + provenance + normative link"]
+    BAD --> ASSET
+    EDIT --> ASSET
+    GOLD --> ASSET
+    ADJ --> HOLD["Store for manual adjudication; never auto-train"]
+    HOLD --> ASSET
+    ASSET --> DEDUP["Idempotent example_key and source SHA256"]
+    DEDUP --> STORE["Experience persistence / indexing outbox — planned"]
+```
+
+Замечание без подтверждённой области **может присутствовать в операционном Review и утверждённом текстовом PDF**, но **не** попадает в обучающую Experience DB независимо от принятия. Отредактированный VLM имеет `tag=edited`, даже при `decision=rejected`; отдельный `edited-bad` как значение поля не требуется.
+
+## 14. Экспорт Reviewed PDF и обучение
+
+```mermaid
+flowchart TD
+    REV["Approved revision"] --> LOCK{"Any pending findings or stale approval?"}
+    LOCK -->|да| DENY["Block reviewed PDF at API and UI"]
+    LOCK -->|нет| FILTER["Include accepted only"]
+    FILTER --> PAGE{"Location available?"}
+    PAGE -->|да| DRAW["Annotation on original PDF page"]
+    PAGE -->|нет| NO_BOX["No artificial annotation"]
+    DRAW --> REPORT["Text report for every accepted finding"]
+    NO_BOX --> REPORT
+    REPORT --> CACHE["Cache by job_id + approved_revision + source digest"]
+    REV --> SELECT["Verified ExperienceCandidate selection"]
+    SELECT --> CROPS["Source PDF crop and full versioned metadata — planned"]
+    CROPS --> INDEX["E embedding via shared-embedding — planned"]
+    INDEX --> EVAL["Blind retrieval evaluation and human checks"]
+    EVAL --> FLAG{"Enable E feature flag only after validation"}
+    FLAG --> TRAIN["Separate VLM fine-tuning research — not live"]
+```
 
 # Как работает retrieval
 
@@ -692,9 +741,7 @@ U1, U2, U3, ...
 
 ## E — Experience retrieval
 
-Experience выполняется после requirement check по `experience_query` finding.
-
-Experience source не становится нормативным basis.
+Контракт Experience search вызывается после requirement check по `experience_query`, но **в текущей конфигурации фактический поиск выключен** (`KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_ENABLED=false`). Включение только после сохранения подтверждённых crop/metadata, trusted E indexing и проверки качества. E никогда не становится нормативным basis.
 
 # Формирование N/T/U JSON
 
@@ -990,6 +1037,10 @@ Frontend позволяет:
 POST /api/v1/analyses
 GET  /api/v1/analyses/{job_id}
 GET  /api/v1/analyses/{job_id}/result
+GET  /api/v1/analyses/{job_id}/progress
+POST /api/v1/analyses/{job_id}/cancel
+GET  /api/v1/analyses/{job_id}/visualization
+GET  /api/v1/analyses/{job_id}/annotated-pdf  # automatic, not reviewed
 ```
 
 Multipart analysis fields включают:
@@ -1065,7 +1116,7 @@ GET    /api/v1/normative/user-packages/documents/{document_id}/content
 GET /api/v1/normative/technical-assignments/{technical_assignment_id}/content
 ```
 
-Browser не обращается к internal Knowledge API напрямую.
+Browser не обращается к internal Knowledge API напрямую. HTTP endpoints Experience/Reviewed PDF появятся после подключения transport, identity и persistence; на текущей ветке **публичного Experience API ещё нет**.
 
 # n8n workflows
 
@@ -1078,7 +1129,7 @@ n8n/workflows/
 └── analysis-v2-pdf-cad.json
 ```
 
-Общий requirement path для всех source modes:
+В V2 PDF выполняются stage-scoped операции с последовательной обработкой страниц тяжёлых этапов; CAD/PDF+CAD сохраняют свои source-mode правила. Общий requirement path:
 
 ```text
 Page understanding
@@ -1091,8 +1142,8 @@ Page understanding
   -> Check Norms
   -> Prepare Finding Normative Queries
   -> Search Finding Norms
-  -> Search Experience
-  -> Finalize Findings
+  -> Search Experience (feature disabled until trusted E ingestion)
+  -> Group/Finalize Findings
 ```
 
 `Check Norms` получает typed sources отдельно:
@@ -1128,7 +1179,8 @@ PDRD-validation/
 │           ├── components/
 │           └── features/
 │               ├── analysis/
-│               └── normative/
+│               ├── normative/
+│               └── review/     # Wise/Bad/Edited/Gold + manual geometry/text list
 │
 ├── services/
 │   ├── api-gateway/
@@ -1155,12 +1207,13 @@ PDRD-validation/
 │   │   │       ├── gpu_coordination.py
 │   │   │       └── ollama.py
 │   │   └── tests/
-│   └── multimodal-embedding-service/
-│       ├── src/pdrd_multimodal_embedding_service/
-│       │   ├── gpu_lease.py
-│       │   ├── main.py
-│       │   ├── runtime.py
-│       │   └── settings.py
+│   ├── multimodal-embedding-service/  # legacy/test code; not a Compose runtime
+│   └── experience-service/
+│       ├── alembic/             # Experience-only PostgreSQL revisions
+│       ├── src/pdrd_experience_service/
+│       │   ├── domain/          # ReviewSession, ExperienceCandidate
+│       │   ├── application/     # open/change/select ports and use cases
+│       │   └── infrastructure/  # PostgreSQL persistence (current stage)
 │       └── tests/
 │
 ├── n8n/
@@ -1208,12 +1261,12 @@ PDRD_RABBITMQ_PASSWORD=replace-me
 Единая embedding identity:
 
 ```dotenv
-PDRD_EMBEDDING_MODEL=Qwen/Qwen3-VL-Embedding-8B
+PDRD_EMBEDDING_MODEL=shared-embedding
 PDRD_EMBEDDING_DIMENSION=4096
-PDRD_EMBEDDING_SCHEMA_VERSION=1
+PDRD_EMBEDDING_SCHEMA_VERSION=2
 ```
 
-Для замены embedding model меняются model/dimension в `.env.example`; business logic не содержит жёсткой привязки к названию модели.
+Физическая модель и GPU topology управляются shared infrastructure; смена логической model identity, размерности или версии схемы требует контролируемого fingerprint cutover. `.env.example` содержит baseline, `.env` — sparse private overrides, и process/Compose env учитываются по согласованному приоритету.
 
 Ключевые Knowledge defaults:
 
@@ -1227,48 +1280,26 @@ embedding.model = PDRD_EMBEDDING_MODEL
 broker.queue_name = pdrd.knowledge.indexing
 ```
 
-Ключевые GPU defaults:
+Ключевые runtime defaults:
 
 ```text
-embedding min free RAM  = 20 GiB
-embedding min free VRAM = 18 GiB
-analysis VLM min VRAM   = 12 GiB
-global lease            = /var/lock/pdrd-gpu/gpu.lock
-analysis keep_alive      = 0s
+analysis VLM URL       = http://shared-vlm:8000/v1
+analysis VLM alias     = shared-vlm
+embedding URL          = http://shared-embedding:8000/v1
+embedding alias        = shared-embedding
+project GPU lease path = /var/lock/pdrd-gpu/gpu.lock (where applicable)
+Experience E search    = disabled until trusted ingestion
 ```
 
 # Запуск
 
 Требуются Docker Engine и Docker Compose plugin.
 
-Shared network `ai-shared` должна содержать:
+Shared network `ai-shared` должна предоставлять RabbitMQ, n8n, `shared-vlm` и `shared-embedding`; их lifecycle независим от проекта. Физические checkpoint/model IDs и GPU layout настраиваются в `shared-infrastructure`, а проект использует logical aliases.
 
-- RabbitMQ;
-- n8n;
-- Ollama.
+Безопасный штатный deploy следует выполнять штатным проектным скриптом после проверки текущей ветки/контейнеров и Compose: `bash scripts/up.sh`. Не перезапускайте shared stack и не удаляйте volume ради разработки Experience.
 
-Ollama model для PDRD Analysis:
-
-```text
-qwen3-vl:8b-instruct
-```
-
-Embedding checkpoint загружается dedicated service через Hugging Face cache:
-
-```text
-Qwen/Qwen3-VL-Embedding-8B
-```
-
-Запуск:
-
-```bash
-docker compose up -d \
-  --build \
-  --force-recreate \
-  --remove-orphans \
-  --wait \
-  --wait-timeout 180
-```
+Важное ограничение: наличие SQLAlchemy adapter и Alembic migration ещё **не** означает, что Experience-service подключён к Compose/HTTP. Доступ к DB и миграция будут проверены отдельно; запуск миграции из README до настройки runtime запрещён.
 
 При startup `knowledge-embedding-migrator` проверяет embedding fingerprint до старта Knowledge runtime.
 
@@ -1328,8 +1359,17 @@ Docker quality:
 
 ```bash
 docker compose --profile test build quality-tests
-docker compose --profile test run --rm quality-tests
+docker compose --profile test run --rm --no-deps quality-tests
 ```
+
+Review domain/Experience selection и инфраструктурные тесты:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest services/experience-service/tests -q
+cd frontend; node --test tests/*.test.js; cd ..
+```
+
+PostgreSQL integration Experience выполняется только на отдельной тестовой БД и только после Alembic upgrade с явными `PDRD_RUN_DATABASE_TESTS=1` и `EXPERIENCE_SERVICE_TEST_DATABASE_URL` (не на production DB).
 
 Service integration:
 
@@ -1405,11 +1445,7 @@ Embedding runtime:
 curl -fsS http://127.0.0.1:8601/internal/v1/status | python3 -m json.tool
 ```
 
-Ollama residency:
-
-```bash
-curl -fsS http://127.0.0.1:11434/api/ps | python3 -m json.tool
-```
+Shared runtime checks осуществляются через опубликованные health endpoints `shared-vlm` и `shared-embedding` в доверенной LAN/VPN. Их адреса, модельный alias и topology следует проверять по текущему `shared-infrastructure/docs/services.yaml`, а не по локальному Ollama `api/ps`.
 
 # Текущий функциональный контур
 
@@ -1425,14 +1461,18 @@ curl -fsS http://127.0.0.1:11434/api/ps | python3 -m json.tool
 - T-guided normative retrieval;
 - N/T/U typed evidence;
 - finding-local normative enrichment;
-- Experience finalization;
-- unified Qwen3-VL-Embedding-8B для N/T/U/E/PZ;
+- Experience search contract присутствует в finalization; реально отключён флагом до проверенной записи Experience;
+- shared vLLM vision и embedding logical endpoints, 4096-dimension vector contract;
 - stable Qdrant aliases и model fingerprint;
 - blue/green automatic reindex из durable sources;
-- global cross-process GPU lease;
-- RAM/VRAM admission;
-- explicit Analysis VLM unload;
+- project-side GPU lease/admission where used; shared model residency управляется отдельным shared-runtime lifecycle;
 - temporary Project Context cleanup;
 - кликабельные N/T sources через API Gateway;
 - frontend нормативного каталога, пользовательских пакетов и ТЗ;
+- Human Review frontend: Wise/Bad/Edited/Gold, независимые решения сгруппированных findings, создание Gold с двумя областями и общим текстовым списком;
+- доменная модель `ReviewSession`, журнал редакций, optimistic revisions, подтверждаемая геометрия и `SelectExperience` (пока только подготовка кандидатов);
+- текущий этап: отдельная SQLAlchemy PostgreSQL persistence и Experience Alembic migration, ещё без live HTTP/Compose;
+- автоматический PDF существует, reviewed PDF после Human Review пока заблокирован;
 - unit/integration/architecture/runtime test layers.
+
+**Следующие этапы Experience:** runtime identity/config и API Gateway integration; подтверждение/коррекция областей на сервере; отдельное durable хранилище Experience metadata и image crop; утверждённый PDF на исходных листах и в текстовом отчёте; trusted E indexing с последующей оценкой качества; отдельный эксперимент дообучения VLM.
