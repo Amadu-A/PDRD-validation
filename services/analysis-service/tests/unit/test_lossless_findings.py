@@ -112,6 +112,7 @@ def violation(
     normative_source_ids: list[str] | None = None,
     technical_assignment_source_ids: list[str] | None = None,
     user_package_source_ids: list[str] | None = None,
+    object_ref: str = "",
 ) -> dict[str, Any]:
     """Строит candidate finding."""
     return {
@@ -120,6 +121,7 @@ def violation(
         "status": "confirmed",
         "comment": comment,
         "evidence": evidence,
+        "object_ref": object_ref,
         "recommendation_draft": ("Проверить проектное решение."),
         "confidence": 0.8,
         "normative_source_ids": (
@@ -133,6 +135,7 @@ def violation(
         "user_package_source_ids": (
             user_package_source_ids if user_package_source_ids is not None else []
         ),
+        "visual_regions": [{"x_min": 100, "y_min": 100, "x_max": 140, "y_max": 130}],
     }
 
 
@@ -244,6 +247,85 @@ def test_exact_duplicate_merges_all_source_id_namespaces() -> None:
         "U2",
     ]
 
+    assert [
+        origin["raw_index"] for origin in selection.origin_assertions_by_candidate[0]
+    ] == [1, 2]
+    assert selection.origin_assertions_by_candidate[0][0]["normative_source_ids"] == [
+        "N1"
+    ]
+    assert selection.origin_assertions_by_candidate[0][1]["normative_source_ids"] == [
+        "N1",
+        "N2",
+    ]
+
+
+def test_same_words_at_different_objects_are_not_consolidated() -> None:
+    """Одинаковый текст у двух приборов с разными областями сохраняет два ID."""
+    first = violation(comment="Проверить датчик PE.", evidence="Разные обозначения.")
+    second = violation(comment="Проверить датчик PE.", evidence="Разные обозначения.")
+    second["visual_regions"] = [
+        {"x_min": 700, "y_min": 600, "x_max": 740, "y_max": 630}
+    ]
+
+    selection = select_violation_candidates([first, second])
+
+    assert selection.consolidated_count == 2
+    assert selection.source_indexes_by_candidate == ((1,), (2,))
+
+
+def test_same_words_without_regions_are_not_consolidated() -> None:
+    """Без объекта и координат одинаковая формулировка недостаточна для dedupe."""
+    first = violation(comment="Проверить датчик PE.", evidence="Разные обозначения.")
+    second = dict(first)
+    first["visual_regions"] = []
+    second["visual_regions"] = []
+
+    assert select_violation_candidates([first, second]).consolidated_count == 2
+
+
+def test_rephrased_same_defect_of_explicit_object_keeps_both_origins() -> None:
+    """Явный объект, свойство, дефект и близкие области допускают мягкий dedupe."""
+    first = violation(
+        comment="У датчика PE 8.5.1 несоответствие позиционного номера.",
+        evidence="На узле Д2 номер датчика PE 8.5.1 не совпадает.",
+        object_ref="Узел Д2",
+        normative_source_ids=["N1"],
+    )
+    second = violation(
+        comment="Несовпадение позиционного номера датчика PE 8.5.1.",
+        evidence="На узле Д2 обнаружено расхождение позиции PE 8.5.1.",
+        object_ref="Узел Д2",
+        normative_source_ids=["N2"],
+    )
+    second["visual_regions"] = [
+        {"x_min": 135, "y_min": 100, "x_max": 175, "y_max": 130}
+    ]
+
+    selection = select_violation_candidates([first, second])
+
+    assert selection.consolidated_count == 1
+    assert selection.candidates[0]["normative_source_ids"] == ["N1", "N2"]
+    assert len(selection.candidates[0]["visual_regions"]) == 2
+    assert [
+        origin["comment"] for origin in selection.origin_assertions_by_candidate[0]
+    ] == [first["comment"], second["comment"]]
+
+
+def test_same_object_but_different_instrument_role_stays_distinct() -> None:
+    """PE и TG под одним узлом не становятся одним дефектом."""
+    first = violation(
+        comment="Несоответствие позиции PE 8.5.1.",
+        evidence="У PE 8.5.1 несовпадение позиционного номера.",
+        object_ref="Узел Д2",
+    )
+    second = violation(
+        comment="Несоответствие позиции TG 8.5.1.",
+        evidence="У TG 8.5.1 несовпадение позиционного номера.",
+        object_ref="Узел Д2",
+    )
+
+    assert select_violation_candidates([first, second]).consolidated_count == 2
+
 
 def test_same_comment_with_different_evidence_stays_distinct() -> None:
     """Одинаковый текст замечания не склеивает разные физические факты."""
@@ -294,6 +376,10 @@ def test_rephrased_same_position_and_issue_are_consolidated() -> None:
         ),
     ]
 
+    candidates[1]["visual_regions"] = [
+        {"x_min": 700, "y_min": 100, "x_max": 740, "y_max": 130}
+    ]
+
     selection = select_violation_candidates(
         candidates,
     )
@@ -314,6 +400,8 @@ def test_rephrased_same_position_and_issue_are_consolidated() -> None:
         "N1",
         "N2",
     ]
+    assert len(selection.origin_assertions_by_candidate[0]) == 2
+    assert len(selection.candidates[0]["visual_regions"]) == 2
 
 
 def test_similar_findings_for_different_positions_stay_distinct() -> None:
@@ -508,6 +596,42 @@ async def test_exact_duplicates_become_one_finding_before_downstream_stages(
 
     assert "raw_candidate_indexes=(1, 2)" in caplog.text
     assert "provenance_lossless=True" in caplog.text
+
+
+async def test_unverified_repeat_retains_original_vlm_assertion() -> None:
+    """Выдуманный повтор сохраняется гипотезой, без нормативного доказательства."""
+    candidate = violation(
+        category="marking",
+        comment="Позиционное обозначение 8.12.34 повторяется.",
+        evidence="Модель видит две подписи 8.12.34.",
+        normative_source_ids=["N1"],
+        object_ref="Узел Д2",
+    )
+    model = FakeVisionModel({"summary": "Возможный повтор.", "violations": [candidate]})
+    use_case = CheckPageAgainstNorms(
+        vision_model=model,
+        num_predict=2600,
+        max_issues=10,
+        normative_text_limit=700,
+    )
+
+    _, findings, _ = await use_case.execute(
+        page_number=22,
+        extracted_text="Принципиальная схема\n8.9.3\n",
+        page_facts=page_facts(),
+        normative_sources=(normative_source(),),
+        image_bytes=b"png",
+    )
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.finding_id == "p22-h1"
+    assert finding.status == "hypothesis"
+    assert finding.object_ref == "Узел Д2"
+    assert finding.basis_sources == ()
+    assert finding.visual_regions
+    assert finding.origin_assertions[0]["comment"] == candidate["comment"]
+    assert finding.origin_assertions[0]["normative_source_ids"] == ["N1"]
 
 
 async def test_unknown_source_id_does_not_delete_candidate(

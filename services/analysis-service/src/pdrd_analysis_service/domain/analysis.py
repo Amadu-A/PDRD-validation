@@ -28,6 +28,7 @@ FindingSeverity = Literal[
 FindingStatus = Literal[
     "confirmed",
     "needs_review",
+    "hypothesis",
 ]
 
 
@@ -328,6 +329,10 @@ class FindingDraft:
         ...,
     ] = ()
 
+    origin_assertions: tuple[dict[str, Any], ...] = ()
+
+    object_ref: str = ""
+
 
 @dataclass(frozen=True, slots=True)
 class FinalFinding:
@@ -369,6 +374,10 @@ class FinalFinding:
         UserPackageSource,
         ...,
     ] = ()
+
+    origin_assertions: tuple[dict[str, Any], ...] = ()
+
+    object_ref: str = ""
 
 
 @dataclass(frozen=True, slots=True)

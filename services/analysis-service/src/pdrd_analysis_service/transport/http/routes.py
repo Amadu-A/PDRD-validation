@@ -264,6 +264,8 @@ def _finding_draft_payload(
             )
             for region in finding.visual_regions
         ],
+        origin_assertions=list(finding.origin_assertions),
+        object_ref=finding.object_ref,
     )
 
 
@@ -318,6 +320,8 @@ def _final_finding_payload(
             )
             for region in visual_regions
         ],
+        origin_assertions=list(finding.origin_assertions),
+        object_ref=finding.object_ref,
     )
 
 

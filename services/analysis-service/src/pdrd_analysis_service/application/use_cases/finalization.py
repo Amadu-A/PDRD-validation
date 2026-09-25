@@ -528,8 +528,11 @@ class FinalizeFindings:
         ordinary = tuple(
             finding
             for finding in findings
-            if not _is_protected_duplicate_review(finding)
-            or normalized_candidate_groups.get(finding.finding_id)
+            if finding.status != "hypothesis"
+            and (
+                not _is_protected_duplicate_review(finding)
+                or normalized_candidate_groups.get(finding.finding_id)
+            )
         )
 
         legacy_candidates = (
@@ -622,6 +625,7 @@ class FinalizeFindings:
             ordinary_by_id.get(finding.finding_id, self._fallback(finding))
             for finding in findings
             if _is_protected_duplicate_review(finding)
+            or finding.status == "hypothesis"
             or finding.finding_id in ordinary_by_id
         ]
         if protected:
@@ -1125,6 +1129,8 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                 finding.technical_assignment_basis_sources
             ),
             user_package_basis_sources=(finding.user_package_basis_sources),
+            origin_assertions=finding.origin_assertions,
+            object_ref=finding.object_ref,
         )
 
     @staticmethod
@@ -1264,4 +1270,6 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                 finding.technical_assignment_basis_sources
             ),
             user_package_basis_sources=(finding.user_package_basis_sources),
+            origin_assertions=finding.origin_assertions,
+            object_ref=finding.object_ref,
         )

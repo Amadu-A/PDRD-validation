@@ -226,6 +226,10 @@ def build_normative_check_schema(
                             "minLength": 1,
                             "maxLength": 180,
                         },
+                        "object_ref": {
+                            "type": "string",
+                            "maxLength": 80,
+                        },
                         "recommendation_draft": {
                             "type": "string",
                             "maxLength": 0,
@@ -261,6 +265,7 @@ def build_normative_check_schema(
                         "status",
                         "comment",
                         "evidence",
+                        "object_ref",
                         "recommendation_draft",
                         "confidence",
                         "visual_regions",

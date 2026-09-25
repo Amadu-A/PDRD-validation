@@ -50,6 +50,7 @@ def _candidate(
         "normative_source_ids": [],
         "technical_assignment_source_ids": [],
         "user_package_source_ids": [],
+        "visual_regions": [{"x_min": 100, "y_min": 100, "x_max": 140, "y_max": 130}],
     }
 
 
@@ -69,6 +70,7 @@ def _duplicate_candidate() -> dict[
         "normative_source_ids": [],
         "technical_assignment_source_ids": [],
         "user_package_source_ids": [],
+        "visual_regions": [{"x_min": 100, "y_min": 100, "x_max": 140, "y_max": 130}],
     }
 
 

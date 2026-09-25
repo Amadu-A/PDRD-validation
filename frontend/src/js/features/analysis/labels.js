@@ -14,6 +14,7 @@ const STATUS_LABELS = {
 
   confirmed: "Подтверждено",
   needs_review: "Требует проверки инженером",
+  hypothesis: "Гипотеза — не подтверждена текстом PDF",
 };
 
 

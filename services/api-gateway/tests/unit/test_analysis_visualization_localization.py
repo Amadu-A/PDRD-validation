@@ -58,6 +58,27 @@ def _located(
     )
 
 
+def test_hypotheses_are_not_sent_to_automatic_localization() -> None:
+    """Исходная VLM область гипотезы не становится подтверждённой рамкой."""
+    targets = GetAnalysisVisualization._targets_for_page(
+        findings=[
+            {
+                "finding_id": "p22-h1",
+                "page": 22,
+                "status": "hypothesis",
+                "comment": "Позиция 8.12.34 повторяется.",
+                "visual_regions": [
+                    {"x_min": 100, "y_min": 100, "x_max": 130, "y_max": 130}
+                ],
+            },
+            {"finding_id": "p22-f2", "page": 22, "status": "needs_review"},
+        ],
+        page_number=22,
+    )
+
+    assert [target.finding_id for target in targets] == ["p22-f2"]
+
+
 def test_matcher_normalizes_latin_and_cyrillic_engineering_tags() -> None:
     """Latin T1.1 в finding совпадает с кириллической Т1.1 PDF geometry."""
     matcher = FindingAnchorMatcher()

@@ -268,6 +268,11 @@ QUANTITY / CHARACTERISTIC RELATIONSHIP.
 
 VISUAL EVIDENCE REGIONS.
 
+Для каждого candidate укажи object_ref: точное обозначение физического
+объекта или узла на листе (например «Узел Д2»), только если принадлежность
+непосредственно видна. Если она неизвестна, верни пустую строку.
+Общая близость на плотной схеме не доказывает общий object_ref.
+
 Одновременно с каждым candidate сохрани место,
 ГДЕ ИМЕННО на текущем изображении ты увидел evidence.
 
@@ -926,17 +931,26 @@ class CheckPageAgainstNorms:
 
         findings: list[FindingDraft,] = []
 
+        origin_groups = candidate_selection.origin_assertions_by_candidate or tuple(
+            () for _ in candidate_selection.candidates
+        )
+
         for (
             violation,
             source_indexes,
+            origin_assertions,
         ) in zip(
             candidate_selection.candidates,
             candidate_selection.source_indexes_by_candidate,
+            origin_groups,
             strict=True,
         ):
             representative_index = source_indexes[0]
 
             finding_id = f"p{page_number}-f{representative_index}"
+            is_hypothesis = bool(violation.get("__hypothesis_reason"))
+            if is_hypothesis:
+                finding_id = f"p{page_number}-h{representative_index}"
             repeated_tag = violation.get("__duplicate_position_tag")
             if isinstance(repeated_tag, str) and repeated_tag in recovered.tags:
                 # Стабильная идентичность проверенного факта не зависит от
@@ -1004,6 +1018,13 @@ class CheckPageAgainstNorms:
                 for source_id in requested_user_package_ids
                 if source_id in user_package_by_id
             )
+
+            if is_hypothesis:
+                # Исходные запрошенные IDs остаются в origin_assertions, но
+                # тематический документ не подтверждает сам факт повтора.
+                selected_normative_sources = ()
+                selected_technical_assignment_sources = ()
+                selected_user_package_sources = ()
 
             detached_normative_ids = tuple(
                 source_id
@@ -1104,6 +1125,9 @@ class CheckPageAgainstNorms:
             if not selected_any_source:
                 normalized_status = "needs_review"
 
+            if is_hypothesis:
+                normalized_status = "hypothesis"
+
             findings.append(
                 FindingDraft(
                     finding_id=finding_id,
@@ -1157,6 +1181,8 @@ class CheckPageAgainstNorms:
                             )
                         )
                     ),
+                    origin_assertions=origin_assertions,
+                    object_ref=str(violation.get("object_ref", "")).strip()[:80],
                 )
             )
 

@@ -436,6 +436,57 @@
 }
 
 
+.analysis-result__annotation--group {
+  width: clamp(210px, 28%, 300px);
+}
+
+.analysis-result__group-title {
+  font-size: 0.72rem;
+}
+
+.analysis-result__group-member {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+  padding: 0.2rem 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-danger) 28%, transparent);
+  cursor: pointer;
+}
+
+.analysis-result__group-member--active,
+.analysis-result__group-member:hover,
+.analysis-result__group-member:focus-visible {
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
+  outline: none;
+}
+
+.analysis-result__group-member-text {
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+
+.analysis-result__hypotheses {
+  margin-top: 0.5rem;
+  padding: 0.45rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: 0.75rem;
+}
+
+.analysis-result__hypotheses-summary {
+  cursor: pointer;
+  font-weight: var(--font-weight-semibold);
+}
+
+.analysis-result__hypothesis {
+  margin-top: 0.4rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+
 .analysis-result__annotation-sources {
   display: flex;
 

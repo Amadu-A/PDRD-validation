@@ -370,6 +370,10 @@ class FindingDraftPayload(BaseModel):
         default_factory=list,
     )
 
+    origin_assertions: list[dict[str, Any]] = Field(default_factory=list)
+
+    object_ref: str = ""
+
     def to_domain(
         self,
     ) -> FindingDraft:
@@ -404,6 +408,8 @@ class FindingDraftPayload(BaseModel):
                 source.to_domain() for source in self.user_package_basis_sources
             ),
             visual_regions=tuple(region.to_domain() for region in self.visual_regions),
+            origin_assertions=tuple(self.origin_assertions),
+            object_ref=self.object_ref,
         )
 
 
@@ -667,6 +673,10 @@ class FinalFindingPayload(BaseModel):
     visual_regions: list[FindingVisualRegionPayload,] = Field(
         default_factory=list,
     )
+
+    origin_assertions: list[dict[str, Any]] = Field(default_factory=list)
+
+    object_ref: str = ""
 
 
 class FinalizeResponse(BaseModel):

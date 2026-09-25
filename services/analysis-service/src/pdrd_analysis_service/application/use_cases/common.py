@@ -38,6 +38,8 @@ _TAG_ANCHOR_RE = re.compile(
     r"(?![\w])",
 )
 
+_INSTRUMENT_ROLE_RE = re.compile(r"(?<!\w)(?:PE|TG|PG|LE)(?!\w)", re.IGNORECASE)
+
 _ISSUE_SIGNATURE_PATTERNS = (
     (
         "missing",
@@ -220,6 +222,8 @@ class ViolationCandidateSelection:
         ...,
     ] = ()
 
+    origin_assertions_by_candidate: tuple[tuple[dict[str, Any], ...], ...] = ()
+
     @property
     def consolidated_count(
         self,
@@ -361,13 +365,7 @@ def _candidate_identity(
         str,
         Any,
     ],
-) -> (
-    tuple[
-        str,
-        str,
-    ]
-    | None
-):
+) -> tuple[str, str, tuple[tuple[int, int, int, int], ...]] | None:
     """Возвращает безопасный exact-dedupe key candidate."""
     comment = normalize_text(
         candidate.get(
@@ -384,10 +382,54 @@ def _candidate_identity(
     if not comment or not evidence:
         return None
 
+    raw_regions = candidate.get("visual_regions")
+    if not isinstance(raw_regions, list) or not raw_regions:
+        # Одинаковый текст без координат может описывать разные объекты.
+        return None
+
+    boxes: list[tuple[int, int, int, int]] = []
+    for region in raw_regions:
+        if not isinstance(region, dict):
+            return None
+        try:
+            box = tuple(
+                int(region[key]) for key in ("x_min", "y_min", "x_max", "y_max")
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+        if box[0] >= box[2] or box[1] >= box[3]:
+            return None
+        boxes.append(box)
+
     return (
         comment,
         evidence,
+        tuple(sorted(boxes)),
     )
+
+
+def _origin_assertion(candidate: dict[str, Any], raw_index: int) -> dict[str, Any]:
+    """Сохраняет исходное утверждение вместе с его собственными источниками и областью."""
+    regions = candidate.get("visual_regions")
+    return {
+        "origin": "vlm",
+        "raw_index": raw_index,
+        "comment": str(candidate.get("comment", "")),
+        "evidence": str(candidate.get("evidence", "")),
+        "object_ref": str(candidate.get("object_ref", "")),
+        "normative_source_ids": _source_id_list(candidate.get("normative_source_ids")),
+        "technical_assignment_source_ids": _source_id_list(
+            candidate.get("technical_assignment_source_ids")
+        ),
+        "user_package_source_ids": _source_id_list(
+            candidate.get("user_package_source_ids")
+        ),
+        "visual_regions": [
+            dict(region) for region in regions if isinstance(region, dict)
+        ]
+        if isinstance(regions, list)
+        else [],
+    }
 
 
 def _candidate_anchor_signature(
@@ -603,6 +645,54 @@ def _candidate_structural_identity(
     )
 
 
+def _candidate_object_semantic_identity(
+    candidate: dict[str, Any],
+) -> tuple[str, str, str, tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None:
+    """Возвращает identity одного дефекта только при явном объекте и anchor."""
+    object_ref = normalize_text(candidate.get("object_ref"))
+    anchors = _candidate_anchor_signature(candidate)
+    issue = _candidate_issue_signature(candidate)
+    properties = _candidate_property_signature(candidate)
+    if not object_ref or not anchors or not issue or not properties:
+        return None
+    text = f"{candidate.get('comment', '')} {candidate.get('evidence', '')}"
+    roles = tuple(sorted({role.upper() for role in _INSTRUMENT_ROLE_RE.findall(text)}))
+    return (
+        normalize_text(candidate.get("category")),
+        object_ref,
+        issue,
+        properties,
+        anchors,
+        roles,
+    )
+
+
+def _candidate_regions_are_near(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """Проверяет близость доказательств после совпадения object identity."""
+
+    def boxes(candidate: dict[str, Any]) -> list[tuple[int, int, int, int]]:
+        result: list[tuple[int, int, int, int]] = []
+        for region in candidate.get("visual_regions", []):
+            if not isinstance(region, dict):
+                continue
+            try:
+                box = tuple(
+                    int(region[key]) for key in ("x_min", "y_min", "x_max", "y_max")
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+            if box[0] < box[2] and box[1] < box[3]:
+                result.append(box)
+        return result
+
+    return any(
+        max(a[0] - b[2], b[0] - a[2], 0) <= 25
+        and max(a[1] - b[3], b[1] - a[3], 0) <= 25
+        for a in boxes(left)
+        for b in boxes(right)
+    )
+
+
 def _source_id_list(
     value: Any,
 ) -> list[str]:
@@ -678,16 +768,43 @@ def _merge_candidate_source_ids(
             target[field_name] = merged
 
 
+def _merge_candidate_regions(
+    *, target: dict[str, Any], duplicate: dict[str, Any]
+) -> None:
+    """Сохраняет все исходные области при безопасном объединении кандидатов."""
+    regions: list[dict[str, Any]] = []
+    seen: set[tuple[tuple[str, str], ...]] = set()
+    for candidate in (target, duplicate):
+        raw_regions = candidate.get("visual_regions")
+        if not isinstance(raw_regions, list):
+            continue
+        for region in raw_regions:
+            if not isinstance(region, dict):
+                continue
+            key = tuple(
+                (name, str(region.get(name, "")))
+                for name in ("x_min", "y_min", "x_max", "y_max")
+            )
+            if key not in seen:
+                regions.append(dict(region))
+                seen.add(key)
+    if regions:
+        target["visual_regions"] = regions
+
+
 def select_violation_candidates(
     violations: Any,
 ) -> ViolationCandidateSelection:
     """Выполняет lossless deterministic candidate consolidation.
 
-    Сначала объединяются exact duplicates, когда после базовой
-    нормализации совпадают одновременно comment и evidence.
+    Сначала объединяются exact duplicates, когда совпадают comment,
+    evidence и исходные области. Без областей текст не доказывает
+    принадлежность одному физическому объекту.
 
     Дополнительно допускается conservative consolidation для повтора
     одной и той же позиционной подписи с одинаковыми category и свойством.
+    Для иных перефразировок требуется явный object_ref, совпадение
+    object/issue/property/anchors и близость областей доказательства.
 
     Разные anchors никогда не объединяются этим правилом.
     Candidates без достаточной structural identity остаются distinct.
@@ -720,12 +837,10 @@ def select_violation_candidates(
     source_indexes_by_candidate: list[list[int]] = []
 
     candidate_position_by_identity: dict[
-        tuple[
-            str,
-            str,
-        ],
-        int,
+        tuple[str, str, tuple[tuple[int, int, int, int], ...]], int
     ] = {}
+
+    origins_by_candidate: list[list[dict[str, Any]]] = []
 
     candidate_position_by_structural_identity: dict[
         tuple[
@@ -735,6 +850,11 @@ def select_violation_candidates(
             tuple[str, ...],
         ],
         int,
+    ] = {}
+
+    candidate_positions_by_object_identity: dict[
+        tuple[str, str, str, tuple[str, ...], tuple[str, ...], tuple[str, ...]],
+        list[int],
     ] = {}
 
     for raw_index, violation in enumerate(
@@ -766,6 +886,12 @@ def select_violation_candidates(
             else None
         )
 
+        object_identity = (
+            _candidate_object_semantic_identity(candidate)
+            if identity is not None
+            else None
+        )
+
         existing_position = (
             candidate_position_by_identity.get(
                 identity,
@@ -779,14 +905,34 @@ def select_violation_candidates(
                 structural_identity,
             )
 
+        if existing_position is None and object_identity is not None:
+            existing_position = next(
+                (
+                    position
+                    for position in candidate_positions_by_object_identity.get(
+                        object_identity, []
+                    )
+                    if _candidate_regions_are_near(candidate, candidates[position])
+                ),
+                None,
+            )
+
         if existing_position is not None:
             _merge_candidate_source_ids(
+                target=candidates[existing_position],
+                duplicate=candidate,
+            )
+            _merge_candidate_regions(
                 target=candidates[existing_position],
                 duplicate=candidate,
             )
 
             source_indexes_by_candidate[existing_position].append(
                 raw_index,
+            )
+
+            origins_by_candidate[existing_position].append(
+                _origin_assertion(violation, raw_index)
             )
 
             if identity is not None:
@@ -796,6 +942,13 @@ def select_violation_candidates(
                 candidate_position_by_structural_identity[structural_identity] = (
                     existing_position
                 )
+
+            if object_identity is not None:
+                positions = candidate_positions_by_object_identity.setdefault(
+                    object_identity, []
+                )
+                if existing_position not in positions:
+                    positions.append(existing_position)
 
             continue
 
@@ -813,6 +966,8 @@ def select_violation_candidates(
             ]
         )
 
+        origins_by_candidate.append([_origin_assertion(violation, raw_index)])
+
         if identity is not None:
             candidate_position_by_identity[identity] = candidate_position
 
@@ -820,6 +975,11 @@ def select_violation_candidates(
             candidate_position_by_structural_identity[structural_identity] = (
                 candidate_position
             )
+
+        if object_identity is not None:
+            candidate_positions_by_object_identity.setdefault(
+                object_identity, []
+            ).append(candidate_position)
 
     return ViolationCandidateSelection(
         candidates=tuple(
@@ -833,6 +993,9 @@ def select_violation_candidates(
         ),
         generated_count=len(
             violations,
+        ),
+        origin_assertions_by_candidate=tuple(
+            tuple(origins) for origins in origins_by_candidate
         ),
     )
 

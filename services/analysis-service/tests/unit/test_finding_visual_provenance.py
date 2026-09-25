@@ -211,6 +211,10 @@ def test_normative_schema_requires_visual_regions() -> None:
 
     assert "visual_regions" in item["required"]
 
+    assert "object_ref" in item["properties"]
+
+    assert "object_ref" in item["required"]
+
     visual_schema = item["properties"]["visual_regions"]
 
     assert visual_schema["maxItems"] == 4
@@ -293,6 +297,7 @@ async def test_normative_check_preserves_visual_regions_and_business_matrix() ->
     assert "BUSINESS CHECK MATRIX" in model.prompt
     assert "ЛОГИКА РАБОТЫ И СХЕМЫ" in model.prompt
     assert "VISUAL EVIDENCE REGIONS" in model.prompt
+    assert "object_ref" in model.prompt
 
 
 async def test_t_first_preserves_visual_region_in_finding() -> None:

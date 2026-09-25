@@ -338,6 +338,7 @@ class GetAnalysisAnnotatedPdf:
                 finding,
                 dict,
             )
+            and finding.get("status") != "hypothesis"
         ]
 
         for index, finding in enumerate(

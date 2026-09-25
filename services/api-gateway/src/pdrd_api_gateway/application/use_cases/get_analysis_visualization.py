@@ -648,6 +648,9 @@ class GetAnalysisVisualization:
             ):
                 continue
 
+            if finding.get("status") == "hypothesis":
+                continue
+
             finding_page = cls._normalize_page(
                 finding.get(
                     "page",
