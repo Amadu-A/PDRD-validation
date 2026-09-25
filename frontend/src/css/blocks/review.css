@@ -1,0 +1,154 @@
+/* frontend/src/css/blocks/review.css */
+
+/* Локальные решения пользователя поверх существующей PDF-визуализации. */
+
+.review-preview {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-control);
+  background: var(--color-warning-soft);
+  color: var(--color-text-primary);
+  font-size: 0.86rem;
+}
+
+.review-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.review-controls__button {
+  display: inline-flex;
+  width: 1.4rem;
+  height: 1.4rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font: inherit;
+}
+
+.review-controls__button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.review-controls__button--accept {
+  color: var(--color-success);
+}
+
+.review-controls__button--reject {
+  color: var(--color-danger);
+}
+
+.review-controls__button--edit {
+  color: var(--color-warning);
+}
+
+.review-controls__button--accept[aria-pressed="true"] {
+  background: var(--color-success-soft);
+  border-color: var(--color-success);
+}
+
+.review-controls__button--reject[aria-pressed="true"] {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
+}
+
+.review-controls__button--edit[aria-pressed="true"] {
+  background: var(--color-warning-soft);
+  border-color: var(--color-warning);
+}
+
+.review-controls__icon {
+  font-size: 0.9rem;
+  font-weight: var(--font-weight-semibold);
+}
+
+.review-controls__status {
+  flex: 1 0 100%;
+  font-size: 0.64rem;
+  color: var(--color-text-secondary);
+}
+
+[data-review-item][data-review-decision="accepted"] {
+  border-color: var(--color-success);
+}
+
+[data-review-item][data-review-decision="rejected"] {
+  border-color: var(--color-danger);
+}
+
+.analysis-result__group-member[data-review-item] {
+  flex-wrap: wrap;
+}
+
+.analysis-result__group-member[data-review-item] > .review-controls {
+  flex: 0 0 100%;
+}
+
+.review-editor {
+  width: min(90vw, 580px);
+  box-sizing: border-box;
+  padding: var(--space-8);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+.review-editor::backdrop {
+  background: var(--color-overlay);
+}
+
+.review-editor__title {
+  margin: 0 0 var(--space-6);
+}
+
+.review-editor__label {
+  display: block;
+  margin-bottom: var(--space-2);
+  font-weight: var(--font-weight-semibold);
+}
+
+.review-editor__textarea {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  font: inherit;
+}
+
+.review-editor__error {
+  min-height: 1.2em;
+  color: var(--color-danger);
+}
+
+.review-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.review-editor__button {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  cursor: pointer;
+  font: inherit;
+}
+
+.review-editor__button--save {
+  background: var(--color-accent);
+  color: var(--color-surface);
+}

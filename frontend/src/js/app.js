@@ -37,6 +37,10 @@ import {
 } from "./features/normative/user_packages.js";
 
 import {
+  createReviewController,
+} from "./features/review/controller.js";
+
+import {
   createTechnicalAssignmentFilePicker,
 } from "./features/technical_assignment/file.js";
 
@@ -133,10 +137,15 @@ const modal = createModal({
 });
 
 
+const reviewController = createReviewController();
+
 const resultView = createResultView(
   requireElement(
     "[data-analysis-result]",
   ),
+  {
+    onReportRendered: reviewController.mount,
+  },
 );
 
 

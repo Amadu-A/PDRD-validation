@@ -5,10 +5,12 @@
  *
  * Progress/error показываются как обычный текст.
  * Финальный отчёт передаётся как безопасно построенный DOM fragment.
+ * При завершении рендера вызывает подключённый feature-hook.
  */
 
 export function createResultView(
   element,
+  { onReportRendered = () => {} } = {},
 ) {
   function show(
     text,
@@ -37,6 +39,7 @@ export function createResultView(
     element.replaceChildren(
       report,
     );
+    onReportRendered(element);
   }
 
 
