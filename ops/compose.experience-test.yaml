@@ -1,19 +1,20 @@
 # ops/compose.experience-test.yaml
 #
-# Изолированное окружение для проверки PostgreSQL Experience Service.
+# Изолированное окружение интеграционного тестирования Experience Service.
 #
 # Назначение:
-# - проверить первую миграцию Alembic на реальном PostgreSQL;
-# - испытать атомарное сохранение снимков и журнала изменений;
-# - проверить конкурентное обновление одного отчёта;
-# - исключить любое обращение к рабочей базе PDRD.
+# - создать отдельный временный PostgreSQL;
+# - применить миграции Experience Service;
+# - убедиться, что база находится на актуальной версии миграций;
+# - проверить сохранение данных и конкурирующие транзакции.
 #
-# Этот Compose НЕ включается в основной стек приложения.
-# Все учётные данные ниже предназначены исключительно для тестов.
+# Окружение не подключается к рабочему стеку PDRD.
+# Рабочие Docker volumes и учётные данные не используются.
 
 services:
   experience-test-postgres:
     image: postgres:16-alpine
+
     restart: "no"
 
     environment:
@@ -21,8 +22,7 @@ services:
       POSTGRES_USER: experience_test
       POSTGRES_PASSWORD: experience-test-only
 
-    # Данные существуют только пока работает тестовый контейнер.
-    # Рабочие Docker volumes проекта здесь не используются.
+    # Тестовые данные не сохраняются в рабочие тома проекта.
     tmpfs:
       - /var/lib/postgresql/data
 
@@ -30,6 +30,7 @@ services:
       test:
         - CMD-SHELL
         - pg_isready -U experience_test -d pdrd_experience_test
+
       interval: 2s
       timeout: 2s
       retries: 30
@@ -49,10 +50,10 @@ services:
         condition: service_healthy
 
     environment:
-      # Флаг разрешает только явно выбранные интеграционные тесты.
+      # Разрешаем выполнение выбранных интеграционных тестов.
       PDRD_RUN_DATABASE_TESTS: "1"
 
-      # Один и тот же URL используется миграцией и тестами.
+      # Миграция и pytest обязаны использовать одну тестовую базу.
       EXPERIENCE_SERVICE_DATABASE_URL: &test_url postgresql+asyncpg://experience_test:experience-test-only@experience-test-postgres:5432/pdrd_experience_test
       EXPERIENCE_SERVICE_TEST_DATABASE_URL: *test_url
 
@@ -62,15 +63,24 @@ services:
 
     command:
       - |
-        echo "=== МИГРАЦИЯ ТЕСТОВОЙ БАЗЫ ==="
+        set -eu
+
+        echo "=== ПРИМЕНЕНИЕ МИГРАЦИЙ ==="
+
         cd /workspace/services/experience-service
+
         python -m alembic -c alembic.ini upgrade head
 
-        echo "=== ПРОВЕРКА ВЕРСИИ МИГРАЦИИ ==="
-        python -m alembic -c alembic.ini current
+        echo "=== ПРОВЕРКА АКТУАЛЬНОЙ ВЕРСИИ ==="
+
+        # В отличие от обычного current, --check-heads завершится
+        # ошибкой, если миграции применены не полностью.
+        python -m alembic -c alembic.ini current --check-heads --verbose
 
         echo "=== ИНТЕГРАЦИОННЫЕ ТЕСТЫ ==="
+
         cd /workspace
+
         python -m pytest -q services/experience-service/tests/integration/test_review_database.py
 
     networks:

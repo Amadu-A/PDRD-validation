@@ -1,6 +1,22 @@
 # services/experience-service/alembic/env.py
 
-"""Experience-only Alembic runner using the project-specific PostgreSQL DB."""
+"""Конфигурация миграций PostgreSQL для Experience Service.
+
+Назначение файла:
+- подключает Alembic к отдельной схеме experience;
+- использует собственную таблицу версий миграций;
+- поддерживает проверку миграций без подключения к базе;
+- обеспечивает атомарное выполнение реальных миграций.
+
+Важно:
+создание схемы и применение миграций должны находиться
+в одной явно управляемой транзакции.
+
+Если миграция завершается успешно, изменения фиксируются.
+Если возникает ошибка, PostgreSQL откатывает всю транзакцию.
+
+Миграции других микросервисов этот файл не запускает.
+"""
 
 import asyncio
 import os
@@ -13,29 +29,39 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 config = context.config
 
-# Until transport/settings and Compose are connected, supply this URL explicitly.
-# No migration is executed by importing the Experience Service package.
-url = os.environ.get(
+
+# До подключения единой runtime-конфигурации сервиса
+# адрес PostgreSQL передаётся явно через переменную окружения.
+#
+# Импорт пакета Experience Service не выполняет миграции.
+database_url = os.environ.get(
     "EXPERIENCE_SERVICE_DATABASE_URL",
     "",
 )
 
-if not url:
-    raise RuntimeError("EXPERIENCE_SERVICE_DATABASE_URL must be explicitly configured.")
+if not database_url:
+    raise RuntimeError("Не задан EXPERIENCE_SERVICE_DATABASE_URL.")
 
-if not url.startswith("postgresql+asyncpg://"):
-    raise RuntimeError("Experience migrations require postgresql+asyncpg URL.")
+if not database_url.startswith("postgresql+asyncpg://"):
+    raise RuntimeError(
+        "Миграции Experience Service требуют PostgreSQL и драйвер asyncpg."
+    )
 
 config.set_main_option(
     "sqlalchemy.url",
-    url.replace("%", "%%"),
+    database_url.replace("%", "%%"),
 )
 
 
 def _configure(
     **options: object,
 ) -> None:
-    """Keep the version table separate from Gateway and Knowledge Service."""
+    """Настраивает независимую историю миграций Experience.
+
+    Собственная таблица версий располагается в схеме experience.
+    Таким образом, миграции этого сервиса не пересекаются
+    с миграциями API Gateway и Knowledge Service.
+    """
     context.configure(
         target_metadata=Base.metadata,
         include_schemas=True,
@@ -47,9 +73,13 @@ def _configure(
 
 
 def run_migrations_offline() -> None:
-    """Produce review migration SQL without connecting to PostgreSQL."""
+    """Генерирует SQL миграций без подключения к PostgreSQL.
+
+    Используется архитектурными тестами и предварительной
+    проверкой изменений схемы.
+    """
     _configure(
-        url=url,
+        url=database_url,
         literal_binds=True,
         dialect_opts={
             "paramstyle": "named",
@@ -65,7 +95,14 @@ def run_migrations_offline() -> None:
 def _migrate(
     connection: Connection,
 ) -> None:
-    """Ensure the schema exists before Alembic creates its version table."""
+    """Применяет миграции внутри уже открытой транзакции.
+
+    Создание схемы выполняется до создания таблицы
+    alembic_version_experience.
+
+    Фиксацией или откатом транзакции управляет вызывающий
+    код через engine.begin().
+    """
     connection.exec_driver_sql("CREATE SCHEMA IF NOT EXISTS experience")
 
     _configure(
@@ -77,7 +114,20 @@ def _migrate(
 
 
 async def _run_migrations_online() -> None:
-    """Create a short-lived connection exclusively for Alembic migrations."""
+    """Выполняет миграции с обязательной фиксацией транзакции.
+
+    Используем engine.begin(), а не engine.connect().
+
+    Причина:
+    предварительный CREATE SCHEMA открывает транзакцию.
+    Если использовать connect() без явного commit(),
+    при закрытии соединения все изменения могут откатиться,
+    несмотря на успешное завершение Alembic.
+
+    Контекст engine.begin():
+    - фиксирует транзакцию при успешном завершении;
+    - откатывает её при возникновении исключения.
+    """
     engine = async_engine_from_config(
         config.get_section(
             config.config_ini_section,
@@ -88,7 +138,7 @@ async def _run_migrations_online() -> None:
     )
 
     try:
-        async with engine.connect() as connection:
+        async with engine.begin() as connection:
             await connection.run_sync(
                 _migrate,
             )
