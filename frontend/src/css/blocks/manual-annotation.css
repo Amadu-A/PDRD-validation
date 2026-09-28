@@ -145,8 +145,7 @@
 
 /* Во время выделения указатель работает со слоем, включая место прежней карточки. */
 .manual-annotation__layer[data-manual-mode="issue"] .manual-annotation__card,
-.manual-annotation__layer[data-manual-mode="callout"] .manual-annotation__card,
-.manual-annotation__layer[data-manual-mode="confirm"] .manual-annotation__card {
+.manual-annotation__layer[data-manual-mode="callout"] .manual-annotation__card {
   pointer-events: none;
 }
 

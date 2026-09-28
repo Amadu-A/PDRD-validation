@@ -21,8 +21,8 @@
 
 .review-controls__button {
   display: inline-flex;
-  width: 1.4rem;
-  height: 1.4rem;
+  width: 1.05rem;
+  height: 1.05rem;
   align-items: center;
   justify-content: center;
   padding: 0;
@@ -67,7 +67,7 @@
 }
 
 .review-controls__icon {
-  font-size: 0.9rem;
+  font-size: 0.675rem;
   font-weight: var(--font-weight-semibold);
 }
 

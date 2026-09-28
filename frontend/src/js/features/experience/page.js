@@ -2,6 +2,7 @@
 
 /** Отображает демонстрационную таблицу Experience без ложного сохранения. */
 import { createExperienceModel } from "./model.js";
+import { DECISION_LABELS, experienceTagLabel } from "./labels.js";
 
 const model = createExperienceModel();
 const filter = document.querySelector("[data-experience-filter]");
@@ -73,8 +74,8 @@ function row(example) {
     needs_adjudication: "Требует уточнения перед обучением",
   };
   tagCell.append(
-    element("strong", "experience-table__tag", example.tag),
-    element("span", "experience-table__detail", example.decision),
+    element("strong", "experience-table__tag", experienceTagLabel(example.tag, example.decision)),
+    element("span", "experience-table__detail", DECISION_LABELS[example.decision] ?? example.decision),
     element("span", "experience-table__detail",
       learningLabels[example.learning_use] ?? "Не определено"),
   );

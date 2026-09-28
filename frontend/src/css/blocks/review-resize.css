@@ -1,0 +1,114 @@
+/* frontend/src/css/blocks/review-resize.css */
+
+/* Границы объектов работают как в редакторе: растягивание стороны или угла. */
+.review-resize__box {
+  overflow: visible;
+}
+
+.review-resize__content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: inherit;
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow: auto;
+}
+
+.analysis-result__annotation[data-review-resized="true"] {
+  max-width: 100%;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.review-resize__handle {
+  position: absolute;
+  z-index: 10;
+  display: block;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.review-resize__handle--n,
+.review-resize__handle--s {
+  left: 6px;
+  right: 6px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.review-resize__handle--n {
+  top: 0;
+}
+
+.review-resize__handle--s {
+  bottom: 0;
+}
+
+.review-resize__handle--e,
+.review-resize__handle--w {
+  top: 6px;
+  bottom: 6px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.review-resize__handle--e {
+  right: 0;
+}
+
+.review-resize__handle--w {
+  left: 0;
+}
+
+.review-resize__handle--ne,
+.review-resize__handle--se,
+.review-resize__handle--sw,
+.review-resize__handle--nw {
+  width: 8px;
+  height: 8px;
+}
+
+.review-resize__handle--ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.review-resize__handle--se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+}
+
+.review-resize__handle--sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.review-resize__handle--nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.review-resize__handle:hover,
+.review-resize__handle:focus-visible {
+  background: var(--color-accent);
+  opacity: 0.6;
+  outline: 1px solid var(--color-accent);
+}
+
+.review-resize--active {
+  user-select: none;
+}
+
+.manual-annotation__layer[data-manual-mode="issue"] .review-resize__handle,
+.manual-annotation__layer[data-manual-mode="callout"] .review-resize__handle {
+  pointer-events: none;
+}

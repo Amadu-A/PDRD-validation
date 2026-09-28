@@ -30,6 +30,7 @@ export function createManualTextList() {
   let overview = null;
   let overviewNote = null;
   let automaticCount = 0;
+  let automaticArticles = [];
   let empty = null;
   let emptyText = "";
   const items = new Map();
@@ -40,30 +41,48 @@ export function createManualTextList() {
     summary = null;
     overviewNote = null;
     overview = root.querySelector(".analysis-result__summary");
-    automaticCount = section?.querySelectorAll(
+    automaticArticles = [...(section?.querySelectorAll(
       ".analysis-result__finding",
-    ).length ?? 0;
+    ) ?? [])];
+    automaticCount = automaticArticles.length;
     empty = section?.querySelector(".analysis-result__empty") ?? null;
     emptyText = empty?.textContent ?? "";
   }
 
   function updateSummary() {
+    automaticCount = automaticArticles.filter((item) => item.dataset.reviewDecision !== "rejected").length;
     let number = automaticCount;
+    let visibleCount = 0;
     for (const item of items.values()) {
+      if (item.article.dataset.manualDecision === "rejected") continue;
       number += 1;
+      visibleCount += 1;
       item.title.textContent = `${number}. Лист/страница ${item.pageNumber}`;
     }
     if (overviewNote) {
       overviewNote.textContent = (
-        `После ручной проверки: ${automaticCount + items.size} замечаний `
-        + `(VLM: ${automaticCount}; Gold: ${items.size}).`
+        `В текстовом списке: ${automaticCount + visibleCount} замечаний `
+        + `(VLM: ${automaticCount}; Gold: ${visibleCount}).`
       );
     }
     if (summary) {
       summary.textContent = (
-        `Текстовый список: ${automaticCount + items.size} замечаний `
-        + `(${automaticCount} VLM, ${items.size} добавлено пользователем).`
+        `Текстовый список: ${automaticCount + visibleCount} замечаний `
+        + `(${automaticCount} VLM, ${visibleCount} добавлено пользователем).`
       );
+    }
+  }
+
+  function ensureSummary() {
+    if (!section || summary) return;
+    summary = element("p", "manual-review-list__summary");
+    summary.setAttribute("role", "status");
+    summary.dataset.manualReviewSummary = "";
+    section.append(summary);
+    if (overview) {
+      overviewNote = element("p", "manual-review-list__overview");
+      overviewNote.setAttribute("role", "status");
+      overview.append(overviewNote);
     }
   }
 
@@ -75,23 +94,7 @@ export function createManualTextList() {
       throw new Error("Текстовая карточка этого замечания уже создана.");
     }
 
-    if (!summary) {
-      if (empty) {
-        empty.textContent = (
-          "Автоматические замечания не сформированы. "
-          + "Ниже приведены замечания пользователя."
-        );
-      }
-      summary = element("p", "manual-review-list__summary");
-      summary.setAttribute("role", "status");
-      summary.dataset.manualReviewSummary = "";
-      section.append(summary);
-      if (overview) {
-        overviewNote = element("p", "manual-review-list__overview");
-        overviewNote.setAttribute("role", "status");
-        overview.append(overviewNote);
-      }
-    }
+    ensureSummary();
 
     const number = automaticCount + items.size + 1;
     const article = element(
@@ -135,8 +138,10 @@ export function createManualTextList() {
   }
 
   function sync(review) {
+    ensureSummary();
     const item = items.get(review.findingId);
     if (!item) {
+      updateSummary();
       return;
     }
     item.text.textContent = review.text;
@@ -147,6 +152,11 @@ export function createManualTextList() {
       accepted: "Принято пользователем",
       rejected: "Отклонено пользователем",
     }[review.decision] ?? "Ожидает решения";
+    item.article.classList.toggle("is-hidden", review.decision === "rejected");
+    if (empty) empty.textContent = [...items.values()].some((entry) => entry.article.dataset.manualDecision !== "rejected")
+      ? "Автоматические замечания не сформированы. Ниже приведены замечания пользователя."
+      : emptyText;
+    updateSummary();
   }
 
   /** Убирает Gold-карточку и пересчитывает номера и счётчики общего отчёта. */
@@ -155,7 +165,7 @@ export function createManualTextList() {
     if (!item) return;
     item.article.remove();
     items.delete(findingId);
-    if (!items.size) {
+    if (!items.size && !automaticArticles.length) {
       summary?.remove();
       overviewNote?.remove();
       summary = null;

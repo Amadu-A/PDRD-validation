@@ -16,6 +16,7 @@ import {
 import { createManualEditor } from "./manual-editor.js";
 import { createManualLine, createManualNote } from "./manual-note.js";
 import { createManualHistory } from "./history.js";
+import { attachBoxResize } from "./resize.js";
 
 const PAGE_SELECTOR = ".analysis-result__page-visualization";
 
@@ -48,7 +49,7 @@ export function createManualAnnotationController({
   onGet,
   onGeometry,
   onRemove,
-  onRestore,
+  onInteractionStart = () => {},
 
   idFactory = () => (
     globalThis.crypto?.randomUUID?.()
@@ -57,6 +58,7 @@ export function createManualAnnotationController({
 }) {
   let activeAbort = null;
   let disposeHandlers = [];
+  const pageActions = new Map();
 
   /** Подписывает обработчик только на время жизни текущего отчёта. */
   function listen(target, event, handler) {
@@ -70,6 +72,7 @@ export function createManualAnnotationController({
     activeAbort = null;
     for (const cleanup of disposeHandlers) cleanup();
     disposeHandlers = [];
+    pageActions.clear();
   }
 
   function mountPage(page, root) {
@@ -123,15 +126,11 @@ export function createManualAnnotationController({
     message.setAttribute("role", "status");
 
     toolbar.append(add, cancel, message);
-    const saveGeometry = element("button", "manual-annotation__button", "Сохранить области");
-    saveGeometry.type = "button";
-    saveGeometry.dataset.reviewGeometrySave = "";
-    saveGeometry.hidden = true;
     const undo = element("button", "manual-annotation__button", "Отменить действие");
     undo.type = "button";
     undo.dataset.reviewPageUndo = String(pageNumber);
     undo.disabled = true;
-    toolbar.append(saveGeometry, undo);
+    toolbar.append(undo);
     page.insertBefore(toolbar, stage);
 
     const layer = element(
@@ -168,9 +167,12 @@ export function createManualAnnotationController({
     let issue = null;
     let callout = null;
     let editingNote = null;
-    let geometryNote = null;
     let draftLine = null;
     const history = createManualHistory();
+    pageActions.set(pageNumber, (label, action) => {
+      history.record(label, action);
+      syncHistory();
+    });
 
     /** Указывает конкретное действие, которое отменит следующая кнопка Undo. */
     function syncHistory() {
@@ -191,11 +193,11 @@ export function createManualAnnotationController({
 
     function setMode(next, description) {
       mode = next;
+      page.dataset.reviewSelecting = String(next !== "idle");
       layer.dataset.manualMode = next;
       message.textContent = description;
       cancel.hidden = next === "idle";
       add.disabled = next !== "idle";
-      saveGeometry.hidden = next !== "confirm";
       syncHistory();
     }
 
@@ -211,7 +213,6 @@ export function createManualAnnotationController({
       draftCallout.hidden = true;
 
       editingNote = null;
-      geometryNote = null;
       draftLine?.remove();
       draftLine = null;
 
@@ -254,19 +255,49 @@ export function createManualAnnotationController({
         const entry = onGet(note.findingId);
         editor.open(entry.text, entry.normativeSection);
       };
-      note.onGeometry = () => {
-        if (beginSelection()) geometryNote = note;
-      };
-      note.onRemove = () => {
-        activeAbort?.();
-        const snapshot = removeNote(note);
-        history.record("удаление Gold", () => {
-          note.applyText(snapshot.text, snapshot.normativeSection);
-          onRestore(note, snapshot);
-          layer.append(note.line, note.region, note.card);
+
+      const resizing = [
+        { node: note.region, key: "issueBox", minimum: { minWidth: 15, minHeight: 15 }, label: "Область ошибки" },
+        { node: note.card, key: "calloutBox", minimum: { minWidth: 130, minHeight: 80 }, label: "Карточка замечания" },
+      ].map(({ node, key, minimum, label }) => {
+        const resize = attachBoxResize({
+          node, page, minimum, label,
+          scrollContent: key === "calloutBox",
+          bounds: () => image.getBoundingClientRect(),
+          getBox: () => ({ ...note[key] }),
+          enabled: () => mode === "idle" && onGet(findingId).decision !== "rejected",
+          onStart() {
+            onInteractionStart();
+            activeAbort?.();
+            activeAbort = resize.cancel;
+          },
+          preview(box) {
+            note.applyGeometry(
+              key === "issueBox" ? box : note.issueBox,
+              key === "calloutBox" ? box : note.calloutBox,
+            );
+          },
+          commit(box, previous) {
+            const oldIssue = { ...(key === "issueBox" ? previous : note.issueBox) };
+            const oldCallout = { ...(key === "calloutBox" ? previous : note.calloutBox) };
+            if (applyGeometry(
+              note,
+              key === "issueBox" ? box : note.issueBox,
+              key === "calloutBox" ? box : note.calloutBox,
+            )) {
+              history.record("изменение области Gold", () => applyGeometry(note, oldIssue, oldCallout));
+              syncHistory();
+            }
+          },
         });
-        syncHistory();
-        undo.focus();
+        disposeHandlers.push(() => resize.dispose());
+        return resize;
+      });
+      note.setRejected = (rejected) => {
+        if (rejected) for (const resize of resizing) resize.cancel();
+        for (const node of [note.region, note.line, note.card]) {
+          node.classList.toggle("is-hidden", rejected);
+        }
       };
 
       onCreate({ ...note, text, normativeSection });
@@ -277,9 +308,8 @@ export function createManualAnnotationController({
 
     /** Сначала исключает канонические данные, затем убирает геометрию листа. */
     function removeNote(note) {
-      const snapshot = onRemove(note);
+      onRemove(note);
       note.remove();
-      return snapshot;
     }
 
     /** Применяет области к DOM только после изменения канонического снимка. */
@@ -288,21 +318,6 @@ export function createManualAnnotationController({
       if (changed) note.applyGeometry(nextIssue, nextCallout);
       return changed;
     }
-
-    listen(saveGeometry, "click", () => {
-      if (mode !== "confirm" || !geometryNote) return;
-      const note = geometryNote;
-      const previousIssue = { ...note.issueBox };
-      const previousCallout = { ...note.calloutBox };
-      if (applyGeometry(note, issue, callout)) {
-        history.record("изменение областей Gold", () => {
-          applyGeometry(note, previousIssue, previousCallout);
-        });
-      }
-      resetDraft();
-      message.textContent = "Области сохранены. Проверьте решение по замечанию.";
-      add.focus();
-    });
 
     listen(undo, "click", () => {
       activeAbort?.();
@@ -385,6 +400,7 @@ export function createManualAnnotationController({
 
       activeAbort?.();
 
+      onInteractionStart();
       activeAbort = abort;
       syncSize();
 
@@ -404,7 +420,7 @@ export function createManualAnnotationController({
     listen(page, "keydown", (event) => {
       if (
         event.key === "Escape"
-        && (mode === "issue" || mode === "callout" || mode === "confirm")
+        && (mode === "issue" || mode === "callout")
       ) {
         event.preventDefault();
         abort();
@@ -522,13 +538,8 @@ export function createManualAnnotationController({
 
         draftLine = createManualLine(issue, callout);
         layer.append(draftLine);
-        if (geometryNote) {
-          setMode("confirm", "Проверьте новые области и нажмите «Сохранить области».");
-          saveGeometry.focus();
-        } else {
-          setMode("editing", "Введите замечание и нормативное основание.");
-          editor.open();
-        }
+        setMode("editing", "Введите замечание и нормативное основание.");
+        editor.open();
       }
     });
 
@@ -582,5 +593,11 @@ export function createManualAnnotationController({
     return pages.length;
   }
 
-  return { mount, dispose };
+  return {
+    mount, dispose,
+    cancelActive: () => activeAbort?.(),
+    recordAction(pageNumber, label, action) {
+      pageActions.get(pageNumber)?.(label, action);
+    },
+  };
 }

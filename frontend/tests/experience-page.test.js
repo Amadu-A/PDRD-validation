@@ -62,10 +62,15 @@ test("страница показывает демо, фильтрует, ред
   const rows = elements.get("[data-experience-rows]");
   assert.equal(rows.children.length, 2);
 
-  fields.get("tag").value = "edited";
+  fields.get("tag").value = "edited:accepted";
+  elements.get("[data-experience-filter]").emit("change");
+  assert.equal(rows.children.length, 0);
+  fields.get("tag").value = "edited:rejected";
   elements.get("[data-experience-filter]").emit("change");
   assert.equal(rows.children.length, 1);
   assert.equal(rows.children[0].dataset.experienceId, "demo-edited");
+  assert.equal(rows.children[0].children[3].children[0].textContent, "Edited — Отклонено");
+  assert.match(rows.children[0].children[3].children[2].textContent, /Требует уточнения/);
 
   const recordRow = rows.children[0];
   recordRow.children[0].children[0].click();

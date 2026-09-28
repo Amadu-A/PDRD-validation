@@ -147,17 +147,13 @@ function appendTextBlock(
     ),
   );
 
-  block.append(
-    createElement(
-      "p",
-      "analysis-result__field-value",
-      value,
-    ),
-  );
+  const content = createElement("p", "analysis-result__field-value", value);
+  block.append(content);
 
   parent.append(
     block,
   );
+  return content;
 }
 
 
@@ -734,6 +730,9 @@ function appendFinding(
     "article",
     "analysis-result__finding",
   );
+  article.dataset.findingId = String(finding.finding_id ?? "");
+  article.dataset.reviewPage = String(page);
+  article.dataset.reviewBasis = String(finding.basis ?? "");
 
   const header = createElement(
     "div",
@@ -797,11 +796,12 @@ function appendFinding(
     ),
   );
 
-  appendTextBlock(
+  const reviewText = appendTextBlock(
     article,
     "Замечание",
     comment,
   );
+  reviewText.dataset.reviewText = "";
 
   appendTextBlock(
     article,
@@ -845,7 +845,7 @@ function appendFinding(
     ? finding.origin_assertions
     : [];
   if (origins.length) {
-    const details = createElement("details", "analysis-result__hypotheses");
+    const details = createElement("details", "analysis-result__hypotheses is-hidden");
     details.append(createElement(
       "summary",
       "analysis-result__hypotheses-summary",

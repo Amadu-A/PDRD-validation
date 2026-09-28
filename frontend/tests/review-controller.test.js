@@ -6,32 +6,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createReviewController } from "../src/js/features/review/controller.js";
 
-class FakeElement {
-  constructor(tagName = "div") {
-    this.tagName = tagName.toUpperCase();
-    this.children = [];
-    this.dataset = {};
-    this.attributes = new Map();
-    this.listeners = new Map();
-    this.selectors = new Map();
-    this.lists = new Map();
-    this.textContent = "";
-    this.value = "";
-  }
-
-  append(...nodes) { this.children.push(...nodes); }
-  prepend(...nodes) { this.children.unshift(...nodes); }
-  remove() { this.removed = true; }
-  setAttribute(name, value) { this.attributes.set(name, value); }
-  getAttribute(name) { return this.attributes.get(name); }
-  addEventListener(name, handler) { this.listeners.set(name, handler); }
-  querySelector(selector) { return this.selectors.get(selector) ?? null; }
-  querySelectorAll(selector) { return this.lists.get(selector) ?? []; }
-  focus() { this.focused = true; }
-  showModal() { this.open = true; }
-  close() { this.open = false; }
-  click() { this.listeners.get("click")?.(); }
-}
+import { FakeElement } from "./helpers/fake-dom.js";
 
 globalThis.document = {
   createElement(tag) { return new FakeElement(tag); },

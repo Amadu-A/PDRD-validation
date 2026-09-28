@@ -64,7 +64,7 @@ test("валидация запрещает пустые данные, неиз�
   assert.equal(state.get("A").revision, 0);
 });
 
-test("изменение геометрии и удаление доступны только Gold; восстановление сохраняет полный снимок", () => {
+test("отмена создания удаляет только локальное Gold; восстановление сохраняет полный снимок", () => {
   const state = createReviewState();
   state.register("vlm", "Замечание VLM");
   state.register("manual:one", "Замечание инженера", { origin: "manual", normativeSection: "СП 123" });
@@ -84,4 +84,30 @@ test("изменение геометрии и удаление доступны
   assert.throws(() => state.removeManual("vlm"));
   assert.throws(() => state.invalidateManual("vlm"));
   assert.equal(state.summary().total, 2);
+});
+
+test("Undo отклонения сохраняет edited, исходный раздел и обе формулировки", () => {
+  const state = createReviewState();
+  state.register("A", "Исходная формулировка", { normativeSection: "СП 123" });
+  state.edit("A", "Исправленная формулировка");
+  state.decide("A", "accepted");
+  const previous = state.get("A");
+  state.decide("A", "rejected");
+  assert.equal(state.snapshot()[0].experienceTag, "edited");
+  const undone = state.restoreDecision("A", previous.decision);
+  assert.equal(undone.experienceTag, "edited");
+  assert.equal(undone.text, "Исправленная формулировка");
+  assert.equal(undone.originalText, "Исходная формулировка");
+  assert.equal(undone.normativeSection, "СП 123");
+  assert.equal(undone.originalNormativeSection, "СП 123");
+  assert.equal(undone.revision, previous.revision + 2);
+  state.invalidate("A");
+  assert.equal(state.get("A").decision, "pending");
+  assert.equal(state.get("A").experienceTag, "edited");
+  state.edit("A", "Исходная формулировка");
+  assert.equal(state.get("A").edited, false);
+  const copy = state.snapshot();
+  copy[0].text = "Внешняя мутация";
+  assert.equal(state.get("A").text, "Исходная формулировка");
+  assert.throws(() => state.restoreDecision("A", "invalid"));
 });

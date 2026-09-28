@@ -5,6 +5,8 @@
  * Переход к серверному хранению будет выполнен через отдельный API-адаптер.
  */
 
+import { matchesTagFilter } from "./labels.js";
+
 export const DEMO_EXAMPLES = Object.freeze([
   {
     id: "demo-wise",
@@ -45,7 +47,7 @@ export function createExperienceModel(examples = DEMO_EXAMPLES) {
         item.normative_basis].some((value) => (
         value.toLocaleLowerCase("ru").includes(needle)
       )))
-      && (!tag || item.tag === tag)
+      && matchesTagFilter(item, tag)
       && (!decision || item.decision === decision)
       && (active === "" || String(item.active) === active)
     )).map((item) => ({ ...item }));

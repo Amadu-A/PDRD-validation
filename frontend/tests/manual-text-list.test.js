@@ -6,30 +6,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createManualTextList } from "../src/js/features/review/manual-list.js";
 
-class Element {
-  constructor(tag) {
-    this.tagName = tag.toUpperCase();
-    this.children = [];
-    this.dataset = {};
-    this.attributes = new Map();
-    this.className = "";
-    this.textContent = "";
-  }
-  append(...children) { this.children.push(...children); }
-  setAttribute(name, value) { this.attributes.set(name, value); }
-  querySelector(selector) {
-    if (selector === ".analysis-result__empty") {
-      return this.children.find((child) => child.className === "analysis-result__empty") ?? null;
-    }
-    return null;
-  }
-  querySelectorAll(selector) {
-    if (selector === ".analysis-result__finding") {
-      return this.children.filter((child) => child.className === "analysis-result__finding");
-    }
-    return [];
-  }
-}
+import { FakeElement as Element } from "./helpers/fake-dom.js";
 
 globalThis.document = { createElement: (tag) => new Element(tag) };
 

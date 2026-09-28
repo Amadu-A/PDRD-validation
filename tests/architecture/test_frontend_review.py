@@ -72,3 +72,22 @@ def test_review_javascript_behaviour() -> None:
     )
 
     assert result.returncode == 0, result.stdout + "\n" + result.stderr
+
+
+def test_resize_and_automatic_adapter_keep_review_boundaries() -> None:
+    """Растягивание, DOM-связи и решения не получают сетевых/обучающих обязанностей."""
+    review = FRONTEND / "src/js/features/review"
+    geometry = (review / "resize-geometry.js").read_text(encoding="utf-8")
+    resize = (review / "resize.js").read_text(encoding="utf-8")
+    automatic = (review / "automatic.js").read_text(encoding="utf-8")
+    registry = (
+        FRONTEND / "src/js/features/analysis/visualization-review.js"
+    ).read_text(encoding="utf-8")
+    assert "document." not in geometry
+    for source in (geometry, resize, automatic, registry):
+        assert "fetch(" not in source
+        assert "innerHTML" not in source
+    assert "WeakMap" in registry
+    assert "proposed_issue_boxes" in automatic
+    assert "confirmed_issue_box" not in automatic
+    assert "needs_adjudication" not in resize

@@ -10,6 +10,7 @@ import { createReviewControls } from "./controls.js";
 import { createManualAnnotationController } from "./manual.js";
 import { createManualTextList } from "./manual-list.js";
 import { createManualRecords } from "./manual-records.js";
+import { createAutomaticReview } from "./automatic.js";
 import { createReviewState, REVIEW_DECISIONS, REVIEW_ORIGINS } from "./state.js";
 
 const TEXT_SELECTOR = (
@@ -95,6 +96,7 @@ export function createReviewController() {
   let reportRoot = null;
   let manualRecords = createManualRecords();
   let emptyMessages = new Map();
+  let manualNotes = new Map();
 
   const manualList = createManualTextList();
 
@@ -114,7 +116,10 @@ export function createReviewController() {
           emptyMessages.set(pageNumber, empty.textContent);
         }
         empty.textContent = manualRecords.snapshot().some(
-          (note) => note.page_number === pageNumber,
+          (note) => (
+            note.page_number === pageNumber
+            && note.decision !== REVIEW_DECISIONS.REJECTED
+          ),
         ) ? (
           "Автоматические замечания на этом листе отсутствуют. "
           + "Замечание добавлено пользователем."
@@ -125,6 +130,7 @@ export function createReviewController() {
   }
 
   const manual = createManualAnnotationController({
+    onInteractionStart: () => automatic.cancelActive(),
     onCreate(note) {
       const entry = state.register(note.findingId, note.text, {
         origin: REVIEW_ORIGINS.MANUAL,
@@ -167,19 +173,27 @@ export function createReviewController() {
         view.controls.element.remove();
       }
       views.delete(note.findingId);
+      manualNotes.delete(note.findingId);
       markManualOnPage(note.pageNumber);
       updatePreview();
       return entry;
     },
+  });
 
-    onRestore(note, snapshot) {
-      const entry = state.restoreManual(snapshot);
-      attachManual(note, entry);
+  const automatic = createAutomaticReview({
+    onGeometry(findingIds) {
+      for (const findingId of findingIds) {
+        state.invalidate(findingId);
+        refresh(findingId);
+      }
     },
+    onRecord: (pageNumber, label, undo) => manual.recordAction(pageNumber, label, undo),
+    onStart: () => manual.cancelActive(),
   });
 
   /** Подключает одну Gold-запись к обоим представлениям без дублирования данных. */
   function attachManual(note, entry) {
+    manualNotes.set(note.findingId, note);
     manualRecords.add(note, entry);
     const textView = manualList.add(note, entry);
     markManualOnPage(note.pageNumber);
@@ -228,6 +242,7 @@ export function createReviewController() {
       view.item.dataset.reviewOrigin = entry.origin;
       view.item.dataset.reviewTag = entry.experienceTag ?? "";
       view.item.dataset.reviewEdited = String(entry.edited);
+      view.item.classList.toggle("is-hidden", entry.decision === REVIEW_DECISIONS.REJECTED);
 
       view.controls.status.textContent = (
         `${tag} · ${decisionLabels[entry.decision]}`
@@ -251,29 +266,38 @@ export function createReviewController() {
 
     manualList.sync(entry);
     manualRecords.sync(entry);
+    manualNotes.get(findingId)?.setRejected(entry.decision === REVIEW_DECISIONS.REJECTED);
+    automatic.setRejected(findingId, entry.decision === REVIEW_DECISIONS.REJECTED);
+    const note = manualNotes.get(findingId);
+    if (note) markManualOnPage(note.pageNumber);
     updatePreview();
   }
 
-  function attach(item, findingId, text, customEdit = null, manualActions = null) {
+  /** Решение и его Undo сохраняют текст, источник, области и независимый тег. */
+  function decide(findingId, decision, pageNumber) {
+    const previous = state.get(findingId).decision;
+    if (previous === decision) return;
+    manual.cancelActive();
+    automatic.cancelActive();
+    state.decide(findingId, decision);
+    refresh(findingId);
+    manual.recordAction(pageNumber, "решение по замечанию", () => {
+      state.restoreDecision(findingId, previous);
+      refresh(findingId);
+    });
+  }
+
+  function attach(item, findingId, text, customEdit = null, note = null) {
     item.dataset.reviewItem = "";
+    const pageNumber = note?.pageNumber ?? Number(item.dataset.reviewPage);
 
     const controls = createReviewControls({
       onAccept() {
-        state.decide(
-          findingId,
-          REVIEW_DECISIONS.ACCEPTED,
-        );
-
-        refresh(findingId);
+        decide(findingId, REVIEW_DECISIONS.ACCEPTED, pageNumber);
       },
 
       onReject() {
-        state.decide(
-          findingId,
-          REVIEW_DECISIONS.REJECTED,
-        );
-
-        refresh(findingId);
+        decide(findingId, REVIEW_DECISIONS.REJECTED, pageNumber);
       },
 
       onEdit() {
@@ -287,9 +311,6 @@ export function createReviewController() {
           );
         }
       },
-
-      onGeometry: manualActions?.onGeometry,
-      onRemove: manualActions?.onRemove,
     });
 
     item.prepend(controls.element);
@@ -308,11 +329,13 @@ export function createReviewController() {
   }
 
   function mount(root) {
+    automatic.dispose();
     manual.dispose();
     state = createReviewState();
     views = new Map();
     manualRecords = createManualRecords();
     emptyMessages = new Map();
+    manualNotes = new Map();
     activeFindingId = null;
     preview = null;
     editor = null;
@@ -357,12 +380,13 @@ export function createReviewController() {
 
     root.append(editor.dialog);
 
-    for (const item of items) {
+    const textItems = root.querySelectorAll(".analysis-result__finding[data-finding-id]");
+    for (const item of [...textItems, ...items]) {
       const findingId = String(
         item.dataset.findingId ?? "",
       ).trim();
 
-      const text = item.querySelector(TEXT_SELECTOR);
+      const text = item.querySelector("[data-review-text]") ?? item.querySelector(TEXT_SELECTOR);
 
       if (
         !findingId
@@ -375,6 +399,7 @@ export function createReviewController() {
       state.register(
         findingId,
         text.textContent,
+        { normativeSection: item.dataset.reviewBasis ?? "" },
       );
 
       attach(item, findingId, text);
@@ -384,6 +409,7 @@ export function createReviewController() {
       visualization,
       root,
     );
+    automatic.mount(visualization);
 
     if (!views.size && !manualPages) {
       editor.dialog.remove();
@@ -406,5 +432,13 @@ export function createReviewController() {
     return manualRecords.snapshot();
   }
 
-  return { mount, getManualSnapshot };
+  /** Операционный снимок включает rejected; серверное сохранение подключается отдельно. */
+  function getReviewSnapshot() {
+    return state.snapshot().map((entry) => ({
+      ...entry,
+      visualizations: automatic.snapshot(entry.findingId),
+    }));
+  }
+
+  return { mount, getManualSnapshot, getReviewSnapshot };
 }

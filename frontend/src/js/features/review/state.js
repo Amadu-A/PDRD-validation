@@ -96,6 +96,7 @@ export function createReviewState() {
       findingId: id,
       origin,
       originalText: normalizedText,
+      originalNormativeSection: normalizedNormative,
       text: normalizedText,
       normativeSection: normalizedNormative,
       decision: REVIEW_DECISIONS.PENDING,
@@ -135,7 +136,7 @@ export function createReviewState() {
       entry.normativeSection = nextNormative;
 
       entry.edited = entry.text !== entry.originalText
-        || (entry.origin === REVIEW_ORIGINS.VLM && nextNormative !== "");
+        || nextNormative !== entry.originalNormativeSection;
 
       entry.decision = REVIEW_DECISIONS.PENDING;
       entry.revision += 1;
@@ -164,18 +165,36 @@ export function createReviewState() {
     };
   }
 
-  /** Изменение области Gold требует нового решения, сохраняя его происхождение. */
-  function invalidateManual(findingId) {
+  /** Сохранённая правка области требует нового решения по замечанию. */
+  function invalidate(findingId) {
     const entry = requireEntry(findingId);
-    if (entry.origin !== REVIEW_ORIGINS.MANUAL) {
-      throw new Error("Эта операция доступна только для Gold-замечаний.");
-    }
     entry.decision = REVIEW_DECISIONS.PENDING;
     entry.revision += 1;
     return get(findingId);
   }
 
-  /** Удаляет только локальное Gold; отказ от VLM выполняется через решение. */
+  /** Undo решения сохраняет запись и увеличивает ревизию истории. */
+  function restoreDecision(findingId, decision) {
+    if (!Object.values(REVIEW_DECISIONS).includes(decision)) {
+      throw new Error("Недопустимое решение пользователя.");
+    }
+    const entry = requireEntry(findingId);
+    if (entry.decision !== decision) {
+      entry.decision = decision;
+      entry.revision += 1;
+    }
+    return get(findingId);
+  }
+
+  /** Совместимость локального Gold API; автоматические области используют invalidate. */
+  function invalidateManual(findingId) {
+    if (requireEntry(findingId).origin !== REVIEW_ORIGINS.MANUAL) {
+      throw new Error("Эта операция доступна только для Gold-замечаний.");
+    }
+    return invalidate(findingId);
+  }
+
+  /** Отменяет создание локального Gold; отклонение запись не удаляет. */
   function removeManual(findingId) {
     const entry = get(findingId);
     if (entry.origin !== REVIEW_ORIGINS.MANUAL) {
@@ -201,6 +220,7 @@ export function createReviewState() {
 
   return {
     register, get, decide, edit, summary,
-    invalidateManual, removeManual, restoreManual,
+    invalidate, invalidateManual, restoreDecision, removeManual, restoreManual,
+    snapshot: () => [...entries.keys()].map(get),
   };
 }
