@@ -79,7 +79,7 @@ services:
 
         cd /workspace
 
-        python -m pytest -q services/experience-service/tests/integration/test_review_database.py services/experience-service/tests/integration/test_confirmed_areas_database.py
+        python -m pytest -q services/experience-service/tests/integration/test_review_database.py services/experience-service/tests/integration/test_confirmed_areas_database.py services/experience-service/tests/integration/test_review_export_database.py
 
     networks:
       - experience-test-only

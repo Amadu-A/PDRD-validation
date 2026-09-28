@@ -32,6 +32,7 @@ from pdrd_experience_service.domain.review import (
     ReviewError,
     ReviewSession,
 )
+from pdrd_experience_service.domain.review_export import AreaStatus
 from pdrd_experience_service.infrastructure.database.codec import (
     event_from_json,
     snapshot_from_json,
@@ -362,6 +363,44 @@ class SqlAlchemyConfirmedAreasRepository:
                 confirmation_revision=row.revision,
                 active=False,
             )
+
+    async def load_status(self, *, review: ReviewSession) -> tuple[AreaStatus, ...]:
+        """Возвращает CAS-версии всех подтверждений и актуальность для этого Review."""
+        async with self._sessions() as database:
+            rows = (
+                await database.scalars(
+                    select(ConfirmedAreaModel)
+                    .where(
+                        ConfirmedAreaModel.job_id == review.job_id,
+                    )
+                    .order_by(ConfirmedAreaModel.finding_id)
+                )
+            ).all()
+        findings = {item.finding_id: item for item in review.findings}
+        statuses = []
+        for row in rows:
+            finding = findings.get(row.finding_id)
+            valid = bool(
+                row.active
+                and finding is not None
+                and finding.origin.value == "vlm"
+                and row.source_sha256 == review.source_sha256
+                and row.page_number == finding.page_number
+                and row.page_number in review.allowed_pages
+                and row.confirmed_at >= review.opened_at
+                and row.content_signature == content_signature(review, finding)
+            )
+            statuses.append(
+                AreaStatus(
+                    finding_id=row.finding_id,
+                    revision=row.revision,
+                    valid=valid,
+                    regions=tuple(Rectangle(**box) for box in row.regions)
+                    if valid
+                    else (),
+                )
+            )
+        return tuple(statuses)
 
     async def load_confirmed(
         self,

@@ -16,6 +16,7 @@ export function createReviewSync({ jobId, api, snapshot, hydrate, onStatus = () 
   let failed = false;
   let conflict = false;
   let detached = false;
+  let serverSession = null;
   const queue = [];
   const emit = (value) => { if (!detached) onStatus(value); };
 
@@ -34,10 +35,11 @@ export function createReviewSync({ jobId, api, snapshot, hydrate, onStatus = () 
         throw new Error("Сервер вернул снимок другого задания или неверную ревизию.");
       }
       hydrate(session);
+      serverSession = session;
       revision = session.revision;
       observed = snapshot();
       initialized = true;
-      emit({ mode: "saved", revision, pending: 0 });
+      emit({ mode: "saved", revision, pending: 0, session: serverSession });
     } catch (error) {
       failed = true;
       emit({ mode: "error", pending: 0, error });
@@ -65,8 +67,9 @@ export function createReviewSync({ jobId, api, snapshot, hydrate, onStatus = () 
             throw new Error("Сервер вернул некорректную ревизию Review.");
           }
           revision = response.revision;
+          serverSession = response;
           queue.shift();
-          emit({ mode: queue.length ? "saving" : "saved", revision, pending: queue.length });
+          emit({ mode: queue.length ? "saving" : "saved", revision, pending: queue.length, session: serverSession });
         } catch (error) {
           failed = true;
           conflict = error.status === 409;
@@ -79,6 +82,17 @@ export function createReviewSync({ jobId, api, snapshot, hydrate, onStatus = () 
 
   return {
     start, changed,
+    /** Подтверждение области и утверждение проходят через ту же очередь CAS. */
+    async run(command) {
+      await saving;
+      if (!initialized || failed || detached || queue.length) throw new Error("Сначала сохраните или восстановите Review.");
+      queue.push(command);
+      emit({ mode: "saving", revision, pending: queue.length, session: serverSession });
+      await flush();
+      if (failed || queue.length) throw new Error("Команда не подтверждена сервером. Восстановите Review.");
+      return serverSession;
+    },
+    get session() { return serverSession; },
     /** Повторяет ту же CAS-команду; потерянный ответ не приводит к дублированию записи. */
     async retry() {
       if (conflict || !initialized) return;

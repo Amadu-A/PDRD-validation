@@ -8,12 +8,12 @@ from typing import Protocol
 
 @dataclass(frozen=True, slots=True)
 class AnalysisBoundingBox:
-    """Нормализованный bbox в диапазоне 0..1000."""
+    """Нормализованный bbox 0..1000 с сохранением дробных координат."""
 
-    x_min: int
-    y_min: int
-    x_max: int
-    y_max: int
+    x_min: float
+    y_min: float
+    x_max: float
+    y_max: float
 
     def __post_init__(
         self,
@@ -40,7 +40,7 @@ class AnalysisBoundingBox:
         self,
     ) -> dict[
         str,
-        int,
+        float,
     ]:
         """Возвращает JSON-ready bbox."""
         return {

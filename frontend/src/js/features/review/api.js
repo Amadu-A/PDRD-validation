@@ -2,7 +2,7 @@
 
 /** HTTP Review через Gateway. Инженер и служебные ключи задаются сервером. */
 
-import { fetchJson } from "../../api.js";
+import { fetchJson, fetchPdf } from "../../api.js";
 import { ANALYSES_ENDPOINT } from "../../config.js";
 
 function endpoint(jobId, suffix = "") {
@@ -18,6 +18,10 @@ export function createReviewApi() {
     command: (jobId, command) => fetchJson(endpoint(jobId, "/commands"), {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(command), cache: "no-store",
+    }),
+    pdf: (jobId, revision) => fetchPdf(`${ANALYSES_ENDPOINT}/${encodeURIComponent(jobId)}/reviewed-pdf`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expected_revision: revision }), cache: "no-store",
     }),
   };
 }

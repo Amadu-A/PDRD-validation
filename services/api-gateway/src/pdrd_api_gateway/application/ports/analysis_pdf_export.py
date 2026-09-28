@@ -23,6 +23,8 @@ class AnalysisPdfAnnotation:
         AnalysisBoundingBox,
         ...,
     ]
+    callout_box: AnalysisBoundingBox | None = None
+    origin: str = "vlm"
 
     def as_dict(
         self,
@@ -31,7 +33,7 @@ class AnalysisPdfAnnotation:
         object,
     ]:
         """Возвращает JSON-ready annotation."""
-        return {
+        result = {
             "number": self.number,
             "finding_id": self.finding_id,
             "page_number": self.page_number,
@@ -39,6 +41,11 @@ class AnalysisPdfAnnotation:
             "content": self.content,
             "regions": [region.as_dict() for region in self.regions],
         }
+        if self.callout_box is not None:
+            result["callout_box"] = self.callout_box.as_dict()
+        if self.origin != "vlm":
+            result["origin"] = self.origin
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +77,7 @@ class AnalysisPdfReportFinding:
         AnalysisPdfReportField,
         ...,
     ]
+    origin: str = "vlm"
 
     def as_dict(
         self,
@@ -78,10 +86,13 @@ class AnalysisPdfReportFinding:
         object,
     ]:
         """Возвращает JSON-ready finding."""
-        return {
+        result = {
             "title": self.title,
             "fields": [field.as_dict() for field in self.fields],
         }
+        if self.origin != "vlm":
+            result["origin"] = self.origin
+        return result
 
 
 @dataclass(frozen=True, slots=True)

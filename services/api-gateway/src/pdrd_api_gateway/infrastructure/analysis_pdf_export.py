@@ -22,6 +22,7 @@ class DocumentServiceAnalysisAnnotatedPdfRenderer:
         self,
         *,
         settings: DocumentServiceSettings,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         """Сохраняет bounded HTTP settings."""
         self._base_url = settings.base_url.rstrip(
@@ -31,6 +32,7 @@ class DocumentServiceAnalysisAnnotatedPdfRenderer:
         self._request_timeout_seconds = settings.request_timeout_seconds
 
         self._connect_timeout_seconds = settings.connect_timeout_seconds
+        self._transport = transport
 
     async def render(
         self,
@@ -57,6 +59,8 @@ class DocumentServiceAnalysisAnnotatedPdfRenderer:
         try:
             async with httpx.AsyncClient(
                 timeout=timeout,
+                transport=self._transport,
+                follow_redirects=False,
             ) as client:
                 response = await client.post(
                     (f"{self._base_url}/internal/v1/pdf/annotate"),

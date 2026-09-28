@@ -47,6 +47,7 @@ from pdrd_api_gateway.application.use_cases.get_analysis_visualization import (
     GetAnalysisVisualization,
 )
 from pdrd_api_gateway.application.use_cases.get_review_source import GetReviewSource
+from pdrd_api_gateway.application.use_cases.get_reviewed_pdf import GetReviewedPdf
 from pdrd_api_gateway.application.use_cases.manage_normative_catalog import (
     NormativeCatalogFacade,
 )
@@ -109,8 +110,12 @@ from pdrd_api_gateway.infrastructure.review import (
     ControlledReviewContext,
     HttpReviewService,
 )
+from pdrd_api_gateway.infrastructure.reviewed_pdf_source import HttpReviewedPdfSource
 from pdrd_api_gateway.infrastructure.storage.filesystem import (
     LocalFilesystemAnalysisArtifactStore,
+)
+from pdrd_api_gateway.infrastructure.storage.reviewed_pdf_cache import (
+    LocalReviewedPdfCache,
 )
 from pdrd_api_gateway.infrastructure.storage.visualization_cache import (
     LocalFilesystemAnalysisVisualizationCache,
@@ -142,6 +147,7 @@ class ApplicationContainer:
 
     manage_review: ManageReview | None = None
     get_review_source: GetReviewSource | None = None
+    get_reviewed_pdf: GetReviewedPdf | None = None
 
     get_analysis_result: GetAnalysisResult | None = None
 
@@ -342,6 +348,7 @@ def build_container() -> ApplicationContainer:
 
     manage_review = None
     get_review_source = None
+    get_reviewed_pdf = None
     if settings.review.enabled:
         manage_review = ManageReview(
             contexts=ControlledReviewContext(actor=settings.review.actor.strip()),
@@ -356,6 +363,15 @@ def build_container() -> ApplicationContainer:
             artifacts=artifact_store,
             visualizations=get_analysis_visualization,
         )
+        get_reviewed_pdf = GetReviewedPdf(
+            contexts=manage_review.contexts,
+            access=manage_review.access,
+            jobs=get_analysis_job,
+            source=HttpReviewedPdfSource(manage_review.service),
+            artifacts=artifact_store,
+            renderer=annotated_pdf_renderer,
+            cache=LocalReviewedPdfCache(root_path=artifact_root / "reviewed-pdf"),
+        )
 
     return ApplicationContainer(
         settings=settings,
@@ -365,6 +381,7 @@ def build_container() -> ApplicationContainer:
         get_analysis_job=(get_analysis_job),
         manage_review=manage_review,
         get_review_source=get_review_source,
+        get_reviewed_pdf=get_reviewed_pdf,
         get_analysis_result=(get_analysis_result),
         get_analysis_visualization=(get_analysis_visualization),
         get_analysis_annotated_pdf=(get_analysis_annotated_pdf),

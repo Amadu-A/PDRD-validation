@@ -4,17 +4,24 @@
 
 from uuid import UUID
 
+from pdrd_experience_service.application.use_cases.confirm_areas import (
+    ConfirmArea,
+    RevokeArea,
+)
 from pdrd_experience_service.application.use_cases.review import ChangeReview
+from pdrd_experience_service.domain.area_confirmation import ConfirmationMode
 from pdrd_experience_service.domain.review import Decision, Rectangle, ReviewSession
 from pdrd_experience_service.transport.http.schemas.review import (
     AddCommand,
     ApproveCommand,
     Box,
+    ConfirmAreaCommand,
     DecideCommand,
     EditCommand,
     GeometryCommand,
     ResetCommand,
     ReviewCommand,
+    RevokeAreaCommand,
 )
 
 
@@ -29,8 +36,30 @@ async def execute_command(
     job_id: UUID,
     actor: str,
     command: ReviewCommand,
+    confirm_area: ConfirmArea | None = None,
+    revoke_area: RevokeArea | None = None,
 ) -> ReviewSession:
     """Передаёт доверенного инженера отдельно от тела пользовательской команды."""
+    if isinstance(command, (ConfirmAreaCommand, RevokeAreaCommand)):
+        arguments = {
+            "job_id": job_id,
+            "finding_id": command.finding_id,
+            "actor": actor,
+            "expected_review_revision": command.expected_revision,
+            "expected_confirmation_revision": command.expected_confirmation_revision,
+        }
+        if isinstance(command, ConfirmAreaCommand) and confirm_area is not None:
+            await confirm_area.execute(
+                **arguments,
+                regions=tuple(rectangle(box) for box in command.regions),
+                mode=ConfirmationMode(command.mode),
+                note=command.note,
+            )
+            return await confirm_area.reviews.load(job_id)
+        if isinstance(command, RevokeAreaCommand) and revoke_area is not None:
+            await revoke_area.execute(**arguments, reason=command.reason)
+            return await revoke_area.reviews.load(job_id)
+        raise RuntimeError("Подтверждение областей не подключено.")
     arguments = {
         "job_id": job_id,
         "actor": actor,

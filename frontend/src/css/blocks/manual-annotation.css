@@ -116,7 +116,8 @@
   box-sizing: border-box;
   gap: 3px;
   padding: 4px;
-  overflow: auto;
+  /* Текст обрезает review-resize__content, полный текст доступен в тултипе. */
+  overflow: visible;
   border: 2px solid var(--color-warning);
   border-radius: var(--radius-control);
   background: color-mix(

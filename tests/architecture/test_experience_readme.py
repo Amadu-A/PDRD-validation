@@ -16,7 +16,7 @@ README = ROOT / "README.md"
 
 
 def test_readme_documents_all_review_process_diagrams() -> None:
-    """Prevent a code-only Experience roadmap without grouping/selection diagrams."""
+    """Сохраняет схемы группировки, проверки областей и отдельного отбора Experience."""
     text = README.read_text(
         encoding="utf-8",
     )
@@ -39,16 +39,23 @@ def test_readme_documents_all_review_process_diagrams() -> None:
     assert not missing, missing
 
 
-def test_readme_does_not_claim_unreleased_e_search_or_reviewed_pdf() -> None:
-    """Закрытый Review не выдаётся за готовый каталог, поиск E или Reviewed PDF."""
+def test_readme_documents_reviewed_pdf_without_claiming_experience_catalog() -> None:
+    """Рабочий экспорт отделён от будущего crop/CRUD и выключенного поиска E."""
     text = README.read_text(
         encoding="utf-8",
     )
 
-    assert "постоянный каталог Experience и Reviewed PDF ещё не реализованы" in text
+    assert (
+        "Постоянный каталог Experience, crop, CRUD и экспорт примеров ещё не реализованы"
+        in text
+    )
     assert "Закрытый Review API доступен через Gateway" in text
-
-    assert "reviewed PDF после Human Review пока заблокирован" in text
+    assert "POST /api/v1/analyses/{job_id}/reviewed-pdf" in text
+    assert "Reviewed PDF доступен только для текущей утверждённой редакции" in text
+    assert "подтверждённой области включаются только в полный текстовый список" in text
+    assert "confirmation digest + renderer version" in text
+    assert "needs_adjudication" in text
+    assert "KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_ENABLED=false" in text
 
     assert "shared-vlm:8000/v1" in text
 

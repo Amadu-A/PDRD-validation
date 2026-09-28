@@ -14,7 +14,13 @@ from time import perf_counter
 
 def configure_review_logging() -> None:
     """Включает один обработчик timing Review независимо от root-логгера Uvicorn."""
-    logger = logging.getLogger("pdrd_api_gateway.application.use_cases.manage_review")
+    for operation in ("manage_review", "get_reviewed_pdf"):
+        _configure_timing_logger(f"pdrd_api_gateway.application.use_cases.{operation}")
+
+
+def _configure_timing_logger(name: str) -> None:
+    """Настраивает один обработчик на операцию без изменения root-логгера."""
+    logger = logging.getLogger(name)
     if not any(
         getattr(handler, "pdrd_review_timing", False) for handler in logger.handlers
     ):

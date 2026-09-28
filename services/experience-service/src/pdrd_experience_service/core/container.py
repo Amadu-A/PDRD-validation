@@ -33,6 +33,7 @@ from pdrd_experience_service.application.use_cases.confirm_areas import (
     ConfirmArea,
     RevokeArea,
 )
+from pdrd_experience_service.application.use_cases.export_review import ExportReview
 from pdrd_experience_service.application.use_cases.review import (
     ChangeReview,
     OpenReview,
@@ -96,6 +97,7 @@ class ApplicationContainer:
     confirm_area: ConfirmArea | None = None
     revoke_area: RevokeArea | None = None
     select_experience: SelectExperience | None = None
+    export_review: ExportReview | None = None
 
     async def close(self) -> None:
         """Освобождает ресурсы, созданные Composition Root."""
@@ -215,4 +217,5 @@ def build_container(
         confirm_area=confirm_area,
         revoke_area=revoke_area,
         select_experience=select_experience,
+        export_review=ExportReview(reviews=reviews, areas=confirmed_areas),
     )

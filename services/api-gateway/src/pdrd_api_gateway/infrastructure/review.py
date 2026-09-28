@@ -43,10 +43,13 @@ class HttpReviewService:
         self, *, context: ReviewContext, command: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """Не пересылает произвольные пользовательские заголовки в Experience."""
-        suffix = {"open": "/open", "read": "", "command": "/commands"}[
-            context.operation
-        ]
-        method = "GET" if context.operation == "read" else "POST"
+        suffix = {
+            "open": "/open",
+            "read": "",
+            "command": "/commands",
+            "export": "/pdf-manifest",
+        }[context.operation]
+        method = "GET" if context.operation in {"read", "export"} else "POST"
         try:
             async with httpx.AsyncClient(
                 timeout=self.timeout_seconds,

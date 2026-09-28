@@ -3,7 +3,7 @@
 """Application contracts построения PDF с инженерными аннотациями."""
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pdrd_document_service.domain.pdf import (
     PdfNormalizedBoundingBox,
@@ -23,6 +23,8 @@ class PdfFindingAnnotation:
         PdfNormalizedBoundingBox,
         ...,
     ]
+    callout_box: PdfNormalizedBoundingBox | None = None
+    origin: Literal["vlm", "manual"] = "vlm"
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +44,7 @@ class PdfReportFinding:
         PdfReportField,
         ...,
     ]
+    origin: Literal["vlm", "manual"] = "vlm"
 
 
 @dataclass(frozen=True, slots=True)

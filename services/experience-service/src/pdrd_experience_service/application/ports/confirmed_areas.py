@@ -17,10 +17,16 @@ from pdrd_experience_service.domain.area_confirmation import (
 from pdrd_experience_service.domain.experience_selection import (
     ConfirmedFindingArea,
 )
+from pdrd_experience_service.domain.review import ReviewSession
+from pdrd_experience_service.domain.review_export import AreaStatus
 
 
 class ConfirmedAreasReader(Protocol):
     """Возвращает только актуальные подтверждения для отбора Experience."""
+
+    async def load_status(self, *, review: ReviewSession) -> tuple[AreaStatus, ...]:
+        """Читает версии и проверяет подписи также до утверждения Review."""
+        ...
 
     async def load_confirmed(
         self,

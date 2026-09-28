@@ -1,114 +1,138 @@
-# ops/check-quality.ps1
+﻿# ops/check-quality.ps1
 
 <#
-Локальная проверка качества Python-кода PDRD под Windows.
+Проверка качества monorepo под Windows без большого блока вставки в PSReadLine.
 
-Скрипт ищет Python сначала в .venv-dev, затем в обычной .venv.
-При параметре -Fix Ruff сначала исправляет безопасно исправляемые нарушения
-и форматирует код. После этого выполняются lint, format check и pytest.
+Скрипт выбирает .venv-dev или .venv, находит Node для JS-тестов, проверяет
+зависимости, Ruff, весь pytest и пробелы Git. Каждый внешний процесс проверяется
+по коду завершения; pytest получает новый временный каталог и не создаёт кеш.
 
-Для monorepo pytest запускается в importlib mode, чтобы тестовые файлы
-с одинаковыми именами в разных микросервисах не конфликтовали между собой.
-
-Файл относится к development tooling и не участвует в runtime приложения.
+-Fix сначала применяет исправления Ruff. -CommitMessage после успешных проверок
+коммитит все неигнорируемые изменения на feature/experience-base. -Push требует
+-CommitMessage и отправляет эту ветку в GitHub через системный OpenSSH.
+Без этих параметров скрипт только проверяет рабочую копию.
 #>
 
 [CmdletBinding()]
 param(
-    [switch]$Fix
+    [switch]$Fix,
+    [string]$CommitMessage,
+    [switch]$Push
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$repositoryRoot = (
-    Resolve-Path (
-        Join-Path $PSScriptRoot ".."
+function Invoke-CheckedCommand {
+    <# Выполняет внешний процесс и останавливает проверку при ненулевом коде. #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$FailureMessage
     )
-).Path
 
-$devPython = Join-Path `
-    $repositoryRoot `
-    ".venv-dev\Scripts\python.exe"
-
-$projectPython = Join-Path `
-    $repositoryRoot `
-    ".venv\Scripts\python.exe"
-
-if (Test-Path $devPython) {
-    $pythonExecutable = $devPython
-}
-elseif (Test-Path $projectPython) {
-    $pythonExecutable = $projectPython
-}
-else {
-    throw (
-        "Python environment was not found. " +
-        "Expected .venv-dev or .venv in repository root."
-    )
+    & $Executable @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$FailureMessage Код завершения: $LASTEXITCODE."
+    }
 }
 
-Write-Host "Python executable:"
-Write-Host $pythonExecutable
+$repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$safeDirectory = $repositoryRoot.Replace("\", "/")
+$gitArguments = @("-c", "safe.directory=$safeDirectory")
+$hasCommitMessage = -not [string]::IsNullOrWhiteSpace($CommitMessage)
 
-& $pythonExecutable --version
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Python executable check failed."
+if ($PSBoundParameters.ContainsKey("CommitMessage") -and -not $hasCommitMessage) {
+    throw "Сообщение коммита не должно быть пустым."
+}
+if ($Push -and -not $hasCommitMessage) {
+    throw "Для -Push нужно указать -CommitMessage; push выполняется после проверок и коммита."
 }
 
+$pythonExecutable = $null
+foreach ($candidate in @(".venv-dev\Scripts\python.exe", ".venv\Scripts\python.exe")) {
+    $candidatePath = Join-Path $repositoryRoot $candidate
+    if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+        $pythonExecutable = $candidatePath
+        break
+    }
+}
+if (-not $pythonExecutable) {
+    throw "В корне проекта не найден Python из .venv-dev или .venv."
+}
+
+$previousPath = $env:PATH
 Push-Location $repositoryRoot
-
 try {
+    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $nodeCommand) {
+        $nodeDirectory = Join-Path $env:ProgramFiles "nodejs"
+        $nodeExecutable = Join-Path $nodeDirectory "node.exe"
+        if (-not (Test-Path -LiteralPath $nodeExecutable -PathType Leaf)) {
+            throw "Node.js не найден в PATH или Program Files\nodejs. Он необходим для frontend-тестов."
+        }
+        $env:PATH = "$nodeDirectory;$previousPath"
+        $nodeCommand = Get-Command node -ErrorAction Stop
+    }
+    $gitCommand = Get-Command git -ErrorAction Stop
+    Invoke-CheckedCommand $pythonExecutable @("--version") "Не удалось запустить Python."
+    Invoke-CheckedCommand $nodeCommand.Source @("--version") "Не удалось запустить Node.js."
+    Invoke-CheckedCommand $gitCommand.Source @("--version") "Не удалось запустить Git."
+
+    if ($hasCommitMessage) {
+        $branch = & $gitCommand.Source @gitArguments branch --show-current
+        if ($LASTEXITCODE -ne 0) {
+            throw "Не удалось определить ветку Git."
+        }
+        if ($branch -ne "feature/experience-base") {
+            throw "Коммит разрешён в feature/experience-base; текущая ветка: $branch."
+        }
+        Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @("status", "--short")) "Не удалось прочитать состояние Git."
+    }
+
+    Invoke-CheckedCommand $pythonExecutable @("-m", "pip", "check") "Нарушена совместимость зависимостей."
     if ($Fix) {
-        Write-Host "Ruff: automatic fixes..."
+        Invoke-CheckedCommand $pythonExecutable @("-m", "ruff", "check", ".", "--fix") "Ruff не смог исправить нарушения."
+        Invoke-CheckedCommand $pythonExecutable @("-m", "ruff", "format", ".") "Ruff не смог отформатировать код."
+    }
+    Invoke-CheckedCommand $pythonExecutable @("-m", "ruff", "check", ".") "Ruff обнаружил ошибки."
+    Invoke-CheckedCommand $pythonExecutable @("-m", "ruff", "format", "--check", ".") "Форматирование не соответствует Ruff."
 
-        & $pythonExecutable -m ruff check . --fix
+    $pytestBase = Join-Path ([System.IO.Path]::GetTempPath()) ("pdrd-quality-" + [guid]::NewGuid().ToString("N"))
+    Invoke-CheckedCommand $pythonExecutable @(
+        "-m", "pytest", "-q", "--import-mode=importlib",
+        "-p", "no:cacheprovider", "--basetemp", $pytestBase
+    ) "Pytest завершился с ошибкой."
+    Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @("diff", "--check")) "Git обнаружил ошибки пробелов."
 
-        if ($LASTEXITCODE -ne 0) {
-            throw "ruff check --fix failed."
+    if ($hasCommitMessage) {
+        Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @("add", "--all")) "Не удалось подготовить изменения к коммиту."
+        Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @("diff", "--cached", "--check")) "В подготовленных изменениях есть ошибки пробелов."
+        & $gitCommand.Source @gitArguments diff --cached --quiet
+        $stagedExitCode = $LASTEXITCODE
+        if ($stagedExitCode -eq 0) {
+            throw "Нет изменений для коммита."
         }
-
-        Write-Host "Ruff: formatting..."
-
-        & $pythonExecutable -m ruff format .
-
-        if ($LASTEXITCODE -ne 0) {
-            throw "ruff format failed."
+        if ($stagedExitCode -ne 1) {
+            throw "Не удалось проверить подготовленные изменения."
+        }
+        Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @("commit", "-m", $CommitMessage)) "Не удалось создать коммит."
+        if ($Push) {
+            $sshExecutable = Join-Path $env:WINDIR "System32\OpenSSH\ssh.exe"
+            if (-not (Test-Path -LiteralPath $sshExecutable -PathType Leaf)) {
+                throw "Системный OpenSSH не найден; коммит создан, push не выполнен."
+            }
+            $sshCommand = $sshExecutable.Replace("\", "/")
+            Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @(
+                "-c", "core.sshCommand=$sshCommand", "push",
+                "git@github.com:Amadu-A/PDRD-validation.git", "feature/experience-base"
+            )) "Push не завершён; коммит сохранён локально."
         }
     }
-
-    Write-Host "Ruff: lint check..."
-
-    & $pythonExecutable -m ruff check .
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "ruff check found errors."
-    }
-
-    Write-Host "Ruff: format check..."
-
-    & $pythonExecutable -m ruff format --check .
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "ruff format --check found errors."
-    }
-
-    Write-Host "Pytest..."
-
-    & $pythonExecutable `
-        -m pytest `
-        -q `
-        --import-mode=importlib
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "pytest failed."
-    }
-
-    Write-Host "All quality checks passed."
+    Write-Host "Все проверки качества успешно завершены."
 }
 finally {
+    $env:PATH = $previousPath
     Pop-Location
 }

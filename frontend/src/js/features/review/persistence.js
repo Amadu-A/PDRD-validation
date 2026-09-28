@@ -10,6 +10,8 @@ import { createReviewApi } from "./api.js";
 import { reviewEntries } from "./commands.js";
 import { createReviewSync } from "./sync.js";
 import { mountReviewTooltips } from "./tooltips.js";
+import { mountReviewedPdf } from "./pdf-controls.js";
+import { mountAreaConfirmations } from "./area-controls.js";
 
 const MESSAGES = {
   loading: "Восстанавливаем решения с сервера…",
@@ -36,14 +38,24 @@ export function createReviewPersistence({ api = createReviewApi() } = {}) {
     if (!active) return;
     active.sync?.detach();
     if (active.sync?.pending === 0) sessions.delete(active.sync);
+    else if (active.sync) {
+      const previous = active.sync;
+      void previous.settled().then(() => { if (previous.pending === 0) sessions.delete(previous); });
+    }
     active.controller.dispose();
     active.tooltips();
+    active.pdf?.dispose();
+    active.areas?.dispose();
     active = null;
   }
 
   function mount(root, { jobId = null } = {}) {
     clear();
     let sync = null;
+    let pdf = null;
+    let areas = null;
+    let busy = false;
+    let latestStatus = { mode: "loading" };
     const controller = createReviewController({ onChange: () => sync?.changed() });
     controller.mount(root);
     const tooltips = mountReviewTooltips(root);
@@ -67,20 +79,30 @@ export function createReviewPersistence({ api = createReviewApi() } = {}) {
     reload.addEventListener("click", () => window.location.reload());
     actions.append(retry, reload);
     root.querySelector("[data-review-preview]").after(actions);
+    function applyStatus(status = latestStatus) {
+      latestStatus = status;
+      controller.setConnection({
+        isPersistent: status.mode !== "local",
+        isLocked: busy || ["loading", "error", "conflict"].includes(status.mode),
+        message: MESSAGES[status.mode] + (status.error?.detail ? ` ${String(status.error.detail).slice(0, 300)}` : ""),
+      });
+      retry.hidden = status.mode !== "error" || status.pending === 0;
+      reload.hidden = !["error", "conflict", "saved"].includes(status.mode);
+      pdf?.update({ ...status, busy });
+      areas?.update({ ...status, busy });
+    }
+    const onBusy = (value) => { busy = value; applyStatus(); };
+    const snapshot = () => reviewEntries(controller.getReviewSnapshot(), controller.getManualSnapshot());
     sync = createReviewSync({
       jobId, api,
-      snapshot: () => reviewEntries(controller.getReviewSnapshot(), controller.getManualSnapshot()),
+      snapshot,
       hydrate: controller.hydrate,
-      onStatus(status) {
-        controller.setConnection({
-          isPersistent: status.mode !== "local",
-          isLocked: ["loading", "error", "conflict"].includes(status.mode),
-          message: MESSAGES[status.mode] + (status.error?.detail ? ` ${String(status.error.detail).slice(0, 300)}` : ""),
-        });
-        retry.hidden = status.mode !== "error" || status.pending === 0;
-        reload.hidden = !["error", "conflict", "saved"].includes(status.mode);
-      },
+      onStatus: applyStatus,
     });
+    pdf = mountReviewedPdf({ root, jobId, api, sync, onBusy });
+    areas = mountAreaConfirmations({ root, sync, snapshot, onBusy });
+    active.pdf = pdf;
+    active.areas = areas;
     active.sync = sync;
     sessions.add(sync);
     retry.addEventListener("click", () => { void sync.retry(); });

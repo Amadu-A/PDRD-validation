@@ -78,12 +78,32 @@ class ApproveCommand(StrictCommand):
     action: Literal["approve"]
 
 
+class ConfirmAreaCommand(FindingCommand):
+    """Явная проверка области; версии Review и подтверждения независимы."""
+
+    action: Literal["confirm_area"]
+    expected_confirmation_revision: int = Field(ge=0)
+    regions: list[Box] = Field(min_length=1, max_length=4)
+    mode: Literal["proposed", "redrawn"]
+    note: str = Field(max_length=1000)
+
+
+class RevokeAreaCommand(FindingCommand):
+    """Отзыв подтверждения сохраняет причину и прежние координаты в аудите."""
+
+    action: Literal["revoke_area"]
+    expected_confirmation_revision: int = Field(ge=0)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 ReviewCommand = Annotated[
     DecideCommand
     | ResetCommand
     | AddCommand
     | EditCommand
     | GeometryCommand
-    | ApproveCommand,
+    | ApproveCommand
+    | ConfirmAreaCommand
+    | RevokeAreaCommand,
     Field(discriminator="action"),
 ]

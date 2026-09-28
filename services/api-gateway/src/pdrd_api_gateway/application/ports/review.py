@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
-ReviewOperation = Literal["open", "read", "command"]
+ReviewOperation = Literal["open", "read", "command", "export"]
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,8 +1,8 @@
 // frontend/src/js/features/analysis/pdf-export.js
 
 /**
- * Разделяет действующий автоматический PDF и будущий PDF после Human Review.
- * Текущий серверный endpoint не принимает решения или ручную геометрию.
+ * Разделяет автоматический PDF и утверждённый PDF после Human Review.
+ * Итоговую кнопку подключает отдельный модуль серверного Review.
  */
 
 function createElement(
@@ -32,7 +32,7 @@ function createElement(
 
 
 /**
- * Выводит автоматический PDF и недоступное пока действие финального review.
+ * Выводит исходный PDF и кнопку итогового PDF до подключения серверного Review.
  */
 export function appendAnnotatedPdfDownload(
   parent,
@@ -108,8 +108,8 @@ export function appendAnnotatedPdfDownload(
   finalButton.dataset.analysisPdfReviewed = "";
 
   finalButton.title = (
-    "Формирование итогового PDF пока недоступно. "
-    + "Итоговый PDF должен включать принятые замечания на листах "
+    "Сначала примите или отклоните все замечания. "
+    + "Итоговый PDF включает принятые замечания с проверенной областью на листах "
     + "и в текстовом списке."
   );
 

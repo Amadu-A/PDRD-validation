@@ -30,6 +30,7 @@ PDRD Validation — локальный сервис проверки проек�
 - кликабельные нормативные и T sources;
 - Human Review в браузере: Wise/Bad/Edited/Gold, выделение Gold на листе и синхронизация с текстовым списком;
 - серверная доменная модель Human Review, утверждение ревизий и отбор подтверждённых областей для будущей Базы Опыта;
+- итоговый PDF актуального утверждённого Human Review: принятые замечания, проверенные области VLM и жёлтый Gold на листе и в текстовом списке;
 - База Опыта (достоверное сохранение, HTTP и E indexing вводятся поэтапно; поиск E отключён до завершения контура);
 - единая embedding model для N/T/U/E/PZ;
 - blue/green переиндексация Qdrant при смене embedding identity;
@@ -157,15 +158,15 @@ flowchart TD
     W --> FS
     FE --> POLL["Status / result / visualization polling"]
     POLL --> GW
-    GW --> DS2["Automatic annotated PDF renderer"]
+    GW --> DS2["Document Service: automatic and reviewed PDF renderer"]
     U --> RF["Закрытый Review frontend: localhost :8081 / SSH"]
     RF --> GW
     GW --> EXP["Experience Service: профиль review"]
     EXP --> RP[("PostgreSQL: схема experience")]
-    EXP -. "approved review PDF planned" .-> DS2
+    EXP -->|approved Review manifest| GW
 ```
 
-Точки и модели shared-inference задаются logical endpoints/переменными окружения, а не физическими ID модели в коде проекта. Пунктир обозначает будущий Reviewed PDF. Review сохраняется через Gateway на закрытом фронте; основной фронт показывает локальный предпросмотр. Действующий `annotated-pdf` остаётся **автоматической исходной версией**.
+Точки и модели shared-inference задаются logical endpoints/переменными окружения, а не физическими ID модели в коде проекта. Experience формирует утверждённую проекцию Review, Gateway передаёт её PDF-рендереру Document Service. Review сохраняется через Gateway на закрытом фронте; основной фронт показывает локальный предпросмотр. Действующий `annotated-pdf` остаётся **автоматической исходной версией**.
 
 ## 2. Managed N/U catalog и индексация
 
@@ -290,7 +291,7 @@ erDiagram
     ANALYSIS_JOBS ||--o{ OUTBOX_MESSAGES : publishes
     ANALYSIS_JOBS ||..o| EXPERIENCE_REVIEW_SESSIONS : "logical job_id, no cross-schema FK"
     EXPERIENCE_REVIEW_SESSIONS ||--o{ EXPERIENCE_REVIEW_EVENTS : audits
-    EXPERIENCE_REVIEW_SESSIONS ||..o{ CONFIRMED_AREAS : "planned separate confirmation"
+    EXPERIENCE_REVIEW_SESSIONS ||--o{ CONFIRMED_AREAS : "versioned explicit confirmation"
     EXPERIENCE_REVIEW_SESSIONS ||..o{ EXPERIENCE_CANDIDATES : "planned verified selection"
     NORMATIVE_SECTIONS ||--o{ NORMATIVE_CATEGORIES : contains
     NORMATIVE_SECTIONS ||--o{ NORMATIVE_DOCUMENTS : contains
@@ -335,11 +336,13 @@ Snapshot содержит независимо:
 
 ### Experience Service
 
-**Контракт текущего этапа:** `experience.review_sessions` хранит последний JSONB-снимок одного `job_id` с `revision` и `approved_revision`; `experience.review_events` хранит неизменяемую последовательность действий `(job_id, session_revision)` с before/after и автором. Каждая запись в транзакции проходит optimistic CAS по `expected_revision`. В `ReviewSession` хранятся также замечания без координат — для полного аудита и итогового **текстового** PDF. Отбор обучающих примеров — отдельная операция, **не** копия всей таблицы Review. Предложенные визуализацией области VLM переносятся как `proposed_regions` с источником и уверенностью; `issue_box` остаётся пустой до явного подтверждения. Старые JSONB-снимки без `proposed_regions` продолжают читаться.
+**Контракт текущего этапа:** `experience.review_sessions` хранит последний JSONB-снимок одного `job_id` с `revision` и `approved_revision`; `experience.review_events` хранит неизменяемую последовательность действий `(job_id, session_revision)` с before/after и автором. Каждая запись в транзакции проходит optimistic CAS по `expected_revision`. В `ReviewSession` хранятся также замечания без координат — для полного аудита и итогового **текстового** PDF. Отбор обучающих примеров — отдельная операция, **не** копия всей таблицы Review. Предложенные визуализацией области VLM переносятся как `proposed_regions` с источником и уверенностью; `issue_box` VLM не заполняется автоматически, подтверждения хранятся отдельно. Старые JSONB-снимки без `proposed_regions` продолжают читаться.
 
-**Этап 5:** закрытый Review API соединяет Gateway, доверенный источник завершённого анализа, Experience Service и frontend. Восстанавливаются решения, исправления и геометрия VLM/Gold. `display_regions` хранит операционные правки отдельно от подтверждений областей. Запуск через приватный frontend на 127.0.0.1:8081, конфигурация и ограничения описаны в [docs/review-api.md](docs/review-api.md). Наличие миграции в Git не означает её применения на рабочем сервере.
+**Этап 5:** закрытый Review API соединяет Gateway, доверенный источник завершённого анализа, Experience Service и frontend. Восстанавливаются решения, исправления и геометрия VLM/Gold. `display_regions` хранит операционные правки отдельно от подтверждений областей. Предоставленные пользователем логи коммита `c1738fe` подтверждают Windows/Linux quality gate и развёртывание Experience на Linux с миграцией `20260928_0002`. Приватный frontend работает на 127.0.0.1:8081. Конфигурация и ограничения описаны в [docs/review-api.md](docs/review-api.md).
 
-**Следующие этапы:** утверждённый PDF с явным подтверждением областей, полноценные Experience records/crops, экспорт, индексация и отдельный эксперимент обучения. План 0–9: [docs/experience-roadmap.md](docs/experience-roadmap.md).
+**Этап 6:** реализованы явное подтверждение/отзыв областей VLM и Reviewed PDF из актуальной утверждённой редакции. Experience готовит проекцию, Gateway проверяет доступ, источник и кеш, Document Service рисует PDF. Полный текст всех accepted включается в приложение; аннотации на листах требуют проверенной области, Gold сохраняет жёлтое оформление и заданную карточку. Rejected исключены. Обновление этапа 6 требует отдельной проверки на Linux и в рабочем UI.
+
+**Следующие этапы:** полноценные Experience records/crops, CRUD, экспорт, индексация и отдельный эксперимент обучения. План 0–9: [docs/experience-roadmap.md](docs/experience-roadmap.md).
 
 ## 7. Qdrant — stable aliases и physical collections
 
@@ -593,7 +596,7 @@ flowchart TD
     CAS --> ALL{"All decisions recorded?"}
     ALL -->|нет| UI
     ALL -->|да| APPROVE["Explicit approval of current review revision"]
-    APPROVE --> PDF["Reviewed PDF renderer — planned"]
+    APPROVE --> PDF["Experience manifest → Gateway → Document Service: Reviewed PDF"]
     PDF --> PAGE["Accepted with location: annotation on original page"]
     PDF --> TEXT["All accepted: textual appended list, including unlocated"]
     APPROVE --> PICK["SelectExperience: separate trusted selection"]
@@ -602,7 +605,7 @@ flowchart TD
     INDEX --> QD[("dva_experience_active, guarded by feature flag")]
 ```
 
-**Статусы внедрения:** Human Review UI, демонстрационная страница Experience, domain `ReviewSession`, `SelectExperience`, PostgreSQL adapter/Alembic schema, аудит подтверждений областей и закрытый Review API реализованы. Серверный mapper переносит визуальные области в `proposed_regions`, не подтверждая их автоматически. Правки отображения сохраняются отдельно как `display_regions`. Явный UI подтверждения VLM-области, crop, reviewed PDF и E indexing ещё предстоят. Слово `planned` обозначает будущую функциональность. Развёртывание нового API требует проверки на Linux.
+**Статусы внедрения:** Human Review UI, демонстрационная страница Experience, domain `ReviewSession`, `SelectExperience`, PostgreSQL adapter/Alembic schema, аудит подтверждений областей, закрытый Review API и Reviewed PDF реализованы. Серверный mapper переносит визуальные области в `proposed_regions`, не подтверждая их автоматически. Правки отображения сохраняются отдельно как `display_regions`; UI подтверждает область отдельной командой. Crop, постоянный каталог Experience и E indexing ещё предстоят. Слово `planned` обозначает будущую функциональность. Развёртывание этапа 5 проверено пользователем; обновление этапа 6 проверяется отдельно.
 
 ## 12. Подтверждение и исправление областей
 
@@ -623,7 +626,7 @@ flowchart TD
     A -->|да| PICK
 ```
 
-`status=located` от автоматического локализатора не равен подтверждению инженера. Mapper читает только серверные артефакты задания и сохраняет такую область как `proposed_regions`; отсутствие, неверная геометрия или неоднозначная локализация оставляют находку текстовой. Подтверждение проверяется отдельно от `decision=accepted`. Никаких выдуманных координат или перехода Gold на другой лист. PostgreSQL-адаптер подтверждений уже проверяет связь с актуальной редакцией finding; пользовательский сценарий явного подтверждения области ещё предстоит.
+`status=located` от автоматического локализатора не равен подтверждению инженера. Mapper читает только серверные артефакты задания и сохраняет такую область как `proposed_regions`; отсутствие, неверная геометрия или неоднозначная локализация оставляют находку текстовой. Подтверждение проверяется отдельно от `decision=accepted`. Никаких выдуманных координат или перехода Gold на другой лист. PostgreSQL-адаптер проверяет связь подтверждения с актуальной редакцией finding. В полном текстовом списке кнопка «Подтвердить область» явно запускает эту операцию; изменение координат требует причины исправления, отзыв — причины отзыва. Оба действия используют собственную ревизию подтверждения и серверный actor.
 
 ## 13. Как будет происходить отбор, отсечение и классификация
 
@@ -661,12 +664,16 @@ flowchart TD
     REV["Approved revision"] --> LOCK{"Any pending findings or stale approval?"}
     LOCK -->|да| DENY["Block reviewed PDF at API and UI"]
     LOCK -->|нет| FILTER["Include accepted only"]
-    FILTER --> PAGE{"Location available?"}
+    FILTER --> PAGE{"Current confirmed VLM region or accepted Gold geometry?"}
     PAGE -->|да| DRAW["Annotation on original PDF page"]
     PAGE -->|нет| NO_BOX["No artificial annotation"]
     DRAW --> REPORT["Text report for every accepted finding"]
     NO_BOX --> REPORT
-    REPORT --> CACHE["Cache by job_id + approved_revision + source digest"]
+    REPORT --> CACHE["Separate cache: job + approved_revision + source SHA256 + confirmation digest + renderer version"]
+    CACHE --> CHECK["Recheck manifest, access and original PDF before response"]
+    CHECK --> CHANGED{"Changed during export?"}
+    CHANGED -->|да| CONFLICT["409: reload current Review"]
+    CHANGED -->|нет| DOWNLOAD["Download current Reviewed PDF"]
     REV --> SELECT["Verified ExperienceCandidate selection"]
     SELECT --> CROPS["Source PDF crop and full versioned metadata — planned"]
     CROPS --> INDEX["E embedding via shared-embedding — planned"]
@@ -674,6 +681,13 @@ flowchart TD
     EVAL --> FLAG{"Enable E feature flag only after validation"}
     FLAG --> TRAIN["Separate VLM fine-tuning research — not live"]
 ```
+
+Кнопка «Утвердить и скачать итоговый PDF после Human Review» блокируется при
+нерассмотренных замечаниях и незавершённом сохранении. Принятые VLM без
+подтверждённой области включаются только в полный текстовый список; Gold —
+на лист и в список с одинаковым номером. Отклонённые замечания сохраняются
+в операционном аудите, но исключаются из итогового PDF. Подтверждение/отзыв
+области меняет ключ кеша независимо от ревизии Review.
 
 # Как работает retrieval
 
@@ -1048,6 +1062,7 @@ GET  /api/v1/analyses/{job_id}/progress
 POST /api/v1/analyses/{job_id}/cancel
 GET  /api/v1/analyses/{job_id}/visualization
 GET  /api/v1/analyses/{job_id}/annotated-pdf  # automatic, not reviewed
+POST /api/v1/analyses/{job_id}/reviewed-pdf  # закрытый Review frontend, JSON: expected_revision
 ```
 
 Multipart analysis fields включают:
@@ -1123,7 +1138,7 @@ GET    /api/v1/normative/user-packages/documents/{document_id}/content
 GET /api/v1/normative/technical-assignments/{technical_assignment_id}/content
 ```
 
-Browser не обращается к internal Knowledge/Experience API напрямую. Закрытый Review API доступен через Gateway на приватном frontend; постоянный каталог Experience и Reviewed PDF ещё не реализованы.
+Browser не обращается к internal Knowledge/Experience API напрямую. Закрытый Review API доступен через Gateway на приватном frontend; Reviewed PDF доступен только для текущей утверждённой редакции. Постоянный каталог Experience, crop, CRUD и экспорт примеров ещё не реализованы.
 
 # n8n workflows
 
@@ -1308,6 +1323,12 @@ Shared network `ai-shared` должна предоставлять RabbitMQ, n8n
 
 Experience подключён к Compose только профилем `review`. Сначала общие и изолированные SQL-тесты, затем настройка закрытого канала и явная миграция по [docs/review-api.md](docs/review-api.md). Основной frontend 8080 остаётся локальным Review; серверное сохранение доступно через SSH на 127.0.0.1:8081.
 
+Обновление этапа 6 в уже настроенном закрытом окружении после синхронизации
+ветки выполняется одной командой `bash ops/deploy-reviewed-pdf.sh </dev/null`.
+Скрипт проверяет общий набор и изолированный PostgreSQL перед пересозданием
+Gateway, Experience, Document Service и обоих фронтов. Fetch/merge выполняется
+отдельно; shared-сервисы и рабочие volumes не меняются.
+
 При startup `knowledge-embedding-migrator` проверяет embedding fingerprint до старта Knowledge runtime.
 
 Проверка:
@@ -1351,16 +1372,22 @@ docker compose down -v
 Windows quality gate:
 
 ```powershell
-.\ops\check-quality.ps1 -Fix
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ops\check-quality.ps1
 ```
 
-Дополнительные проверки:
+Скрипт проверяет Python и Node, `pip check`, Ruff check/format,
+общий pytest с новым `--basetemp` и `git diff --check`.
+Параметр `-Fix` применяет исправления Ruff перед проверками.
+Для коммита и push после успешной проверки на `feature/experience-base`:
 
 ```powershell
-python -m pip check
-git diff --check
-docker compose --profile test config --quiet
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ops\check-quality.ps1 -CommitMessage "feat: export approved human review PDF" -Push
 ```
+
+`-CommitMessage` включает все неигнорируемые изменения рабочей копии;
+`-Push` использует системный OpenSSH и явный адрес GitHub.
+Ненулевой код любого шага останавливает скрипт.
+`ExecutionPolicy Bypass` действует только для этого запуска PowerShell.
 
 Docker quality:
 
@@ -1479,7 +1506,7 @@ Shared runtime checks осуществляются через опубликов
 - Human Review frontend: Wise/Bad/Edited/Gold, независимые решения сгруппированных findings, создание Gold с двумя областями и общим текстовым списком;
 - доменная модель `ReviewSession`, журнал редакций, optimistic revisions, подтверждаемая геометрия и `SelectExperience` (пока только подготовка кандидатов);
 - отдельная SQLAlchemy PostgreSQL persistence и Experience Alembic migration, закрытый Review API, серверный источник анализа и mapper предложенных VLM-областей;
-- автоматический PDF существует, reviewed PDF после Human Review пока заблокирован;
+- автоматический PDF и отдельный Reviewed PDF после Human Review; итоговый экспорт требует актуального утверждения и включает только accepted;
 - unit/integration/architecture/runtime test layers.
 
-**Следующие этапы Experience:** этап 6 — утверждённый PDF и явное подтверждение областей; этап 7 — постоянные Experience metadata/crop, CRUD и экспорт; этап 8 — trusted E indexing с оценкой качества; этап 9 — отдельный эксперимент дообучения VLM.
+**Текущая приёмка:** этап 6 — обновить Linux-сервисы и проверить итоговый PDF в закрытом UI. **Следующие этапы Experience:** этап 7 — постоянные Experience metadata/crop, CRUD и экспорт; этап 8 — trusted E indexing с оценкой качества; этап 9 — отдельный эксперимент дообучения VLM.
