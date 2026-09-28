@@ -1,82 +1,127 @@
 # services/experience-service/src/pdrd_experience_service/core/container.py
 
-"""Composition Root микросервиса Experience Service.
+"""Сборка зависимостей и управление ресурсами Experience Service.
 
 Назначение файла:
-- получить единую типизированную конфигурацию;
-- создать инфраструктурные зависимости;
-- подключить их к application use cases;
-- управлять освобождением ресурсов при остановке приложения.
+- создавать единый PostgreSQL Engine и фабрику независимых сессий;
+- подключать существующие репозитории к application use cases;
+- предоставлять готовые сценарии Human Review и подтверждения областей;
+- не создавать подключения, если Experience Service выключен;
+- освобождать ресурсы PostgreSQL при остановке приложения.
 
-Пока Experience Service выключен, engine PostgreSQL
-не создаётся и соединения не открываются.
+Открытие Review требует доверенного источника исходного анализа.
+Если такой источник не передан, OpenReview не регистрируется.
 
-При включении создаётся только инфраструктура проверки
-готовности. Business HTTP endpoints подключим отдельно,
-после реализации проверки доступа к заданиям.
+Наличие бизнес-сценария в контейнере не означает разрешения
+на его вызов по HTTP. Проверку пользователя и прав доступа
+должен обеспечивать отдельный защищённый транспортный слой.
 """
 
-from collections.abc import (
-    Awaitable,
-    Callable,
-)
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from pdrd_experience_service.application.ports.analysis_source import (
+    AnalysisSourceReader,
+)
+from pdrd_experience_service.application.ports.review import (
+    ReviewRepository,
+)
 from pdrd_experience_service.application.use_cases.check_readiness import (
     CheckReadiness,
+)
+from pdrd_experience_service.application.use_cases.confirm_areas import (
+    ConfirmArea,
+    RevokeArea,
+)
+from pdrd_experience_service.application.use_cases.review import (
+    ChangeReview,
+    OpenReview,
+)
+from pdrd_experience_service.application.use_cases.select_experience import (
+    SelectExperience,
 )
 from pdrd_experience_service.core.settings import (
     Settings,
     get_settings,
 )
+from pdrd_experience_service.infrastructure.analysis.completed_reader import (
+    VerifiedCompletedAnalysisReader,
+)
+from pdrd_experience_service.infrastructure.database.confirmed_areas import (
+    SqlAlchemyConfirmedAreasRepository,
+)
 from pdrd_experience_service.infrastructure.database.engine import (
     build_async_engine,
+    build_session_factory,
 )
 from pdrd_experience_service.infrastructure.database.health import (
     DatabaseReadinessProbe,
 )
+from pdrd_experience_service.infrastructure.database.repository import (
+    SqlAlchemyReviewRepository,
+)
 
-ShutdownCallback = Callable[
-    [],
-    Awaitable[None],
-]
+ShutdownCallback = Callable[[], Awaitable[None]]
 
 
 class DisabledDatabaseProbe:
-    """Запрещает положительный readiness выключенного сервиса."""
+    """Отклоняет готовность выключенного Experience Service."""
 
     async def is_ready(self) -> bool:
-        """Выключенный сервис не обращается к PostgreSQL."""
+        """Не выполняет запросов к PostgreSQL."""
         return False
 
 
 @dataclass(frozen=True, slots=True)
 class ApplicationContainer:
-    """Хранит зависимости и управляет их жизненным циклом."""
+    """Общий контейнер зависимостей одного экземпляра приложения.
+
+    Первые три поля сохраняют существующий контракт.
+    Дополнительные зависимости необязательны, поэтому прежние
+    unit-тесты могут по-прежнему подменять только readiness.
+    """
 
     settings: Settings
     check_readiness: CheckReadiness
     shutdown_callback: ShutdownCallback
 
+    reviews: ReviewRepository | None = None
+    confirmed_areas: SqlAlchemyConfirmedAreasRepository | None = None
+
+    open_review: OpenReview | None = None
+    change_review: ChangeReview | None = None
+    confirm_area: ConfirmArea | None = None
+    revoke_area: RevokeArea | None = None
+    select_experience: SelectExperience | None = None
+
     async def close(self) -> None:
-        """Освобождает инфраструктурные ресурсы при остановке HTTP."""
+        """Освобождает ресурсы, созданные Composition Root."""
         await self.shutdown_callback()
 
 
 def build_container(
     settings: Settings | None = None,
+    *,
+    analysis_source: AnalysisSourceReader | None = None,
 ) -> ApplicationContainer:
-    """Собирает зависимости из явной конфигурации.
+    """Собирает зависимости из конфигурации и доверенных адаптеров.
 
-    Возможность передать Settings напрямую используется тестами,
-    чтобы не читать приватный .env и не создавать соединения.
+    При enabled=false возвращает только выключенный readiness.
+    PostgreSQL Engine и бизнес-сценарии не создаются.
+
+    При enabled=true создаёт один Engine и одну фабрику AsyncSession.
+    Каждая операция репозитория самостоятельно открывает сессию.
+
+    OpenReview регистрируется только при наличии явно переданного
+    серверного AnalysisSourceReader. Сам Composition Root не
+    загружает исходные документы и не открывает Review.
     """
     actual_settings = settings if settings is not None else get_settings()
 
     if not actual_settings.enabled:
 
         async def shutdown_disabled() -> None:
-            """Для выключенного сервиса освобождать нечего."""
+            """У выключенного сервиса нет ресурсов PostgreSQL."""
 
         return ApplicationContainer(
             settings=actual_settings,
@@ -90,13 +135,57 @@ def build_container(
         actual_settings.database,
     )
 
+    session_factory = build_session_factory(
+        engine,
+    )
+
+    reviews = SqlAlchemyReviewRepository(
+        session_factory,
+    )
+
+    confirmed_areas = SqlAlchemyConfirmedAreasRepository(
+        session_factory,
+        reviews,
+    )
+
+    change_review = ChangeReview(
+        repository=reviews,
+    )
+
+    confirm_area = ConfirmArea(
+        reviews=reviews,
+        areas=confirmed_areas,
+    )
+
+    revoke_area = RevokeArea(
+        reviews=reviews,
+        areas=confirmed_areas,
+    )
+
+    select_experience = SelectExperience(
+        reviews=reviews,
+        areas=confirmed_areas,
+    )
+
+    open_review: OpenReview | None = None
+
+    if analysis_source is not None:
+        verified_reader = VerifiedCompletedAnalysisReader(
+            source=analysis_source,
+        )
+
+        open_review = OpenReview(
+            analyses=verified_reader,
+            repository=reviews,
+        )
+
     readiness = DatabaseReadinessProbe(
         engine=engine,
         timeout_seconds=(actual_settings.database.connect_timeout_seconds),
     )
 
     async def shutdown_database() -> None:
-        """Корректно закрывает пул соединений PostgreSQL."""
+        """Корректно освобождает общий пул PostgreSQL."""
         await engine.dispose()
 
     return ApplicationContainer(
@@ -105,4 +194,11 @@ def build_container(
             database=readiness,
         ),
         shutdown_callback=shutdown_database,
+        reviews=reviews,
+        confirmed_areas=confirmed_areas,
+        open_review=open_review,
+        change_review=change_review,
+        confirm_area=confirm_area,
+        revoke_area=revoke_area,
+        select_experience=select_experience,
     )
