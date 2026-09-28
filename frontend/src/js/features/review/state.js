@@ -218,8 +218,28 @@ export function createReviewState() {
     return get(entry.findingId);
   }
 
+  /** Загружает доверенный серверный снимок до разрешения редактирования. */
+  function hydrate(findings) {
+    entries.clear();
+    for (const row of findings) {
+      register(row.finding_id, row.original_text, {
+        origin: row.origin, normativeSection: row.original_basis,
+      });
+      const entry = requireEntry(row.finding_id);
+      entry.text = validatedText(row.text);
+      entry.normativeSection = validatedNormative(row.normative_basis);
+      if (!Object.values(REVIEW_DECISIONS).includes(row.decision)) {
+        throw new Error("Сервер вернул неизвестное решение.");
+      }
+      entry.decision = row.decision;
+      entry.revision = row.revision;
+      entry.edited = entry.text !== entry.originalText
+        || entry.normativeSection !== entry.originalNormativeSection;
+    }
+  }
+
   return {
-    register, get, decide, edit, summary,
+    register, get, decide, edit, summary, hydrate,
     invalidate, invalidateManual, restoreDecision, removeManual, restoreManual,
     snapshot: () => [...entries.keys()].map(get),
   };

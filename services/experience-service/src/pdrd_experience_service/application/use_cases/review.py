@@ -1,6 +1,6 @@
 # services/experience-service/src/pdrd_experience_service/application/use_cases/review.py
 
-"""Review application commands; all durable writes go through repository ports."""
+"""Открытие и команды Human Review через атомарное хранилище с ревизиями."""
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,6 +14,7 @@ from pdrd_experience_service.domain.review import (
     ApprovedReview,
     Decision,
     Rectangle,
+    ReviewConflictError,
     ReviewSession,
 )
 
@@ -53,7 +54,14 @@ class OpenReview:
             at=datetime.now(UTC),
         )
 
-        await self.repository.insert(session)
+        try:
+            await self.repository.insert(session)
+        except ReviewConflictError:
+            # Параллельное открытие не подменяет оригинал уже созданного Review.
+            existing = await self.repository.load(job_id)
+            if existing is None:
+                raise
+            return existing
 
         return session
 
@@ -155,6 +163,50 @@ class ChangeReview:
             expected_revision=current.revision,
         )
 
+        return updated
+
+    async def reset_decision(
+        self,
+        *,
+        job_id: UUID,
+        finding_id: str,
+        actor: str,
+        expected_revision: int,
+    ) -> ReviewSession:
+        """Сохраняет отмену решения отдельным событием без удаления истории."""
+        current = await self._require(job_id)
+        updated = current.reset_decision(
+            finding_id=finding_id,
+            actor=actor,
+            at=datetime.now(UTC),
+            expected_revision=expected_revision,
+        )
+        if updated is not current:
+            await self.repository.update(updated, expected_revision=current.revision)
+        return updated
+
+    async def change_geometry(
+        self,
+        *,
+        job_id: UUID,
+        finding_id: str,
+        regions: tuple[Rectangle, ...],
+        callout_box: Rectangle | None,
+        actor: str,
+        expected_revision: int,
+    ) -> ReviewSession:
+        """Сохраняет области отображения; подтверждение Experience остаётся отдельным."""
+        current = await self._require(job_id)
+        updated = current.change_geometry(
+            finding_id=finding_id,
+            regions=regions,
+            callout_box=callout_box,
+            actor=actor,
+            at=datetime.now(UTC),
+            expected_revision=expected_revision,
+        )
+        if updated is not current:
+            await self.repository.update(updated, expected_revision=current.revision)
         return updated
 
     async def approve(

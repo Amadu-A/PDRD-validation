@@ -809,11 +809,12 @@ function appendFinding(
     finding.evidence,
   );
 
-  appendTextBlock(
+  const reviewBasis = appendTextBlock(
     article,
     "Нормативное основание",
-    finding.basis,
+    finding.basis || "Не указано.",
   );
+  reviewBasis.dataset.reviewBasisText = "";
 
   appendNormativeSources(
     finding,

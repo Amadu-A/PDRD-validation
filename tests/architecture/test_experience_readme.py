@@ -1,6 +1,6 @@
 # tests/architecture/test_experience_readme.py
 
-"""README architecture guards for current versus planned Experience capabilities."""
+"""Проверки README: разделение реализованного Review и будущего каталога Experience."""
 
 from pathlib import Path
 
@@ -40,12 +40,13 @@ def test_readme_documents_all_review_process_diagrams() -> None:
 
 
 def test_readme_does_not_claim_unreleased_e_search_or_reviewed_pdf() -> None:
-    """Planned indexing/export cannot be mistaken for production functionality."""
+    """Закрытый Review не выдаётся за готовый каталог, поиск E или Reviewed PDF."""
     text = README.read_text(
         encoding="utf-8",
     )
 
-    assert "публичного Experience API ещё нет" in text
+    assert "постоянный каталог Experience и Reviewed PDF ещё не реализованы" in text
+    assert "Закрытый Review API доступен через Gateway" in text
 
     assert "reviewed PDF после Human Review пока заблокирован" in text
 

@@ -468,6 +468,47 @@ function resizeHandle(node, direction) {
   return node.children.find((child) => child.dataset.resizeDirection === direction);
 }
 
+test("серверный Gold восстанавливает решение, обе области и полный текст без события добавления", () => {
+  const { root, pages, findings } = fixture([22]);
+  const controller = createReviewController();
+  controller.mount(root);
+  controller.setConnection({ isPersistent: true, isLocked: true });
+  const id = "manual:00000000-0000-4000-8000-000000000001";
+  const issue = { x_min: 100, y_min: 150, x_max: 300, y_max: 350 };
+  const callout = { x_min: 500, y_min: 450, x_max: 900, y_max: 700 };
+  controller.hydrate({ findings: [{
+    finding_id: id, origin: "manual", page_number: 22,
+    original_text: "Первоначальный Gold", text: "Исправленный Gold",
+    original_basis: "СП 1", normative_basis: "СП 2", decision: "accepted", revision: 7,
+    issue_box: issue, callout_box: callout,
+  }] });
+  controller.setConnection({ isLocked: false });
+  const card = mounted(pages[0]).layer.querySelector(".manual-annotation__card");
+  assert.equal(card.dataset.reviewDecision, "accepted");
+  assert.equal(card.dataset.reviewTag, "gold");
+  assert.equal(card.title, "Исправленный Gold\nСП 2");
+  assert.deepEqual(controller.getManualSnapshot()[0].issue_box, issue);
+  assert.deepEqual(controller.getManualSnapshot()[0].callout_box, callout);
+  const article = findings.querySelector(".manual-review-list__item");
+  assert.equal(article.dataset.manualFindingId, id);
+  assert.ok(article.querySelectorAll(".analysis-result__field-value").some((node) => node.textContent === "Исправленный Gold"));
+  assert.equal(pageAction(pages[0], "reviewPageUndo").disabled, true);
+});
+
+test("Undo создания в серверном режиме сохраняет Gold как rejected в операционном снимке", () => {
+  const { root, pages } = fixture();
+  const controller = createReviewController();
+  controller.mount(root);
+  controller.setConnection({ isPersistent: true });
+  const card = addGold(root, pages[0]);
+  const id = card.dataset.findingId;
+  pageAction(pages[0], "reviewPageUndo").click();
+  const entry = controller.getReviewSnapshot().find((row) => row.findingId === id);
+  assert.equal(entry.decision, "rejected");
+  assert.equal(entry.experienceTag, "gold");
+  assert.equal(controller.getManualSnapshot()[0].decision, "rejected");
+});
+
 function pointer(x, y, pointerId = 7) {
   return { button: 0, pointerId, clientX: 10 + x * 0.8, clientY: 20 + y * 0.5, preventDefault() {}, stopPropagation() {} };
 }

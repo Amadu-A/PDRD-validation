@@ -1,6 +1,9 @@
 # services/experience-service/src/pdrd_experience_service/infrastructure/database/codec.py
 
-"""Explicit, JSON-safe encoding of immutable Review domain states and audit events."""
+"""Кодирование снимков и аудита Review в JSONB без потери исходных данных.
+
+Старые снимки без display_regions продолжают восстанавливаться.
+"""
 
 from dataclasses import asdict
 from datetime import datetime
@@ -93,6 +96,11 @@ def finding_from_json(
         updated_at=_timestamp(value["updated_at"]),
         revision=value["revision"],
         proposed_regions=_proposed_regions(value.get("proposed_regions", [])),
+        display_regions=(
+            tuple(Rectangle(**box) for box in value["display_regions"])
+            if value.get("display_regions") is not None
+            else None
+        ),
     )
 
 

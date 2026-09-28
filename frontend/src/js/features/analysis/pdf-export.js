@@ -108,7 +108,7 @@ export function appendAnnotatedPdfDownload(
   finalButton.dataset.analysisPdfReviewed = "";
 
   finalButton.title = (
-    "Серверное сохранение и экспорт ещё не подключены. "
+    "Формирование итогового PDF пока недоступно. "
     + "Итоговый PDF должен включать принятые замечания на листах "
     + "и в текстовом списке."
   );

@@ -19,6 +19,10 @@ from typing import Any, Protocol
 from uuid import UUID
 
 
+class AnalysisSourceUnavailableError(RuntimeError):
+    """Доверенный серверный источник недоступен или нарушил свой контракт."""
+
+
 @dataclass(frozen=True, slots=True)
 class CompletedAnalysisArtifacts:
     """Набор серверных артефактов одного задания анализа PDF.

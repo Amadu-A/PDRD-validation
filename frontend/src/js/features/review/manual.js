@@ -3,7 +3,7 @@
 /**
  * Создание, изменение областей и отмена локальных Gold-находок на одном листе.
  * Две области выбираются на изображении одного листа; координаты 0..1000.
- * Все операции локальные, серверное сохранение здесь отсутствует.
+ * Управляет DOM; серверное сохранение выполняет отдельный модуль persistence.
  */
 
 import {
@@ -17,6 +17,7 @@ import { createManualEditor } from "./manual-editor.js";
 import { createManualLine, createManualNote } from "./manual-note.js";
 import { createManualHistory } from "./history.js";
 import { attachBoxResize } from "./resize.js";
+import { newManualFindingId } from "./identity.js";
 
 const PAGE_SELECTOR = ".analysis-result__page-visualization";
 
@@ -50,15 +51,14 @@ export function createManualAnnotationController({
   onGeometry,
   onRemove,
   onInteractionStart = () => {},
+  isEnabled = () => true,
 
-  idFactory = () => (
-    globalThis.crypto?.randomUUID?.()
-    ?? `local-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  ),
+  idFactory = newManualFindingId,
 }) {
   let activeAbort = null;
   let disposeHandlers = [];
   const pageActions = new Map();
+  const pageRestorers = new Map();
 
   /** Подписывает обработчик только на время жизни текущего отчёта. */
   function listen(target, event, handler) {
@@ -73,6 +73,7 @@ export function createManualAnnotationController({
     for (const cleanup of disposeHandlers) cleanup();
     disposeHandlers = [];
     pageActions.clear();
+    pageRestorers.clear();
   }
 
   function mountPage(page, root) {
@@ -176,7 +177,7 @@ export function createManualAnnotationController({
 
     /** Указывает конкретное действие, которое отменит следующая кнопка Undo. */
     function syncHistory() {
-      undo.disabled = mode !== "idle" || !history.label;
+      undo.disabled = !isEnabled() || mode !== "idle" || !history.label;
       undo.textContent = history.label ? `Отменить ${history.label}` : "Отменить действие";
       undo.title = history.label ? `Отменить: ${history.label}` : "Нет действий для отмены";
     }
@@ -242,11 +243,11 @@ export function createManualAnnotationController({
       add.focus();
     }
 
-    function createNote(text, normativeSection) {
-      const findingId = `manual:${idFactory()}`;
+    function createNote(text, normativeSection, saved = null) {
+      const findingId = saved?.finding_id ?? `manual:${idFactory()}`;
       const note = createManualNote({
         findingId, pageNumber, text, normativeSection,
-        issueBox: issue, calloutBox: callout,
+        issueBox: saved?.issue_box ?? issue, calloutBox: saved?.callout_box ?? callout,
       });
       note.onEdit = () => {
         activeAbort?.();
@@ -265,7 +266,7 @@ export function createManualAnnotationController({
           scrollContent: key === "calloutBox",
           bounds: () => image.getBoundingClientRect(),
           getBox: () => ({ ...note[key] }),
-          enabled: () => mode === "idle" && onGet(findingId).decision !== "rejected",
+          enabled: () => isEnabled() && mode === "idle" && onGet(findingId).decision !== "rejected",
           onStart() {
             onInteractionStart();
             activeAbort?.();
@@ -302,9 +303,12 @@ export function createManualAnnotationController({
 
       onCreate({ ...note, text, normativeSection });
       layer.append(note.line, note.region, note.card);
-      history.record("добавление Gold", () => removeNote(note));
+      if (!saved) history.record("добавление Gold", () => removeNote(note));
       syncHistory();
     }
+
+    pageRestorers.set(pageNumber, (saved) => createNote(saved.text, saved.normative_basis, saved));
+    disposeHandlers.push(() => pageRestorers.delete(pageNumber));
 
     /** Сначала исключает канонические данные, затем убирает геометрию листа. */
     function removeNote(note) {
@@ -320,6 +324,7 @@ export function createManualAnnotationController({
     }
 
     listen(undo, "click", () => {
+      if (!isEnabled()) return;
       activeAbort?.();
       if (history.undo()) message.textContent = "Локальное действие отменено.";
       syncHistory();
@@ -413,7 +418,7 @@ export function createManualAnnotationController({
       return true;
     }
 
-    listen(add, "click", beginSelection);
+    listen(add, "click", () => { if (isEnabled()) beginSelection(); });
 
     listen(cancel, "click", abort);
 
@@ -598,6 +603,14 @@ export function createManualAnnotationController({
     cancelActive: () => activeAbort?.(),
     recordAction(pageNumber, label, action) {
       pageActions.get(pageNumber)?.(label, action);
+    },
+    /** Воссоздаёт Gold без фиктивного события добавления в истории Undo. */
+    restore(findings) {
+      for (const row of findings) {
+        const restore = pageRestorers.get(row.page_number);
+        if (!restore) throw new Error("Серверное Gold-замечание относится к отсутствующему листу.");
+        restore(row);
+      }
     },
   };
 }

@@ -41,8 +41,9 @@ import {
 } from "./features/normative/user_packages.js";
 
 import {
-  createReviewController,
-} from "./features/review/controller.js";
+  createReviewPersistence,
+} from "./features/review/persistence.js";
+import { bindReportRestoration } from "./features/analysis/restore.js";
 
 import {
   createTechnicalAssignmentFilePicker,
@@ -143,7 +144,7 @@ const modal = createModal({
 });
 
 
-const reviewController = createReviewController();
+const reviewController = createReviewPersistence();
 
 const resultView = createResultView(
   requireElement(
@@ -151,6 +152,7 @@ const resultView = createResultView(
   ),
   {
     onReportRendered: reviewController.mount,
+    onReportCleared: reviewController.clear,
   },
 );
 
@@ -242,9 +244,6 @@ const analysisController = createAnalysisController({
 
 analysisForm.bind();
 
-analysisFormElement.addEventListener(
-  "submit",
-  analysisController.submit,
-);
+bindReportRestoration({ resultView, formElement: analysisFormElement, submit: analysisController.submit, canSubmit: () => !reviewController.hasPending() });
 
 void normativeCatalog.start();

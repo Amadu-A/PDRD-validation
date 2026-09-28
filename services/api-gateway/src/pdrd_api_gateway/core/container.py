@@ -46,8 +46,13 @@ from pdrd_api_gateway.application.use_cases.get_analysis_result import (
 from pdrd_api_gateway.application.use_cases.get_analysis_visualization import (
     GetAnalysisVisualization,
 )
+from pdrd_api_gateway.application.use_cases.get_review_source import GetReviewSource
 from pdrd_api_gateway.application.use_cases.manage_normative_catalog import (
     NormativeCatalogFacade,
+)
+from pdrd_api_gateway.application.use_cases.manage_review import (
+    CompletedJobReviewAccess,
+    ManageReview,
 )
 from pdrd_api_gateway.application.use_cases.manage_user_packages import (
     UserPackageCatalogFacade,
@@ -100,6 +105,10 @@ from pdrd_api_gateway.infrastructure.messaging.broker import (
 from pdrd_api_gateway.infrastructure.project_context_preflight import (
     HttpProjectContextPreflightCoordinator,
 )
+from pdrd_api_gateway.infrastructure.review import (
+    ControlledReviewContext,
+    HttpReviewService,
+)
 from pdrd_api_gateway.infrastructure.storage.filesystem import (
     LocalFilesystemAnalysisArtifactStore,
 )
@@ -130,6 +139,9 @@ class ApplicationContainer:
     create_analysis_job: CreateAnalysisJob | None = None
 
     get_analysis_job: GetAnalysisJob | None = None
+
+    manage_review: ManageReview | None = None
+    get_review_source: GetReviewSource | None = None
 
     get_analysis_result: GetAnalysisResult | None = None
 
@@ -328,12 +340,31 @@ def build_container() -> ApplicationContainer:
     async def _shutdown_database() -> None:
         await engine.dispose()
 
+    manage_review = None
+    get_review_source = None
+    if settings.review.enabled:
+        manage_review = ManageReview(
+            contexts=ControlledReviewContext(actor=settings.review.actor.strip()),
+            access=CompletedJobReviewAccess(jobs=get_analysis_job),
+            service=HttpReviewService(
+                base_url=settings.review.base_url,
+                internal_key=settings.review.internal_key.get_secret_value(),
+            ),
+        )
+        get_review_source = GetReviewSource(
+            jobs=get_analysis_job,
+            artifacts=artifact_store,
+            visualizations=get_analysis_visualization,
+        )
+
     return ApplicationContainer(
         settings=settings,
         check_readiness=check_readiness,
         shutdown_callback=(_shutdown_database),
         create_analysis_job=(create_analysis_job),
         get_analysis_job=(get_analysis_job),
+        manage_review=manage_review,
+        get_review_source=get_review_source,
         get_analysis_result=(get_analysis_result),
         get_analysis_visualization=(get_analysis_visualization),
         get_analysis_annotated_pdf=(get_analysis_annotated_pdf),

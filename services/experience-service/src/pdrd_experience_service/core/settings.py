@@ -14,6 +14,7 @@
 За создание инфраструктурных зависимостей отвечает composition root.
 """
 
+import re
 from functools import lru_cache
 from typing import Literal
 
@@ -129,9 +130,13 @@ class Settings(BaseSettings):
 
     environment: EnvironmentName = "local"
 
-    # Пока полноценный HTTP-сервис не подключён,
-    # новая функциональность остаётся выключенной.
+    # Включение репозиториев отделено от доступа к закрытому HTTP API.
     enabled: bool = False
+
+    # Закрытый HTTP API включается отдельно от репозиториев/миграций.
+    review_api_enabled: bool = False
+    internal_key: SecretStr = SecretStr("")
+    gateway_base_url: str = "http://api-gateway:8000"
 
     database: DatabaseSettings = Field(
         default_factory=DatabaseSettings,
@@ -152,6 +157,16 @@ class Settings(BaseSettings):
         настоящих учётных данных PostgreSQL.
         """
         password = self.database.password.get_secret_value()
+
+        if self.review_api_enabled and (
+            not self.enabled
+            or not re.fullmatch(
+                r"[A-Za-z0-9_-]{32,256}", self.internal_key.get_secret_value()
+            )
+        ):
+            raise ValueError(
+                "Review API требует активный сервис и служебный ключ длиной от 32 символов."
+            )
 
         if (self.enabled or self.environment == "prod") and password in {
             "",

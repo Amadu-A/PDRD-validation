@@ -3,7 +3,7 @@
 /**
  * UI-адаптер решений для VLM и ручных Gold-замечаний.
  * Карточка на листе, текстовый список и данные экспорта используют одно решение.
- * Пока решения локальные: серверный review не подключён.
+ * Сетевой адаптер подключается снаружи через onChange/hydrate.
  */
 
 import { createReviewControls } from "./controls.js";
@@ -63,7 +63,7 @@ function createEditor(onSave) {
   save.type = "button";
   save.className = "review-editor__button review-editor__button--save";
   save.dataset.reviewSave = "";
-  save.textContent = "Сохранить правку локально";
+  save.textContent = "Сохранить правку";
 
   save.addEventListener(
     "click",
@@ -87,7 +87,11 @@ function createEditor(onSave) {
 }
 
 /** Связывает существующую визуализацию с ручным review и текстовым отчётом. */
-export function createReviewController() {
+export function createReviewController({ onChange = () => {} } = {}) {
+  let locked = false;
+  let persistent = false;
+  let syncMessage = "";
+  let hydrating = false;
   let state = createReviewState();
   let views = new Map();
   let preview = null;
@@ -130,6 +134,7 @@ export function createReviewController() {
   }
 
   const manual = createManualAnnotationController({
+    isEnabled: () => !locked,
     onInteractionStart: () => automatic.cancelActive(),
     onCreate(note) {
       const entry = state.register(note.findingId, note.text, {
@@ -141,6 +146,7 @@ export function createReviewController() {
     },
 
     onUpdate(findingId, text, normativeSection) {
+      if (locked) throw new Error("Дождитесь восстановления Review.");
       const entry = state.edit(
         findingId,
         text,
@@ -166,6 +172,12 @@ export function createReviewController() {
     },
 
     onRemove(note) {
+      if (persistent) {
+        // Undo добавления остаётся аудируемым отклонением сохранённой Gold-записи.
+        const entry = state.decide(note.findingId, REVIEW_DECISIONS.REJECTED);
+        refresh(note.findingId);
+        return entry;
+      }
       const entry = state.removeManual(note.findingId);
       manualRecords.remove(note.findingId);
       manualList.remove(note.findingId);
@@ -181,6 +193,7 @@ export function createReviewController() {
   });
 
   const automatic = createAutomaticReview({
+    isEnabled: () => !locked,
     onGeometry(findingIds) {
       for (const findingId of findingIds) {
         state.invalidate(findingId);
@@ -213,7 +226,7 @@ export function createReviewController() {
     preview.textContent = (
       `Предпросмотр решений: ${counts.pending} без решения, `
       + `${counts.accepted} принято, ${counts.rejected} отклонено. `
-      + "Изменения пока не сохраняются на сервере и не влияют на PDF."
+      + (syncMessage || "Изменения пока не сохраняются на сервере и не влияют на PDF.")
     );
   }
 
@@ -229,14 +242,18 @@ export function createReviewController() {
 
     const decisionLabels = {
       pending: "ожидает решения",
-      accepted: "принято локально",
-      rejected: "отклонено локально",
+      accepted: persistent ? "принято" : "принято локально",
+      rejected: persistent ? "отклонено" : "отклонено локально",
     };
 
     const tag = tagLabels[entry.experienceTag] ?? "VLM";
 
     for (const view of views.get(findingId) ?? []) {
       view.text.textContent = entry.text;
+      // Полный текст остаётся актуальным после правки и серверного восстановления.
+      const tooltipText = view.tooltipText;
+      if (tooltipText) tooltipText.textContent = entry.text;
+      if (view.basisText) view.basisText.textContent = entry.normativeSection || "Не указано.";
 
       view.item.dataset.reviewDecision = entry.decision;
       view.item.dataset.reviewOrigin = entry.origin;
@@ -262,19 +279,23 @@ export function createReviewController() {
         "aria-pressed",
         String(entry.edited),
       );
+      for (const key of ["accept", "reject", "edit"]) view.controls[key].disabled = locked;
     }
 
     manualList.sync(entry);
     manualRecords.sync(entry);
+    manualNotes.get(findingId)?.applyText(entry.text, entry.normativeSection);
     manualNotes.get(findingId)?.setRejected(entry.decision === REVIEW_DECISIONS.REJECTED);
     automatic.setRejected(findingId, entry.decision === REVIEW_DECISIONS.REJECTED);
     const note = manualNotes.get(findingId);
     if (note) markManualOnPage(note.pageNumber);
     updatePreview();
+    if (!hydrating) onChange();
   }
 
   /** Решение и его Undo сохраняют текст, источник, области и независимый тег. */
   function decide(findingId, decision, pageNumber) {
+    if (locked) return;
     const previous = state.get(findingId).decision;
     if (previous === decision) return;
     manual.cancelActive();
@@ -301,6 +322,7 @@ export function createReviewController() {
       },
 
       onEdit() {
+        if (locked) return;
         if (customEdit) {
           customEdit();
         } else {
@@ -321,6 +343,8 @@ export function createReviewController() {
       item,
       text,
       controls,
+      tooltipText: item.querySelector("[data-review-tooltip-text]"),
+      basisText: item.querySelector("[data-review-tooltip-basis]") ?? item.querySelector("[data-review-basis-text]"),
     });
 
     views.set(findingId, found);
@@ -369,6 +393,7 @@ export function createReviewController() {
       }
 
       try {
+        if (locked) throw new Error("Дождитесь восстановления Review.");
         state.edit(activeFindingId, value);
         refresh(activeFindingId);
         dialog.close();
@@ -427,7 +452,7 @@ export function createReviewController() {
     updatePreview();
   }
 
-  /** Снимок Gold-данных только для будущего защищённого API, без автосохранения. */
+  /** Снимок Gold для отдельного модуля серверного сохранения. */
   function getManualSnapshot() {
     return manualRecords.snapshot();
   }
@@ -440,5 +465,37 @@ export function createReviewController() {
     }));
   }
 
-  return { mount, getManualSnapshot, getReviewSnapshot };
+  /** Восстанавливает данные и обе геометрии до разблокировки контролов. */
+  function hydrate(session) {
+    hydrating = true;
+    try {
+      state.hydrate(session.findings);
+      automatic.restore(session.findings.filter((row) => row.origin === "vlm"));
+      manual.restore(session.findings.filter((row) => row.origin === "manual"));
+      for (const entry of state.snapshot()) refresh(entry.findingId);
+    } finally {
+      hydrating = false;
+    }
+  }
+
+  /** Отделяет состояние подключения от принятия конкретных замечаний. */
+  function setConnection({ isPersistent = persistent, message = syncMessage, isLocked = locked }) {
+    persistent = isPersistent;
+    locked = isLocked;
+    syncMessage = message;
+    if (locked) { manual.cancelActive(); automatic.cancelActive(); }
+    for (const rows of views.values()) for (const view of rows) {
+      for (const key of ["accept", "reject", "edit"]) view.controls[key].disabled = locked;
+    }
+    for (const button of reportRoot?.querySelectorAll("[data-review-page-add], [data-review-page-undo]") ?? []) {
+      if (button.dataset.reviewPageUndo !== undefined) continue;
+      button.disabled = locked;
+    }
+    updatePreview();
+  }
+
+  return {
+    mount, getManualSnapshot, getReviewSnapshot, hydrate, setConnection,
+    dispose() { manual.dispose(); automatic.dispose(); editor?.dialog.remove(); },
+  };
 }

@@ -8,9 +8,8 @@
 - внедрять общий ApplicationContainer;
 - корректно закрывать инфраструктурные ресурсы.
 
-Пока HTTP-интерфейс не предоставляет бизнес-операции.
-Он используется для проверки безопасного запуска,
-конфигурации и готовности PostgreSQL.
+Бизнес-маршруты закрыты по умолчанию и включаются только для API Gateway.
+Готовность проверяет проектный PostgreSQL, а не доступность фронта.
 """
 
 from collections.abc import AsyncIterator
@@ -24,6 +23,9 @@ from pdrd_experience_service.core.container import (
 )
 from pdrd_experience_service.transport.http.routers.health import (
     router as health_router,
+)
+from pdrd_experience_service.transport.http.routers.review import (
+    router as review_router,
 )
 
 
@@ -63,6 +65,9 @@ def create_app(
     application.include_router(
         health_router,
     )
+
+    if application_container.settings.review_api_enabled:
+        application.include_router(review_router)
 
     return application
 

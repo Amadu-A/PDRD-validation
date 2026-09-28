@@ -169,7 +169,7 @@ def completed_analysis_from_visualization(
         seen_ids.add(finding_id)
         page_number = _page(finding.get("page", finding.get("page_number")))
         key = (page_number, finding_id)
-        normative_basis = finding.get("normative_basis", "")
+        normative_basis = finding.get("normative_basis", finding.get("basis", ""))
 
         if not isinstance(normative_basis, str):
             raise ReviewError("Нормативное основание имеет неверный формат.")

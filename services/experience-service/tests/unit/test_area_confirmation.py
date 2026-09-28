@@ -34,6 +34,30 @@ BOX = Rectangle(100, 150, 250, 300)
 CORRECTED = Rectangle(300, 250, 400, 375)
 
 
+def test_geometry_and_undo_invalidate_old_confirmation_signature() -> None:
+    """Старая область не используется повторно после растягивания и обратного Undo."""
+    session = opened()
+    initial = content_signature(session, session.findings[0])
+    changed = session.change_geometry(
+        finding_id="vlm:1",
+        regions=(CORRECTED,),
+        callout_box=None,
+        actor="engineer:1",
+        at=NOW,
+        expected_revision=0,
+    )
+    assert content_signature(changed, changed.findings[0]) != initial
+    restored = changed.change_geometry(
+        finding_id="vlm:1",
+        regions=(BOX,),
+        callout_box=None,
+        actor="engineer:1",
+        at=NOW,
+        expected_revision=1,
+    )
+    assert content_signature(restored, restored.findings[0]) != initial
+
+
 def opened() -> ReviewSession:
     """Создаёт серверный Review с VLM-подсказкой и текстовым замечанием."""
     return ReviewSession.open(

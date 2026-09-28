@@ -15,14 +15,18 @@ PDRD_RUN_DATABASE_TESTS=1 и проверки адреса изолирован�
 import asyncio
 import os
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
+from pdrd_experience_service.application.use_cases.review import ChangeReview
 from pdrd_experience_service.domain.review import (
     Decision,
     OriginalFinding,
+    ProposedRegion,
+    Rectangle,
     ReviewConflictError,
     ReviewSession,
 )
@@ -49,6 +53,64 @@ TEST_DATABASE_USER = "experience_test"
 TEST_DATABASE_HOST = "experience-test-postgres"
 
 EXPECTED_MIGRATION = "20260928_0002"
+
+
+async def test_geometry_reset_and_audit_survive_repository_recreation(
+    test_engine: AsyncEngine,
+) -> None:
+    """Новые HTTP-команды сохраняют области и Undo в настоящем PostgreSQL."""
+    job_id = uuid4()
+    repository = repository_for(test_engine)
+    session = new_review(job_id)
+    original_box = Rectangle(10, 20, 100, 200)
+    session = replace(
+        session,
+        findings=(
+            replace(
+                session.findings[0],
+                proposed_regions=(ProposedRegion(original_box, "vlm", 0.9, "vlm"),),
+            ),
+        ),
+    )
+    changed_box = Rectangle(20, 30, 150, 250)
+    commands = ChangeReview(repository)
+    try:
+        await repository.insert(session)
+        await commands.change_geometry(
+            job_id=job_id,
+            finding_id="vlm:test:1",
+            regions=(changed_box,),
+            callout_box=None,
+            actor="integration:user:1",
+            expected_revision=0,
+        )
+        await commands.decide(
+            job_id=job_id,
+            finding_id="vlm:test:1",
+            decision=Decision.REJECTED,
+            actor="integration:user:1",
+            expected_revision=1,
+        )
+        await commands.reset_decision(
+            job_id=job_id,
+            finding_id="vlm:test:1",
+            actor="integration:user:1",
+            expected_revision=2,
+        )
+        restored = await repository_for(test_engine).load(job_id)
+        assert restored.revision == 3
+        assert restored.findings[0].display_regions == (changed_box,)
+        assert restored.findings[0].proposed_regions[0].bbox == original_box
+        assert restored.findings[0].issue_box is None
+        assert restored.findings[0].decision is Decision.PENDING
+        assert [event.action.value for event in restored.history] == [
+            "opened",
+            "geometry",
+            "decided",
+            "reset",
+        ]
+    finally:
+        await remove_test_review(test_engine, job_id)
 
 
 def validate_isolated_database_url(raw_url: str) -> URL:

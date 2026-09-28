@@ -85,7 +85,7 @@ export function createManualEditor(pageNumber, onSave, onCancel) {
   const save = element(
     "button",
     "manual-editor__button manual-editor__button--save",
-    "Сохранить локально",
+    "Сохранить",
   );
 
   save.type = "submit";
@@ -132,4 +132,3 @@ export function createManualEditor(pageNumber, onSave, onCancel) {
     },
   };
 }
-

@@ -1,6 +1,10 @@
 # services/experience-service/src/pdrd_experience_service/domain/review.py
 
-"""Immutable Human Review domain; no HTTP, SQLAlchemy, VLM or PDF dependencies."""
+"""Неизменяемый Human Review: решения, исправления, геометрия и аудит.
+
+Отображаемые области сохраняются отдельно от подтверждений для Experience.
+Модель не зависит от HTTP, SQLAlchemy, VLM и генерации PDF.
+"""
 
 import math
 import re
@@ -45,6 +49,8 @@ class Action(StrEnum):
     EDITED = "edited"
     DECIDED = "decided"
     APPROVED = "approved"
+    GEOMETRY = "geometry"
+    RESET = "reset"
 
 
 def _text(value: str, *, limit: int = 10000, required: bool = True) -> str:
@@ -165,6 +171,9 @@ class ReviewedFinding:
     updated_at: datetime
     revision: int = 0
     proposed_regions: tuple[ProposedRegion, ...] = ()
+
+    # Правки отображения инженером не повышают координаты до подтверждённых.
+    display_regions: tuple[Rectangle, ...] | None = None
 
     @property
     def experience_tag(self) -> str | None:
@@ -521,6 +530,99 @@ class ReviewSession:
             before=record,
             after=updated,
             action=Action.DECIDED,
+            actor=actor,
+            at=at,
+        )
+
+    def reset_decision(
+        self,
+        *,
+        finding_id: str,
+        actor: str,
+        at: datetime,
+        expected_revision: int,
+    ) -> "ReviewSession":
+        """Возвращает замечание в pending как отдельное аудируемое действие Undo."""
+        self._expect(expected_revision)
+        actor, at = _actor(actor), _time(at)
+        record = self._item(finding_id)
+        if record.decision is Decision.PENDING:
+            return self
+        updated = replace(
+            record,
+            decision=Decision.PENDING,
+            updated_by=actor,
+            updated_at=at,
+            revision=record.revision + 1,
+        )
+        return self._update(
+            before=record,
+            after=updated,
+            action=Action.RESET,
+            actor=actor,
+            at=at,
+        )
+
+    def change_geometry(
+        self,
+        *,
+        finding_id: str,
+        regions: tuple[Rectangle, ...],
+        callout_box: Rectangle | None,
+        actor: str,
+        at: datetime,
+        expected_revision: int,
+    ) -> "ReviewSession":
+        """Сохраняет отображение одного листа, сбрасывая решение и утверждение.
+
+        VLM сохраняет исходные proposed_regions. display_regions не являются
+        подтверждением для Experience и не используются для обучения.
+        Для Gold требуется область ошибки и область текста.
+        """
+        self._expect(expected_revision)
+        actor, at = _actor(actor), _time(at)
+        record = self._item(finding_id)
+        if record.page_number not in self.allowed_pages:
+            raise ReviewError("Геометрия допустима только на серверном листе.")
+        if not isinstance(regions, tuple) or any(
+            not isinstance(box, Rectangle) for box in regions
+        ):
+            raise ReviewError("Области должны быть проверенными прямоугольниками.")
+        if callout_box is not None and not isinstance(callout_box, Rectangle):
+            raise ReviewError("Некорректная область текста.")
+        if record.origin is Origin.MANUAL:
+            if len(regions) != 1 or callout_box is None:
+                raise ReviewError("Gold требует две области на одном листе.")
+            unchanged = (
+                record.issue_box == regions[0] and record.callout_box == callout_box
+            )
+        else:
+            if len(regions) != len(record.proposed_regions):
+                raise ReviewError(
+                    "Нельзя создавать новые области VLM через правку отображения."
+                )
+            existing = record.display_regions
+            if existing is None:
+                existing = tuple(item.bbox for item in record.proposed_regions)
+            unchanged = existing == regions and record.callout_box == callout_box
+        if unchanged:
+            return self
+        updated = replace(
+            record,
+            issue_box=regions[0]
+            if record.origin is Origin.MANUAL
+            else record.issue_box,
+            display_regions=regions if record.origin is Origin.VLM else None,
+            callout_box=callout_box,
+            decision=Decision.PENDING,
+            updated_by=actor,
+            updated_at=at,
+            revision=record.revision + 1,
+        )
+        return self._update(
+            before=record,
+            after=updated,
+            action=Action.GEOMETRY,
             actor=actor,
             at=at,
         )

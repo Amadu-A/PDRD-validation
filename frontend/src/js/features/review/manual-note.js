@@ -54,6 +54,7 @@ export function createManualNote({
 
     applyText(value, normative) {
       textNode.textContent = value;
+      card.title = `${value}\n${normative || ""}`.trim();
       normNode.textContent = normative
         ? `Нормативное основание: ${normative}`
         : "Нормативное основание не указано";

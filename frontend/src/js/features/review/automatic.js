@@ -34,7 +34,7 @@ function measuredBox(node, pane) {
 }
 
 /** Отделяет автоматическую визуализацию от состояния решений и журнала листа. */
-export function createAutomaticReview({ onGeometry, onRecord, onStart }) {
+export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled = () => true }) {
   let entries = [];
   let resizers = [];
   const calloutBoxes = new Map();
@@ -78,7 +78,7 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart }) {
             node: bbox.node, page, label: "Область ошибки VLM",
             bounds: () => adapter.imagePane.getBoundingClientRect(),
             getBox: () => ({ ...entry.boxes[index] }),
-            enabled: () => !entry.rejected && page.dataset.reviewSelecting !== "true",
+            enabled: () => isEnabled() && !entry.rejected && page.dataset.reviewSelecting !== "true",
             onStart() {
               cancelActive();
               onStart();
@@ -121,7 +121,7 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart }) {
           minimum: { minWidth: 130, minHeight: 80 },
           bounds: () => adapter.imagePane.getBoundingClientRect(),
           getBox: () => reviewCalloutBox(record.callout) ?? measuredBox(record.callout, adapter.imagePane),
-          enabled: () => members().length > 0 && page.dataset.reviewSelecting !== "true",
+          enabled: () => isEnabled() && members().length > 0 && page.dataset.reviewSelecting !== "true",
           onStart() {
             cancelActive();
             onStart();
@@ -170,5 +170,30 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart }) {
     for (const resize of resizers) resize.cancel();
   }
 
-  return { mount, dispose, setRejected, snapshot, cancelActive };
+  /** Восстанавливает только операционные правки; они не подтверждают области VLM. */
+  function restore(findings) {
+    for (const row of findings) {
+      for (const entry of entries.filter((item) => item.findingId === row.finding_id)) {
+        const boxes = row.display_regions ?? row.proposed_regions.map((region) => region.bbox);
+        if (boxes.length !== entry.bboxEntries.length) {
+          throw new Error("Геометрия Review не соответствует серверной визуализации.");
+        }
+        entry.boxes = boxes.map((box) => ({ ...box }));
+        entry.bboxEntries.forEach((bbox, index) => {
+          const box = entry.boxes[index];
+          Object.assign(bbox.box, { xMin: box.x_min, yMin: box.y_min, xMax: box.x_max, yMax: box.y_max });
+          positionBox(bbox.node, box);
+        });
+        if (row.callout_box) {
+          calloutBoxes.set(entry.callout, { ...row.callout_box });
+          pinReviewCallout(entry.callout, row.callout_box);
+          entry.callout.dataset.reviewResized = "true";
+          positionBox(entry.callout, row.callout_box);
+        }
+        entry.adapter.redraw();
+      }
+    }
+  }
+
+  return { mount, dispose, setRejected, snapshot, cancelActive, restore };
 }

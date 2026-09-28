@@ -86,14 +86,14 @@ def content_signature(
     """Связывает область с источником и последней содержательной правкой.
 
     Решение ACCEPTED/REJECTED не влияет на подпись. Даже если инженер
-    вернёт прежний текст после редактирования, последняя ревизия EDITED
+    вернёт прежний текст или область, последняя ревизия EDITED/GEOMETRY
     изменится и старое подтверждение не будет использоваться повторно.
     """
     last_edit = max(
         (
             event.session_revision
             for event in session.history
-            if event.action is Action.EDITED
+            if event.action in (Action.EDITED, Action.GEOMETRY)
             and event.after is not None
             and event.after.finding_id == finding.finding_id
         ),
@@ -127,6 +127,12 @@ def content_signature(
         "last_edit_revision": last_edit,
         "proposals": proposals,
     }
+
+    if finding.display_regions is not None:
+        payload["display_regions"] = [
+            [float(box.x_min), float(box.y_min), float(box.x_max), float(box.y_max)]
+            for box in finding.display_regions
+        ]
 
     serialized = json.dumps(
         payload,

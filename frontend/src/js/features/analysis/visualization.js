@@ -589,17 +589,13 @@ function appendDetailField(
     ),
   );
 
-  field.append(
-    createElement(
-      "span",
-      "analysis-result__annotation-detail-value",
-      value,
-    ),
-  );
+  const valueNode = createElement("span", "analysis-result__annotation-detail-value", value);
+  field.append(valueNode);
 
   parent.append(
     field,
   );
+  return valueNode;
 }
 
 
@@ -661,7 +657,7 @@ function createFindingDetailControl(
     ),
   );
 
-  appendDetailField(
+  const reviewText = appendDetailField(
     tooltip,
     "Замечание",
     (
@@ -671,6 +667,7 @@ function createFindingDetailControl(
       || "Текст замечания не передан."
     ),
   );
+  reviewText.dataset.reviewTooltipText = "";
 
   appendDetailField(
     tooltip,
@@ -678,11 +675,12 @@ function createFindingDetailControl(
     finding.evidence,
   );
 
-  appendDetailField(
+  const reviewBasis = appendDetailField(
     tooltip,
     "Нормативное основание",
-    finding.basis,
+    finding.basis || "Не указано.",
   );
+  reviewBasis.dataset.reviewTooltipBasis = "";
 
   appendDetailField(
     tooltip,

@@ -36,7 +36,7 @@ def test_review_has_independent_state_view_and_controller() -> None:
     assert "fetch(" not in records
     assert "fetch(" not in note
     assert "fetch(" not in editor
-    assert "createReviewController" in app
+    assert "createReviewPersistence" in app
     assert "createReviewState" in controller
     assert "createManualAnnotationController" in controller
     assert "normalizedPoint" in manual

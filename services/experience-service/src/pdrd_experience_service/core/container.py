@@ -47,6 +47,9 @@ from pdrd_experience_service.core.settings import (
 from pdrd_experience_service.infrastructure.analysis.completed_reader import (
     VerifiedCompletedAnalysisReader,
 )
+from pdrd_experience_service.infrastructure.analysis.http_source import (
+    GatewayAnalysisSource,
+)
 from pdrd_experience_service.infrastructure.database.confirmed_areas import (
     SqlAlchemyConfirmedAreasRepository,
 )
@@ -112,9 +115,9 @@ def build_container(
     При enabled=true создаёт один Engine и одну фабрику AsyncSession.
     Каждая операция репозитория самостоятельно открывает сессию.
 
-    OpenReview регистрируется только при наличии явно переданного
-    серверного AnalysisSourceReader. Сам Composition Root не
-    загружает исходные документы и не открывает Review.
+    OpenReview получает явно переданный AnalysisSourceReader либо закрытый
+    GatewayAnalysisSource при review_api_enabled=true. Сам Composition Root
+    не загружает исходные документы и не открывает Review.
     """
     actual_settings = settings if settings is not None else get_settings()
 
@@ -176,6 +179,17 @@ def build_container(
 
         open_review = OpenReview(
             analyses=verified_reader,
+            repository=reviews,
+        )
+
+    elif actual_settings.review_api_enabled:
+        open_review = OpenReview(
+            analyses=VerifiedCompletedAnalysisReader(
+                source=GatewayAnalysisSource(
+                    base_url=actual_settings.gateway_base_url,
+                    internal_key=actual_settings.internal_key.get_secret_value(),
+                )
+            ),
             repository=reviews,
         )
 

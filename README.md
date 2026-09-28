@@ -95,7 +95,7 @@ Bounded contexts:
 - **API Gateway** — публичный API, job state, immutable analysis snapshot, Outbox, Celery, analysis artifacts и public content proxy для managed sources.
 - **Document Service** — PDF/CAD extraction, render, DWG -> DXF.
 - **Knowledge Service** — managed catalog, ТЗ lifecycle, PostgreSQL metadata, Qdrant, N/T/U/E retrieval и Project Context.
-- **Experience Service** — отдельный bounded context: Human Review, versioned decisions/audit, verified region selection, будущие Experience metadata/crops; на текущем этапе реализованы domain/application и PostgreSQL-контракт, HTTP/развёртывание впереди.
+- **Experience Service** — отдельный bounded context: Human Review, versioned decisions/audit, verified region selection, закрытый HTTP API и PostgreSQL; постоянные Experience metadata/crops разрабатываются дальше. Рабочее развёртывание новой версии проверяется отдельно.
 - **Shared Embedding Runtime** — общий external endpoint `shared-embedding`; локальный каталог `multimodal-embedding-service` сохраняется в репозитории как legacy/test code, но не поднимает второй runtime в Compose.
 - **Analysis Service** — VLM page understanding, requirement check, N/T/U policy и finalization.
 - **n8n** — orchestration внутренних вызовов.
@@ -113,7 +113,7 @@ Project infrastructure:
 - PostgreSQL (`analysis_jobs`/`knowledge` и отдельная схема Experience после миграции);
 - Qdrant и проектные application services;
 - analysis/document/knowledge volumes;
-- Experience Service включится в Compose после transport/config этапа, без копирования shared GPU runtimes.
+- Experience Service запускается профилем `review`, без копирования shared GPU runtimes.
 
 Направление зависимостей backend:
 
@@ -158,11 +158,14 @@ flowchart TD
     FE --> POLL["Status / result / visualization polling"]
     POLL --> GW
     GW --> DS2["Automatic annotated PDF renderer"]
-    GW -. "review transport planned" .-> EXP["Experience Service"]
+    U --> RF["Закрытый Review frontend: localhost :8081 / SSH"]
+    RF --> GW
+    GW --> EXP["Experience Service: профиль review"]
+    EXP --> RP[("PostgreSQL: схема experience")]
     EXP -. "approved review PDF planned" .-> DS2
 ```
 
-Точки и модели shared-inference задаются logical endpoints/переменными окружения, а не физическими ID модели в коде проекта. Пунктир обозначает ещё не подключённый runtime. Текущее создание Gold, review-контролы и текстовые карточки работают в браузере, а действующий `annotated-pdf` остаётся **автоматической исходной версией**.
+Точки и модели shared-inference задаются logical endpoints/переменными окружения, а не физическими ID модели в коде проекта. Пунктир обозначает будущий Reviewed PDF. Review сохраняется через Gateway на закрытом фронте; основной фронт показывает локальный предпросмотр. Действующий `annotated-pdf` остаётся **автоматической исходной версией**.
 
 ## 2. Managed N/U catalog и индексация
 
@@ -334,7 +337,9 @@ Snapshot содержит независимо:
 
 **Контракт текущего этапа:** `experience.review_sessions` хранит последний JSONB-снимок одного `job_id` с `revision` и `approved_revision`; `experience.review_events` хранит неизменяемую последовательность действий `(job_id, session_revision)` с before/after и автором. Каждая запись в транзакции проходит optimistic CAS по `expected_revision`. В `ReviewSession` хранятся также замечания без координат — для полного аудита и итогового **текстового** PDF. Отбор обучающих примеров — отдельная операция, **не** копия всей таблицы Review. Предложенные визуализацией области VLM переносятся как `proposed_regions` с источником и уверенностью; `issue_box` остаётся пустой до явного подтверждения. Старые JSONB-снимки без `proposed_regions` продолжают читаться.
 
-**Следующие этапы:** подключение доверенного источника завершённого анализа к mapper, бизнес-маршруты HTTP, отдельные подтверждения областей, полноценные Experience records/crops, экспорт и индексация. Наличие миграции в Git не означает её применения на рабочем сервере.
+**Этап 5:** закрытый Review API соединяет Gateway, доверенный источник завершённого анализа, Experience Service и frontend. Восстанавливаются решения, исправления и геометрия VLM/Gold. `display_regions` хранит операционные правки отдельно от подтверждений областей. Запуск через приватный frontend на 127.0.0.1:8081, конфигурация и ограничения описаны в [docs/review-api.md](docs/review-api.md). Наличие миграции в Git не означает её применения на рабочем сервере.
+
+**Следующие этапы:** утверждённый PDF с явным подтверждением областей, полноценные Experience records/crops, экспорт, индексация и отдельный эксперимент обучения. План 0–9: [docs/experience-roadmap.md](docs/experience-roadmap.md).
 
 ## 7. Qdrant — stable aliases и physical collections
 
@@ -569,14 +574,14 @@ flowchart TD
 
 **Реализовано во frontend:** пространственная группировка влияет только на отображение; каждый `finding_id` остаётся независимым в review/DB. Hypothesis не создаёт ложную рамку. Группировка не объединяет доказательства, решения или оригинальные тексты в одну запись. Gold всегда имеет отдельный собственный `finding_id` и исходно выбранные пользователем две области.
 
-**Локальные действия с Gold:** кнопка «Изменить области» на карточке или в текстовом списке запускает повторное выделение ошибки и места текста на том же листе. До нажатия «Сохранить области» исходная геометрия и решение сохраняются; Escape отменяет черновик. Применение других координат сбрасывает решение в `pending`, сохраняя `gold`. «Удалить локальное замечание» убирает рамку, линию, обе карточки и запись из клиентского снимка. Кнопка над листом отменяет последнее добавление, изменение областей или удаление на этом листе; при отмене удаления возвращаются текст, координаты и решение. История живёт до открытия другого отчёта. Эти действия пока не сохраняются на сервере и не меняют автоматический PDF; подключение постоянного Review относится к этапу 5.
+**Действия с Gold и VLM:** стороны и углы рамки/карточки растягиваются мышью, Escape отменяет жест. Изменение координат сбрасывает решение в `pending`. Красный крестик отклоняет запись и скрывает её рамку, линию и текст; кнопка над листом отменяет последнее действие. Отдельных кнопок изменения областей и удаления нет. В карточке нет скролла; полный ответ доступен в тултипе. История кнопки Undo живёт до открытия другого отчёта. На закрытом фронте решения, тексты и геометрия сохраняются сервером и восстанавливаются после перезагрузки. Undo создания Gold там записывает rejected, сохраняя аудит; в локальном режиме отменяет добавление. Автоматический PDF эти решения не применяет.
 
 ## 11. Полный бизнес-процесс Experience Service
 
 ```mermaid
 flowchart TD
     A["Completed analysis: immutable source findings"] --> V["Lazy visualization and source PDF"]
-    V --> GW["API Gateway review boundary — planned"]
+    V --> GW["API Gateway: закрытый Review API"]
     GW --> OPEN["Experience OpenReview: original VLM findings pending"]
     OPEN --> UI["Human Review UI: Wise / Bad / Edited / Gold"]
     UI --> EDIT["Edit VLM: original + corrected version; decision resets"]
@@ -597,7 +602,7 @@ flowchart TD
     INDEX --> QD[("dva_experience_active, guarded by feature flag")]
 ```
 
-**Статусы внедрения:** локальный Human Review UI, демонстрационная страница Experience, domain `ReviewSession`, `SelectExperience`, PostgreSQL adapter/Alembic schema и HTTP bootstrap с health/readiness реализованы. Серверный mapper переносит визуальные области в `proposed_regions`, не подтверждая их автоматически. Бизнес-маршруты Review, сохранение подтверждений координат, crop, reviewed PDF и E indexing пока не подключены. Пунктир/слово `planned` означает архитектурный план, не существующую рабочую функциональность.
+**Статусы внедрения:** Human Review UI, демонстрационная страница Experience, domain `ReviewSession`, `SelectExperience`, PostgreSQL adapter/Alembic schema, аудит подтверждений областей и закрытый Review API реализованы. Серверный mapper переносит визуальные области в `proposed_regions`, не подтверждая их автоматически. Правки отображения сохраняются отдельно как `display_regions`. Явный UI подтверждения VLM-области, crop, reviewed PDF и E indexing ещё предстоят. Слово `planned` обозначает будущую функциональность. Развёртывание нового API требует проверки на Linux.
 
 ## 12. Подтверждение и исправление областей
 
@@ -610,7 +615,7 @@ flowchart TD
     CONF -->|нет| FIX["Engineer redraws / corrects region"]
     FIX --> RECONF["Validate page, coordinates, actor, revision"]
     CONF -->|да| RECONF
-    RECONF --> AREA["ConfirmedFindingArea, server-owned audit — planned"]
+    RECONF --> AREA["ConfirmedFindingArea: отдельный серверный аудит"]
     AREA --> PICK["SelectExperience candidate"]
     G["Manual Gold"] --> M["User draws issue+callout on the same page"]
     M --> A{"Gold explicitly accepted?"}
@@ -618,7 +623,7 @@ flowchart TD
     A -->|да| PICK
 ```
 
-`status=located` от автоматического локализатора не равен подтверждению инженера. Mapper читает только серверные артефакты задания и сохраняет такую область как `proposed_regions`; отсутствие, неверная геометрия или неоднозначная локализация оставляют находку текстовой. Подтверждение проверяется отдельно от `decision=accepted`. Никаких выдуманных координат или перехода Gold на другой лист. Достоверная привязка подтверждения к актуальной редакции finding будет enforced в persistent confirmed-areas adapter.
+`status=located` от автоматического локализатора не равен подтверждению инженера. Mapper читает только серверные артефакты задания и сохраняет такую область как `proposed_regions`; отсутствие, неверная геометрия или неоднозначная локализация оставляют находку текстовой. Подтверждение проверяется отдельно от `decision=accepted`. Никаких выдуманных координат или перехода Gold на другой лист. PostgreSQL-адаптер подтверждений уже проверяет связь с актуальной редакцией finding; пользовательский сценарий явного подтверждения области ещё предстоит.
 
 ## 13. Как будет происходить отбор, отсечение и классификация
 
@@ -1118,7 +1123,7 @@ GET    /api/v1/normative/user-packages/documents/{document_id}/content
 GET /api/v1/normative/technical-assignments/{technical_assignment_id}/content
 ```
 
-Browser не обращается к internal Knowledge API напрямую. HTTP endpoints Experience/Reviewed PDF появятся после подключения transport, identity и persistence; на текущей ветке **публичного Experience API ещё нет**.
+Browser не обращается к internal Knowledge/Experience API напрямую. Закрытый Review API доступен через Gateway на приватном frontend; постоянный каталог Experience и Reviewed PDF ещё не реализованы.
 
 # n8n workflows
 
@@ -1301,7 +1306,7 @@ Shared network `ai-shared` должна предоставлять RabbitMQ, n8n
 
 Безопасный штатный deploy следует выполнять штатным проектным скриптом после проверки текущей ветки/контейнеров и Compose: `bash scripts/up.sh`. Не перезапускайте shared stack и не удаляйте volume ради разработки Experience.
 
-Важное ограничение: наличие SQLAlchemy adapter и Alembic migration ещё **не** означает, что Experience-service подключён к Compose/HTTP. Доступ к DB и миграция будут проверены отдельно; запуск миграции из README до настройки runtime запрещён.
+Experience подключён к Compose только профилем `review`. Сначала общие и изолированные SQL-тесты, затем настройка закрытого канала и явная миграция по [docs/review-api.md](docs/review-api.md). Основной frontend 8080 остаётся локальным Review; серверное сохранение доступно через SSH на 127.0.0.1:8081.
 
 При startup `knowledge-embedding-migrator` проверяет embedding fingerprint до старта Knowledge runtime.
 
@@ -1473,8 +1478,8 @@ Shared runtime checks осуществляются через опубликов
 - frontend нормативного каталога, пользовательских пакетов и ТЗ;
 - Human Review frontend: Wise/Bad/Edited/Gold, независимые решения сгруппированных findings, создание Gold с двумя областями и общим текстовым списком;
 - доменная модель `ReviewSession`, журнал редакций, optimistic revisions, подтверждаемая геометрия и `SelectExperience` (пока только подготовка кандидатов);
-- отдельная SQLAlchemy PostgreSQL persistence и Experience Alembic migration, HTTP bootstrap без бизнес-маршрутов, серверный mapper предложенных VLM-областей;
+- отдельная SQLAlchemy PostgreSQL persistence и Experience Alembic migration, закрытый Review API, серверный источник анализа и mapper предложенных VLM-областей;
 - автоматический PDF существует, reviewed PDF после Human Review пока заблокирован;
 - unit/integration/architecture/runtime test layers.
 
-**Следующие этапы Experience:** runtime identity/config и API Gateway integration; подтверждение/коррекция областей на сервере; отдельное durable хранилище Experience metadata и image crop; утверждённый PDF на исходных листах и в текстовом отчёте; trusted E indexing с последующей оценкой качества; отдельный эксперимент дообучения VLM.
+**Следующие этапы Experience:** этап 6 — утверждённый PDF и явное подтверждение областей; этап 7 — постоянные Experience metadata/crop, CRUD и экспорт; этап 8 — trusted E indexing с оценкой качества; этап 9 — отдельный эксперимент дообучения VLM.
