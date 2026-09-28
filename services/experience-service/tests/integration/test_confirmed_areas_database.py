@@ -2,8 +2,18 @@
 
 """Проверяет реальное хранение, отзыв и конкуренцию подтверждений PostgreSQL.
 
-Запускается только на изолированном Compose со временной тестовой базой.
-Никакие тесты не выполняют SQL в рабочем PostgreSQL PDRD.
+Назначение файла:
+- проверять сохранение явно подтверждённых областей;
+- убеждаться, что изменение текста делает старые области недействительными;
+- проверять исправление, отзыв и неизменность журнала аудита;
+- испытывать конкурентные операции нескольких пользователей;
+- защищать рабочую базу от случайного запуска интеграционных тестов.
+
+Используется исключительно изолированный PostgreSQL.
+
+При чтении через AsyncConnection явно выбираем необходимые столбцы.
+В отличие от AsyncSession, AsyncConnection не создаёт ORM-объекты
+из выражения select(ORMModel).
 """
 
 import asyncio
@@ -149,7 +159,9 @@ def adapters(engine: AsyncEngine):
         expire_on_commit=False,
     )
 
-    reviews = SqlAlchemyReviewRepository(sessions)
+    reviews = SqlAlchemyReviewRepository(
+        sessions,
+    )
 
     areas = SqlAlchemyConfirmedAreasRepository(
         sessions,
@@ -163,7 +175,7 @@ async def cleanup(
     engine: AsyncEngine,
     job_id: UUID,
 ) -> None:
-    """Удаляет только тестовый job; связанные тестовые события удаляет FK."""
+    """Удаляет только тестовый job; связанные события удаляет внешний ключ."""
     async with engine.begin() as connection:
         await connection.execute(
             delete(ReviewSessionModel).where(ReviewSessionModel.job_id == job_id)
@@ -231,7 +243,10 @@ async def test_proposed_confirmation_survives_decision_and_approval(
 
         assert result.confirmation_revision == 1
 
-        await seal(reviews, opened)
+        await seal(
+            reviews,
+            opened,
+        )
 
         (confirmed,) = await areas.load_confirmed(
             job_id=job,
@@ -241,7 +256,10 @@ async def test_proposed_confirmation_survives_decision_and_approval(
         assert confirmed.confirmed_by == "integration:2"
 
     finally:
-        await cleanup(engine, job)
+        await cleanup(
+            engine,
+            job,
+        )
 
 
 @pytest.mark.asyncio
@@ -271,9 +289,19 @@ async def test_edit_and_text_reversion_both_invalidate_old_confirmation(
             expected_confirmation_revision=0,
         )
 
-        approved = await seal(reviews, opened)
+        approved = await seal(
+            reviews,
+            opened,
+        )
 
-        assert len(await areas.load_confirmed(job_id=job)) == 1
+        assert (
+            len(
+                await areas.load_confirmed(
+                    job_id=job,
+                )
+            )
+            == 1
+        )
 
         edited = approved.edit(
             finding_id="vlm:1",
@@ -318,14 +346,17 @@ async def test_edit_and_text_reversion_both_invalidate_old_confirmation(
         )
 
     finally:
-        await cleanup(engine, job)
+        await cleanup(
+            engine,
+            job,
+        )
 
 
 @pytest.mark.asyncio
 async def test_correction_revocation_and_immutable_audit(
     engine: AsyncEngine,
 ) -> None:
-    """Каждая корректировка сохраняет старую рамку и идентификатор автора."""
+    """Каждая корректировка сохраняет прежнюю рамку и автора действия."""
     job = uuid4()
 
     reviews, areas = adapters(engine)
@@ -391,7 +422,10 @@ async def test_correction_revocation_and_immutable_audit(
                 expected_confirmation_revision=2,
             )
 
-        await seal(reviews, opened)
+        await seal(
+            reviews,
+            opened,
+        )
 
         assert (
             await areas.load_confirmed(
@@ -400,10 +434,19 @@ async def test_correction_revocation_and_immutable_audit(
             == ()
         )
 
+        # ВАЖНО:
+        # AsyncConnection работает со строками SQL, а не
+        # восстанавливает экземпляры ORM-моделей.
+        #
+        # Поэтому явно выбираем action и details,
+        # затем получаем строки через execute().
         async with engine.connect() as connection:
             events = (
-                await connection.scalars(
-                    select(AreaConfirmationEventModel)
+                await connection.execute(
+                    select(
+                        AreaConfirmationEventModel.action,
+                        AreaConfirmationEventModel.details,
+                    )
                     .where(AreaConfirmationEventModel.job_id == job)
                     .order_by(AreaConfirmationEventModel.revision)
                 )
@@ -415,12 +458,19 @@ async def test_correction_revocation_and_immutable_audit(
             "revoked",
         ]
 
+        # Предыдущие координаты должны оставаться
+        # в неизменяемой истории подтверждений.
         assert events[1].details["before"]["regions"][0]["x_min"] == 100.0
 
+        # Отзыв сохраняет последнюю исправленную область,
+        # но исключает её из активных подтверждений.
         assert events[2].details["after"]["regions"][0]["x_min"] == 400.0
 
     finally:
-        await cleanup(engine, job)
+        await cleanup(
+            engine,
+            job,
+        )
 
 
 @pytest.mark.asyncio
@@ -469,19 +519,24 @@ async def test_two_simultaneous_confirmations_do_not_overwrite_each_other(
 
         assert sum(isinstance(value, ReviewConflictError) for value in results) == 1
 
+        # Здесь нужны только номера записанных ревизий.
+        # Не запрашиваем ORM-модель через AsyncConnection.
         async with engine.connect() as connection:
-            entries = (
+            revisions = (
                 await connection.scalars(
-                    select(AreaConfirmationEventModel).where(
+                    select(AreaConfirmationEventModel.revision).where(
                         AreaConfirmationEventModel.job_id == job
                     )
                 )
             ).all()
 
-        assert len(entries) == 1
+        assert revisions == [1]
 
     finally:
-        await cleanup(engine, job)
+        await cleanup(
+            engine,
+            job,
+        )
 
 
 @pytest.mark.asyncio
@@ -531,16 +586,21 @@ async def test_review_revision_change_between_read_and_save_blocks_confirmation(
                 expected_confirmation_revision=0,
             )
 
+        # Проверяем отсутствие событий аудита от
+        # неуспешной конкурентной операции.
         async with engine.connect() as connection:
-            events = (
+            revisions = (
                 await connection.scalars(
-                    select(AreaConfirmationEventModel).where(
+                    select(AreaConfirmationEventModel.revision).where(
                         AreaConfirmationEventModel.job_id == job
                     )
                 )
             ).all()
 
-        assert events == []
+        assert revisions == []
 
     finally:
-        await cleanup(engine, job)
+        await cleanup(
+            engine,
+            job,
+        )
