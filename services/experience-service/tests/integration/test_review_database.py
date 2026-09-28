@@ -3,7 +3,7 @@
 """Интеграционные проверки PostgreSQL-хранилища Human Review.
 
 Для чего нужен файл:
-- проверяет, что первая миграция действительно применена к PostgreSQL;
+- проверяет, что миграции Experience применены к PostgreSQL;
 - испытывает сохранение и восстановление замечаний и истории действий;
 - проверяет защиту от одновременного изменения одного отчёта;
 - запрещает случайное выполнение тестов на рабочей базе PDRD.
@@ -48,7 +48,7 @@ TEST_DATABASE_NAME = "pdrd_experience_test"
 TEST_DATABASE_USER = "experience_test"
 TEST_DATABASE_HOST = "experience-test-postgres"
 
-EXPECTED_MIGRATION = "20260925_0001"
+EXPECTED_MIGRATION = "20260928_0002"
 
 
 def validate_isolated_database_url(raw_url: str) -> URL:
@@ -161,8 +161,8 @@ async def test_engine() -> AsyncIterator[AsyncEngine]:
             assert identity[0] == TEST_DATABASE_NAME
             assert identity[1] == TEST_DATABASE_USER
 
-            # Проверяем реальное применение первой миграции.
-            # Отсутствующая таблица должна приводить к ошибке теста.
+            # Отсутствующая таблица или устаревшая версия
+            # должны приводить к ошибке интеграционного теста.
             current_revision = await connection.scalar(
                 text("SELECT version_num FROM experience.alembic_version_experience")
             )

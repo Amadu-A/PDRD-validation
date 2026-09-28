@@ -5,8 +5,9 @@
 # Назначение:
 # - создать отдельный временный PostgreSQL;
 # - применить миграции Experience Service;
-# - убедиться, что база находится на актуальной версии миграций;
-# - проверить сохранение данных и конкурирующие транзакции.
+# - проверить сохранение Human Review;
+# - проверить подтверждение, исправление и отзыв областей;
+# - испытать конкурентные транзакции.
 #
 # Окружение не подключается к рабочему стеку PDRD.
 # Рабочие Docker volumes и учётные данные не используются.
@@ -22,7 +23,7 @@ services:
       POSTGRES_USER: experience_test
       POSTGRES_PASSWORD: experience-test-only
 
-    # Тестовые данные не сохраняются в рабочие тома проекта.
+    # Данные существуют только в тестовом контейнере.
     tmpfs:
       - /var/lib/postgresql/data
 
@@ -50,10 +51,9 @@ services:
         condition: service_healthy
 
     environment:
-      # Разрешаем выполнение выбранных интеграционных тестов.
       PDRD_RUN_DATABASE_TESTS: "1"
 
-      # Миграция и pytest обязаны использовать одну тестовую базу.
+      # Миграция и тесты используют один временный PostgreSQL.
       EXPERIENCE_SERVICE_DATABASE_URL: &test_url postgresql+asyncpg://experience_test:experience-test-only@experience-test-postgres:5432/pdrd_experience_test
       EXPERIENCE_SERVICE_TEST_DATABASE_URL: *test_url
 
@@ -73,15 +73,13 @@ services:
 
         echo "=== ПРОВЕРКА АКТУАЛЬНОЙ ВЕРСИИ ==="
 
-        # В отличие от обычного current, --check-heads завершится
-        # ошибкой, если миграции применены не полностью.
         python -m alembic -c alembic.ini current --check-heads --verbose
 
         echo "=== ИНТЕГРАЦИОННЫЕ ТЕСТЫ ==="
 
         cd /workspace
 
-        python -m pytest -q services/experience-service/tests/integration/test_review_database.py
+        python -m pytest -q services/experience-service/tests/integration/test_review_database.py services/experience-service/tests/integration/test_confirmed_areas_database.py
 
     networks:
       - experience-test-only

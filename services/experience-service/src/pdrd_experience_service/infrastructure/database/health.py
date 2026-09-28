@@ -1,15 +1,9 @@
 # services/experience-service/src/pdrd_experience_service/infrastructure/database/health.py
 
-"""Проверка доступности и готовности PostgreSQL Experience Service.
+"""Проверяет PostgreSQL и наличие схемы подтверждений Experience Service.
 
-Назначение файла:
-- проверить возможность подключиться к PostgreSQL;
-- убедиться в наличии собственной схемы Experience;
-- проверить существование таблиц Review и Alembic;
-- возвращать безопасный результат без раскрытия DSN.
-
-Отсутствие миграций считается состоянием NOT READY.
-Проверка не создаёт схему и не модифицирует данные.
+Readiness становится положительным только после миграции 20260928_0002.
+Проверка ничего не создаёт и не меняет в рабочей базе данных.
 """
 
 import asyncio
@@ -20,19 +14,19 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 
 class DatabaseReadinessProbe:
-    """Infrastructure adapter проверки готовности PostgreSQL."""
+    """Проверяет доступность и обязательные таблицы текущей версии сервиса."""
 
     def __init__(
         self,
         engine: AsyncEngine,
         timeout_seconds: float,
     ) -> None:
-        """Получает engine через DI и ограничение времени проверки."""
+        """Получает engine через DI и задаёт максимальное время проверки."""
         self._engine = engine
         self._timeout_seconds = timeout_seconds
 
     async def is_ready(self) -> bool:
-        """Проверяет доступность базы и обязательных таблиц Experience."""
+        """Возвращает False, если миграции не доведены до текущего head."""
         try:
             async with asyncio.timeout(
                 self._timeout_seconds,
@@ -45,7 +39,7 @@ class DatabaseReadinessProbe:
                         )
                     )
 
-                    if version is None:
+                    if version != "20260928_0002":
                         return False
 
                     tables_exist = await connection.scalar(
@@ -53,8 +47,12 @@ class DatabaseReadinessProbe:
                             "SELECT "
                             "to_regclass('experience.review_sessions') "
                             "IS NOT NULL "
+                            "AND to_regclass('experience.review_events') "
+                            "IS NOT NULL "
+                            "AND to_regclass('experience.confirmed_areas') "
+                            "IS NOT NULL "
                             "AND "
-                            "to_regclass('experience.review_events') "
+                            "to_regclass('experience.area_confirmation_events') "
                             "IS NOT NULL"
                         )
                     )

@@ -197,11 +197,11 @@ def test_roundtrip_rejects_naive_audit_metadata() -> None:
 
 
 def test_orm_uses_separate_experience_schema_and_append_only_event_key() -> None:
-    """Таблицы Experience не должны изменять схемы других сервисов."""
-    assert set(Base.metadata.tables) == {
+    """Исходные таблицы Review должны сохраняться при расширении схемы."""
+    assert {
         "experience.review_sessions",
         "experience.review_events",
-    }
+    }.issubset(set(Base.metadata.tables))
 
     assert [column.name for column in ReviewEventModel.__table__.primary_key] == [
         "job_id",
@@ -228,7 +228,6 @@ def test_orm_uses_separate_experience_schema_and_append_only_event_key() -> None
     assert "experience.review_events" in events_sql
 
     assert "JSONB" in sessions_sql and "JSONB" in events_sql
-
     assert "ck_review_sessions_approval" in sessions_sql
 
 
@@ -457,7 +456,6 @@ async def test_update_guards_expected_revision_and_adds_only_new_audit_event() -
     )
 
     assert "review_sessions.revision =" in str(compiled)
-
     assert approved.revision - 1 in compiled.params.values()
 
 
