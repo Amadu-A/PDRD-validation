@@ -63,3 +63,25 @@ test("валидация запрещает пустые данные, неиз�
   assert.throws(() => state.edit("A", "x".repeat(10001)));
   assert.equal(state.get("A").revision, 0);
 });
+
+test("изменение геометрии и удаление доступны только Gold; восстановление сохраняет полный снимок", () => {
+  const state = createReviewState();
+  state.register("vlm", "Замечание VLM");
+  state.register("manual:one", "Замечание инженера", { origin: "manual", normativeSection: "СП 123" });
+  state.decide("manual:one", "accepted");
+  const pending = state.invalidateManual("manual:one");
+  assert.equal(pending.decision, "pending");
+  assert.equal(pending.experienceTag, "gold");
+  assert.equal(pending.revision, 2);
+  state.decide("manual:one", "rejected");
+  const snapshot = state.removeManual("manual:one");
+  assert.equal(state.summary().total, 1);
+  assert.throws(() => state.get("manual:one"));
+  assert.deepEqual(state.restoreManual(snapshot), snapshot);
+  snapshot.text = "Внешнее изменение";
+  assert.equal(state.get("manual:one").text, "Замечание инженера");
+  assert.throws(() => state.restoreManual(snapshot));
+  assert.throws(() => state.removeManual("vlm"));
+  assert.throws(() => state.invalidateManual("vlm"));
+  assert.equal(state.summary().total, 2);
+});

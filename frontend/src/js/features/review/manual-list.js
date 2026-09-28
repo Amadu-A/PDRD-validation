@@ -30,6 +30,8 @@ export function createManualTextList() {
   let overview = null;
   let overviewNote = null;
   let automaticCount = 0;
+  let empty = null;
+  let emptyText = "";
   const items = new Map();
 
   function mount(root) {
@@ -41,9 +43,16 @@ export function createManualTextList() {
     automaticCount = section?.querySelectorAll(
       ".analysis-result__finding",
     ).length ?? 0;
+    empty = section?.querySelector(".analysis-result__empty") ?? null;
+    emptyText = empty?.textContent ?? "";
   }
 
   function updateSummary() {
+    let number = automaticCount;
+    for (const item of items.values()) {
+      number += 1;
+      item.title.textContent = `${number}. Лист/страница ${item.pageNumber}`;
+    }
     if (overviewNote) {
       overviewNote.textContent = (
         `После ручной проверки: ${automaticCount + items.size} замечаний `
@@ -67,7 +76,6 @@ export function createManualTextList() {
     }
 
     if (!summary) {
-      const empty = section.querySelector(".analysis-result__empty");
       if (empty) {
         empty.textContent = (
           "Автоматические замечания не сформированы. "
@@ -119,7 +127,7 @@ export function createManualTextList() {
     const normative = field(article, "Нормативное основание", "Не указано");
     section.append(article);
 
-    const item = { article, text, normative, decision };
+    const item = { article, text, normative, decision, title, pageNumber: note.pageNumber };
     items.set(note.findingId, item);
     sync(review);
     updateSummary();
@@ -141,5 +149,21 @@ export function createManualTextList() {
     }[review.decision] ?? "Ожидает решения";
   }
 
-  return { mount, add, sync };
+  /** Убирает Gold-карточку и пересчитывает номера и счётчики общего отчёта. */
+  function remove(findingId) {
+    const item = items.get(findingId);
+    if (!item) return;
+    item.article.remove();
+    items.delete(findingId);
+    if (!items.size) {
+      summary?.remove();
+      overviewNote?.remove();
+      summary = null;
+      overviewNote = null;
+      if (empty) empty.textContent = emptyText;
+    }
+    updateSummary();
+  }
+
+  return { mount, add, sync, remove };
 }

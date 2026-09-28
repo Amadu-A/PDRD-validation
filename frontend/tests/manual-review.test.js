@@ -39,11 +39,21 @@ class FakeElement {
   }
 
   append(...nodes) {
-    this.children.push(...nodes);
+    for (const node of nodes) {
+      node.remove();
+      node.parent = this;
+      node.removed = false;
+      this.children.push(node);
+    }
   }
 
   prepend(...nodes) {
-    this.children.unshift(...nodes);
+    for (const node of [...nodes].reverse()) {
+      node.remove();
+      node.parent = this;
+      node.removed = false;
+      this.children.unshift(node);
+    }
   }
 
   insertBefore(node, before) {
@@ -54,10 +64,15 @@ class FakeElement {
       0,
       node,
     );
+    node.parent = this;
   }
 
   remove() {
     this.removed = true;
+    if (this.parent) {
+      this.parent.children = this.parent.children.filter((node) => node !== this);
+      this.parent = null;
+    }
   }
 
   addEventListener(name, handler) {
@@ -149,6 +164,15 @@ globalThis.ResizeObserver = class {
 function fixture(pageNumbers = [22], loaded = true) {
   const root = new FakeElement();
   const visualization = new FakeElement();
+  const findings = new FakeElement("section");
+  const overview = new FakeElement("section");
+  const empty = new FakeElement("p");
+  empty.className = "analysis-result__empty";
+  empty.textContent = "Замечания не сформированы.";
+  findings.append(empty);
+  findings.selectors.set(".analysis-result__empty", empty);
+  root.selectors.set(".analysis-result__findings", findings);
+  root.selectors.set(".analysis-result__summary", overview);
 
   root.selectors.set(
     ".analysis-result__visualization",
@@ -163,6 +187,9 @@ function fixture(pageNumbers = [22], loaded = true) {
   const pages = pageNumbers.map((number) => {
     const page = new FakeElement("section");
     const title = new FakeElement("h4");
+    const pageEmpty = new FakeElement("p");
+    pageEmpty.textContent = "На листе замечаний нет.";
+    page.selectors.set(".analysis-result__page-empty", pageEmpty);
 
     title.textContent = `Лист/страница ${number}`;
 
@@ -209,11 +236,14 @@ function fixture(pageNumbers = [22], loaded = true) {
     ".analysis-result__page-visualization",
     pages.map((page) => page.page),
   );
+  root.lists.set(".analysis-result__page-visualization", pages.map((item) => item.page));
 
   return {
     root,
     visualization,
     pages,
+    findings,
+    overview,
   };
 }
 
@@ -273,7 +303,7 @@ function control(card, action) {
 
 function saveDialog(root, textValue, normValue) {
   const dialog = root.children.find(
-    (child) => child.className === "manual-editor",
+    (child) => child.className === "manual-editor" && child.open,
   );
 
   const form = dialog.children[0];
@@ -522,4 +552,167 @@ test("до загрузки картинки начало выделения з�
     message.textContent,
     /Дождитесь загрузки/,
   );
+});
+
+/** Создаёт Gold через реальные обработчики указателя и формы. */
+function addGold(root, page, text = "Gold для проверки", norm = "СП 123, п. 4") {
+  const ui = mounted(page);
+  ui.add.click();
+  draw(ui.layer, 100, 200, 300, 400);
+  draw(ui.layer, 500, 150, 800, 400);
+  saveDialog(root, text, norm);
+  return ui.layer.children.find((node) => node.className === "manual-annotation__card");
+}
+
+function pageAction(page, hook) {
+  return mounted(page).toolbar.children.find((node) => node.dataset[hook] !== undefined);
+}
+
+test("геометрия Gold меняется только после подтверждения и сбрасывает решение в обоих видах", () => {
+  const { root, pages, findings } = fixture();
+  const controller = createReviewController();
+  controller.mount(root);
+  const card = addGold(root, pages[0]);
+  control(card, "accept").click();
+  const before = controller.getManualSnapshot();
+  const line = mounted(pages[0]).layer.children.find((node) => node.tagName === "SVG");
+  const oldPoints = line.children[0].getAttribute("points");
+  control(card, "geometry").click();
+  draw(mounted(pages[0]).layer, 10, 10, 12, 12);
+  assert.deepEqual(controller.getManualSnapshot(), before);
+  draw(mounted(pages[0]).layer, 200, 300, 450, 500);
+  draw(mounted(pages[0]).layer, 600, 500, 900, 850);
+  assert.equal(mounted(pages[0]).layer.dataset.manualMode, "confirm");
+  assert.deepEqual(controller.getManualSnapshot(), before);
+  pageAction(pages[0], "reviewGeometrySave").click();
+  const after = controller.getManualSnapshot();
+  assert.equal(after.length, 1);
+  assert.equal(after[0].finding_id, before[0].finding_id);
+  assert.equal(after[0].page_number, 22);
+  assert.equal(after[0].experience_tag, "gold");
+  assert.equal(after[0].decision, "pending");
+  assert.equal(after[0].revision, before[0].revision + 1);
+  assert.equal(after[0].issue_box.x_min, 200);
+  assert.equal(card.style.left, "60%");
+  assert.notEqual(line.children[0].getAttribute("points"), oldPoints);
+  const textCard = findings.children.find((node) => node.dataset.manualFindingId);
+  assert.equal(textCard.dataset.reviewDecision, "pending");
+  control(textCard, "accept").click();
+  assert.equal(card.dataset.reviewDecision, "accepted");
+  pageAction(pages[0], "reviewPageUndo").click();
+  assert.deepEqual(controller.getManualSnapshot()[0].issue_box, before[0].issue_box);
+  assert.deepEqual(controller.getManualSnapshot()[0].callout_box, before[0].callout_box);
+  assert.equal(controller.getManualSnapshot()[0].decision, "pending");
+  assert.equal(line.children[0].getAttribute("points"), oldPoints);
+});
+
+test("Escape и смена листа отменяют черновик существующей геометрии без потери принятия", () => {
+  const { root, pages } = fixture([22, 23]);
+  const controller = createReviewController();
+  controller.mount(root);
+  const card = addGold(root, pages[0]);
+  control(card, "accept").click();
+  const before = controller.getManualSnapshot();
+  control(card, "geometry").click();
+  draw(mounted(pages[0]).layer, 200, 200, 400, 400);
+  draw(mounted(pages[0]).layer, 600, 600, 900, 850);
+  pages[0].page.dispatch("keydown", { key: "Escape", preventDefault() {} });
+  assert.deepEqual(controller.getManualSnapshot(), before);
+  assert.equal(mounted(pages[0]).layer.dataset.manualMode, "idle");
+  assert.equal(pageAction(pages[0], "reviewGeometrySave").hidden, true);
+  control(card, "geometry").click();
+  draw(mounted(pages[0]).layer, 200, 200, 400, 400);
+  mounted(pages[1]).add.click();
+  assert.equal(mounted(pages[0]).layer.dataset.manualMode, "idle");
+  assert.equal(mounted(pages[1]).layer.dataset.manualMode, "issue");
+  assert.deepEqual(controller.getManualSnapshot(), before);
+});
+
+test("удаление из списка и Undo синхронизируют рамку, линию, карточки, счётчики и снимок", () => {
+  const { root, pages, findings, overview, visualization } = fixture();
+  const controller = createReviewController();
+  controller.mount(root);
+  const card = addGold(root, pages[0]);
+  control(card, "edit").click();
+  saveDialog(root, "Полный уточнённый текст", "СП 123, п. 5");
+  control(card, "accept").click();
+  const before = controller.getManualSnapshot();
+  const textCard = findings.children.find((node) => node.dataset.manualFindingId);
+  control(textCard, "remove").click();
+  assert.deepEqual(controller.getManualSnapshot(), []);
+  assert.equal(card.removed, true);
+  assert.equal(textCard.removed, true);
+  assert.equal(mounted(pages[0]).layer.children.length, 2);
+  assert.equal(findings.children.length, 1);
+  assert.equal(overview.children.length, 0);
+  assert.equal(findings.children[0].textContent, "Замечания не сформированы.");
+  assert.equal(pages[0].page.querySelector(".analysis-result__page-empty").textContent, "На листе замечаний нет.");
+  assert.match(visualization.children[0].textContent, /0 без решения, 0 принято/);
+  pageAction(pages[0], "reviewPageUndo").click();
+  assert.deepEqual(controller.getManualSnapshot(), before);
+  assert.equal(card.removed, false);
+  assert.equal(card.children.filter((node) => node.dataset.reviewControls !== undefined).length, 1);
+  assert.equal(findings.children.filter((node) => node.dataset.manualFindingId).length, 1);
+  const restored = findings.children.find((node) => node.dataset.manualFindingId);
+  control(restored, "reject").click();
+  assert.equal(card.dataset.reviewDecision, "rejected");
+  assert.equal(card.dataset.reviewTag, "gold");
+  pageAction(pages[0], "reviewPageUndo").click();
+  assert.deepEqual(controller.getManualSnapshot(), []);
+  assert.equal(mounted(pages[0]).layer.children.length, 2);
+  assert.equal(pageAction(pages[0], "reviewPageUndo").disabled, true);
+});
+
+test("Undo добавления действует на свой лист и не удаляет соседнее замечание", () => {
+  const { root, pages, findings } = fixture([22, 23]);
+  const controller = createReviewController();
+  controller.mount(root);
+  addGold(root, pages[0], "Первый лист");
+  const second = addGold(root, pages[1], "Второй лист");
+  pageAction(pages[0], "reviewPageUndo").click();
+  const data = controller.getManualSnapshot();
+  assert.equal(data.length, 1);
+  assert.equal(data[0].page_number, 23);
+  assert.equal(data[0].text, "Второй лист");
+  assert.equal(second.removed, false);
+  const remaining = findings.children.find((node) => node.dataset.manualFindingId);
+  assert.equal(remaining.children[1].children[0].textContent, "1. Лист/страница 23");
+});
+
+test("смена отчёта очищает историю и отключает старые обработчики указателя и Undo", () => {
+  const controller = createReviewController();
+  const previous = fixture([22]);
+  controller.mount(previous.root);
+  const previousCard = addGold(previous.root, previous.pages[0]);
+  const oldUndo = pageAction(previous.pages[0], "reviewPageUndo");
+  const next = fixture([23]);
+  controller.mount(next.root);
+  assert.equal(pageAction(next.pages[0], "reviewPageUndo").disabled, true);
+  oldUndo.click();
+  mounted(previous.pages[0]).add.click();
+  draw(mounted(previous.pages[0]).layer, 100, 100, 400, 400);
+  assert.equal(mounted(previous.pages[0]).layer.dataset.manualMode, "idle");
+  assert.equal(previousCard.removed, false);
+  assert.deepEqual(controller.getManualSnapshot(), []);
+  addGold(next.root, next.pages[0]);
+  pageAction(next.pages[0], "reviewPageUndo").click();
+  assert.deepEqual(controller.getManualSnapshot(), []);
+});
+
+test("отмена выделения освобождает захват указателя и сохраняет прежние области", () => {
+  const { root, pages } = fixture();
+  const controller = createReviewController();
+  controller.mount(root);
+  const card = addGold(root, pages[0]);
+  const before = controller.getManualSnapshot();
+  control(card, "geometry").click();
+  const { layer, cancel } = mounted(pages[0]);
+  layer.dispatch("pointerdown", {
+    button: 0, pointerId: 5, clientX: 110, clientY: 150, preventDefault() {},
+  });
+  assert.equal(layer.hasPointerCapture(5), true);
+  cancel.click();
+  assert.equal(layer.hasPointerCapture(5), false);
+  layer.dispatch("pointerup", { pointerId: 5 });
+  assert.deepEqual(controller.getManualSnapshot(), before);
 });

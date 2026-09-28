@@ -94,6 +94,7 @@ export function createReviewController() {
   let activeFindingId = null;
   let reportRoot = null;
   let manualRecords = createManualRecords();
+  let emptyMessages = new Map();
 
   const manualList = createManualTextList();
 
@@ -109,10 +110,15 @@ export function createReviewController() {
       }
       const empty = page.querySelector(".analysis-result__page-empty");
       if (empty) {
-        empty.textContent = (
+        if (!emptyMessages.has(pageNumber)) {
+          emptyMessages.set(pageNumber, empty.textContent);
+        }
+        empty.textContent = manualRecords.snapshot().some(
+          (note) => note.page_number === pageNumber,
+        ) ? (
           "Автоматические замечания на этом листе отсутствуют. "
           + "Замечание добавлено пользователем."
-        );
+        ) : emptyMessages.get(pageNumber);
       }
       break;
     }
@@ -125,25 +131,7 @@ export function createReviewController() {
         normativeSection: note.normativeSection,
       });
 
-      manualRecords.add(note, entry);
-      const textView = manualList.add(note, entry);
-      markManualOnPage(note.pageNumber);
-
-      attach(
-        note.card,
-        note.findingId,
-        note.textNode,
-        note.onEdit,
-      );
-
-      if (textView) {
-        attach(
-          textView.article,
-          note.findingId,
-          textView.textNode,
-          note.onEdit,
-        );
-      }
+      attachManual(note, entry);
     },
 
     onUpdate(findingId, text, normativeSection) {
@@ -161,7 +149,45 @@ export function createReviewController() {
     onGet(findingId) {
       return state.get(findingId);
     },
+
+    onGeometry(findingId, issueBox, calloutBox) {
+      const changed = manualRecords.updateGeometry(findingId, issueBox, calloutBox);
+      if (changed) {
+        state.invalidateManual(findingId);
+        refresh(findingId);
+      }
+      return changed;
+    },
+
+    onRemove(note) {
+      const entry = state.removeManual(note.findingId);
+      manualRecords.remove(note.findingId);
+      manualList.remove(note.findingId);
+      for (const view of views.get(note.findingId) ?? []) {
+        view.controls.element.remove();
+      }
+      views.delete(note.findingId);
+      markManualOnPage(note.pageNumber);
+      updatePreview();
+      return entry;
+    },
+
+    onRestore(note, snapshot) {
+      const entry = state.restoreManual(snapshot);
+      attachManual(note, entry);
+    },
   });
+
+  /** Подключает одну Gold-запись к обоим представлениям без дублирования данных. */
+  function attachManual(note, entry) {
+    manualRecords.add(note, entry);
+    const textView = manualList.add(note, entry);
+    markManualOnPage(note.pageNumber);
+    attach(note.card, note.findingId, note.textNode, note.onEdit, note);
+    if (textView) {
+      attach(textView.article, note.findingId, textView.textNode, note.onEdit, note);
+    }
+  }
 
   function updatePreview() {
     if (!preview) {
@@ -228,7 +254,7 @@ export function createReviewController() {
     updatePreview();
   }
 
-  function attach(item, findingId, text, customEdit = null) {
+  function attach(item, findingId, text, customEdit = null, manualActions = null) {
     item.dataset.reviewItem = "";
 
     const controls = createReviewControls({
@@ -261,6 +287,9 @@ export function createReviewController() {
           );
         }
       },
+
+      onGeometry: manualActions?.onGeometry,
+      onRemove: manualActions?.onRemove,
     });
 
     item.prepend(controls.element);
@@ -279,9 +308,11 @@ export function createReviewController() {
   }
 
   function mount(root) {
+    manual.dispose();
     state = createReviewState();
     views = new Map();
     manualRecords = createManualRecords();
+    emptyMessages = new Map();
     activeFindingId = null;
     preview = null;
     editor = null;

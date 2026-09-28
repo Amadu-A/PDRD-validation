@@ -1,6 +1,6 @@
 /* frontend/src/css/blocks/manual-annotation.css */
 
-/* Gold: ручное выделение ошибки и места карточки в пределах одного листа. */
+/* Локальные Gold: выделение, изменение областей и обратимые действия одного листа. */
 
 .manual-annotation__toolbar {
   display: flex;
@@ -141,6 +141,13 @@
 
 .manual-annotation__card .review-controls {
   flex: 0 0 auto;
+}
+
+/* Во время выделения указатель работает со слоем, включая место прежней карточки. */
+.manual-annotation__layer[data-manual-mode="issue"] .manual-annotation__card,
+.manual-annotation__layer[data-manual-mode="callout"] .manual-annotation__card,
+.manual-annotation__layer[data-manual-mode="confirm"] .manual-annotation__card {
+  pointer-events: none;
 }
 
 .manual-annotation__text,

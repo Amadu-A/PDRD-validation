@@ -164,5 +164,43 @@ export function createReviewState() {
     };
   }
 
-  return { register, get, decide, edit, summary };
+  /** Изменение области Gold требует нового решения, сохраняя его происхождение. */
+  function invalidateManual(findingId) {
+    const entry = requireEntry(findingId);
+    if (entry.origin !== REVIEW_ORIGINS.MANUAL) {
+      throw new Error("Эта операция доступна только для Gold-замечаний.");
+    }
+    entry.decision = REVIEW_DECISIONS.PENDING;
+    entry.revision += 1;
+    return get(findingId);
+  }
+
+  /** Удаляет только локальное Gold; отказ от VLM выполняется через решение. */
+  function removeManual(findingId) {
+    const entry = get(findingId);
+    if (entry.origin !== REVIEW_ORIGINS.MANUAL) {
+      throw new Error("Удалять можно только локальные Gold-замечания.");
+    }
+    entries.delete(findingId);
+    return entry;
+  }
+
+  /** Восстанавливает сохранённый локальный снимок при отмене удаления. */
+  function restoreManual(snapshot) {
+    if (snapshot.origin !== REVIEW_ORIGINS.MANUAL || entries.has(snapshot.findingId)) {
+      throw new Error("Нельзя восстановить это Gold-замечание.");
+    }
+    const entry = { ...snapshot };
+    entry.text = validatedText(entry.text);
+    entry.originalText = validatedText(entry.originalText);
+    entry.normativeSection = validatedNormative(entry.normativeSection);
+    delete entry.experienceTag;
+    entries.set(entry.findingId, entry);
+    return get(entry.findingId);
+  }
+
+  return {
+    register, get, decide, edit, summary,
+    invalidateManual, removeManual, restoreManual,
+  };
 }

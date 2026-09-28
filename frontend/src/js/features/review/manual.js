@@ -1,18 +1,21 @@
 // frontend/src/js/features/review/manual.js
 
 /**
- * Ручное создание Gold-находок на одной PDF-странице.
+ * Создание, изменение областей и отмена локальных Gold-находок на одном листе.
  * Две области выбираются на изображении одного листа; координаты 0..1000.
  * Все операции локальные, серверное сохранение здесь отсутствует.
  */
 
 import {
   boxBetween,
-  connectorPoints,
   normalizedPoint,
   positionBox,
   validBox,
 } from "./geometry.js";
+
+import { createManualEditor } from "./manual-editor.js";
+import { createManualLine, createManualNote } from "./manual-note.js";
+import { createManualHistory } from "./history.js";
 
 const PAGE_SELECTOR = ".analysis-result__page-visualization";
 
@@ -34,141 +37,6 @@ function pageNumberOf(page) {
   return match ? Number(match[1]) : null;
 }
 
-function manualLine(issue, callout) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-
-  svg.classList.add("manual-annotation__connector");
-  svg.setAttribute("viewBox", "0 0 1000 1000");
-  svg.setAttribute("preserveAspectRatio", "none");
-  svg.setAttribute("aria-hidden", "true");
-
-  const line = document.createElementNS(
-    "http://www.w3.org/2000/svg",
-    "polyline",
-  );
-
-  line.setAttribute("points", connectorPoints(issue, callout));
-  svg.append(line);
-
-  return svg;
-}
-
-function createEditor(pageNumber, onSave, onCancel) {
-  const dialog = element("dialog", "manual-editor");
-
-  dialog.setAttribute("aria-labelledby", `manualTitle${pageNumber}`);
-
-  const form = element("form", "manual-editor__form");
-
-  const title = element(
-    "h3",
-    "manual-editor__title",
-    "Gold · замечание пользователя",
-  );
-
-  title.id = `manualTitle${pageNumber}`;
-
-  const textLabel = element(
-    "label",
-    "manual-editor__label",
-    "Текст замечания",
-  );
-
-  textLabel.htmlFor = `manualText${pageNumber}`;
-
-  const text = element("textarea", "manual-editor__textarea");
-
-  text.id = textLabel.htmlFor;
-  text.required = true;
-  text.maxLength = 10000;
-  text.rows = 6;
-
-  const normLabel = element(
-    "label",
-    "manual-editor__label",
-    "Нормативное основание (при наличии)",
-  );
-
-  normLabel.htmlFor = `manualNorm${pageNumber}`;
-
-  const norm = element("input", "manual-editor__input");
-
-  norm.id = normLabel.htmlFor;
-  norm.type = "text";
-  norm.maxLength = 2000;
-
-  const hint = element(
-    "p",
-    "manual-editor__hint",
-    "Основание пока хранится как текст и не является проверенной ссылкой на норматив.",
-  );
-
-  const error = element("p", "manual-editor__error");
-
-  error.setAttribute("role", "alert");
-
-  const actions = element("div", "manual-editor__actions");
-
-  const cancel = element(
-    "button",
-    "manual-editor__button",
-    "Отмена",
-  );
-
-  cancel.type = "button";
-  cancel.addEventListener("click", onCancel);
-
-  const save = element(
-    "button",
-    "manual-editor__button manual-editor__button--save",
-    "Сохранить локально",
-  );
-
-  save.type = "submit";
-
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    onSave(text.value, norm.value, error);
-  });
-
-  dialog.addEventListener("cancel", (event) => {
-    event.preventDefault();
-    onCancel();
-  });
-
-  actions.append(cancel, save);
-
-  form.append(
-    title,
-    textLabel,
-    text,
-    normLabel,
-    norm,
-    hint,
-    error,
-    actions,
-  );
-
-  dialog.append(form);
-
-  return {
-    dialog,
-
-    open(value = "", normative = "") {
-      text.value = value;
-      norm.value = normative;
-      error.textContent = "";
-
-      dialog.showModal();
-      text.focus();
-    },
-
-    close() {
-      dialog.close();
-    },
-  };
-}
-
 /**
  * Интегрирует ручные области с уже существующим review controller.
  * Каждый контроллер страницы хранит свою геометрию, поэтому области не могут
@@ -178,6 +46,9 @@ export function createManualAnnotationController({
   onCreate,
   onUpdate,
   onGet,
+  onGeometry,
+  onRemove,
+  onRestore,
 
   idFactory = () => (
     globalThis.crypto?.randomUUID?.()
@@ -186,6 +57,20 @@ export function createManualAnnotationController({
 }) {
   let activeAbort = null;
   let disposeHandlers = [];
+
+  /** Подписывает обработчик только на время жизни текущего отчёта. */
+  function listen(target, event, handler) {
+    target.addEventListener(event, handler);
+    disposeHandlers.push(() => target.removeEventListener(event, handler));
+  }
+
+  /** Закрывает черновик и освобождает подписки прежнего отчёта. */
+  function dispose() {
+    activeAbort?.();
+    activeAbort = null;
+    for (const cleanup of disposeHandlers) cleanup();
+    disposeHandlers = [];
+  }
 
   function mountPage(page, root) {
     const pageNumber = pageNumberOf(page);
@@ -238,6 +123,15 @@ export function createManualAnnotationController({
     message.setAttribute("role", "status");
 
     toolbar.append(add, cancel, message);
+    const saveGeometry = element("button", "manual-annotation__button", "Сохранить области");
+    saveGeometry.type = "button";
+    saveGeometry.dataset.reviewGeometrySave = "";
+    saveGeometry.hidden = true;
+    const undo = element("button", "manual-annotation__button", "Отменить действие");
+    undo.type = "button";
+    undo.dataset.reviewPageUndo = String(pageNumber);
+    undo.disabled = true;
+    toolbar.append(saveGeometry, undo);
     page.insertBefore(toolbar, stage);
 
     const layer = element(
@@ -274,6 +168,16 @@ export function createManualAnnotationController({
     let issue = null;
     let callout = null;
     let editingNote = null;
+    let geometryNote = null;
+    let draftLine = null;
+    const history = createManualHistory();
+
+    /** Указывает конкретное действие, которое отменит следующая кнопка Undo. */
+    function syncHistory() {
+      undo.disabled = mode !== "idle" || !history.label;
+      undo.textContent = history.label ? `Отменить ${history.label}` : "Отменить действие";
+      undo.title = history.label ? `Отменить: ${history.label}` : "Нет действий для отмены";
+    }
 
     function syncSize() {
       const bounds = image.getBoundingClientRect();
@@ -291,17 +195,25 @@ export function createManualAnnotationController({
       message.textContent = description;
       cancel.hidden = next === "idle";
       add.disabled = next !== "idle";
+      saveGeometry.hidden = next !== "confirm";
+      syncHistory();
     }
 
     function resetDraft() {
       issue = null;
       callout = null;
+      if (dragging && layer.hasPointerCapture(dragging.pointerId)) {
+        layer.releasePointerCapture(dragging.pointerId);
+      }
       dragging = null;
 
       draftIssue.hidden = true;
       draftCallout.hidden = true;
 
       editingNote = null;
+      geometryNote = null;
+      draftLine?.remove();
+      draftLine = null;
 
       setMode(
         "idle",
@@ -331,78 +243,74 @@ export function createManualAnnotationController({
 
     function createNote(text, normativeSection) {
       const findingId = `manual:${idFactory()}`;
-
-      const region = element(
-        "div",
-        "manual-annotation__issue",
-      );
-
-      positionBox(region, issue);
-
-      region.title = (
-        `Область пользовательского замечания на странице ${pageNumber}`
-      );
-
-      const line = manualLine(issue, callout);
-
-      const card = element(
-        "article",
-        "manual-annotation__card",
-      );
-
-      card.dataset.findingId = findingId;
-      card.dataset.manualPage = String(pageNumber);
-
-      positionBox(card, callout);
-
-      const textNode = element(
-        "p",
-        "manual-annotation__text",
-        text,
-      );
-
-      const normNode = element(
-        "p",
-        "manual-annotation__norm",
-      );
-
-      normNode.textContent = normativeSection
-        ? `Нормативное основание: ${normativeSection}`
-        : "Нормативное основание не указано";
-
-      card.append(textNode, normNode);
-
-      const note = {
-        findingId,
-        pageNumber,
-        issueBox: { ...issue },
-        calloutBox: { ...callout },
-        textNode,
-        normNode,
-        card,
+      const note = createManualNote({
+        findingId, pageNumber, text, normativeSection,
+        issueBox: issue, calloutBox: callout,
+      });
+      note.onEdit = () => {
+        activeAbort?.();
+        activeAbort = abort;
+        editingNote = note;
+        const entry = onGet(note.findingId);
+        editor.open(entry.text, entry.normativeSection);
+      };
+      note.onGeometry = () => {
+        if (beginSelection()) geometryNote = note;
+      };
+      note.onRemove = () => {
+        activeAbort?.();
+        const snapshot = removeNote(note);
+        history.record("удаление Gold", () => {
+          note.applyText(snapshot.text, snapshot.normativeSection);
+          onRestore(note, snapshot);
+          layer.append(note.line, note.region, note.card);
+        });
+        syncHistory();
+        undo.focus();
       };
 
-      onCreate({
-        ...note,
-        text,
-        normativeSection,
-
-        onEdit: () => {
-          editingNote = note;
-
-          const entry = onGet(note.findingId);
-
-          editor.open(
-            entry.text,
-            entry.normativeSection,
-          );
-        },
-      });
-
-      layer.append(line, region, card);
+      onCreate({ ...note, text, normativeSection });
+      layer.append(note.line, note.region, note.card);
+      history.record("добавление Gold", () => removeNote(note));
+      syncHistory();
     }
 
-    const editor = createEditor(
+    /** Сначала исключает канонические данные, затем убирает геометрию листа. */
+    function removeNote(note) {
+      const snapshot = onRemove(note);
+      note.remove();
+      return snapshot;
+    }
+
+    /** Применяет области к DOM только после изменения канонического снимка. */
+    function applyGeometry(note, nextIssue, nextCallout) {
+      const changed = onGeometry(note.findingId, nextIssue, nextCallout);
+      if (changed) note.applyGeometry(nextIssue, nextCallout);
+      return changed;
+    }
+
+    listen(saveGeometry, "click", () => {
+      if (mode !== "confirm" || !geometryNote) return;
+      const note = geometryNote;
+      const previousIssue = { ...note.issueBox };
+      const previousCallout = { ...note.calloutBox };
+      if (applyGeometry(note, issue, callout)) {
+        history.record("изменение областей Gold", () => {
+          applyGeometry(note, previousIssue, previousCallout);
+        });
+      }
+      resetDraft();
+      message.textContent = "Области сохранены. Проверьте решение по замечанию.";
+      add.focus();
+    });
+
+    listen(undo, "click", () => {
+      activeAbort?.();
+      if (history.undo()) message.textContent = "Локальное действие отменено.";
+      syncHistory();
+    });
+
+    const editor = createManualEditor(
       pageNumber,
 
       (textValue, normValue, error) => {
@@ -432,6 +340,7 @@ export function createManualAnnotationController({
               : "Нормативное основание не указано";
 
             editingNote = null;
+            if (activeAbort === abort) activeAbort = null;
 
           } else {
             createNote(text, normativeSection);
@@ -455,7 +364,8 @@ export function createManualAnnotationController({
 
     root.append(editor.dialog);
 
-    add.addEventListener("click", () => {
+    /** Начинает отдельный черновик на загруженном изображении этого листа. */
+    function beginSelection() {
       const bounds = image.getBoundingClientRect();
 
       if (
@@ -470,12 +380,10 @@ export function createManualAnnotationController({
           "Дождитесь загрузки изображения листа."
         );
 
-        return;
+        return false;
       }
 
-      if (activeAbort && activeAbort !== abort) {
-        activeAbort();
-      }
+      activeAbort?.();
 
       activeAbort = abort;
       syncSize();
@@ -486,21 +394,24 @@ export function createManualAnnotationController({
       );
 
       layer.focus();
-    });
+      return true;
+    }
 
-    cancel.addEventListener("click", abort);
+    listen(add, "click", beginSelection);
 
-    page.addEventListener("keydown", (event) => {
+    listen(cancel, "click", abort);
+
+    listen(page, "keydown", (event) => {
       if (
         event.key === "Escape"
-        && (mode === "issue" || mode === "callout")
+        && (mode === "issue" || mode === "callout" || mode === "confirm")
       ) {
         event.preventDefault();
         abort();
       }
     });
 
-    layer.addEventListener("pointerdown", (event) => {
+    listen(layer, "pointerdown", (event) => {
       if (
         (mode !== "issue" && mode !== "callout")
         || event.button !== 0
@@ -525,7 +436,7 @@ export function createManualAnnotationController({
       layer.setPointerCapture(event.pointerId);
     });
 
-    layer.addEventListener("pointermove", (event) => {
+    listen(layer, "pointermove", (event) => {
       if (
         !dragging
         || dragging.pointerId !== event.pointerId
@@ -552,7 +463,7 @@ export function createManualAnnotationController({
       draft.hidden = false;
     });
 
-    layer.addEventListener("pointerup", (event) => {
+    listen(layer, "pointerup", (event) => {
       if (
         !dragging
         || dragging.pointerId !== event.pointerId
@@ -609,16 +520,19 @@ export function createManualAnnotationController({
         positionBox(draftCallout, box);
         draftCallout.hidden = false;
 
-        setMode(
-          "editing",
-          "Введите замечание и нормативное основание.",
-        );
-
-        editor.open();
+        draftLine = createManualLine(issue, callout);
+        layer.append(draftLine);
+        if (geometryNote) {
+          setMode("confirm", "Проверьте новые области и нажмите «Сохранить области».");
+          saveGeometry.focus();
+        } else {
+          setMode("editing", "Введите замечание и нормативное основание.");
+          editor.open();
+        }
       }
     });
 
-    layer.addEventListener("pointercancel", () => {
+    listen(layer, "pointercancel", () => {
       if (!dragging) {
         return;
       }
@@ -657,17 +571,7 @@ export function createManualAnnotationController({
   }
 
   function mount(visualization, root) {
-    for (const dispose of disposeHandlers) {
-      dispose();
-    }
-
-    disposeHandlers = [];
-
-    if (activeAbort) {
-      activeAbort();
-    }
-
-    activeAbort = null;
+    dispose();
 
     const pages = visualization.querySelectorAll(PAGE_SELECTOR);
 
@@ -678,5 +582,5 @@ export function createManualAnnotationController({
     return pages.length;
   }
 
-  return { mount };
+  return { mount, dispose };
 }

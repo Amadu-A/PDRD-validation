@@ -81,3 +81,25 @@ test("новые и неизвестные записи не меняют сущ
   assert.equal(records.snapshot()[0].decision, "pending");
   assert.equal(records.snapshot().length, 1);
 });
+
+test("обе области обновляются атомарно и не меняют лист, источник и текст", () => {
+  const records = createManualRecords();
+  const { note, review } = fixture();
+  records.add(note, review);
+  const nextIssue = { x_min: 100, y_min: 150, x_max: 400, y_max: 500 };
+  const nextCallout = { x_min: 600, y_min: 500, x_max: 900, y_max: 800 };
+  const before = records.snapshot();
+  assert.throws(() => records.updateGeometry(note.findingId, nextIssue, { ...nextCallout, y_max: 1200 }));
+  assert.deepEqual(records.snapshot(), before);
+  assert.equal(records.updateGeometry(note.findingId, nextIssue, nextCallout), true);
+  assert.equal(records.updateGeometry(note.findingId, nextIssue, nextCallout), false);
+  nextIssue.x_min = 999;
+  const snapshot = records.snapshot()[0];
+  assert.equal(snapshot.issue_box.x_min, 100);
+  assert.equal(snapshot.page_number, 22);
+  assert.equal(snapshot.experience_tag, "gold");
+  assert.equal(snapshot.text, review.text);
+  assert.throws(() => records.updateGeometry("unknown", issueBox, calloutBox));
+  records.remove(note.findingId);
+  assert.deepEqual(records.snapshot(), []);
+});

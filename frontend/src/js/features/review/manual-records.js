@@ -79,5 +79,27 @@ export function createManualRecords() {
     }));
   }
 
-  return { add, sync, snapshot };
+  /** Заменяет обе области атомарно; лист и идентичность остаются прежними. */
+  function updateGeometry(findingId, issueBox, calloutBox) {
+    const record = records.get(findingId);
+    if (!record) throw new Error("Ручное замечание не найдено.");
+    const issue = copyBox(issueBox);
+    const callout = copyBox(calloutBox);
+    const equal = (first, second) => Object.keys(first).every(
+      (key) => first[key] === second[key],
+    );
+    if (equal(record.issue_box, issue) && equal(record.callout_box, callout)) {
+      return false;
+    }
+    record.issue_box = issue;
+    record.callout_box = callout;
+    return true;
+  }
+
+  /** Исключает удалённое локальное замечание из снимка будущего экспорта. */
+  function remove(findingId) {
+    records.delete(findingId);
+  }
+
+  return { add, sync, snapshot, updateGeometry, remove };
 }

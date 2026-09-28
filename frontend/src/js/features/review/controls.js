@@ -5,13 +5,13 @@
  * Не содержит состояния и не обращается к API.
  */
 
-function createAction(label, icon, action, handler) {
+function createAction(label, icon, action, handler, toggle = true) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `review-controls__button review-controls__button--${action}`;
   button.dataset.reviewAction = action;
   button.setAttribute("aria-label", label);
-  button.setAttribute("aria-pressed", "false");
+  if (toggle) button.setAttribute("aria-pressed", "false");
   button.title = label;
 
   const symbol = document.createElement("span");
@@ -25,7 +25,7 @@ function createAction(label, icon, action, handler) {
 
 
 /** Возвращает набор кнопок и узлов для независимого обновления. */
-export function createReviewControls({ onAccept, onReject, onEdit }) {
+export function createReviewControls({ onAccept, onReject, onEdit, onGeometry, onRemove }) {
   const element = document.createElement("div");
   element.className = "review-controls";
   element.dataset.reviewControls = "";
@@ -41,6 +41,13 @@ export function createReviewControls({ onAccept, onReject, onEdit }) {
   status.dataset.reviewStatus = "";
   status.textContent = "Ожидает решения";
 
-  element.append(accept, reject, edit, status);
+  element.append(accept, reject, edit);
+  if (onGeometry) {
+    element.append(createAction("Изменить области", "▣", "geometry", onGeometry, false));
+  }
+  if (onRemove) {
+    element.append(createAction("Удалить локальное замечание", "⌫", "remove", onRemove, false));
+  }
+  element.append(status);
   return { element, accept, reject, edit, status };
 }
