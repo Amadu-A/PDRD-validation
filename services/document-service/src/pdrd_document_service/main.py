@@ -23,6 +23,9 @@ from pdrd_document_service.transport.http.routers.pdf import (
 from pdrd_document_service.transport.http.routers.pdf_annotation import (
     router as pdf_annotation_router,
 )
+from pdrd_document_service.transport.http.routers.pdf_crop import (
+    router as pdf_crop_router,
+)
 
 
 def create_app(
@@ -54,6 +57,7 @@ def create_app(
     application.include_router(
         pdf_annotation_router,
     )
+    application.include_router(pdf_crop_router)
 
     application.include_router(
         cad_router,

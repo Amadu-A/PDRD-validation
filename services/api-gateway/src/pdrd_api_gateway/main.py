@@ -27,6 +27,9 @@ from pdrd_api_gateway.transport.http.routers.analysis_pdf_exports import (
 from pdrd_api_gateway.transport.http.routers.analysis_progress import (
     router as analysis_progress_router,
 )
+from pdrd_api_gateway.transport.http.routers.experience import (
+    router as experience_router,
+)
 from pdrd_api_gateway.transport.http.routers.health import (
     router as health_router,
 )
@@ -93,6 +96,7 @@ def create_app(
     )
 
     application.include_router(review_router)
+    application.include_router(experience_router)
     application.include_router(review_source_router)
 
     application.include_router(

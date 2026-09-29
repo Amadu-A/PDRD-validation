@@ -40,7 +40,7 @@ function Invoke-CheckedCommand {
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $safeDirectory = $repositoryRoot.Replace("\", "/")
-$gitArguments = @("-c", "safe.directory=$safeDirectory")
+$gitArguments = @("--no-pager", "-c", "safe.directory=$safeDirectory")
 $hasCommitMessage = -not [string]::IsNullOrWhiteSpace($CommitMessage)
 
 if ($PSBoundParameters.ContainsKey("CommitMessage") -and -not $hasCommitMessage) {
@@ -63,8 +63,11 @@ if (-not $pythonExecutable) {
 }
 
 $previousPath = $env:PATH
+$previousPythonIoEncoding = $env:PYTHONIOENCODING
 Push-Location $repositoryRoot
 try {
+    # Совпадает с UTF-8 OutputEncoding PowerShell и сохраняет русский вывод pytest.
+    $env:PYTHONIOENCODING = "utf-8"
     $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
     if (-not $nodeCommand) {
         $nodeDirectory = Join-Path $env:ProgramFiles "nodejs"
@@ -134,5 +137,6 @@ try {
 }
 finally {
     $env:PATH = $previousPath
+    $env:PYTHONIOENCODING = $previousPythonIoEncoding
     Pop-Location
 }

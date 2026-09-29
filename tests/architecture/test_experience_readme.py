@@ -1,6 +1,6 @@
 # tests/architecture/test_experience_readme.py
 
-"""Проверки README: разделение реализованного Review и будущего каталога Experience."""
+"""README отражает работающий Review/каталог и отдельно будущий поиск Experience."""
 
 from pathlib import Path
 
@@ -39,16 +39,18 @@ def test_readme_documents_all_review_process_diagrams() -> None:
     assert not missing, missing
 
 
-def test_readme_documents_reviewed_pdf_without_claiming_experience_catalog() -> None:
-    """Рабочий экспорт отделён от будущего crop/CRUD и выключенного поиска E."""
+def test_readme_documents_catalog_without_enabling_experience_search() -> None:
+    """Каталог и экспорт реализованы, но не объявляют индексацию или обучение."""
     text = README.read_text(
         encoding="utf-8",
     )
 
     assert (
-        "Постоянный каталог Experience, crop, CRUD и экспорт примеров ещё не реализованы"
+        "Постоянный каталог Experience, crop, CRUD и экспорт примеров реализованы"
         in text
     )
+    assert "docs/experience-catalog.md" in text
+    assert "negative_target=original|revised|both" in text
     assert "Закрытый Review API доступен через Gateway" in text
     assert "POST /api/v1/analyses/{job_id}/reviewed-pdf" in text
     assert "Reviewed PDF доступен только для текущей утверждённой редакции" in text

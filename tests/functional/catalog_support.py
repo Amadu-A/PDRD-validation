@@ -1,0 +1,157 @@
+# tests/functional/catalog_support.py
+
+"""Тестовые порты каталога для HTTP-проверок; настоящие транзакции проверяются отдельно."""
+
+from pdrd_experience_service.application.catalog_snapshot import example_to_json
+from pdrd_experience_service.domain.area_confirmation import content_signature
+from pdrd_experience_service.domain.catalog import CatalogEntry
+from pdrd_experience_service.domain.experience_selection import ConfirmedFindingArea
+from pdrd_experience_service.domain.review import Origin, ReviewConflictError
+
+from tests.functional.reviewed_pdf_support import MemoryAreas
+
+
+class CatalogAreas(MemoryAreas):
+    """Дополняет уже проверенный CAS-порт чтением пригодных областей."""
+
+    async def load_confirmed(self, *, job_id):
+        """Отбрасывает отозванные и устаревшие подписи, как реальный SQL-адаптер."""
+        review = await self.reviews.load(job_id)
+        review.accepted_for_pdf()
+        statuses = await self.load_status(review=review)
+        result = []
+        for status in statuses:
+            if status.valid:
+                area = self.rows[status.finding_id][0]
+                result.append(
+                    ConfirmedFindingArea(
+                        area.job_id,
+                        area.finding_id,
+                        area.page_number,
+                        area.regions,
+                        area.confirmed_by,
+                        area.confirmed_at,
+                    )
+                )
+        return tuple(result)
+
+
+class MemoryCatalog:
+    """Идемпотентность и CAS в HTTP-фикстуре, без имитации SQL синтаксиса."""
+
+    def __init__(self, reviews, areas):
+        """Источник Review и подтверждений остаётся отдельным портом."""
+        self.reviews, self.areas = reviews, areas
+        self.examples, self.events = {}, {}
+
+    async def _entry(self, example):
+        """Актуальность определяется текущим источником и подписью, а не UI."""
+        source = example.source
+        review = await self.reviews.load(source.job_id)
+        current = (
+            review is not None
+            and review.revision == source.approved_revision
+            and review.approved_revision == review.revision
+        )
+        if current and source.origin is Origin.VLM:
+            area = self.areas.rows.get(source.finding_id)
+            finding = next(
+                item for item in review.findings if item.finding_id == source.finding_id
+            )
+            current = bool(
+                area
+                and area[2]
+                and area[0].content_signature == content_signature(review, finding)
+                and area[0].confirmed_at == source.confirmed_at
+            )
+        return CatalogEntry(example, current)
+
+    async def capture(self, *, review, area_versions, examples, actor):
+        """Фикстура проверяет тот же ожидаемый набор версий перед вставкой."""
+        if await self.reviews.load(review.job_id) != review:
+            raise ReviewConflictError("Stale Review.")
+        statuses = await self.areas.load_status(review=review)
+        if (
+            tuple((area.finding_id, area.revision) for area in statuses)
+            != area_versions
+        ):
+            raise ReviewConflictError("Stale areas.")
+        created = 0
+        for example in examples:
+            if example.id not in self.examples:
+                self.examples[example.id] = example
+                self.events[example.id] = [
+                    {
+                        "revision": 0,
+                        "actor": actor,
+                        "occurred_at": example.created_at.isoformat(),
+                        "snapshot": example_to_json(example),
+                    }
+                ]
+                created += 1
+        return {
+            "created": created,
+            "job_id": str(review.job_id),
+            "revision": review.revision,
+        }
+
+    async def get(self, example_id):
+        """Возвращает только существующий пример."""
+        record = self.examples.get(example_id)
+        return await self._entry(record) if record else None
+
+    async def list(self, criteria):
+        """HTTP проверяет передачу критериев, реальные SQL-фильтры проверяет PostgreSQL."""
+        result = []
+        for example in self.examples.values():
+            entry = await self._entry(example)
+            tag, _, decision = criteria.tag.partition(":")
+            haystack = " ".join(
+                [
+                    example.text,
+                    example.document_title,
+                    example.normative_basis,
+                    example.source.source_filename,
+                ]
+            ).lower()
+            if (
+                (criteria.query and criteria.query.lower() not in haystack)
+                or (tag and example.tag != tag)
+                or (decision and example.source.decision.value != decision)
+                or (
+                    criteria.decision
+                    and example.source.decision.value != criteria.decision
+                )
+                or (criteria.active is not None and entry.active != criteria.active)
+                or (
+                    criteria.learning_use
+                    and example.learning_use != criteria.learning_use
+                )
+                or (criteria.job_id and example.source.job_id != criteria.job_id)
+            ):
+                continue
+            result.append(entry)
+        result.sort(key=lambda entry: (entry.example.created_at, str(entry.example.id)))
+        return tuple(result[criteria.offset : criteria.offset + criteria.limit]), len(
+            result
+        )
+
+    async def update(self, *, example, expected_revision):
+        """Старая редакция не перезаписывает новую."""
+        previous = self.examples[example.id]
+        if previous.revision != expected_revision:
+            raise ReviewConflictError("Stale example.")
+        self.examples[example.id] = example
+        self.events[example.id].append(
+            {
+                "revision": example.revision,
+                "actor": example.curated_by,
+                "occurred_at": example.updated_at.isoformat(),
+                "snapshot": example_to_json(example),
+            }
+        )
+        return await self._entry(example)
+
+    async def history(self, example_id):
+        """История фиксирует все редакции без изменения старого снимка."""
+        return tuple(self.events[example_id])

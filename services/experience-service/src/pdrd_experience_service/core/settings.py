@@ -16,6 +16,7 @@
 
 import re
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import (
@@ -137,6 +138,8 @@ class Settings(BaseSettings):
     review_api_enabled: bool = False
     internal_key: SecretStr = SecretStr("")
     gateway_base_url: str = "http://api-gateway:8000"
+    document_base_url: str = "http://document-service:8301"
+    crop_root: Path = Path("/data/experience/crops")
 
     database: DatabaseSettings = Field(
         default_factory=DatabaseSettings,

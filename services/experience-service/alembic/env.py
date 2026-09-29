@@ -18,10 +18,12 @@
 import asyncio
 
 from alembic import context
+from pdrd_experience_service.infrastructure.database.catalog_models import (
+    CatalogExampleModel,
+)
 from pdrd_experience_service.infrastructure.database.migration_url import (
     resolve_migration_url,
 )
-from pdrd_experience_service.infrastructure.database.models import Base
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
@@ -41,7 +43,7 @@ def _configure(
 ) -> None:
     """Настраивает отдельную цепочку миграций Experience Service."""
     context.configure(
-        target_metadata=Base.metadata,
+        target_metadata=CatalogExampleModel.metadata,
         include_schemas=True,
         version_table="alembic_version_experience",
         version_table_schema="experience",

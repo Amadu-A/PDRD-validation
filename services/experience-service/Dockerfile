@@ -10,7 +10,9 @@ COPY pyproject.toml alembic.ini /app/
 COPY alembic /app/alembic
 COPY src /app/src
 RUN pip install --no-cache-dir . \
-    && useradd --create-home --uid 1000 app
+    && useradd --create-home --uid 1000 app \
+    && mkdir -p /data/experience/crops \
+    && chown -R app:app /data/experience
 USER app
 EXPOSE 8000
 CMD ["uvicorn", "pdrd_experience_service.main:app", "--host", "0.0.0.0", "--port", "8000"]

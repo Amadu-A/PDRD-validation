@@ -1,8 +1,8 @@
 <!-- frontend/src/experience.html -->
 
 <!--
-  Демонстрационная страница управления примерами Experience.
-  Пока серверный каталог не подключён, все изменения живут только в этой вкладке.
+  Каталог Experience: серверные фильтры, правки с CAS, изображения и выгрузка.
+  Локальная демонстрация выбирается при выключенном серверном Review.
 -->
 
 <!doctype html>
@@ -27,16 +27,14 @@
           Замечания с подтверждёнными областями и решениями инженера.
         </p>
       </div>
-      <button class="experience-page__export" type="button" disabled
-        title="Экспорт станет доступен после подключения серверного каталога">
+      <button class="experience-page__export" type="button" disabled data-experience-export
+        title="ZIP с полными текстами и изображениями всех примеров по выбранным фильтрам">
         Выгрузить замечания
       </button>
     </header>
 
-    <p class="experience-page__notice" role="status">
-      Демонстрация интерфейса. Показаны вымышленные примеры; изменения
-      хранятся только до закрытия или перезагрузки страницы. Серверное
-      сохранение и выгрузка пока не подключены.
+    <p class="experience-page__notice" role="status" data-experience-notice>
+      Проверяем доступ к сохранённой базе опыта…
     </p>
 
     <form class="experience-filter" data-experience-filter>
@@ -73,13 +71,31 @@
           <option value="false">Неактивно</option>
         </select>
       </label>
+      <label class="experience-filter__field">
+        <span>Использование</span>
+        <select name="learning_use">
+          <option value="">Все</option>
+          <option value="positive">Положительный пример</option>
+          <option value="negative">Отрицательный пример</option>
+          <option value="needs_adjudication">Требует уточнения</option>
+        </select>
+      </label>
+      <label class="experience-filter__field" data-experience-server-only>
+        <span>Задание обработки</span>
+        <input name="job_id" type="text" maxlength="36" placeholder="UUID задания или пустое поле">
+      </label>
     </form>
 
     <p class="experience-page__count" data-experience-count role="status"></p>
+    <nav class="experience-page__pagination" data-experience-pagination hidden aria-label="Страницы каталога">
+      <button type="button" data-experience-previous>← Назад</button>
+      <button type="button" data-experience-next>Далее →</button>
+      <button type="button" data-experience-refresh>Обновить</button>
+    </nav>
 
     <div class="experience-page__table-wrap">
       <table class="experience-table">
-        <caption>Демонстрационные записи Experience</caption>
+        <caption data-experience-caption>Примеры Experience</caption>
         <thead>
           <tr>
             <th scope="col">Область</th>
@@ -95,8 +111,9 @@
     </div>
 
     <dialog class="experience-dialog" data-experience-image-dialog
-      aria-label="Демонстрационная область замечания">
+      aria-label="Область замечания">
       <img class="experience-dialog__image" data-experience-large-image alt="">
+      <a data-experience-image-original data-experience-server-only target="_blank" rel="noopener noreferrer">Открыть изображение в полном размере</a>
       <button type="button" data-experience-image-close>Закрыть</button>
     </dialog>
 
@@ -105,6 +122,10 @@
       <form method="dialog" data-experience-edit-form>
         <h2 id="experienceEditTitle">Редактировать пример</h2>
         <p>Идентификатор, происхождение и история решения не редактируются.</p>
+        <label class="experience-dialog__field" data-experience-server-only>
+          <span>Название документа</span>
+          <input name="document_title" maxlength="500">
+        </label>
         <label class="experience-dialog__field">
           <span>Текст замечания</span>
           <textarea name="text" rows="5" maxlength="10000" required></textarea>
@@ -118,11 +139,41 @@
           <span>Активно</span>
         </label>
         <p class="experience-dialog__error" data-experience-edit-error role="alert"></p>
+        <label class="experience-dialog__field" data-experience-server-only>
+          <span>Ссылка на нормативный документ или раздел</span>
+          <input name="normative_reference" maxlength="2000">
+        </label>
+        <fieldset data-experience-rejection-fields data-experience-server-only>
+          <legend>Уточнение отрицательного примера</legend>
+          <label class="experience-dialog__field">
+            <span>Причина отказа</span>
+            <textarea name="rejection_reason" rows="3" maxlength="1000"></textarea>
+          </label>
+          <label class="experience-dialog__field">
+            <span>Какая формулировка ошибочна</span>
+            <select name="negative_target">
+              <option value="">Ещё не определено</option>
+              <option value="original">Первоначальный текст VLM</option>
+              <option value="revised">Исправленный текст</option>
+              <option value="both">Обе формулировки</option>
+            </select>
+          </label>
+        </fieldset>
+        <details data-experience-server-only>
+          <summary>Исходные данные и подтверждение области</summary>
+          <p class="experience-dialog__source" data-experience-source-text></p>
+        </details>
         <div class="experience-dialog__actions">
           <button type="button" data-experience-edit-close>Отмена</button>
-          <button type="submit">Применить локально</button>
+          <button type="button" data-experience-edit-reload hidden>Загрузить серверную редакцию (сбросить правки)</button>
+          <button type="submit" data-experience-edit-save>Сохранить на сервере</button>
         </div>
       </form>
+    </dialog>
+    <dialog class="experience-dialog" data-experience-history-dialog aria-label="История редакций примера">
+      <h2>История изменений</h2>
+      <div data-experience-history-content></div>
+      <button type="button" data-experience-history-close>Закрыть</button>
     </dialog>
   </main>
 </body>

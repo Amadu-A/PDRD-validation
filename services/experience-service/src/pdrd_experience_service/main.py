@@ -21,6 +21,10 @@ from pdrd_experience_service.core.container import (
     ApplicationContainer,
     build_container,
 )
+from pdrd_experience_service.core.observability import configure_catalog_logging
+from pdrd_experience_service.transport.http.routers.catalog import (
+    router as catalog_router,
+)
 from pdrd_experience_service.transport.http.routers.health import (
     router as health_router,
 )
@@ -67,7 +71,9 @@ def create_app(
     )
 
     if application_container.settings.review_api_enabled:
+        configure_catalog_logging()
         application.include_router(review_router)
+        application.include_router(catalog_router)
 
     return application
 

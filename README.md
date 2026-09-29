@@ -96,7 +96,7 @@ Bounded contexts:
 - **API Gateway** — публичный API, job state, immutable analysis snapshot, Outbox, Celery, analysis artifacts и public content proxy для managed sources.
 - **Document Service** — PDF/CAD extraction, render, DWG -> DXF.
 - **Knowledge Service** — managed catalog, ТЗ lifecycle, PostgreSQL metadata, Qdrant, N/T/U/E retrieval и Project Context.
-- **Experience Service** — отдельный bounded context: Human Review, versioned decisions/audit, verified region selection, закрытый HTTP API и PostgreSQL; постоянные Experience metadata/crops разрабатываются дальше. Рабочее развёртывание новой версии проверяется отдельно.
+- **Experience Service** — отдельный bounded context: Human Review, решения и аудит, проверенные области, закрытый HTTP API, PostgreSQL-каталог и собственное хранилище PNG. Оригинал для crop получает через Gateway, вырезание выполняет Document Service. Рабочее развёртывание каждой новой версии проверяется отдельно.
 - **Shared Embedding Runtime** — общий external endpoint `shared-embedding`; локальный каталог `multimodal-embedding-service` сохраняется в репозитории как legacy/test code, но не поднимает второй runtime в Compose.
 - **Analysis Service** — VLM page understanding, requirement check, N/T/U policy и finalization.
 - **n8n** — orchestration внутренних вызовов.
@@ -340,9 +340,11 @@ Snapshot содержит независимо:
 
 **Этап 5:** закрытый Review API соединяет Gateway, доверенный источник завершённого анализа, Experience Service и frontend. Восстанавливаются решения, исправления и геометрия VLM/Gold. `display_regions` хранит операционные правки отдельно от подтверждений областей. Предоставленные пользователем логи коммита `c1738fe` подтверждают Windows/Linux quality gate и развёртывание Experience на Linux с миграцией `20260928_0002`. Приватный frontend работает на 127.0.0.1:8081. Конфигурация и ограничения описаны в [docs/review-api.md](docs/review-api.md).
 
-**Этап 6:** реализованы явное подтверждение/отзыв областей VLM и Reviewed PDF из актуальной утверждённой редакции. Experience готовит проекцию, Gateway проверяет доступ, источник и кеш, Document Service рисует PDF. Полный текст всех accepted включается в приложение; аннотации на листах требуют проверенной области, Gold сохраняет жёлтое оформление и заданную карточку. Rejected исключены. Обновление этапа 6 требует отдельной проверки на Linux и в рабочем UI.
+**Этап 6:** реализованы явное подтверждение/отзыв областей VLM и Reviewed PDF из актуальной утверждённой редакции. Experience готовит проекцию, Gateway проверяет доступ, источник и кеш, Document Service рисует PDF. Полный текст всех accepted включается в приложение; аннотации на листах требуют проверенной области, Gold сохраняет жёлтое оформление и заданную карточку. Rejected исключены. Логи коммита `e0e9762` подтверждают Windows/Linux — 965 passed и изолированный PostgreSQL — 14 passed. Итоговый PDF доступен на закрытом frontend 8081; решения локального предпросмотра 8080 туда автоматически не переносятся.
 
-**Следующие этапы:** полноценные Experience records/crops, CRUD, экспорт, индексация и отдельный эксперимент обучения. План 0–9: [docs/experience-roadmap.md](docs/experience-roadmap.md).
+**Этап 7:** реализованы постоянные примеры с PNG, серверные фильтры, история правок, деактивация и ZIP-экспорт. Утверждение Review запускает сохранение проверенных примеров; отдельная кнопка позволяет повторить его после сбоя. Edited + Rejected требует причины и выбора отрицательной формулировки. Контракт и запуск: [docs/experience-catalog.md](docs/experience-catalog.md). Обновление этого этапа на Linux проверяется отдельно.
+
+**Следующие этапы:** контролируемая индексация E и отдельный эксперимент обучения. План 0–9: [docs/experience-roadmap.md](docs/experience-roadmap.md).
 
 ## 7. Qdrant — stable aliases и physical collections
 
@@ -538,7 +540,7 @@ flowchart TD
     KS["Knowledge Service / indexer"] --> NV["normative_documents"]
     TIDX["T indexer"] --> TV["technical_assignment_documents"]
     EX["Experience metadata and review"] --> PGV
-    EX -. "future crop asset contract" .-> CROP["Versioned crop storage: design pending"]
+    EX --> CROP["Immutable SHA-256 PNG storage: experience_crops volume"]
     PGV --> PGP["/var/lib/postgresql/data"]
     QDV --> QDP["/qdrant/storage"]
     AV --> AP["/data/analyses"]
@@ -555,7 +557,7 @@ flowchart TD
 | Managed N/U files | `normative_documents` | `/data/normative` |
 | T files | `technical_assignment_documents` | `/data/technical-assignments` |
 | Shared vLLM/embedding weights | `shared-infrastructure` | Не является volume проекта |
-| Experience image crops | отдельный versioned storage — план | Путь определяется на этапе storage adapter |
+| Experience image crops | собственный volume `experience_crops` | `/data/experience/crops/<sha256-prefix>/<sha256>.png` |
 
 Не использовать `docker compose down -v` в обычном деплое: он уничтожает постоянные данные.
 
@@ -600,12 +602,12 @@ flowchart TD
     PDF --> PAGE["Accepted with location: annotation on original page"]
     PDF --> TEXT["All accepted: textual appended list, including unlocated"]
     APPROVE --> PICK["SelectExperience: separate trusted selection"]
-    PICK --> STORE["Validated metadata and crop assets — planned"]
+    PICK --> STORE["PostgreSQL catalog + original PDF crops via Document Service"]
     STORE --> INDEX["Knowledge Service: E indexing only after evaluation"]
     INDEX --> QD[("dva_experience_active, guarded by feature flag")]
 ```
 
-**Статусы внедрения:** Human Review UI, демонстрационная страница Experience, domain `ReviewSession`, `SelectExperience`, PostgreSQL adapter/Alembic schema, аудит подтверждений областей, закрытый Review API и Reviewed PDF реализованы. Серверный mapper переносит визуальные области в `proposed_regions`, не подтверждая их автоматически. Правки отображения сохраняются отдельно как `display_regions`; UI подтверждает область отдельной командой. Crop, постоянный каталог Experience и E indexing ещё предстоят. Слово `planned` обозначает будущую функциональность. Развёртывание этапа 5 проверено пользователем; обновление этапа 6 проверяется отдельно.
+**Статусы внедрения:** Human Review UI, `ReviewSession`, отбор Experience, PostgreSQL/Alembic, аудит подтверждений, закрытый Review API, Reviewed PDF и постоянный каталог с crop/CRUD/экспортом реализованы. Серверный mapper переносит визуальные области в `proposed_regions`, не подтверждая их автоматически. Правки отображения хранятся отдельно как `display_regions`; UI подтверждает область отдельной командой. Публичная страница Experience остаётся явно обозначенной демонстрацией; приватная читает реальные записи. E indexing и fine-tuning предстоят. Слово `planned` обозначает будущую функциональность. Развёртывание этапов 5–6 проверено пользователем; обновление этапа 7 проверяется отдельно.
 
 ## 12. Подтверждение и исправление областей
 
@@ -652,10 +654,15 @@ flowchart TD
     ADJ --> HOLD["Store for manual adjudication; never auto-train"]
     HOLD --> ASSET
     ASSET --> DEDUP["Idempotent example_key and source SHA256"]
-    DEDUP --> STORE["Experience persistence / indexing outbox — planned"]
+    DEDUP --> STORE["Experience catalog: immutable source + audited curation"]
+    STORE --> INDEX["E indexing outbox — planned"]
 ```
 
 Замечание без подтверждённой области **может присутствовать в операционном Review и утверждённом текстовом PDF**, но **не** попадает в обучающую Experience DB независимо от принятия. Отредактированный VLM имеет `tag=edited`, даже при `decision=rejected`; отдельный `edited-bad` как значение поля не требуется.
+
+В каталоге `edited + rejected` остаётся `needs_adjudication`, пока инженер
+не задаст причину и `negative_target=original|revised|both`. Уточнение сохраняется
+в аудите; редактирование выбранной исправленной формулировки требует нового уточнения.
 
 ## 14. Экспорт Reviewed PDF и обучение
 
@@ -675,7 +682,7 @@ flowchart TD
     CHANGED -->|да| CONFLICT["409: reload current Review"]
     CHANGED -->|нет| DOWNLOAD["Download current Reviewed PDF"]
     REV --> SELECT["Verified ExperienceCandidate selection"]
-    SELECT --> CROPS["Source PDF crop and full versioned metadata — planned"]
+    SELECT --> CROPS["Source PDF crop and full versioned metadata: Experience catalog"]
     CROPS --> INDEX["E embedding via shared-embedding — planned"]
     INDEX --> EVAL["Blind retrieval evaluation and human checks"]
     EVAL --> FLAG{"Enable E feature flag only after validation"}
@@ -1138,7 +1145,7 @@ GET    /api/v1/normative/user-packages/documents/{document_id}/content
 GET /api/v1/normative/technical-assignments/{technical_assignment_id}/content
 ```
 
-Browser не обращается к internal Knowledge/Experience API напрямую. Закрытый Review API доступен через Gateway на приватном frontend; Reviewed PDF доступен только для текущей утверждённой редакции. Постоянный каталог Experience, crop, CRUD и экспорт примеров ещё не реализованы.
+Browser не обращается к internal Knowledge/Experience API напрямую. Закрытый Review API доступен через Gateway на приватном frontend; Reviewed PDF доступен только для текущей утверждённой редакции. Постоянный каталог Experience, crop, CRUD и экспорт примеров реализованы через закрытый Gateway API. Примеры с отозванным подтверждением или изменённым Review сохраняются для аудита, но становятся неактуальными и исключаются из пригодного для обучения набора.
 
 # n8n workflows
 
@@ -1509,4 +1516,4 @@ Shared runtime checks осуществляются через опубликов
 - автоматический PDF и отдельный Reviewed PDF после Human Review; итоговый экспорт требует актуального утверждения и включает только accepted;
 - unit/integration/architecture/runtime test layers.
 
-**Текущая приёмка:** этап 6 — обновить Linux-сервисы и проверить итоговый PDF в закрытом UI. **Следующие этапы Experience:** этап 7 — постоянные Experience metadata/crop, CRUD и экспорт; этап 8 — trusted E indexing с оценкой качества; этап 9 — отдельный эксперимент дообучения VLM.
+**Текущая приёмка:** этап 7 — обновить Linux-сервисы, проверить каталог и итоговый PDF в закрытом UI 8081. **Следующие этапы Experience:** этап 8 — trusted E indexing с оценкой качества; этап 9 — отдельный эксперимент дообучения VLM. Поиск E остаётся выключенным до отдельной оценки качества.

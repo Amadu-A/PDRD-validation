@@ -640,6 +640,8 @@ services:
     restart: unless-stopped
     env_file: *app-env-files
     environment: *experience-environment
+    volumes:
+      - experience_crops:/data/experience/crops
     depends_on:
       experience-migrate:
         condition: service_completed_successfully
@@ -684,6 +686,7 @@ services:
       - app-net
 
 volumes:
+  experience_crops:
   postgres_data:
   qdrant_data:
   analysis_artifacts:

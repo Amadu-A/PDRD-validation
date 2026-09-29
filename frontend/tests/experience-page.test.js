@@ -57,6 +57,7 @@ test("страница показывает демо, фильтрует, ред
       .map((key) => [key, fields.get(key).value]); }
     entries() { return this.values; }
   };
+  globalThis.fetch = async () => ({ ok: true, text: async () => '{"enabled":false}' });
 
   await import("../src/js/features/experience/page.js");
   const rows = elements.get("[data-experience-rows]");

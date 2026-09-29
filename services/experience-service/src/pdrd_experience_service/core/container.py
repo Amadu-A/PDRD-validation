@@ -26,6 +26,13 @@ from pdrd_experience_service.application.ports.analysis_source import (
 from pdrd_experience_service.application.ports.review import (
     ReviewRepository,
 )
+from pdrd_experience_service.application.use_cases.approval_experience import (
+    ApprovalExperience,
+)
+from pdrd_experience_service.application.use_cases.capture_experience import (
+    CaptureExperience,
+)
+from pdrd_experience_service.application.use_cases.catalog import ManageCatalog
 from pdrd_experience_service.application.use_cases.check_readiness import (
     CheckReadiness,
 )
@@ -33,6 +40,7 @@ from pdrd_experience_service.application.use_cases.confirm_areas import (
     ConfirmArea,
     RevokeArea,
 )
+from pdrd_experience_service.application.use_cases.export_catalog import ExportCatalog
 from pdrd_experience_service.application.use_cases.export_review import ExportReview
 from pdrd_experience_service.application.use_cases.review import (
     ChangeReview,
@@ -50,6 +58,13 @@ from pdrd_experience_service.infrastructure.analysis.completed_reader import (
 )
 from pdrd_experience_service.infrastructure.analysis.http_source import (
     GatewayAnalysisSource,
+)
+from pdrd_experience_service.infrastructure.crops import (
+    DocumentCropRenderer,
+    LocalCropStore,
+)
+from pdrd_experience_service.infrastructure.database.catalog import (
+    SqlAlchemyCatalogRepository,
 )
 from pdrd_experience_service.infrastructure.database.confirmed_areas import (
     SqlAlchemyConfirmedAreasRepository,
@@ -98,6 +113,10 @@ class ApplicationContainer:
     revoke_area: RevokeArea | None = None
     select_experience: SelectExperience | None = None
     export_review: ExportReview | None = None
+    capture_experience: CaptureExperience | None = None
+    catalog: ManageCatalog | None = None
+    export_catalog: ExportCatalog | None = None
+    approval_experience: ApprovalExperience | None = None
 
     async def close(self) -> None:
         """Освобождает ресурсы, созданные Composition Root."""
@@ -199,6 +218,28 @@ def build_container(
         engine=engine,
         timeout_seconds=(actual_settings.database.connect_timeout_seconds),
     )
+    catalog_repository = SqlAlchemyCatalogRepository(session_factory)
+    crop_store = LocalCropStore(actual_settings.crop_root)
+    capture_source = analysis_source or (
+        GatewayAnalysisSource(
+            base_url=actual_settings.gateway_base_url,
+            internal_key=actual_settings.internal_key.get_secret_value(),
+        )
+        if actual_settings.review_api_enabled
+        else None
+    )
+    capture = (
+        CaptureExperience(
+            reviews,
+            confirmed_areas,
+            capture_source,
+            DocumentCropRenderer(actual_settings.document_base_url),
+            crop_store,
+            catalog_repository,
+        )
+        if capture_source is not None
+        else None
+    )
 
     async def shutdown_database() -> None:
         """Корректно освобождает общий пул PostgreSQL."""
@@ -218,4 +259,10 @@ def build_container(
         revoke_area=revoke_area,
         select_experience=select_experience,
         export_review=ExportReview(reviews=reviews, areas=confirmed_areas),
+        catalog=ManageCatalog(catalog_repository, crop_store),
+        export_catalog=ExportCatalog(catalog_repository, crop_store),
+        capture_experience=capture,
+        approval_experience=ApprovalExperience(capture)
+        if capture is not None
+        else None,
     )

@@ -6,12 +6,11 @@
 Публичный Gateway получает инженера из серверного адаптера, не из браузера.
 """
 
-import secrets
 from dataclasses import asdict
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
 
 from pdrd_experience_service.application.ports.analysis_source import (
@@ -24,28 +23,14 @@ from pdrd_experience_service.domain.review import (
     ReviewNotReadyError,
     ReviewSession,
 )
-from pdrd_experience_service.transport.http.dependencies import get_container
+from pdrd_experience_service.transport.http.dependencies import (
+    get_container,
+    trusted_actor,
+)
 from pdrd_experience_service.transport.http.review_commands import execute_command
 from pdrd_experience_service.transport.http.schemas.review import ReviewCommand
 
 router = APIRouter(prefix="/internal/v1/reviews", tags=["review-internal"])
-
-
-def trusted_actor(
-    request: Request,
-    container: Annotated[ApplicationContainer, Depends(get_container)],
-) -> str:
-    """Проверяет ключ до обработки операции и принимает контекст только от Gateway."""
-    token = container.settings.internal_key.get_secret_value()
-    supplied = request.headers.get("authorization", "")
-    if not token or not secrets.compare_digest(
-        supplied.encode("utf-8"), f"Bearer {token}".encode()
-    ):
-        raise HTTPException(403, "Доступ разрешён только API Gateway.")
-    actor = request.headers.get("x-review-actor", "").strip()
-    if not 1 <= len(actor) <= 128:
-        raise HTTPException(403, "Отсутствует доверенный контекст инженера.")
-    return actor
 
 
 def snapshot(session: ReviewSession) -> dict:
@@ -121,17 +106,20 @@ async def change_review(
 ) -> dict:
     """Применяет одну команду с CAS, оригиналами и журналом в одной транзакции."""
     try:
-        return await current_snapshot(
-            container,
-            await execute_command(
-                container.change_review,
-                job_id=job_id,
-                actor=actor,
-                command=command,
-                confirm_area=container.confirm_area,
-                revoke_area=container.revoke_area,
-            ),
+        session = await execute_command(
+            container.change_review,
+            job_id=job_id,
+            actor=actor,
+            command=command,
+            confirm_area=container.confirm_area,
+            revoke_area=container.revoke_area,
         )
+        result = await current_snapshot(container, session)
+        if command.action == "approve" and container.approval_experience is not None:
+            result["experience_capture"] = await container.approval_experience.execute(
+                review=session, actor=actor
+            )
+        return result
     except ReviewConflictError as error:
         raise HTTPException(
             409, "Review изменён в другой вкладке. Загрузите актуальную редакцию."
