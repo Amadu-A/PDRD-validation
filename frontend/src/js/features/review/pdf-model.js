@@ -3,7 +3,8 @@
 /** Чистые правила доступности итогового PDF и явного подтверждения VLM-областей. */
 
 export function reviewedPdfAvailability({ mode, pending = 0, session, busy = false }) {
-  if (mode === "local") return { enabled: false, message: "Это локальный предпросмотр. Для сохранения решений и итогового PDF откройте серверный Review через SSH-туннель на http://127.0.0.1:8081. Локальные решения автоматически туда не переносятся." };
+  if (mode === "local") return { enabled: false, message: "Серверный Review недоступен. Итоговый PDF можно скачать после восстановления сервиса." };
+  if (session?.pending_count > 0) return { enabled: false, message: `Сначала примите или отклоните все замечания. Ожидают решения: ${session.pending_count}.` };
   if (busy || mode !== "saved" || pending) return { enabled: false, message: "Дождитесь сохранения Review. При ошибке загрузите серверную версию." };
   if (!session || session.pending_count !== 0) return { enabled: false, message: "Сначала примите или отклоните все замечания." };
   return { enabled: true, message: "Принятые замечания попадут на листы с проверенной областью и в текстовый список. Замечания без подтверждённой области — только в текстовый список." };

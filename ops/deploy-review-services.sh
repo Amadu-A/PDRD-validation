@@ -1,11 +1,11 @@
 # ops/deploy-review-services.sh
-# Общий запуск проверок, миграций и обновления закрытого Review/Experience.
+# Общий запуск проверок, миграций и серверного Review/Experience на основном фронте.
 # Общий quality gate и отдельный PostgreSQL должны пройти до изменения runtime.
 # Shared-сервисы, рабочие volumes, .env и Git-история этим скриптом не меняются.
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-deployment_label="${1:-Закрытый Review и каталог Experience}"
+deployment_label="${1:-Серверный Review и каталог Experience}"
 
 # Отдельные команды сохраняют set -e: ошибка Git внутри условия не игнорируется.
 current_branch="$(git branch --show-current)"
@@ -51,9 +51,9 @@ docker compose --profile review up -d --no-deps --force-recreate --wait \
 
 curl -fsS --retry 10 --retry-delay 1 --retry-connrefused --max-time 5 \
     http://127.0.0.1:8080/api/v1/review/config |
-    python3 -c 'import json, sys; data = json.load(sys.stdin); assert data == {"enabled": False}, data; print("Frontend 8080: локальный Review")'
+    python3 -c 'import json, sys; data = json.load(sys.stdin); assert data == {"enabled": True}, data; print("Frontend 8080: серверный Review")'
 curl -fsS --retry 10 --retry-delay 1 --retry-connrefused --max-time 5 \
     http://127.0.0.1:8081/api/v1/review/config |
     python3 -c 'import json, sys; data = json.load(sys.stdin); assert data == {"enabled": True}, data; print("Frontend 8081: серверный Review")'
 docker compose --profile review ps experience-service document-service api-gateway frontend review-frontend </dev/null
-echo "$deployment_label: сервисы обновлены. Проверьте каталог и итоговый PDF через закрытый frontend 8081."
+echo "$deployment_label: сервисы обновлены. Проверьте каталог и итоговый PDF на основном frontend 8080."

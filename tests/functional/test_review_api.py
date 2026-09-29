@@ -246,12 +246,12 @@ def flow():
     )
 
 
-def client(flow):
-    """Клиент закрытого фронта; ключ является серверным заголовком nginx."""
+def client(flow, *, base_url="http://review.test"):
+    """Клиент серверного фронта с реальным Origin; ключ добавляет серверный nginx."""
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(flow.network.apps["gateway"]),
-        base_url="http://review.test",
-        headers={"X-PDRD-Review-Key": UI_KEY, "Origin": "http://review.test"},
+        base_url=base_url,
+        headers={"X-PDRD-Review-Key": UI_KEY, "Origin": base_url},
     )
 
 

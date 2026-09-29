@@ -16,7 +16,7 @@ try {
     if (save) save.textContent = "Применить локально";
     const caption = document.querySelector("[data-experience-caption]");
     if (caption) caption.textContent = "Демонстрационные записи Experience";
-    if (notice) notice.textContent = "Локальная демонстрация: вымышленные примеры и правки только в этой вкладке. Настоящий каталог доступен в серверном Review на http://127.0.0.1:8081 через SSH-туннель.";
+    if (notice) notice.textContent = "Локальная демонстрация: вымышленные примеры и правки только в этой вкладке. Серверный каталог Experience пока недоступен.";
     await import("./demo-page.js");
   }
 } catch (error) {

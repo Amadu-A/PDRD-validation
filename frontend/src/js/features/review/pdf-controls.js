@@ -1,11 +1,14 @@
 // frontend/src/js/features/review/pdf-controls.js
 
-/** DOM итогового PDF; очередь CAS и сетевой клиент внедряются извне. */
+/** DOM единого действия утверждения/PDF/Experience; очередь CAS и клиенты внедряются извне. */
 
 import { reviewedPdfAvailability } from "./pdf-model.js";
 import { downloadReviewedPdf } from "./download.js";
+import { createExperienceApi } from "../experience/api.js";
+import { captureApprovedExperience, experienceCaptureMessage } from "../experience/capture.js";
 
-export function mountReviewedPdf({ root, jobId, api, sync, onBusy = () => {}, download = downloadReviewedPdf }) {
+/** Соединяет утверждение, перенос Experience и скачивание с общей блокировкой Review. */
+export function mountReviewedPdf({ root, jobId, api, sync, onBusy = () => {}, download = downloadReviewedPdf, experienceApi = createExperienceApi() }) {
   const button = root.querySelector("[data-analysis-pdf-reviewed]");
   if (!button) return { update() {}, dispose() {} };
   const message = document.createElement("p");
@@ -36,11 +39,15 @@ export function mountReviewedPdf({ root, jobId, api, sync, onBusy = () => {}, do
     update();
     try {
       let session = sync.session;
-      if (session.approved_revision !== session.revision) session = await sync.run({ action: "approve" });
+      const approvedNow = session.approved_revision !== session.revision;
+      if (approvedNow) session = await sync.run({ action: "approve" });
+      if (disposed) return;
+      const capture = await captureApprovedExperience({ jobId, session, approvedNow, api: experienceApi });
+      if (disposed) return;
       const result = await api.pdf(jobId, session.revision);
       if (!disposed) {
         download(result);
-        message.textContent = "Итоговый PDF сформирован из утверждённой редакции.";
+        message.textContent = `Итоговый PDF сформирован из утверждённой редакции. ${experienceCaptureMessage(capture)}`;
       }
     } catch (error) {
       if (!disposed) message.textContent = error.detail ?? error.message;

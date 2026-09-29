@@ -1,60 +1,62 @@
 // frontend/tests/experience-capture.test.js
 
-/** Перенос после утверждения, ручной повтор, ошибки, блокировка и демонтаж. */
+/** Автоматический перенос опыта из сценария PDF, повтор и отдельный HTTP-адаптер. */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mountExperienceCapture } from "../src/js/features/experience/capture-controls.js";
+import { captureApprovedExperience, experienceCaptureMessage } from "../src/js/features/experience/capture.js";
 import { reviewedPdfAvailability } from "../src/js/features/review/pdf-model.js";
 import { createExperienceApi } from "../src/js/features/experience/api.js";
-import { deferred, Node, setup } from "./experience-dom.js";
 
-function controls(options = {}) {
-  setup(); const anchor = new Node("button"); const sync = { session: { revision: 4, approved_revision: 4, pending_count: 0 } };
-  const events = []; const api = { capture: async () => ({ created: 2, eligible: 2, excluded: 1 }) };
-  const controller = mountExperienceCapture({ root: { querySelector: () => anchor }, jobId: "job", sync, api,
-    onBusy: (value) => events.push(value), ...options });
-  controller.update({ mode: "saved", pending: 0, session: sync.session });
-  return { controller, button: anchor.afterNodes[0], message: anchor.afterNodes[1], sync, api, events };
-}
-
-test("локальный PDF объясняет серверный режим и отсутствие автоматического переноса", () => {
+test("недоступный Review объясняет проблему без другого порта или туннеля", () => {
   const state = reviewedPdfAvailability({ mode: "local" });
   assert.equal(state.enabled, false);
-  assert.match(state.message, /8081/);
-  assert.match(state.message, /автоматически.*не переносятся/);
-  const ui = controls(); ui.controller.update({ mode: "local" }); assert.equal(ui.button.hidden, true);
+  assert.match(state.message, /недоступен/);
+  assert.doesNotMatch(state.message, /8081|SSH|туннель|локальный предпросмотр/i);
 });
 
-test("утверждение сохраняет Experience один раз, уже выполненный автоматический перенос не повторяется", async () => {
-  const ui = controls(); const calls = [];
-  ui.sync.session.approved_revision = null;
-  ui.sync.run = async (command) => { calls.push(command); return { revision: 5, approved_revision: 5,
-    experience_capture: { status: "saved", created: 2, eligible: 2, excluded: 1 } }; };
-  ui.api.capture = async () => { throw new Error("Лишний повтор"); };
-  await ui.button.click();
-  assert.deepEqual(calls, [{ action: "approve" }]);
-  assert.deepEqual(ui.events, [true, false]);
-  assert.match(ui.message.textContent, /пригодных 2/);
+test("новое утверждение использует выполненный сервером перенос без дублирующего запроса", async () => {
+  const saved = { status: "saved", created: 2, eligible: 2, excluded: 1 };
+  const result = await captureApprovedExperience({ jobId: "job", approvedNow: true,
+    session: { revision: 5, experience_capture: saved },
+    api: { capture: () => { throw new Error("Лишний запрос"); } } });
+  assert.equal(result, saved);
+  assert.match(experienceCaptureMessage(result), /проверенные примеры: 2/);
 });
 
-test("после ошибки автоматического переноса доступен явный повтор", async () => {
-  const ui = controls(); ui.api.capture = async () => { throw { detail: "PNG недоступен" }; };
-  await ui.button.click(); assert.match(ui.message.textContent, /PNG недоступен/);
-  assert.equal(ui.button.disabled, false);
-  ui.api.capture = async () => ({ created: 1, eligible: 1, excluded: 0 });
-  await ui.button.click(); assert.match(ui.message.textContent, /пригодных 1/);
+test("ошибка автоматического переноса сохраняется с рекомендацией повторить скачивание", async () => {
+  const error = { status: "error", message: "Review утверждён, crop временно недоступен." };
+  const result = await captureApprovedExperience({ jobId: "job", approvedNow: true,
+    session: { revision: 5, experience_capture: error },
+    api: { capture: () => { throw new Error("Неявный повтор"); } } });
+  assert.equal(result, error);
+  assert.match(experienceCaptureMessage(result), /crop.*Повторите скачивание/);
 });
 
-test("двойной клик не дублирует запрос и поздний ответ не меняет снятый Review", async () => {
-  const ui = controls(); const pending = deferred(); let calls = 0;
-  ui.api.capture = () => { calls += 1; return pending.promise; };
-  const first = ui.button.click(); ui.button.click(); ui.controller.dispose();
-  pending.resolve({ created: 1, eligible: 1, excluded: 0 }); await first;
-  assert.equal(calls, 1); assert.equal(ui.button.removed, true);
-  assert.deepEqual(ui.events, [true]);
+test("скачивание уже утверждённой редакции повторяет идемпотентный перенос", async () => {
+  const calls = [];
+  const result = await captureApprovedExperience({ jobId: "job", approvedNow: false,
+    session: { revision: 5, approved_revision: 5, experience_capture: { status: "saved" } },
+    api: { capture: async (...args) => { calls.push(args); return { created: 0, eligible: 2, excluded: 1 }; } } });
+  assert.deepEqual(calls, [["job", 5]]);
+  assert.equal(result.status, "saved");
+  assert.equal(result.created, 0);
 });
 
-test("сетевой адаптер отправляет только ревизию и отвергает HTML вместо ZIP", async () => {
+test("перезагрузка утверждённого Review не требует отдельной кнопки для сохранения Experience", async () => {
+  const calls = [];
+  const api = { capture: async () => { throw { detail: "PNG недоступен" }; } };
+  const options = { jobId: "job", session: { revision: 8, approved_revision: 8 }, approvedNow: false, api };
+  const failed = await captureApprovedExperience(options);
+  assert.match(experienceCaptureMessage(failed), /PNG недоступен.*скачивание/);
+  api.capture = async (...args) => { calls.push(args); return { created: 1, eligible: 1, excluded: 0 }; };
+  const saved = await captureApprovedExperience(options);
+  assert.equal(saved.status, "saved");
+  assert.deepEqual(calls, [["job", 8]]);
+});
+
+test("HTTP capture отправляет только ревизию; неверный экспорт не скачивается", async (t) => {
+  const previous = globalThis.fetch;
+  t.after(() => { globalThis.fetch = previous; });
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     calls.push([url, options]); return { ok: true, text: async () => "{}", headers: { get: () => "text/html" }, blob: async () => new Blob(["<html>"]) };

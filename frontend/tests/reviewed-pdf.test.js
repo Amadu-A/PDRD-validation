@@ -100,6 +100,7 @@ test("общая разблокировка не стирает результа
   let controls;
   try {
     controls = mountReviewedPdf({ root: { querySelector: () => button }, jobId: JOB,
+      experienceApi: { capture: async () => ({ eligible: 1, excluded: 0, created: 0 }) },
       sync: { session }, download() {},
       api: { pdf: async () => {
         if (fail) throw new ApiError(409, "Review изменён во время формирования");
@@ -125,6 +126,7 @@ test("кнопка утверждает ровно один раз, скачив
   const busy = [];
   try {
     const controls = mountReviewedPdf({ root: { querySelector: () => button }, jobId: JOB,
+      experienceApi: { capture: async () => ({ eligible: 1, excluded: 0, created: 0 }) },
       sync: { get session() { return session; }, run: async (body) => { calls.push(body); session = { ...session, revision: 6, approved_revision: 6 }; return session; } },
       api: { pdf: async (job, revision) => { calls.push([job, revision]); return { filename: "План.pdf" }; } },
       download: (file) => calls.push(file.filename), onBusy: (value) => busy.push(value),

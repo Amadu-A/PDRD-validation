@@ -36,7 +36,7 @@ export function setup() {
   elements.get("[data-experience-edit-form]").elements = { namedItem: (name) => fields[name] };
   const dom = { querySelector: (selector) => elements.get(selector), createElement: (tag) => new Node(tag) };
   globalThis.document = dom;
-  globalThis.window = { location: { href: "http://127.0.0.1:8081/experience.html" } };
+  globalThis.window = { location: { href: "http://192.168.55.3:8080/experience.html" } };
   globalThis.FormData = class { constructor(form) { this.form = form; } entries() { return Object.entries(this.form.fields).map(([name, field]) => [name, field.value]); } };
   return { dom, filter, fields, get: (key) => elements.get(`[data-experience-${key}]`) };
 }

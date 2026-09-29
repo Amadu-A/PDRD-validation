@@ -40,6 +40,11 @@ async def test_failed_capture_acknowledges_approved_review_and_can_retry(
         assert response.status_code == 200
         assert response.json()["approved_revision"] == revision
         assert response.json()["experience_capture"]["status"] == "error"
+        assert (
+            "повторите скачивание итогового PDF"
+            in response.json()["experience_capture"]["message"]
+        )
+        assert "Сохранить в базу опыта" not in response.text
         assert "private storage" not in response.text
         assert (await listed(browser))["total"] == 0
         assert (await f.reviews.load(f.job_id)).approved_revision == revision

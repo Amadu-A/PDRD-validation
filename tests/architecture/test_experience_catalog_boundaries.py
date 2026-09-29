@@ -109,13 +109,31 @@ def test_catalog_frontend_is_modular_and_uses_real_crop_urls():
         "rows.js",
         "dialogs.js",
         "server-page.js",
-        "capture-controls.js",
+        "capture.js",
     ):
         source = (root / name).read_text(encoding="utf-8")
         assert len(source.splitlines()) <= 250
         assert "innerHTML" not in source
     assert "DEMO_EXAMPLES" not in (root / "server-page.js").read_text(encoding="utf-8")
     assert "api.imageUrl" in (root / "rows.js").read_text(encoding="utf-8")
+    capture = (root / "capture.js").read_text(encoding="utf-8")
+    assert "document." not in capture
+    assert "fetch(" not in capture
+
+
+def test_review_export_is_the_only_experience_capture_action_in_ui():
+    """Review не создаёт отдельную кнопку сохранения и не отправляет пользователя в SSH."""
+    root = ROOT / "frontend/src/js/features"
+    persistence = (root / "review/persistence.js").read_text(encoding="utf-8")
+    export = (root / "review/pdf-controls.js").read_text(encoding="utf-8")
+    assert "mountExperienceCapture" not in persistence
+    assert "captureApprovedExperience" in export
+    for directory in ("review", "experience"):
+        for source in (root / directory).glob("*.js"):
+            text = source.read_text(encoding="utf-8")
+            assert "SSH-туннель" not in text
+            assert "127.0.0.1:8081" not in text
+            assert "Сохранить в базу опыта" not in text
 
 
 def test_windows_quality_commands_disable_git_pager():

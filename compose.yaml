@@ -1,5 +1,5 @@
 # compose.yaml
-# Project-specific Docker stack PDRD.
+# Проектный Docker-стек PDRD и серверный Review на основном frontend.
 #
 # Shared: RabbitMQ, n8n, shared-vlm, shared-embedding.
 # Project-specific: PostgreSQL, Qdrant и application services.
@@ -678,7 +678,8 @@ services:
       - "${FRONTEND_PORT:-8080}:80"
 
     environment:
-      PDRD_REVIEW_PROXY_KEY: ""
+      # Серверный Review работает на основном фронте; ключ не передаётся браузеру.
+      PDRD_REVIEW_PROXY_KEY: ${API_GATEWAY_REVIEW__UI_KEY:-}
 
     logging: *default-logging
 

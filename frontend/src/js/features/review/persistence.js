@@ -12,11 +12,10 @@ import { createReviewSync } from "./sync.js";
 import { mountReviewTooltips } from "./tooltips.js";
 import { mountReviewedPdf } from "./pdf-controls.js";
 import { mountAreaConfirmations } from "./area-controls.js";
-import { mountExperienceCapture } from "../experience/capture-controls.js";
 
 const MESSAGES = {
   loading: "Восстанавливаем решения с сервера…",
-  local: "Локальный предпросмотр: серверное сохранение доступно на закрытом фронте Review. Решения не влияют на PDF.",
+  local: "Серверное сохранение Review недоступно. Итоговый PDF можно скачать после восстановления сервиса.",
   saving: "Сохраняем изменения… Не закрывайте страницу.",
   saved: "Изменения сохранены на сервере и восстановятся после перезагрузки.",
   error: "Не удалось сохранить или загрузить Review. Несохранённые изменения остаются на странице.",
@@ -47,7 +46,6 @@ export function createReviewPersistence({ api = createReviewApi() } = {}) {
     active.tooltips();
     active.pdf?.dispose();
     active.areas?.dispose();
-    active.experience?.dispose();
     active = null;
   }
 
@@ -56,7 +54,6 @@ export function createReviewPersistence({ api = createReviewApi() } = {}) {
     let sync = null;
     let pdf = null;
     let areas = null;
-    let experience = null;
     let busy = false;
     let latestStatus = { mode: "loading" };
     const controller = createReviewController({ onChange: () => sync?.changed() });
@@ -93,7 +90,6 @@ export function createReviewPersistence({ api = createReviewApi() } = {}) {
       reload.hidden = !["error", "conflict", "saved"].includes(status.mode);
       pdf?.update({ ...status, busy });
       areas?.update({ ...status, busy });
-      experience?.update({ ...status, busy });
     }
     const onBusy = (value) => { busy = value; applyStatus(); };
     const snapshot = () => reviewEntries(controller.getReviewSnapshot(), controller.getManualSnapshot());
@@ -105,10 +101,8 @@ export function createReviewPersistence({ api = createReviewApi() } = {}) {
     });
     pdf = mountReviewedPdf({ root, jobId, api, sync, onBusy });
     areas = mountAreaConfirmations({ root, sync, snapshot, onBusy });
-    experience = mountExperienceCapture({ root, jobId, sync, onBusy });
     active.pdf = pdf;
     active.areas = areas;
-    active.experience = experience;
     active.sync = sync;
     sessions.add(sync);
     retry.addEventListener("click", () => { void sync.retry(); });

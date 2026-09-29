@@ -8,6 +8,7 @@ import zipfile
 from dataclasses import replace
 from uuid import UUID, uuid4
 
+import fitz
 import httpx
 import pytest
 from pdrd_api_gateway.application.use_cases.manage_experience import ManageExperience
@@ -110,6 +111,49 @@ async def listed(browser, **params):
     response = await browser.get("/api/v1/experience", params=params)
     assert response.status_code == 200, response.text
     return response.json()
+
+
+async def test_lan_frontend_approval_saves_experience_and_exports_reviewed_pdf(
+    catalog_flow,
+):
+    """Основной LAN Origin: pending блокирует PDF, Review сохраняет Bad/Gold и выводит только accepted."""
+    flow = catalog_flow
+    async with client(flow, base_url="http://192.168.55.3:8080") as browser:
+        config = await browser.get("/api/v1/review/config")
+        assert config.json() == {"enabled": True}
+        await browser.post(flow.endpoint + "/open")
+        assert (
+            await browser.post(flow.pdf_endpoint, json={"expected_revision": 0})
+        ).status_code == 409
+        revision = await prepare(browser, flow, reject_first=True)
+        review = (await browser.get(flow.endpoint)).json()
+        assert review["pending_count"] == 0
+        assert review["approved_revision"] == revision
+        records = (await listed(browser))["items"]
+        assert {record["tag"] for record in records} == {"bad", "gold"}
+        response = await browser.post(
+            flow.pdf_endpoint, json={"expected_revision": revision}
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+        with fitz.open(stream=response.content, filetype="pdf") as document:
+            notes = [
+                annotation.info["content"]
+                for annotation in document[0].annots()
+                if annotation.type[1] == "Text"
+            ]
+            assert len(notes) == 1 and "Ручное замечание Gold" in notes[0]
+            text = "\n".join(page.get_text() for page in document)
+            assert "Ручное замечание Gold" in text
+            assert "Замечание без координат" in text
+            assert "Исходный полный текст VLM" not in text
+        repeated = await browser.post(
+            f"/api/v1/experience/capture/{flow.job_id}",
+            json={"expected_revision": revision},
+        )
+        assert repeated.status_code == 200
+        assert repeated.json()["created"] == 0
+        assert (await listed(browser))["total"] == 2
 
 
 async def test_approval_materializes_verified_examples_and_crop_survives_reload(
