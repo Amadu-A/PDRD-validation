@@ -11,6 +11,7 @@ from pdrd_experience_service.domain.catalog import (
     Crop,
     Example,
 )
+from pdrd_experience_service.domain.experience_selection import ExperienceCandidate
 from pdrd_experience_service.domain.review import Rectangle, ReviewSession
 
 
@@ -20,7 +21,7 @@ class CropRenderer(Protocol):
     async def render(
         self, *, pdf: bytes, page_number: int, regions: tuple[Rectangle, ...]
     ) -> tuple[bytes, ...]:
-        """Возвращает PNG по одному на каждую подтверждённую область."""
+        """Возвращает PNG по одному на каждую исходную или принятую область."""
         ...
 
 
@@ -46,8 +47,13 @@ class CatalogRepository(Protocol):
         area_versions: tuple,
         examples: tuple[Example, ...],
         actor: str,
+        expected_revisions: tuple[tuple[UUID, int], ...] = (),
     ) -> dict:
         """Атомарно проверяет Review/подтверждения и вставляет новые примеры."""
+        ...
+
+    async def find_source(self, source: ExperienceCandidate) -> CatalogEntry | None:
+        """Находит семантический дубль или прежний снимок того же утверждения."""
         ...
 
     async def list(

@@ -22,6 +22,7 @@ class NormativeSectionRecord:
     section_id: UUID
 
     system_prompt: str
+    name: str = ""
 
 
 @dataclass(frozen=True, slots=True)

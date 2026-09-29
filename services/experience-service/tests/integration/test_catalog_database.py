@@ -24,7 +24,7 @@ from pdrd_experience_service.domain.catalog import CatalogFilter, Crop, Example
 from pdrd_experience_service.domain.experience_selection import (
     select_experience_candidates,
 )
-from pdrd_experience_service.domain.review import ReviewConflictError
+from pdrd_experience_service.domain.review import Decision, ReviewConflictError
 from pdrd_experience_service.infrastructure.database.catalog import (
     SqlAlchemyCatalogRepository,
 )
@@ -38,6 +38,100 @@ from .test_confirmed_areas_database import BOX, adapters, cleanup, initial, seal
 from .test_confirmed_areas_database import engine as engine
 
 pytestmark = pytest.mark.database
+
+
+async def rejected_source(engine, *, scenario="original", sha=None):
+    """Утверждённый Bad без когда-либо записанного подтверждения области."""
+    review = initial(uuid4())
+    review = replace(
+        review, source_sha256=sha or hashlib.sha256(review.job_id.bytes).hexdigest()
+    )
+    if scenario == "unlocated":
+        review = replace(
+            review, findings=(replace(review.findings[0], proposed_regions=()),)
+        )
+    reviews, areas = adapters(engine)
+    await reviews.insert(review)
+    if scenario == "moved":
+        moved = review.change_geometry(
+            finding_id="vlm:1",
+            regions=(replace(BOX, x_min=125),),
+            callout_box=None,
+            actor="integration:1",
+            at=datetime.now(UTC),
+            expected_revision=review.revision,
+        )
+        await reviews.update(moved, expected_revision=review.revision)
+        review = moved
+    rejected = review.decide(
+        finding_id="vlm:1",
+        decision=Decision.REJECTED,
+        actor="integration:1",
+        at=datetime.now(UTC),
+        expected_revision=review.revision,
+    )
+    await reviews.update(rejected, expected_revision=review.revision)
+    approved = rejected.approve(
+        actor="integration:1", at=datetime.now(UTC), expected_revision=rejected.revision
+    )
+    await reviews.update(approved, expected_revision=rejected.revision)
+    source = select_experience_candidates(
+        session=approved, confirmed_areas=(), for_catalog=True
+    )[0]
+    at = datetime.now(UTC)
+    example = Example(
+        uuid4(),
+        source,
+        (Crop("b" * 64, 200, 100),) if source.issue_regions else (),
+        0,
+        "План",
+        source.text,
+        source.normative_basis,
+        "",
+        True,
+        "",
+        "",
+        at,
+        at,
+        "integration:1",
+    )
+    repository = SqlAlchemyCatalogRepository(
+        async_sessionmaker(engine, expire_on_commit=False)
+    )
+    assert await areas.load_status(review=approved) == ()
+    return approved, example, repository
+
+
+@pytest.mark.parametrize("scenario", ["original", "moved", "unlocated"])
+async def test_bad_without_confirmation_persists_original_and_modified_regions(
+    engine, scenario
+):
+    """PostgreSQL не требует подтверждения первоначальной области Bad, текстовый Bad остаётся в каталоге."""
+    review, example, catalog = await rejected_source(engine, scenario=scenario)
+    try:
+        result = await catalog.capture(
+            review=review, area_versions=(), examples=(example,), actor="integration:1"
+        )
+        assert result["created"] == 1
+        record = await catalog.get(example.id)
+        assert record.active and record.example.source.confirmed_by == ""
+        assert (
+            record.example.source.proposed_regions
+            == review.findings[0].proposed_regions
+        )
+        assert (
+            record.example.source.display_regions == review.findings[0].display_regions
+        )
+        assert bool(record.example.crops) == (scenario != "unlocated")
+        if scenario != "unlocated":
+            assert record.example.source.issue_regions == (BOX,)
+        repeated = await catalog.capture(
+            review=review, area_versions=(), examples=(example,), actor="integration:1"
+        )
+        assert repeated["created"] == 0 and repeated["repaired"] == []
+        assert len(await catalog.history(example.id)) == 1
+    finally:
+        await remove_catalog(engine, review.job_id)
 
 
 async def prepared(engine, *, source_sha256=None):
@@ -150,7 +244,7 @@ async def test_catalog_capture_is_idempotent_and_survives_repository_recreation(
                         "SELECT version_num FROM experience.alembic_version_experience"
                     )
                 )
-                == "20260929_0004"
+                == "20260929_0005"
             )
     finally:
         await remove_catalog(engine, approved.job_id)
@@ -332,6 +426,22 @@ async def test_index_keyset_scan_keeps_cursor_across_excluded_examples(engine, e
                 expected_review_revision=approved.revision,
                 expected_confirmation_revision=1,
             )
+            candidate = select_experience_candidates(
+                session=approved, confirmed_areas=(), for_catalog=True
+            )[0]
+            incoming = replace(example, source=candidate, crops=())
+            versions = tuple(
+                (item.finding_id, item.revision)
+                for item in await fixtures[0][1].load_status(review=approved)
+            )
+            result = await catalog.capture(
+                review=approved,
+                area_versions=versions,
+                examples=(incoming,),
+                actor="integration:1",
+            )
+            assert result["created"] == 0
+            assert not (await catalog.get(example.id)).source_current
         raw = await catalog.scan(after=None, limit=1)
         assert raw[0].example.id == example.id and not raw[0].active
         feed = ReadIndexFeed(catalog, None)

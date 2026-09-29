@@ -3,11 +3,16 @@
 """Gateway → реестр → очередь Knowledge → crop: ручной выбор и границы служебных ключей."""
 
 from dataclasses import replace
-from uuid import UUID
+from types import SimpleNamespace
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
+from pdrd_api_gateway.application.ports.normative_catalog import NormativeSectionRecord
 from pdrd_experience_service.application.use_cases.artifacts import ManageArtifacts
+from pdrd_experience_service.application.use_cases.refresh_catalog_sources import (
+    RefreshCatalogSources,
+)
 from pdrd_experience_service.main import create_app as experience_app
 from pdrd_knowledge_service.application.ports.experience_feed import ExperienceFeedError
 from pdrd_knowledge_service.application.use_cases.index_experience import (
@@ -41,13 +46,96 @@ from tests.functional.test_reviewed_pdf_api import pdf_flow as pdf_flow
 from tests.functional.test_reviewed_pdf_api import prepare
 
 
+def provide_normative_section(f, section_id):
+    """Источник раздела принадлежит Gateway/Knowledge, не браузерному запросу."""
+
+    class NormativeCatalog:
+        async def get_section(self, *, section_id):
+            return NormativeSectionRecord(
+                section_id, "Системная инструкция", "Охранная сигнализация"
+            )
+
+    f.jobs.job.normative_snapshot = SimpleNamespace(section_id=section_id)
+    gateway = f.network.apps["gateway"].state.container
+    f.network.apps["gateway"].state.container = replace(
+        gateway,
+        get_review_source=replace(
+            gateway.get_review_source, normative_catalog=NormativeCatalog()
+        ),
+    )
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_index_selection_uses_normative_catalog_section_and_reports_exclusions(
+    version_flow, legacy
+):
+    """Раздел автоматический; старый Bad получает первоначальную область, выбор фиксирует пригодные редакции."""
+    f, section_id = version_flow, uuid4()
+    if not legacy:
+        provide_normative_section(f, section_id)
+    async with client(f) as browser:
+        await prepare(browser, f, reject_first=True)
+        rows = (await listed(browser))["items"]
+        assert len(rows) == 3
+        if legacy:
+            # Точно воспроизводим сохранённый до исправления Bad без исходной области.
+            bad = next(item for item in rows if item["tag"] == "bad")
+            item = f.catalog.examples[UUID(bad["id"])]
+            f.catalog.examples[item.id] = replace(
+                item,
+                crops=(),
+                source=replace(
+                    item.source,
+                    proposed_regions=(),
+                    issue_regions=(),
+                    area_source="engineer_confirmed",
+                ),
+            )
+            provide_normative_section(f, section_id)
+        else:
+            assert all(item["section_id"] == str(section_id) for item in rows)
+        assert (await browser.get("/api/v1/experience-versions")).json()["items"] == []
+        result = await browser.post(
+            "/api/v1/experience-versions",
+            json={
+                "kind": "vector",
+                "name": "Автоматический раздел",
+                "model": "shared-embedding",
+                "items": [
+                    {"id": item["id"], "revision": item["revision"]} for item in rows
+                ],
+            },
+        )
+        assert result.status_code == 200, result.text
+        version = result.json()
+        assert version["section_id"] == str(section_id)
+        assert version["section_title"] == "Охранная сигнализация"
+        assert {member["tag"] for member in version["members"]} == {"bad", "gold"}
+        assert (
+            len(version["excluded"]) == 1
+            and "област" in version["excluded"][0]["reason"]
+        )
+        current = (await listed(browser))["items"]
+        assert len(current) == 3 and all(
+            item["section_id"] == str(section_id) for item in current
+        )
+        bad = next(item for item in current if item["tag"] == "bad")
+        assert bad["crops"] and bad["source"]["proposed_regions"]
+        assert bool(version["repaired"]) == legacy
+
+
 @pytest.fixture
 def version_flow(index_flow):
     """Добавляет настоящий HTTP-реестр к контуру утверждения PDF."""
     container = index_flow.network.apps["experience"].state.container
     index_flow.artifacts = MemoryArtifacts()
     container = replace(
-        container, artifacts=ManageArtifacts(index_flow.artifacts, index_flow.catalog)
+        container,
+        artifacts=ManageArtifacts(
+            index_flow.artifacts,
+            index_flow.catalog,
+            RefreshCatalogSources(index_flow.capture),
+        ),
     )
     index_flow.network.apps["experience"] = experience_app(container)
     return index_flow

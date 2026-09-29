@@ -23,6 +23,9 @@ test("серверные строки, все области, редактиро
   assert.match(ui.get("caption").textContent, /Сохранённые/);
   const row = ui.get("rows").children[0];
   assert.equal(row.children[1].children.length, 2);
+  const trash = row.children[9].children[2];
+  assert.equal(trash.children[0].tagName, "SVG");
+  assert.equal(trash.children[0].children[0].attributes.get("d"), "M9 3h6l1 2h4v2h-1l-1 14H6L5 7H4V5h4l1-2zm1.2 2h3.6l-.5-1h-2.6l-.5 1zM7 7l.86 12h8.28L17 7H7z");
   row.children[1].children[1].click();
   assert.equal(ui.get("image-dialog").open, true);
   assert.equal(ui.get("large-image").src, "/crop/example-1/1");
@@ -154,7 +157,12 @@ test("просмотр версии подсвечивает состав и в�
   api.versions = async () => ({ items: [version], applied: [] }); api.version = async () => version;
   api.applyVersion = async (...args) => { applies.push(args); };
   const controller = await mountExperienceCatalog({ api });
+  controller.selection.toggle(rows[2], true);
+  const beforeViewing = controller.selection.references();
   ui.get("version").value = "v1"; await ui.get("version").emit("change");
+  assert.deepEqual(controller.selection.references(), beforeViewing);
+  assert.equal(ui.get("rows").children[0].children[0].children[0].checked, false);
+  assert.equal(ui.get("rows").children[2].children[0].children[0].checked, true);
   assert.equal(ui.filter.section_id.value, "СП 1:6");
   assert.match(ui.get("rows").children[0].className, /member/);
   assert.match(ui.get("rows").children[1].children[5].children.at(-1).textContent, /редакция 1/);
@@ -164,6 +172,7 @@ test("просмотр версии подсвечивает состав и в�
   ui.get("version-kind").value = "fine_tune"; await ui.get("version-kind").emit("change");
   await new Promise((done) => setImmediate(done));
   assert.equal(controller.selection.memberRevision("included"), null);
+  assert.deepEqual(controller.selection.references().map((item) => item.id), ["updated", "missing"]);
 });
 
 test("новая версия отправляет только выбранные редакции, модель и название", async () => {

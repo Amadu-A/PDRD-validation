@@ -1,6 +1,6 @@
 # services/experience-service/src/pdrd_experience_service/domain/experience_selection.py
 
-"""Отбор проверенных локализованных примеров без записи в Experience DB."""
+"""Отбор итоговых решений каталога и локализованных примеров для обучения."""
 
 import hashlib
 from dataclasses import dataclass
@@ -11,6 +11,7 @@ from uuid import UUID
 from pdrd_experience_service.domain.review import (
     Decision,
     Origin,
+    ProposedRegion,
     Rectangle,
     ReviewedFinding,
     ReviewError,
@@ -87,6 +88,9 @@ class ExperienceCandidate:
     confirmed_at: datetime
     section_id: str = ""
     section_title: str = ""
+    proposed_regions: tuple[ProposedRegion, ...] = ()
+    display_regions: tuple[Rectangle, ...] | None = None
+    area_source: str = "engineer_confirmed"
 
 
 def _example_key(
@@ -127,14 +131,13 @@ def select_experience_candidates(
     *,
     session: ReviewSession,
     confirmed_areas: tuple[ConfirmedFindingArea, ...],
-    include_unlocated_rejections: bool = False,
+    for_catalog: bool = False,
 ) -> tuple[ExperienceCandidate, ...]:
-    """Отбирает только проверенные области после утверждения всего review.
+    """Отбирает обучающие примеры либо все итоговые решения для каталога.
 
-    VLM-область должна быть явно подтверждена инженером и получена
-    через доверенный серверный порт. Браузер не вправе передавать этот объект.
-
-    Ручная Gold-область подтверждается автором при принятии Gold-замечания.
+    Для отказа VLM crop относится к неизменной исходной области, а правки
+    инженера сохраняются отдельно. Принятие подтверждает текущую область.
+    Флаг каталога включает также текстовые решения и отклонённые Gold.
     """
     session.accepted_for_pdf()
 
@@ -166,9 +169,7 @@ def select_experience_candidates(
             continue
 
         if finding.origin is Origin.MANUAL:
-            # Отклонённый Gold остаётся в истории review,
-            # но не считается подтверждённым примером.
-            if finding.decision is not Decision.ACCEPTED:
+            if finding.decision is not Decision.ACCEPTED and not for_catalog:
                 continue
 
             if (
@@ -183,25 +184,27 @@ def select_experience_candidates(
 
             confirmed_by = finding.updated_by
             confirmed_at = finding.updated_at
+            area_source = "manual"
 
         else:
             area = by_id.get(finding.finding_id)
-
-            if area is None:
-                # Отказ хранится в каталоге без выдуманной области. Он не допускается
-                # в обучающую проекцию, пока нет ранее принятой актуальной области.
-                if (
-                    not include_unlocated_rejections
-                    or finding.decision is not Decision.REJECTED
-                ):
+            if finding.decision is Decision.REJECTED and finding.proposed_regions:
+                regions = tuple(item.bbox for item in finding.proposed_regions)
+                callout_box = None
+                confirmed_by, confirmed_at = "", finding.updated_at
+                area_source = "vlm_original"
+            elif area is None or finding.decision is Decision.REJECTED:
+                if not for_catalog:
                     continue
                 regions, callout_box = (), None
                 confirmed_by, confirmed_at = "", finding.updated_at
+                area_source = "unlocated"
             else:
                 regions = area.regions
                 callout_box = None
                 confirmed_by = area.confirmed_by
                 confirmed_at = area.confirmed_at
+                area_source = "engineer_confirmed"
 
         tag = finding.experience_tag
 
@@ -239,6 +242,9 @@ def select_experience_candidates(
                 updated_by=finding.updated_by,
                 confirmed_by=confirmed_by,
                 confirmed_at=confirmed_at,
+                proposed_regions=finding.proposed_regions,
+                display_regions=finding.display_regions,
+                area_source=area_source,
             )
         )
 

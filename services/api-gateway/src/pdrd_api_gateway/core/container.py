@@ -370,6 +370,7 @@ def build_container() -> ApplicationContainer:
             jobs=get_analysis_job,
             artifacts=artifact_store,
             visualizations=get_analysis_visualization,
+            normative_catalog=normative_catalog_reader,
         )
         manage_experience = ManageExperience(
             contexts=ControlledExperienceContext(settings.review.actor.strip()),

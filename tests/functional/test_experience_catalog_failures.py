@@ -53,8 +53,8 @@ async def test_failed_capture_acknowledges_approved_review_and_can_retry(
             f"/api/v1/experience/capture/{f.job_id}",
             json={"expected_revision": revision},
         )
-        assert retry.status_code == 200 and retry.json()["created"] == 2
-        assert (await listed(browser))["total"] == 2
+        assert retry.status_code == 200 and retry.json()["created"] == 3
+        assert (await listed(browser))["total"] == 3
 
 
 async def test_replaced_original_pdf_cannot_create_examples(catalog_flow, monkeypatch):
@@ -184,7 +184,9 @@ async def test_corrupt_png_is_neither_served_nor_exported(catalog_flow):
     f = catalog_flow
     async with client(f) as browser:
         await prepare(browser, f)
-        record = (await listed(browser))["items"][0]
+        record = next(
+            item for item in (await listed(browser))["items"] if item["crops"]
+        )
         example = (await f.catalog.get(UUID(record["id"]))).example
         f.crops._path(example.crops[0].sha256).write_bytes(b"corrupted")
         assert (

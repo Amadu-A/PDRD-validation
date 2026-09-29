@@ -40,7 +40,7 @@ export function setup() {
   elements.get("[data-experience-filter]").fields = filter;
   elements.get("[data-experience-filter]").elements = { namedItem: (name) => filter[name] };
   elements.get("[data-experience-edit-form]").elements = { namedItem: (name) => fields[name] };
-  const dom = { querySelector: (selector) => elements.get(selector), createElement: (tag) => new Node(tag) };
+  const dom = { querySelector: (selector) => elements.get(selector), createElement: (tag) => new Node(tag), createElementNS: (_namespace, tag) => new Node(tag) };
   globalThis.document = dom;
   globalThis.window = { location: { href: "http://192.168.55.3:8080/experience.html" } };
   globalThis.FormData = class { constructor(form) { this.form = form; } entries() { return Object.entries(this.form.fields).map(([name, field]) => [name, field.value]); } };

@@ -68,9 +68,15 @@ class HttpNormativeCatalogReader:
                 "Knowledge Service вернул некорректный system_prompt.",
             )
 
+        name = payload.get("name", "")
+        if not isinstance(name, str) or len(name) > 300:
+            raise NormativeCatalogReadError(
+                "Knowledge Service вернул некорректное название раздела."
+            )
         return NormativeSectionRecord(
             section_id=payload_section_id,
             system_prompt=system_prompt,
+            name=name.strip(),
         )
 
     async def list_documents(

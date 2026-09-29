@@ -149,7 +149,11 @@ async def test_revoked_area_blocks_feed_crop_and_search_without_erasing_audit(
     async with client(flow) as browser:
         revision = await prepare(browser, flow)
         await index.execute()
-        wise = (await listed(browser, tag="wise"))["items"][0]
+        wise = next(
+            item
+            for item in (await listed(browser, tag="wise"))["items"]
+            if item["crops"]
+        )
         old = next(
             item
             for item in (await feed.page(after=None, limit=100))[0]
@@ -166,7 +170,7 @@ async def test_revoked_area_blocks_feed_crop_and_search_without_erasing_audit(
                 reason="Отозвана область",
             )
         ).status_code == 200
-        assert (await listed(browser))["total"] == 2
+        assert (await listed(browser))["total"] == 3
     assert await feed.verify((old.reference,)) == ()
     async with httpx.AsyncClient(
         transport=flow.network,

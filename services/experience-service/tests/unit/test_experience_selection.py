@@ -17,6 +17,7 @@ from pdrd_experience_service.domain.experience_selection import (
 from pdrd_experience_service.domain.review import (
     Decision,
     OriginalFinding,
+    ProposedRegion,
     Rectangle,
     ReviewError,
     ReviewNotReadyError,
@@ -43,6 +44,7 @@ def opened() -> ReviewSession:
                 2,
                 "Первый текст VLM",
                 "СП 1",
+                (ProposedRegion(REGION, "vlm", 0.9, "vlm"),),
             ),
             OriginalFinding(
                 "vlm:2",
@@ -244,10 +246,8 @@ def test_manual_accepted_gold_has_both_rectangles_and_source_provenance() -> Non
         expected_revision=session.revision,
     )
 
-    (example,) = select_experience_candidates(
-        session=session,
-        confirmed_areas=(),
-    )
+    candidates = select_experience_candidates(session=session, confirmed_areas=())
+    example = next(item for item in candidates if item.tag == "gold")
 
     assert example.tag == "gold"
     assert example.issue_regions == (REGION,)
@@ -284,13 +284,8 @@ def test_rejected_manual_remains_in_audit_not_training_candidates() -> None:
         expected_revision=session.revision,
     )
 
-    assert (
-        select_experience_candidates(
-            session=session,
-            confirmed_areas=(),
-        )
-        == ()
-    )
+    candidates = select_experience_candidates(session=session, confirmed_areas=())
+    assert all(item.origin.value != "manual" for item in candidates)
 
     assert session.findings[-1].experience_tag == "gold"
 

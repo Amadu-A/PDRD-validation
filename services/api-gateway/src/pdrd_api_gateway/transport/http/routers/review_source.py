@@ -51,6 +51,8 @@ async def review_source(
         "source_sha256": source.source_sha256,
         "pdf_base64": base64.b64encode(source.pdf_content).decode("ascii"),
         "result": source.result,
+        "section_id": source.section_id,
+        "section_title": source.section_title,
         "visualization": {
             "job_id": source.visualization.get("job_id"),
             "document_id": source.visualization.get("document_id"),

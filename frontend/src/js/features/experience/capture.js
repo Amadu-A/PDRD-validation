@@ -18,6 +18,6 @@ export async function captureApprovedExperience({ jobId, session, approvedNow, a
 
 /** Объясняет сохранение только подходящих примеров и повтор при частичном сбое. */
 export function experienceCaptureMessage(result) {
-  if (result.status === "saved") return `В каталоге сохранено замечаний: ${result.stored ?? result.eligible}; с подтверждёнными областями: ${result.eligible}. В операционном Review осталось без переноса: ${result.excluded}.`;
+  if (result.status === "saved") return `В каталоге сохранено замечаний: ${result.stored ?? result.eligible}; с областями: ${result.eligible}. В операционном Review осталось без переноса: ${result.excluded}.`;
   return `${result.message} Повторите скачивание итогового PDF, чтобы завершить сохранение в базу опыта.`;
 }

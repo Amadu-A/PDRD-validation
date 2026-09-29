@@ -62,6 +62,22 @@ class GatewayAnalysisSource:
             )
         response.raise_for_status()
         payload = response.json()
+        if not isinstance(payload, dict):
+            raise TypeError("Некорректный ответ серверного источника анализа.")
+        section_id, section_title = (
+            payload.get("section_id", ""),
+            payload.get("section_title", ""),
+        )
+        if (
+            not isinstance(section_id, str)
+            or not isinstance(section_title, str)
+            or len(section_title) > 300
+        ):
+            raise TypeError(
+                "Некорректный раздел нормативной базы в серверном источнике."
+            )
+        if section_id:
+            section_id = str(UUID(section_id))
         return CompletedAnalysisArtifacts(
             job_id=UUID(payload["job_id"]),
             document_id=UUID(payload["document_id"]),
@@ -71,4 +87,6 @@ class GatewayAnalysisSource:
             pdf_content=base64.b64decode(payload["pdf_base64"], validate=True),
             result=payload["result"],
             visualization=payload["visualization"],
+            section_id=section_id,
+            section_title=section_title.strip(),
         )

@@ -60,6 +60,7 @@ export function createExperienceSelection({ api, criteria, onChanged, onSaved, n
   return { selected, references, toggle, clear, changed,
     remove: (example) => remove([{ id: example.id, revision: example.revision }]),
     memberRevision: (id) => members.get(id) ?? null,
-    setMembers(items) { members = new Map(items.map((item) => [item.example_id, item.example_revision])); clear(); },
+    refreshRevisions(items) { for (const item of items) { if (selected.get(item.id) === item.previous_revision) selected.set(item.id, item.revision); } changed(); },
+    setMembers(items) { generation += 1; members = new Map(items.map((item) => [item.example_id, item.example_revision])); changed(); },
   };
 }

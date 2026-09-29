@@ -43,6 +43,8 @@ class CompletedAnalysisArtifacts:
     pdf_content: bytes
     result: dict[str, Any]
     visualization: dict[str, Any]
+    section_id: str = ""
+    section_title: str = ""
 
 
 class AnalysisSourceReader(Protocol):

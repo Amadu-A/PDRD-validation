@@ -14,7 +14,12 @@ from pdrd_experience_service.domain.experience_selection import (
     ExperienceCandidate,
     LearningUse,
 )
-from pdrd_experience_service.domain.review import Decision, Origin, Rectangle
+from pdrd_experience_service.domain.review import (
+    Decision,
+    Origin,
+    ProposedRegion,
+    Rectangle,
+)
 
 
 def encode(value):
@@ -44,6 +49,14 @@ def example_from_json(value: dict) -> Example:
     source["learning_use"] = LearningUse(source["learning_use"])
     source["confirmed_at"] = datetime.fromisoformat(source["confirmed_at"])
     source["issue_regions"] = tuple(Rectangle(**box) for box in source["issue_regions"])
+    source["proposed_regions"] = tuple(
+        ProposedRegion(**{**region, "bbox": Rectangle(**region["bbox"])})
+        for region in source.get("proposed_regions", [])
+    )
+    if source.get("display_regions") is not None:
+        source["display_regions"] = tuple(
+            Rectangle(**box) for box in source["display_regions"]
+        )
     if source["callout_box"] is not None:
         source["callout_box"] = Rectangle(**source["callout_box"])
     fields["id"] = UUID(fields["id"])

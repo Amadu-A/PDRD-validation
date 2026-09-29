@@ -8,6 +8,7 @@
 
 import hashlib
 import json
+from dataclasses import asdict
 
 from pdrd_experience_service.domain.experience_selection import ExperienceCandidate
 
@@ -17,7 +18,6 @@ def content_key(source: ExperienceCandidate) -> str:
     return snapshot_content_key(
         {
             "source_sha256": source.source_sha256,
-            "section_id": source.section_id,
             "page_number": source.page_number,
             "origin": source.origin.value,
             "tag": source.tag,
@@ -35,17 +35,20 @@ def content_key(source: ExperienceCandidate) -> str:
                 }
                 for box in source.issue_regions
             ],
+            "proposed_regions": [asdict(item) for item in source.proposed_regions],
+            "display_regions": [asdict(item) for item in source.display_regions]
+            if source.display_regions is not None
+            else None,
         }
     )
 
 
 def snapshot_content_key(source: dict) -> str:
-    """Обратная совместимость: старый снимок без раздела остаётся неопределённым."""
+    """Раздел и provenance не создают дубль; отличающиеся области — создают."""
     payload = {
         key: source.get(key, "")
         for key in (
             "source_sha256",
-            "section_id",
             "page_number",
             "origin",
             "tag",
@@ -64,6 +67,26 @@ def snapshot_content_key(source: dict) -> str:
             for box in source.get("issue_regions", [])
         ]
     )
+
+    def coordinates(boxes):
+        return sorted(
+            [
+                [
+                    round(float(box[key]), 6)
+                    for key in ("x_min", "y_min", "x_max", "y_max")
+                ]
+                for box in boxes
+            ]
+        )
+
+    original = coordinates(
+        [item["bbox"] for item in source.get("proposed_regions", [])]
+    )
+    display = source.get("display_regions")
+    if original and original != payload["issue_regions"]:
+        payload["original_regions"] = original
+    if display is not None and coordinates(display) != payload["issue_regions"]:
+        payload["display_regions"] = coordinates(display)
     canonical = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )

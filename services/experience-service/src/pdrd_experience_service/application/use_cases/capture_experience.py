@@ -7,7 +7,7 @@
 """
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -34,7 +34,7 @@ from pdrd_experience_service.domain.review import ReviewConflictError, ReviewErr
 
 @dataclass(frozen=True, slots=True)
 class CaptureExperience:
-    """Сохраняет все пригодные примеры текущего утверждённого задания."""
+    """Сохраняет все итоговые решения текущего утверждённого задания."""
 
     reviews: ReviewRepository
     areas: ConfirmedAreasReader
@@ -45,7 +45,12 @@ class CaptureExperience:
 
     @log_execution_time(operation="experience_capture")
     async def execute(
-        self, *, job_id: UUID, expected_revision: int, actor: str
+        self,
+        *,
+        job_id: UUID,
+        expected_revision: int,
+        actor: str,
+        expected_catalog_revisions: tuple[tuple[UUID, int], ...] = (),
     ) -> dict:
         """Не принимает текст, координаты или происхождение от браузера."""
         review = await self.reviews.load(job_id)
@@ -57,7 +62,7 @@ class CaptureExperience:
         statuses = await self.areas.load_status(review=review)
         confirmed = await self.areas.load_confirmed(job_id=job_id)
         candidates = select_experience_candidates(
-            session=review, confirmed_areas=confirmed, include_unlocated_rejections=True
+            session=review, confirmed_areas=confirmed, for_catalog=True
         )
         source = await self.source.load_completed(job_id)
         if (
@@ -72,11 +77,23 @@ class CaptureExperience:
         examples = []
         at = datetime.now(UTC)
         for candidate in candidates:
+            candidate = replace(
+                candidate,
+                section_id=source.section_id,
+                section_title=source.section_title,
+            )
             example_id = uuid5(
                 NAMESPACE_URL,
                 f"pdrd-experience-content-v1:{content_key(candidate)}",
             )
-            existing = await self.catalog.get(example_id)
+            existing = await self.catalog.find_source(candidate)
+            if existing is not None:
+                example_id = existing.example.id
+            reusable = (
+                existing is not None
+                and existing.example.source.issue_regions == candidate.issue_regions
+                and len(existing.example.crops) == len(candidate.issue_regions)
+            )
             # Повторный прогон сохраняет происхождение, но не дублирует crop.
             images = (
                 await self.renderer.render(
@@ -84,14 +101,14 @@ class CaptureExperience:
                     page_number=candidate.page_number,
                     regions=candidate.issue_regions,
                 )
-                if candidate.issue_regions and existing is None
+                if candidate.issue_regions and not reusable
                 else ()
             )
-            if existing is None and len(images) != len(candidate.issue_regions):
+            if not reusable and len(images) != len(candidate.issue_regions):
                 raise RuntimeError("Document Service вернул неполный crop.")
             crops = (
                 existing.example.crops
-                if existing
+                if reusable
                 else tuple([await self.crops.put(content) for content in images])
             )
             examples.append(
@@ -124,6 +141,7 @@ class CaptureExperience:
             area_versions=tuple((area.finding_id, area.revision) for area in statuses),
             examples=tuple(examples),
             actor=actor,
+            expected_revisions=expected_catalog_revisions,
         )
         return {
             **result,

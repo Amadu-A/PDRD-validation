@@ -128,3 +128,31 @@ async def test_invalid_selection_never_writes_partial_version(invalid):
             actor="engineer:1",
         )
     assert registry.saved == []
+
+
+async def test_manual_selection_freezes_eligible_members_and_explains_exclusion():
+    """Текстовая запись остаётся в каталоге; версия создаётся из пригодной части ручного выбора."""
+    good = scoped()
+    text_only = replace(
+        good, id=uuid4(), crops=(), source=replace(good.source, issue_regions=())
+    )
+    registry = Registry()
+    manager = ManageArtifacts(
+        registry, Catalog([CatalogEntry(good, True), CatalogEntry(text_only, True)])
+    )
+    result = await manager.create(
+        kind="vector",
+        name="Версия",
+        model="model",
+        references=((good.id, good.revision), (text_only.id, text_only.revision)),
+        actor="engineer:1",
+    )
+    assert len(result["members"]) == 1 and result["members"][0]["example_id"] == str(
+        good.id
+    )
+    assert result["excluded"] == [
+        {
+            "id": str(text_only.id),
+            "reason": "Нет пригодной исходной или принятой области; запись остаётся текстовой.",
+        }
+    ]

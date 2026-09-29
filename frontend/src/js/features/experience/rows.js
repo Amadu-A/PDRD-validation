@@ -1,7 +1,8 @@
 // frontend/src/js/features/experience/rows.js
 
-/** Безопасные строки настоящего каталога и миниатюры всех подтверждённых областей. */
+/** Безопасные строки каталога: миниатюры исходных VLM и принятых инженером областей. */
 import { DECISION_LABELS, experienceTagLabel } from "./labels.js";
+import { createTrashIcon } from "../../components/icons.js";
 
 export const LEARNING_LABELS = {
   positive: "Положительный пример", negative: "Отрицательный пример",
@@ -42,7 +43,7 @@ export function experienceRow(example, { api, onImage, onEdit, onHistory, onDele
     button.addEventListener("click", () => onImage(example, index));
     preview.append(button);
   });
-  if (!example.crops.length) preview.append(element("span", "experience-table__detail", "Нет подтверждённой области"));
+  if (!example.crops.length) preview.append(element("span", "experience-table__detail", "Нет пригодной области"));
   const documentCell = element("td");
   documentCell.append(element("strong", "experience-table__title", example.document_title),
     element("span", "experience-table__detail", `${example.source_filename} · лист ${example.page_number}`));
@@ -62,10 +63,11 @@ export function experienceRow(example, { api, onImage, onEdit, onHistory, onDele
   const author = element("td", "", example.source.created_by);
   const created = element("td", "experience-table__date", new Date(example.created_at).toLocaleString("ru"));
   const actions = element("td", "experience-table__actions");
-  for (const [icon, label, callback] of [["✎", "Редактировать", onEdit], ["◷", "История", onHistory], ["⌫", "Удалить замечание", onDelete]]) {
+  for (const [icon, label, callback] of [["✎", "Редактировать", onEdit], ["◷", "История", onHistory], [null, "Удалить замечание", onDelete]]) {
     const button = element("button", "experience-table__icon", icon);
     button.type = "button";
     button.title = label; button.setAttribute("aria-label", label);
+    if (icon === null) { button.textContent = ""; button.append(createTrashIcon()); }
     button.addEventListener("click", () => callback?.(example));
     actions.append(button);
   }

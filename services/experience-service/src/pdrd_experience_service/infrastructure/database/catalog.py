@@ -18,6 +18,8 @@ from pdrd_experience_service.application.catalog_snapshot import (
 )
 from pdrd_experience_service.domain.catalog import CatalogEntry, CatalogFilter, Example
 from pdrd_experience_service.domain.catalog_identity import content_key
+from pdrd_experience_service.domain.catalog_repair import repair_example
+from pdrd_experience_service.domain.experience_selection import ExperienceCandidate
 from pdrd_experience_service.domain.review import (
     Origin,
     ReviewConflictError,
@@ -148,9 +150,11 @@ class SqlAlchemyCatalogRepository:
         area_versions: tuple,
         examples: tuple[Example, ...],
         actor: str,
+        expected_revisions: tuple[tuple[UUID, int], ...] = (),
     ) -> dict:
         """Блокировка Review согласована с записью подтверждений и редактированием."""
         created = 0
+        repaired = []
         async with self._sessions() as database, database.begin():
             row = await database.get(
                 ReviewSessionModel, review.job_id, with_for_update=True
@@ -164,6 +168,23 @@ class SqlAlchemyCatalogRepository:
             if lock_key >= 2**63:
                 lock_key -= 2**64
             await database.execute(select(func.pg_advisory_xact_lock(lock_key)))
+            if expected_revisions:
+                expected = dict(expected_revisions)
+                selected = (
+                    await database.scalars(
+                        select(CatalogExampleModel)
+                        .where(CatalogExampleModel.id.in_(expected))
+                        .order_by(CatalogExampleModel.id)
+                        .with_for_update()
+                    )
+                ).all()
+                if len(selected) != len(expected) or any(
+                    item.revision != expected[item.id] or item.deleted
+                    for item in selected
+                ):
+                    raise ReviewConflictError(
+                        "Замечания изменены перед восстановлением метаданных."
+                    )
             areas = (
                 await database.scalars(
                     select(ConfirmedAreaModel)
@@ -182,14 +203,36 @@ class SqlAlchemyCatalogRepository:
             for example in examples:
                 source = example.source
                 area = by_finding.get(source.finding_id)
+                finding = next(
+                    (
+                        item
+                        for item in review.findings
+                        if item.finding_id == source.finding_id
+                    ),
+                    None,
+                )
                 if (
                     source.job_id != review.job_id
                     or source.approved_revision != review.revision
+                    or finding is None
+                    or source.original_text != finding.original_text
+                    or source.original_basis != finding.original_basis
+                    or source.proposed_regions != finding.proposed_regions
                 ):
                     raise ReviewError("Пример не принадлежит утверждённому Review.")
+                if source.area_source == "vlm_original" and (
+                    source.decision.value != "rejected"
+                    or not source.proposed_regions
+                    or source.issue_regions
+                    != tuple(item.bbox for item in source.proposed_regions)
+                ):
+                    raise ReviewError(
+                        "Область Bad не соответствует первоначальным координатам VLM."
+                    )
                 if (
                     source.origin is Origin.VLM
                     and source.issue_regions
+                    and source.area_source == "engineer_confirmed"
                     and (area is None or not area.active)
                 ):
                     raise ReviewConflictError("Область примера больше не подтверждена.")
@@ -200,10 +243,14 @@ class SqlAlchemyCatalogRepository:
                     "finding_id": source.finding_id,
                     "approved_revision": source.approved_revision,
                     "area_revision": area.revision
-                    if area and source.issue_regions
+                    if area
+                    and source.issue_regions
+                    and source.area_source == "engineer_confirmed"
                     else 0,
                     "area_signature": area.content_signature
-                    if area and source.issue_regions
+                    if area
+                    and source.issue_regions
+                    and source.area_source == "engineer_confirmed"
                     else "",
                     "revision": example.revision,
                     "origin": source.origin.value,
@@ -224,12 +271,64 @@ class SqlAlchemyCatalogRepository:
                 }
                 prior_id = await database.scalar(
                     select(CatalogExampleModel.id)
-                    .where(CatalogExampleModel.content_key == values["content_key"])
+                    .where(
+                        or_(
+                            CatalogExampleModel.content_key == values["content_key"],
+                            CatalogExampleModel.id == example.id,
+                        )
+                    )
                     .order_by(CatalogExampleModel.created_at, CatalogExampleModel.id)
                     .limit(1)
                 )
                 if prior_id is not None:
-                    await self._occurrence(database, example, prior_id, values, actor)
+                    prior = await database.get(
+                        CatalogExampleModel, prior_id, with_for_update=True
+                    )
+                    original = example_from_json(prior.snapshot)
+                    keep_confirmation = bool(original.source.issue_regions) and (
+                        original.source.area_source == "engineer_confirmed"
+                        and source.area_source == "unlocated"
+                        and original.source.decision.value == "accepted"
+                    )
+                    updated = repair_example(original, example, actor)
+                    if updated != original:
+                        prior.snapshot = example_to_json(updated)
+                        prior.revision = updated.revision
+                        prior.section_id, prior.section_title = (
+                            updated.section_id,
+                            updated.section_title,
+                        )
+                        prior.content_key = content_key(updated.source)
+                        if (
+                            original.source.job_id == source.job_id
+                            and not keep_confirmation
+                        ):
+                            prior.area_revision, prior.area_signature = (
+                                values["area_revision"],
+                                values["area_signature"],
+                            )
+                        if updated.source.area_source == "vlm_original":
+                            prior.area_revision, prior.area_signature = 0, ""
+                        database.add(
+                            CatalogEventModel(
+                                example_id=prior_id,
+                                revision=updated.revision,
+                                actor=actor,
+                                occurred_at=updated.updated_at,
+                                snapshot=prior.snapshot,
+                            )
+                        )
+                        repaired.append(
+                            {
+                                "id": str(prior_id),
+                                "previous_revision": original.revision,
+                                "revision": updated.revision,
+                            }
+                        )
+                    if not keep_confirmation:
+                        await self._occurrence(
+                            database, example, prior_id, values, actor
+                        )
                     continue
                 inserted = await database.scalar(
                     insert(CatalogExampleModel)
@@ -253,6 +352,7 @@ class SqlAlchemyCatalogRepository:
             "created": created,
             "job_id": str(review.job_id),
             "revision": review.revision,
+            "repaired": repaired,
         }
 
     @staticmethod
@@ -278,7 +378,19 @@ class SqlAlchemyCatalogRepository:
                 actor=actor,
                 snapshot=values["snapshot"]["source"],
             )
-            .on_conflict_do_nothing()
+            .on_conflict_do_update(
+                index_elements=[
+                    CatalogOccurrenceModel.example_id,
+                    CatalogOccurrenceModel.job_id,
+                    CatalogOccurrenceModel.finding_id,
+                    CatalogOccurrenceModel.approved_revision,
+                ],
+                set_={
+                    "area_revision": values["area_revision"],
+                    "area_signature": values["area_signature"],
+                    "snapshot": values["snapshot"]["source"],
+                },
+            )
         )
 
     async def list(
@@ -348,6 +460,41 @@ class SqlAlchemyCatalogRepository:
             result = (
                 await database.execute(
                     self._query().where(CatalogExampleModel.id == example_id)
+                )
+            ).first()
+            return self._entry(*result) if result is not None else None
+
+    async def find_source(self, source: ExperienceCandidate) -> CatalogEntry | None:
+        """Старый снимок находится по происхождению даже после дополнения координат."""
+        row, occurrence = CatalogExampleModel, CatalogOccurrenceModel
+        known = (
+            select(occurrence.example_id)
+            .where(
+                occurrence.example_id == row.id,
+                occurrence.job_id == source.job_id,
+                occurrence.finding_id == source.finding_id,
+                occurrence.approved_revision == source.approved_revision,
+            )
+            .correlate(row)
+            .exists()
+        )
+        async with self._sessions() as database:
+            result = (
+                await database.execute(
+                    self._query()
+                    .where(
+                        or_(
+                            row.content_key == content_key(source),
+                            known,
+                            and_(
+                                row.job_id == source.job_id,
+                                row.finding_id == source.finding_id,
+                                row.approved_revision == source.approved_revision,
+                            ),
+                        )
+                    )
+                    .order_by(row.created_at, row.id)
+                    .limit(1)
                 )
             ).first()
             return self._entry(*result) if result is not None else None

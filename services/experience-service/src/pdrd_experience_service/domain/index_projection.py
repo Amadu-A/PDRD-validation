@@ -12,19 +12,41 @@ import json
 from pdrd_experience_service.domain.catalog import CatalogEntry
 
 
+def exclusion_reason(entry: CatalogEntry) -> str:
+    """Одна проверка допуска для worker и понятных причин ручного отбора."""
+    example, source = entry.example, entry.example.source
+    if not entry.active:
+        return "Пример удалён, неактивен или его источник изменён."
+    if source.decision.value == "pending":
+        return "Решение инженера ещё не принято."
+    if not source.issue_regions:
+        return "Нет пригодной исходной или принятой области; запись остаётся текстовой."
+    if len(example.crops) != len(source.issue_regions):
+        return "Изображения областей не подготовлены."
+    if example.tag == "gold" and source.decision.value != "accepted":
+        return "Отклонённый Gold сохранён в каталоге, но не размечен для обучения."
+    if example.learning_use not in {"positive", "negative"}:
+        return "Для Edited + Rejected нужны причина отказа и объект отрицательного примера."
+    if (example.learning_use == "positive" and source.decision.value != "accepted") or (
+        example.learning_use == "negative" and source.decision.value != "rejected"
+    ):
+        return "Назначение обучения не соответствует решению инженера."
+    if (
+        example.learning_use == "negative"
+        and example.tag != "bad"
+        and not (
+            example.rejection_reason
+            and example.negative_target in {"original", "revised", "both"}
+        )
+    ):
+        return "Не указан объект отрицательного примера и причина отказа."
+    return ""
+
+
 def index_projection(entry: CatalogEntry) -> dict | None:
     """Отбирает актуальный пример с crop и однозначным назначением обучения."""
     example, source = entry.example, entry.example.source
-    if (
-        not entry.active
-        or example.learning_use not in {"positive", "negative"}
-        or source.decision.value == "pending"
-        or not source.issue_regions
-        or len(example.crops) != len(source.issue_regions)
-        or (example.learning_use == "positive" and source.decision.value != "accepted")
-        or (example.learning_use == "negative" and source.decision.value != "rejected")
-        or (example.tag == "gold" and source.decision.value != "accepted")
-    ):
+    if exclusion_reason(entry):
         return None
     if example.learning_use == "positive":
         texts = [{"target": "revised", "text": example.text}]

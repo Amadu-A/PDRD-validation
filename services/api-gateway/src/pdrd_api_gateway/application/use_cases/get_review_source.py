@@ -11,6 +11,11 @@ from typing import Any
 from uuid import UUID
 
 from pdrd_api_gateway.application.ports.artifacts import AnalysisArtifactStore
+from pdrd_api_gateway.application.ports.normative_catalog import (
+    NormativeCatalogNotFoundError,
+    NormativeCatalogReader,
+    NormativeCatalogReadError,
+)
 from pdrd_api_gateway.application.ports.review import ReviewRequestError
 from pdrd_api_gateway.application.use_cases.get_analysis_job import GetAnalysisJob
 from pdrd_api_gateway.application.use_cases.get_analysis_visualization import (
@@ -30,6 +35,8 @@ class ReviewSource:
     pdf_content: bytes
     result: dict[str, Any]
     visualization: dict[str, Any]
+    section_id: str = ""
+    section_title: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +46,7 @@ class GetReviewSource:
     jobs: GetAnalysisJob
     artifacts: AnalysisArtifactStore
     visualizations: GetAnalysisVisualization
+    normative_catalog: NormativeCatalogReader | None = None
 
     async def execute(self, *, job_id: UUID) -> ReviewSource:
         """Отклоняет чужой документ, незавершённый анализ и CAD без исходного PDF."""
@@ -58,6 +66,30 @@ class GetReviewSource:
         if result is None:
             raise ReviewRequestError(409, "Результат анализа ещё не сохранён.")
         visualization = await self.visualizations.execute(job_id=job_id)
+        snapshot = getattr(job, "normative_snapshot", None) or getattr(
+            artifacts, "normative_snapshot", None
+        )
+        section_id, section_title = "", ""
+        if snapshot is not None:
+            section_id = str(snapshot.section_id)
+            if self.normative_catalog is not None:
+                try:
+                    section = await self.normative_catalog.get_section(
+                        section_id=snapshot.section_id
+                    )
+                except (
+                    NormativeCatalogReadError,
+                    NormativeCatalogNotFoundError,
+                ) as error:
+                    raise ReviewRequestError(
+                        503,
+                        "Не удалось получить раздел нормативной базы. Повторите операцию.",
+                    ) from error
+                if section.section_id != snapshot.section_id:
+                    raise ReviewRequestError(
+                        502, "Нормативная база вернула другой раздел."
+                    )
+                section_title = section.name
         return ReviewSource(
             job_id=job_id,
             document_id=job.document_id,
@@ -66,4 +98,6 @@ class GetReviewSource:
             pdf_content=artifacts.pdf_content,
             result=result,
             visualization=visualization,
+            section_id=section_id,
+            section_title=section_title,
         )

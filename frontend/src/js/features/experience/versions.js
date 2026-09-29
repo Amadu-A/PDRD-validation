@@ -63,7 +63,7 @@ export function mountExperienceVersions({ api, selection, onViewed, notice, docu
   function open(rename = false) {
     editing = rename;
     find("version-title").textContent = rename ? "Переименовать версию" : kind.value === "vector" ? "Новая векторная база" : "Набор для дообучения";
-    find("version-summary").textContent = rename ? viewing.name : `Выбрано ${selection.references().length} замечаний. Нужен один заполненный раздел нормативного документа.`;
+    find("version-summary").textContent = rename ? viewing.name : `Выбрано ${selection.references().length} замечаний. Раздел берётся из нормативной базы; сервер проверит пригодность примеров.`;
     form.elements.namedItem("name").value = rename ? viewing.name : `Версия ${new Date().toLocaleString("ru")}`;
     form.elements.namedItem("model").value = rename ? viewing.model : model.value || DEFAULT_MODELS[kind.value];
     form.elements.namedItem("model").required = !rename;
@@ -83,6 +83,9 @@ export function mountExperienceVersions({ api, selection, onViewed, notice, docu
       const result = editing ? await api.renameVersion(viewing.id, viewing.revision, name)
         : await api.createVersion({ kind: kind.value, name, model: form.elements.namedItem("model").value, items: selection.references() });
       dialog.close(); await reload(); model.value = result.model; paint(); choice.value = result.id; await view();
+      selection.refreshRevisions(result.repaired ?? []);
+      if (result.excluded?.length) notice.textContent = `В версию включено: ${result.members.length}. Исключено: ${result.excluded.length}. `
+        + result.excluded.map((item) => `${item.id}: ${item.reason}`).join("; ");
     } catch (error) { find("version-error").textContent = error.detail ?? error.message; }
     finally { busy = false; save.disabled = false; paint(); }
   });

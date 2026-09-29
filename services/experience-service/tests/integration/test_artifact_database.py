@@ -3,6 +3,7 @@
 """Изолированный PostgreSQL: состав, аренда, CAS, допуск и аудит версий."""
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
@@ -10,6 +11,7 @@ from uuid import UUID
 import pytest
 from alembic import command as alembic_command
 from alembic.config import Config
+from pdrd_experience_service.application.catalog_snapshot import example_to_json
 from pdrd_experience_service.application.use_cases.artifacts import ManageArtifacts
 from pdrd_experience_service.application.use_cases.catalog import ManageCatalog
 from pdrd_experience_service.domain.catalog import CatalogFilter
@@ -25,11 +27,13 @@ from pdrd_experience_service.infrastructure.database.artifacts import (
     SqlAlchemyArtifactRepository,
 )
 from pdrd_experience_service.infrastructure.database.catalog_models import (
+    CatalogEventModel,
+    CatalogExampleModel,
     CatalogOccurrenceModel,
 )
 from sqlalchemy import delete, func, select, text, update
 
-from .test_catalog_database import prepared, remove_catalog
+from .test_catalog_database import prepared, rejected_source, remove_catalog
 from .test_confirmed_areas_database import engine as engine
 
 pytestmark = pytest.mark.database
@@ -64,6 +68,105 @@ async def test_upgrade_preserves_existing_catalog_and_backfills_dedup_key(engine
     finally:
         await asyncio.to_thread(alembic_command.upgrade, configuration, "head")
         await remove_catalog(engine, data[3].job_id)
+
+
+async def test_legacy_bad_migration_and_repeated_pdf_repair_without_duplicate(engine):
+    """Старый текстовый Bad с известной VLM-областью не размножается новым прогоном."""
+    first = await rejected_source(engine, sha="e" * 64)
+    second = await rejected_source(engine, sha="e" * 64)
+    review, example, repository = first
+    configuration = Config(str(MIGRATION_CONFIG))
+    try:
+        await repository.capture(
+            review=review, area_versions=(), examples=(example,), actor="integration:1"
+        )
+        legacy = replace(
+            example,
+            crops=(),
+            source=replace(
+                example.source,
+                issue_regions=(),
+                proposed_regions=(),
+                area_source="engineer_confirmed",
+            ),
+        )
+        legacy_json = example_to_json(legacy)
+        for field in ("proposed_regions", "display_regions", "area_source"):
+            legacy_json["source"].pop(field)
+        async with engine.begin() as connection:
+            await connection.execute(
+                update(CatalogExampleModel)
+                .where(CatalogExampleModel.id == example.id)
+                .values(snapshot=legacy_json, content_key=content_key(legacy.source))
+            )
+            await connection.execute(
+                update(CatalogEventModel)
+                .where(CatalogEventModel.example_id == example.id)
+                .values(snapshot=legacy_json)
+            )
+        await asyncio.to_thread(
+            alembic_command.downgrade, configuration, "20260929_0004"
+        )
+        await asyncio.to_thread(alembic_command.upgrade, configuration, "head")
+        existing = await repository.find_source(second[1].source)
+        assert existing.example.id == example.id and existing.example.crops == ()
+        incoming = replace(
+            second[1],
+            id=example.id,
+            section_id="section",
+            section_title="Раздел",
+            source=replace(
+                second[1].source, section_id="section", section_title="Раздел"
+            ),
+        )
+        result = await repository.capture(
+            review=second[0],
+            area_versions=(),
+            examples=(incoming,),
+            actor="integration:1",
+            expected_revisions=((example.id, 0),),
+        )
+        assert result["created"] == 0 and result["repaired"][0]["revision"] == 1
+        repaired = (await repository.get(example.id)).example
+        assert (
+            repaired.crops
+            and repaired.source.proposed_regions == review.findings[0].proposed_regions
+        )
+        assert (
+            repaired.source.job_id == review.job_id
+            and repaired.source.original_text == example.source.original_text
+        )
+        assert len(await repository.history(example.id)) == 2
+        assert (await repository.list(CatalogFilter(job_id=second[0].job_id)))[1] == 1
+        async with engine.connect() as connection:
+            assert (
+                await connection.scalar(
+                    select(func.count())
+                    .select_from(CatalogOccurrenceModel)
+                    .where(CatalogOccurrenceModel.example_id == example.id)
+                )
+                == 2
+            )
+        repeated = await repository.capture(
+            review=second[0],
+            area_versions=(),
+            examples=(incoming,),
+            actor="integration:1",
+        )
+        assert repeated["created"] == 0 and repeated["repaired"] == []
+        with pytest.raises(ReviewConflictError):
+            await repository.capture(
+                review=second[0],
+                area_versions=(),
+                examples=(incoming,),
+                actor="integration:1",
+                expected_revisions=((example.id, 0),),
+            )
+        assert len(await repository.history(example.id)) == 2
+    finally:
+        await asyncio.to_thread(alembic_command.upgrade, configuration, "head")
+        for data in (first, second):
+            await remove_catalog(engine, data[0].job_id)
 
 
 async def test_cross_job_dedup_preserves_both_sources_and_currentness(engine):

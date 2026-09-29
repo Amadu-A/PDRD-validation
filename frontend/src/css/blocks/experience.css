@@ -212,7 +212,8 @@
   align-items: center;
 }
 
-.experience-table__icon { width: 28px; height: 28px; padding: 0; font-size: 17px; }
+.experience-table__icon { display: inline-flex; align-items: center; justify-content: center; vertical-align: top; width: 28px; height: 28px; padding: 0; font-size: 17px; line-height: 1; }
+.experience-table__icon svg { flex: none; fill: currentColor; }
 .experience-table__icon:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .experience-table__actions { white-space: nowrap; }
 .experience-table__actions button + button { margin-left: var(--space-1); }

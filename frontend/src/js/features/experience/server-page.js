@@ -43,12 +43,12 @@ export async function mountExperienceCatalog({ api, document: dom = document, do
   }, onSaved: () => load(), notice, document: dom });
   const versions = mountExperienceVersions({ api, selection, notice, document: dom, onViewed: async (version) => {
     filter.elements.namedItem("section_id").value = version?.section_id ?? "";
-    await load(true);
+    await load(true, true);
   } });
   selection.changed();
 
-  async function load(reset = false) {
-    if (reset) { offset = 0; selection.clear(); }
+  async function load(reset = false, preserveSelection = false) {
+    if (reset) { offset = 0; if (!preserveSelection) selection.clear(); }
     const request = ++generation;
     exportButton.disabled = true; previous.disabled = true; next.disabled = true;
     rows.setAttribute("aria-busy", "true");
@@ -64,7 +64,7 @@ export async function mountExperienceCatalog({ api, document: dom = document, do
       }
       page = result.items; render();
       count.textContent = total ? `Показано ${offset + 1}–${offset + result.items.length} из ${total}.` : "Сохранённых примеров по этим фильтрам нет.";
-      notice.textContent = "Правки сохраняются с историей. Bad без подтверждённой области видны в каталоге и исключены из обучения. Индексация запускается только для выбранных замечаний.";
+      notice.textContent = "Правки сохраняются с историей. Bad использует исходную область VLM; записи без области остаются текстовыми. Индексация запускается только для выбранных замечаний.";
       exportButton.disabled = exporting;
       previous.disabled = offset === 0;
       next.disabled = offset + limit >= total;

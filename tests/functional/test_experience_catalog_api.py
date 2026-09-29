@@ -120,7 +120,9 @@ async def listed(browser, **params):
     return response.json()
 
 
-async def test_direct_rejection_is_saved_without_inventing_confirmed_crop(catalog_flow):
+async def test_direct_rejection_preserves_original_regions_without_confirmation(
+    catalog_flow,
+):
     """Крестик сохраняет Bad при утверждении, даже если область ранее не принимали."""
     flow = catalog_flow
     async with client(flow) as browser:
@@ -151,11 +153,16 @@ async def test_direct_rejection_is_saved_without_inventing_confirmed_crop(catalo
         rows = await listed(browser, tag="bad")
         assert rows["total"] == 1
         bad = rows["items"][0]
-        assert bad["source_current"] and not bad["training_eligible"]
-        assert bad["crops"] == [] and bad["source"]["issue_regions"] == []
+        assert bad["source_current"] and bad["training_eligible"]
+        assert len(bad["crops"]) == 1
+        assert bad["source"]["issue_regions"] == [
+            bad["source"]["proposed_regions"][0]["bbox"]
+        ]
+        assert bad["source"]["confirmed_by"] == ""
+        assert bad["source"]["area_source"] == "vlm_original"
         assert (
             await browser.get(f"/api/v1/experience/{bad['id']}/crops/0")
-        ).status_code == 404
+        ).status_code == 200
 
 
 async def test_bulk_delete_is_atomic_and_does_not_reappear_after_capture(catalog_flow):
@@ -172,11 +179,11 @@ async def test_bulk_delete_is_atomic_and_does_not_reappear_after_capture(catalog
                 "/api/v1/experience/delete-selection", json={"items": stale}
             )
         ).status_code == 409
-        assert (await listed(browser))["total"] == 2
+        assert (await listed(browser))["total"] == 3
         deleted = await browser.post(
             "/api/v1/experience/delete-selection", json={"items": items}
         )
-        assert deleted.status_code == 200 and deleted.json()["deleted"] == 2
+        assert deleted.status_code == 200 and deleted.json()["deleted"] == 3
         assert (await listed(browser))["total"] == 0
         again = await browser.post(
             f"/api/v1/experience/capture/{flow.job_id}",
@@ -207,7 +214,7 @@ async def test_lan_frontend_approval_saves_experience_and_exports_reviewed_pdf(
         assert review["pending_count"] == 0
         assert review["approved_revision"] == revision
         records = (await listed(browser))["items"]
-        assert {record["tag"] for record in records} == {"bad", "gold"}
+        assert {record["tag"] for record in records} == {"bad", "gold", "wise"}
         response = await browser.post(
             flow.pdf_endpoint, json={"expected_revision": revision}
         )
@@ -230,7 +237,7 @@ async def test_lan_frontend_approval_saves_experience_and_exports_reviewed_pdf(
         )
         assert repeated.status_code == 200
         assert repeated.json()["created"] == 0
-        assert (await listed(browser))["total"] == 2
+        assert (await listed(browser))["total"] == 3
 
 
 async def test_approval_materializes_verified_examples_and_crop_survives_reload(
@@ -241,10 +248,10 @@ async def test_approval_materializes_verified_examples_and_crop_survives_reload(
     async with client(flow) as browser:
         revision = await prepare(browser, flow)
         rows = await listed(browser)
-        assert rows["total"] == 2
+        assert rows["total"] == 3
         assert {item["tag"] for item in rows["items"]} == {"wise", "gold"}
         assert all(item["active"] and item["source_current"] for item in rows["items"])
-        record = rows["items"][0]
+        record = next(item for item in rows["items"] if item["crops"])
         image = await browser.get(f"/api/v1/experience/{record['id']}/crops/0")
         assert image.status_code == 200 and image.content.startswith(b"\x89PNG")
         assert image.headers["cache-control"] == "no-store"
@@ -258,8 +265,8 @@ async def test_approval_materializes_verified_examples_and_crop_survives_reload(
             json={"expected_revision": revision},
         )
         assert repeated.status_code == 200 and repeated.json()["created"] == 0
-        assert repeated.json()["eligible"] == 2 and repeated.json()["excluded"] == 1
-        assert (await listed(browser))["total"] == 2
+        assert repeated.json()["eligible"] == 2 and repeated.json()["excluded"] == 0
+        assert (await listed(browser))["total"] == 3
 
 
 async def test_curate_cas_filters_and_history_preserve_gold_and_originals(catalog_flow):
@@ -284,7 +291,7 @@ async def test_curate_cas_filters_and_history_preserve_gold_and_originals(catalo
         assert not revised["active"] and revised["revision"] == 1
         assert (await browser.patch(url, json=body)).status_code == 409
         assert (await listed(browser, query="НОВАЯ", active="false"))["total"] == 1
-        assert (await listed(browser, active="true"))["total"] == 1
+        assert (await listed(browser, active="true"))["total"] == 2
         history = (await browser.get(url + "/history")).json()["events"]
         assert len(history) == 2 and history[0]["snapshot"]["text"] == gold["text"]
         assert history[1]["actor"] == "engineer:test"
@@ -341,10 +348,11 @@ async def test_export_contains_all_filtered_examples_metadata_png_and_safe_csv(
         assert response.status_code == 200, response.text
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            assert manifest["version"] == 1 and len(manifest["examples"]) == 2
+            assert manifest["version"] == 1 and len(manifest["examples"]) == 3
             for example in manifest["examples"]:
                 assert example["text"] and example["source"]["original_text"]
-                assert archive.read(example["crop_files"][0]).startswith(b"\x89PNG")
+                if example["crop_files"]:
+                    assert archive.read(example["crop_files"][0]).startswith(b"\x89PNG")
             assert "Ручное замечание Gold" in archive.read("examples.csv").decode(
                 "utf-8-sig"
             )
@@ -407,7 +415,11 @@ async def test_revoked_area_immediately_marks_saved_example_inactive(catalog_flo
     flow = catalog_flow
     async with client(flow) as browser:
         revision = await prepare(browser, flow)
-        wise = (await listed(browser, tag="wise"))["items"][0]
+        wise = next(
+            item
+            for item in (await listed(browser, tag="wise"))["items"]
+            if item["crops"]
+        )
         response = await command(
             browser,
             flow,
@@ -424,7 +436,13 @@ async def test_revoked_area_immediately_marks_saved_example_inactive(catalog_flo
             and not entry["active"]
             and not entry["training_eligible"]
         )
-        assert (await listed(browser, active="true"))["total"] == 1
+        assert (await listed(browser, active="true"))["total"] == 2
         assert (
             await browser.get(f"/api/v1/experience/{wise['id']}/crops/0")
         ).status_code == 200
+        repeated = await flow.capture.execute(
+            job_id=flow.job_id, expected_revision=revision, actor="engineer:test"
+        )
+        assert repeated["created"] == 0
+        entry = (await browser.get(f"/api/v1/experience/{wise['id']}")).json()
+        assert not entry["source_current"] and not entry["training_eligible"]

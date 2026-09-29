@@ -25,18 +25,18 @@ FIXED = {**BOX, "x_min": 15.25, "x_max": 140.75}
     [
         (("accepted",), "wise", "positive", BOX),
         (("geometry", "accepted"), "wise", "positive", FIXED),
-        (("rejected",), None, None, None),
+        (("rejected",), "bad", "negative", BOX),
         (("accepted", "rejected"), "bad", "negative", BOX),
-        (("accepted", "geometry", "rejected"), None, None, None),
+        (("accepted", "geometry", "rejected"), "bad", "negative", BOX),
         (("edit", "accepted"), "edited", "positive", BOX),
         (("edit", "accepted", "rejected"), "edited", "needs_adjudication", BOX),
-        (("accepted", "edit", "rejected"), None, None, None),
+        (("accepted", "edit", "rejected"), "edited", "needs_adjudication", BOX),
     ],
 )
 async def test_acceptance_geometry_rejection_and_training_selection(
     catalog_flow, actions, tag, learning_use, regions
 ):
-    """Крестик использует только ранее принятую актуальную область; Accept принимает текущую."""
+    """Bad сохраняет первоначальную область; Accept принимает текущую; текстовые решения остаются в каталоге."""
     flow = catalog_flow
     async with client(flow, base_url="http://192.168.55.3:8080") as browser:
         opened = await browser.post(flow.endpoint + "/open")
@@ -80,17 +80,21 @@ async def test_acceptance_geometry_rejection_and_training_selection(
         restored = (await browser.get(flow.endpoint)).json()
         assert restored["findings"] == review["findings"]
         records = (await listed(browser))["items"]
-        assert len(records) == 1
+        assert len(records) == 2
         if not tag:
             assert records[0]["tag"] == ("edited" if "edit" in actions else "bad")
             assert records[0]["crops"] == [] and not records[0]["training_eligible"]
             assert records[0]["source"]["issue_regions"] == []
         if tag:
-            record = records[0]
+            record = next(
+                item for item in records if item["source"]["finding_id"] == "vlm:1"
+            )
             assert record["tag"] == tag and record["learning_use"] == learning_use
             example = (await flow.catalog.get(UUID(record["id"]))).example
             assert example.source.issue_regions[0].x_min == regions["x_min"]
-            assert example.source.confirmed_by == "engineer:test"
+            assert example.source.confirmed_by == (
+                "engineer:test" if actions[-1] == "accepted" else ""
+            )
             image = await browser.get(f"/api/v1/experience/{record['id']}/crops/0")
             assert image.status_code == 200 and image.content.startswith(b"\x89PNG")
         document_response = await browser.post(

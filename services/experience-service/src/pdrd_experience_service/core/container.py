@@ -44,6 +44,9 @@ from pdrd_experience_service.application.use_cases.confirm_areas import (
 from pdrd_experience_service.application.use_cases.export_catalog import ExportCatalog
 from pdrd_experience_service.application.use_cases.export_review import ExportReview
 from pdrd_experience_service.application.use_cases.index_feed import ReadIndexFeed
+from pdrd_experience_service.application.use_cases.refresh_catalog_sources import (
+    RefreshCatalogSources,
+)
 from pdrd_experience_service.application.use_cases.review import (
     ChangeReview,
     OpenReview,
@@ -281,6 +284,8 @@ def build_container(
         else None,
         index_feed=ReadIndexFeed(catalog_repository, crop_store),
         artifacts=ManageArtifacts(
-            SqlAlchemyArtifactRepository(session_factory), catalog_repository
+            SqlAlchemyArtifactRepository(session_factory),
+            catalog_repository,
+            RefreshCatalogSources(capture) if capture is not None else None,
         ),
     )

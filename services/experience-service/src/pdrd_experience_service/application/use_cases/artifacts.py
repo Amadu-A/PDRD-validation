@@ -9,13 +9,19 @@ from uuid import UUID, uuid4
 from pdrd_experience_service.application.catalog_snapshot import encode
 from pdrd_experience_service.application.ports.artifacts import ArtifactRepository
 from pdrd_experience_service.application.ports.catalog import CatalogRepository
+from pdrd_experience_service.application.use_cases.refresh_catalog_sources import (
+    RefreshCatalogSources,
+)
 from pdrd_experience_service.core.observability import log_execution_time
 from pdrd_experience_service.domain.artifacts import (
     ArtifactVersion,
     manifest_hash,
     validate_name,
 )
-from pdrd_experience_service.domain.index_projection import index_projection
+from pdrd_experience_service.domain.index_projection import (
+    exclusion_reason,
+    index_projection,
+)
 from pdrd_experience_service.domain.review import ReviewConflictError, ReviewError
 
 
@@ -30,6 +36,7 @@ class ManageArtifacts:
 
     repository: ArtifactRepository
     catalog: CatalogRepository
+    refresh: RefreshCatalogSources | None = None
 
     async def list(self) -> dict:
         """Модели перечисляются из известных версий; новая модель задаётся при создании."""
@@ -66,20 +73,40 @@ class ManageArtifacts:
             raise LookupError("Часть выбранных замечаний не найдена.")
         expected, sections, members = dict(references), set(), []
         for entry in entries:
+            if entry.example.revision != expected[entry.example.id]:
+                raise ReviewConflictError("Замечания изменены; обновите выбор.")
+        repaired = (
+            await self.refresh.execute(entries=entries, actor=actor)
+            if self.refresh
+            else ()
+        )
+        for item in repaired:
+            example_id = UUID(item["id"])
+            if expected.get(example_id) == item["previous_revision"]:
+                expected[example_id] = item["revision"]
+        if repaired:
+            entries = await self.catalog.get_many(tuple(expected))
+        excluded = []
+        for entry in entries:
             example = entry.example
             if example.revision != expected[example.id]:
                 raise ReviewConflictError("Замечания изменены; обновите выбор.")
             projection = index_projection(entry)
-            if projection is None:
-                raise ReviewError(
-                    "Для индексации и обучения нужны актуальные области и однозначная разметка всех выбранных примеров."
-                )
+            reason = exclusion_reason(entry)
             if not example.section_id or not example.section_title:
-                raise ReviewError(
-                    "Заполните идентификатор и название раздела нормативного документа."
+                reason = (
+                    reason or "В исходном задании не определён раздел нормативной базы."
                 )
+            if reason:
+                excluded.append({"id": str(example.id), "reason": reason})
+                continue
             sections.add((example.section_id, example.section_title))
             members.append(projection)
+        if not members:
+            raise ReviewError(
+                "Нет пригодных выбранных замечаний. "
+                + "; ".join(f"{item['id']}: {item['reason']}" for item in excluded[:20])
+            )
         if len(sections) != 1:
             raise ReviewError(
                 "Создайте отдельную версию для каждого раздела нормативного документа."
@@ -102,7 +129,7 @@ class ManageArtifacts:
             status="queued" if kind == "vector" else "prepared",
         )
         await self.repository.create(version)
-        return version_view(version)
+        return {**version_view(version), "excluded": excluded, "repaired": repaired}
 
     async def get(self, version_id: UUID) -> dict:
         """Просмотр и подсветка используют зафиксированный состав этой версии."""

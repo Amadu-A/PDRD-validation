@@ -9,6 +9,7 @@ from pdrd_experience_service.application.catalog_snapshot import example_to_json
 from pdrd_experience_service.domain.area_confirmation import content_signature
 from pdrd_experience_service.domain.catalog import CatalogEntry
 from pdrd_experience_service.domain.catalog_identity import content_key
+from pdrd_experience_service.domain.catalog_repair import repair_example
 from pdrd_experience_service.domain.experience_selection import ConfirmedFindingArea
 from pdrd_experience_service.domain.review import Origin, ReviewConflictError
 
@@ -58,7 +59,12 @@ class MemoryCatalog:
             and review.revision == source.approved_revision
             and review.approved_revision == review.revision
         )
-        if current and source.origin is Origin.VLM and source.issue_regions:
+        if (
+            current
+            and source.origin is Origin.VLM
+            and source.issue_regions
+            and source.area_source == "engineer_confirmed"
+        ):
             area = self.areas.rows.get(source.finding_id)
             finding = next(
                 item for item in review.findings if item.finding_id == source.finding_id
@@ -71,7 +77,9 @@ class MemoryCatalog:
             )
         return CatalogEntry(example, current)
 
-    async def capture(self, *, review, area_versions, examples, actor):
+    async def capture(
+        self, *, review, area_versions, examples, actor, expected_revisions=()
+    ):
         """Фикстура проверяет тот же ожидаемый набор версий перед вставкой."""
         if await self.reviews.load(review.job_id) != review:
             raise ReviewConflictError("Stale Review.")
@@ -82,17 +90,48 @@ class MemoryCatalog:
         ):
             raise ReviewConflictError("Stale areas.")
         created = 0
+        repaired = []
+        if any(
+            self.examples[key].revision != revision or self.examples[key].deleted
+            for key, revision in expected_revisions
+        ):
+            raise ReviewConflictError("Stale catalog.")
         for example in examples:
             prior = next(
                 (
                     item
                     for item in self.examples.values()
-                    if content_key(item.source) == content_key(example.source)
+                    if item.id == example.id
+                    or content_key(item.source) == content_key(example.source)
                 ),
                 None,
             )
             if prior is not None:
-                self.occurrences.setdefault(prior.id, []).append(example.source)
+                keep_confirmation = bool(prior.source.issue_regions) and (
+                    prior.source.area_source == "engineer_confirmed"
+                    and example.source.area_source == "unlocated"
+                    and prior.source.decision.value == "accepted"
+                )
+                updated = repair_example(prior, example, actor)
+                if updated != prior:
+                    self.examples[prior.id] = updated
+                    self.events[prior.id].append(
+                        {
+                            "revision": updated.revision,
+                            "actor": actor,
+                            "occurred_at": updated.updated_at.isoformat(),
+                            "snapshot": example_to_json(updated),
+                        }
+                    )
+                    repaired.append(
+                        {
+                            "id": str(prior.id),
+                            "previous_revision": prior.revision,
+                            "revision": updated.revision,
+                        }
+                    )
+                if not keep_confirmation:
+                    self.occurrences.setdefault(prior.id, []).append(example.source)
                 continue
             if example.id not in self.examples:
                 self.examples[example.id] = example
@@ -109,7 +148,20 @@ class MemoryCatalog:
             "created": created,
             "job_id": str(review.job_id),
             "revision": review.revision,
+            "repaired": repaired,
         }
+
+    async def find_source(self, source):
+        """Находит старый снимок по утверждённому происхождению либо содержимому."""
+        for item in self.examples.values():
+            known = (item.source, *self.occurrences.get(item.id, ()))
+            if content_key(item.source) == content_key(source) or any(
+                (candidate.job_id, candidate.finding_id, candidate.approved_revision)
+                == (source.job_id, source.finding_id, source.approved_revision)
+                for candidate in known
+            ):
+                return await self._entry(item)
+        return None
 
     async def get(self, example_id):
         """Возвращает только существующий пример."""

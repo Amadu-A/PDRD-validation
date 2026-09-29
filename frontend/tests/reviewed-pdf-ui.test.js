@@ -72,7 +72,7 @@ test("все решения разрешают утверждение даже �
   assert.deepEqual(f.calls, [{ action: "approve" }, ["job:1", 6]]);
   assert.equal(f.downloads.length, 1);
   assert.equal(f.captures.length, 0);
-  assert.match(f.button.description.textContent, /каталоге.*2.*подтверждёнными областями: 2/);
+  assert.match(f.button.description.textContent, /каталоге.*2.*с областями: 2/);
 });
 
 test("повторный клик во время формирования не создаёт второй запрос", async (t) => {
@@ -150,7 +150,7 @@ test("ошибка Experience не мешает PDF, повторное скач
   await f.click();
   assert.equal(f.downloads.length, 2);
   assert.deepEqual(f.captures, [["job:1", 5], ["job:1", 5]]);
-  assert.match(f.button.description.textContent, /каталоге.*2.*подтверждёнными областями: 2/);
+  assert.match(f.button.description.textContent, /каталоге.*2.*с областями: 2/);
   assert.equal(f.calls.filter((row) => row.action === "approve").length, 0);
 });
 
@@ -225,5 +225,5 @@ test("настоящая очередь Review включает PDF после �
   for (const handler of button.listeners.get("click")) await handler();
   assert.deepEqual(requests, ["decide", "decide", "decide", "approve", "pdf"]);
   assert.equal(downloads.length, 1);
-  assert.match(button.description.textContent, /каталоге.*2.*подтверждёнными областями: 2/);
+  assert.match(button.description.textContent, /каталоге.*2.*с областями: 2/);
 });
