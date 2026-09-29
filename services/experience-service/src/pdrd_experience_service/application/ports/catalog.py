@@ -60,10 +60,18 @@ class CatalogRepository(Protocol):
         """Вычисляет актуальность Review и координат при каждом чтении."""
         ...
 
+    async def get_many(self, example_ids: tuple[UUID, ...]) -> tuple[CatalogEntry, ...]:
+        """Читает выбранные редакции с актуальностью одним запросом, без N+1."""
+        ...
+
     async def update(self, *, example: Example, expected_revision: int) -> CatalogEntry:
         """Пишет редакцию и неизменяемый аудит с CAS."""
         ...
 
     async def history(self, example_id: UUID) -> tuple[dict, ...]:
         """Возвращает редакции и серверных авторов для просмотра аудита."""
+        ...
+
+    async def scan(self, *, after: UUID | None, limit: int) -> tuple[CatalogEntry, ...]:
+        """Читает стабильную страницу по UUID, включая неактивные записи для отбора."""
         ...

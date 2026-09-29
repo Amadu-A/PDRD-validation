@@ -137,6 +137,8 @@ class Settings(BaseSettings):
     # Закрытый HTTP API включается отдельно от репозиториев/миграций.
     review_api_enabled: bool = False
     internal_key: SecretStr = SecretStr("")
+    # Только чтение проекций/crop индексатором Knowledge, без прав Review.
+    index_key: SecretStr = SecretStr("")
     gateway_base_url: str = "http://api-gateway:8000"
     document_base_url: str = "http://document-service:8301"
     crop_root: Path = Path("/data/experience/crops")
@@ -162,6 +164,16 @@ class Settings(BaseSettings):
         настоящих учётных данных PostgreSQL.
         """
         password = self.database.password.get_secret_value()
+
+        index_key = self.index_key.get_secret_value()
+        if index_key and (
+            not self.enabled
+            or not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", index_key)
+            or index_key == self.internal_key.get_secret_value()
+        ):
+            raise ValueError(
+                "Индекс E требует активный сервис и отдельный ключ длиной от 32 символов."
+            )
 
         if self.review_api_enabled and (
             not self.enabled

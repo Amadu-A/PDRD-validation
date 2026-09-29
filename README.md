@@ -602,11 +602,11 @@ flowchart TD
     PDF --> TEXT["All accepted: textual appended list, including unlocated"]
     APPROVE --> PICK["SelectExperience: separate trusted selection"]
     PICK --> STORE["PostgreSQL catalog + original PDF crops via Document Service"]
-    STORE --> INDEX["Knowledge Service: E indexing only after evaluation"]
-    INDEX --> QD[("dva_experience_active, guarded by feature flag")]
+    STORE --> INDEX["Knowledge: закрытый feed и индексатор текста + crop"]
+    INDEX --> QD[("Отдельная коллекция Human Review по identity embedding")]
 ```
 
-**Статусы внедрения:** Human Review UI, `ReviewSession`, отбор Experience, PostgreSQL/Alembic, аудит подтверждений, серверный Review API, Reviewed PDF и постоянный каталог с crop/CRUD/экспортом реализованы. Серверный mapper переносит визуальные области в `proposed_regions`, не подтверждая их автоматически. Правки отображения хранятся отдельно как `display_regions`; UI подтверждает область отдельной командой. Основная страница Experience читает реальные записи при включённом серверном режиме. E indexing и fine-tuning предстоят. Слово `planned` обозначает будущую функциональность. Логи `596a0de` подтвердили Linux — 1040 passed, 22 skipped, PostgreSQL — 18 passed и обновление этапа 7; подключение основного фронта проверяется отдельно.
+**Статусы внедрения:** Human Review UI, `ReviewSession`, отбор Experience, PostgreSQL/Alembic, аудит подтверждений, серверный Review API, Reviewed PDF и постоянный каталог с crop/CRUD/экспортом реализованы. Серверный mapper переносит визуальные области в `proposed_regions`; зелёная галочка атомарно принимает текущую сохранённую область вместе с замечанием. Отдельных действий подтверждения области нет. Основная страница Experience читает реальные записи. Логи `e24629f` подтвердили Windows/Linux — 1055 passed, 32 skipped, PostgreSQL — 28 passed; пользователь принял UI/PDF. Этап 8 добавляет автоматическую индексацию и проверочный поиск, рабочий E выключен до оценки качества. Fine-tuning относится к этапу 9. Контракты и команды: [docs/experience-index.md](docs/experience-index.md).
 
 ## 12. Подтверждение и исправление областей
 
@@ -654,7 +654,7 @@ flowchart TD
     HOLD --> ASSET
     ASSET --> DEDUP["Idempotent example_key and source SHA256"]
     DEDUP --> STORE["Experience catalog: immutable source + audited curation"]
-    STORE --> INDEX["E indexing outbox — planned"]
+    STORE --> INDEX["Knowledge: периодический полный обход через закрытый feed"]
 ```
 
 Замечание без подтверждённой области **может присутствовать в операционном Review и утверждённом текстовом PDF**, но **не** попадает в обучающую Experience DB независимо от принятия. Отредактированный VLM имеет `tag=edited`, даже при `decision=rejected`; отдельный `edited-bad` как значение поля не требуется.
@@ -682,7 +682,7 @@ flowchart TD
     CHANGED -->|нет| DOWNLOAD["Download current Reviewed PDF"]
     REV --> SELECT["Verified ExperienceCandidate selection"]
     SELECT --> CROPS["Source PDF crop and full versioned metadata: Experience catalog"]
-    CROPS --> INDEX["E embedding via shared-embedding — planned"]
+    CROPS --> INDEX["Knowledge: текст + crop через shared-embedding"]
     INDEX --> EVAL["Blind retrieval evaluation and human checks"]
     EVAL --> FLAG{"Enable E feature flag only after validation"}
     FLAG --> TRAIN["Separate VLM fine-tuning research — not live"]
@@ -769,6 +769,13 @@ U1, U2, U3, ...
 ## E — Experience retrieval
 
 Контракт Experience search вызывается после requirement check по `experience_query`, но **в текущей конфигурации фактический поиск выключен** (`KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_ENABLED=false`). Включение только после сохранения подтверждённых crop/metadata, trusted E indexing и проверки качества. E никогда не становится нормативным basis.
+
+Автоматический индекс Human Review реализован отдельным процессом Knowledge.
+Он получает актуальные примеры через закрытый HTTP Experience, векторизует текст
+с PNG области и повторно проверяет редакцию перед записью/выдачей. Операторский
+preview не включает E в обычный анализ. Отложенного размеченного набора пока нет;
+полная приёмка требует парного эксперимента и совместимого отчёта качества.
+Схема, критерии, шаблон набора и развёртывание: [docs/experience-index.md](docs/experience-index.md).
 
 # Формирование N/T/U JSON
 
@@ -1170,7 +1177,7 @@ Page understanding
   -> Check Norms
   -> Prepare Finding Normative Queries
   -> Search Finding Norms
-  -> Search Experience (feature disabled until trusted E ingestion)
+  -> Search Experience (выключен до оценки на отложенных документах)
   -> Group/Finalize Findings
 ```
 
@@ -1316,7 +1323,7 @@ analysis VLM alias     = shared-vlm
 embedding URL          = http://shared-embedding:8000/v1
 embedding alias        = shared-embedding
 project GPU lease path = /var/lock/pdrd-gpu/gpu.lock (where applicable)
-Experience E search    = disabled until trusted ingestion
+Experience E search    = выключен до отложенной оценки качества
 ```
 
 # Запуск
@@ -1328,6 +1335,12 @@ Shared network `ai-shared` должна предоставлять RabbitMQ, n8n
 Безопасный штатный deploy следует выполнять штатным проектным скриптом после проверки текущей ветки/контейнеров и Compose: `bash scripts/up.sh`. Не перезапускайте shared stack и не удаляйте volume ради разработки Experience.
 
 Experience подключён к Compose только профилем `review`. Сначала общие и изолированные SQL-тесты, затем настройка серверного канала и явная миграция по [docs/review-api.md](docs/review-api.md). Основной frontend 8080 использует серверный Review и каталог Experience. Рабочий адрес — `http://192.168.55.3:8080/`; SSH-туннель не требуется. Ключи остаются между контейнерами; полноценная пользовательская авторизация пока не реализована.
+
+Для подключения автоматической индексации после синхронизации ветки:
+`bash ops/deploy-experience-index.sh </dev/null`. Скрипт повторяет общий и SQL gate,
+создаёт отдельный read-only ключ, запускает полный sync и индексатор профилем
+`experience-index`, проверяет выключенный рабочий E. Подробности —
+[docs/experience-index.md](docs/experience-index.md).
 
 Обновление этапа 6 в уже настроенном закрытом окружении после синхронизации
 ветки выполняется одной командой `bash ops/deploy-reviewed-pdf.sh </dev/null`.
@@ -1515,7 +1528,7 @@ Shared runtime checks осуществляются через опубликов
 - автоматический PDF и отдельный Reviewed PDF после Human Review; итоговый экспорт требует актуального утверждения и включает только accepted;
 - unit/integration/architecture/runtime test layers.
 
-**Текущая приёмка:** доработка этапа 7 — обновить Linux-сервисы, проверить каталог и итоговый PDF на основном UI 8080. Сохранение опыта выполняется автоматически при утверждении и скачивании PDF; отдельной кнопки нет. **Следующие этапы Experience:** этап 8 — trusted E indexing с оценкой качества; этап 9 — отдельный эксперимент дообучения VLM. Поиск E остаётся выключенным до отдельной оценки качества.
+**Текущая приёмка:** этап 7 подтверждён логами и проверкой пользователя. Этап 8 — развернуть автоматический индекс, проверить preview на реальных сохранённых примерах, подготовить отложенный набор и измерить качество. Сохранение опыта выполняется автоматически при утверждении и скачивании PDF; отдельной кнопки нет. Рабочий поиск E выключен до успешной оценки. Этап 9 — последующий отдельный эксперимент дообучения VLM.
 
 Принятие замечания одной зелёной галочкой принимает его текущую сохранённую область:
 Review и аудит координат фиксируются атомарно. Отдельной кнопки проверки области

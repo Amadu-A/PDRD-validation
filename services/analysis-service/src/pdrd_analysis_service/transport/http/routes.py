@@ -197,6 +197,12 @@ def _experience_source_payload(
         after_page=source.after_page,
         before_context=source.before_context,
         after_context=source.after_context,
+        example_id=source.example_id,
+        example_revision=source.example_revision,
+        tag=source.tag,
+        decision=source.decision,
+        learning_use=source.learning_use,
+        negative_target=source.negative_target,
     )
 
 

@@ -42,6 +42,7 @@ from pdrd_experience_service.application.use_cases.confirm_areas import (
 )
 from pdrd_experience_service.application.use_cases.export_catalog import ExportCatalog
 from pdrd_experience_service.application.use_cases.export_review import ExportReview
+from pdrd_experience_service.application.use_cases.index_feed import ReadIndexFeed
 from pdrd_experience_service.application.use_cases.review import (
     ChangeReview,
     OpenReview,
@@ -120,6 +121,7 @@ class ApplicationContainer:
     catalog: ManageCatalog | None = None
     export_catalog: ExportCatalog | None = None
     approval_experience: ApprovalExperience | None = None
+    index_feed: ReadIndexFeed | None = None
 
     async def close(self) -> None:
         """Освобождает ресурсы, созданные Composition Root."""
@@ -272,4 +274,5 @@ def build_container(
         approval_experience=ApprovalExperience(capture)
         if capture is not None
         else None,
+        index_feed=ReadIndexFeed(catalog_repository, crop_store),
     )

@@ -17,6 +17,7 @@ from pdrd_experience_service.application.use_cases.confirm_areas import (
     ConfirmArea,
     RevokeArea,
 )
+from pdrd_experience_service.application.use_cases.index_feed import ReadIndexFeed
 from pdrd_experience_service.domain.area_confirmation import ConfirmationMode
 from pdrd_experience_service.domain.catalog import CatalogFilter, Crop, Example
 from pdrd_experience_service.domain.experience_selection import (
@@ -293,3 +294,61 @@ async def test_review_edit_invalidates_examples_without_deleting_history(engine)
             )
     finally:
         await remove_catalog(engine, approved.job_id)
+
+
+@pytest.mark.parametrize("exclude", ["inactive", "revoked"])
+async def test_index_keyset_scan_keeps_cursor_across_excluded_examples(engine, exclude):
+    """Настоящие UUID/SQL JOIN: исключённая первая строка не скрывает следующую страницу E."""
+    fixtures = [await prepared(engine) for _ in range(2)]
+    try:
+        for _, _, _, approved, example, catalog, _, versions in fixtures:
+            await catalog.capture(
+                review=approved,
+                area_versions=versions,
+                examples=(example,),
+                actor="integration:1",
+            )
+        fixtures.sort(key=lambda item: item[4].id)
+        _, _, revoke, approved, example, catalog, _, _ = fixtures[0]
+        if exclude == "inactive":
+            await catalog.update(
+                example=example.curate(
+                    fields={"active": False},
+                    actor="integration:2",
+                    at=datetime.now(UTC),
+                ),
+                expected_revision=0,
+            )
+        else:
+            await revoke.execute(
+                job_id=approved.job_id,
+                finding_id="vlm:1",
+                actor="integration:2",
+                reason="Отозвана область",
+                expected_review_revision=approved.revision,
+                expected_confirmation_revision=1,
+            )
+        raw = await catalog.scan(after=None, limit=1)
+        assert raw[0].example.id == example.id and not raw[0].active
+        feed = ReadIndexFeed(catalog, None)
+        page = await feed.page(limit=1)
+        assert page == {"items": [], "next_after": str(example.id)}
+        following = await feed.page(after=example.id, limit=1)
+        assert following["items"][0]["example_id"] == str(fixtures[1][4].id)
+        references = tuple(
+            {
+                key: item[key]
+                for key in ("example_id", "example_revision", "fingerprint")
+            }
+            for item in following["items"]
+        )
+        assert len(await feed.verify(references)) == 1
+        batch = await catalog.get_many((example.id, fixtures[1][4].id, uuid4()))
+        assert len(batch) == 2 and sum(entry.active for entry in batch) == 1
+        assert (await feed.page(after=fixtures[1][4].id, limit=1))["next_after"] is None
+        assert len(await catalog.history(example.id)) == (
+            2 if exclude == "inactive" else 1
+        )
+    finally:
+        for item in fixtures:
+            await remove_catalog(engine, item[3].job_id)

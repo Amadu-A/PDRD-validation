@@ -925,6 +925,12 @@ def build_finalization_prompt(
                 "issue_id": source.issue_id,
                 "issue_text": source.issue_text,
                 "verified_fixed": source.verified_fixed,
+                "example_id": source.example_id,
+                "example_revision": source.example_revision,
+                "tag": source.tag,
+                "decision": source.decision,
+                "learning_use": source.learning_use,
+                "negative_target": source.negative_target,
                 "before_page": source.before_page,
                 "after_page": source.after_page,
                 "before_context": (source.before_context[:experience_context_limit]),
@@ -1254,8 +1260,14 @@ normative_source_ids=[]
   пункты и страницы;
 - T/U не являются нормативными документами;
 - Experience используется только
-  как пример формулировки;
+  как инженерная подсказка для повторной проверки и пример формулировки;
 - Experience не является доказательством;
+- learning_use=positive означает принятое инженером замечание на другом документе,
+  а не доказанное нарушение на текущем листе и не исправленный проект;
+- learning_use=negative означает отклонённую формулировку: повторно проверь
+  фактическое основание текущего candidate, не копируй отрицательный пример;
+- похожесть E сама по себе не разрешает создать или отклонить замечание:
+  опирайся на текущий лист и его факты; нормативную ссылку подтверждай только N;
 - AFTER можно считать подтверждённым исправлением
   только при verified_fixed=true;
 - не вставляй N1/T1/U1/E1

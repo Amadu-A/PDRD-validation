@@ -28,6 +28,9 @@ from pdrd_experience_service.transport.http.routers.catalog import (
 from pdrd_experience_service.transport.http.routers.health import (
     router as health_router,
 )
+from pdrd_experience_service.transport.http.routers.index_feed import (
+    router as index_router,
+)
 from pdrd_experience_service.transport.http.routers.review import (
     router as review_router,
 )
@@ -74,6 +77,12 @@ def create_app(
         configure_catalog_logging()
         application.include_router(review_router)
         application.include_router(catalog_router)
+
+    if (
+        application_container.settings.enabled
+        and application_container.settings.index_key.get_secret_value()
+    ):
+        application.include_router(index_router)
 
     return application
 

@@ -100,6 +100,24 @@ class MemoryCatalog:
         record = self.examples.get(example_id)
         return await self._entry(record) if record else None
 
+    async def scan(self, *, after, limit):
+        """Обходит все строки по UUID, включая исключённые из индекса."""
+        examples = sorted(self.examples.values(), key=lambda example: example.id)
+        page = [example for example in examples if after is None or example.id > after][
+            :limit
+        ]
+        return tuple([await self._entry(example) for example in page])
+
+    async def get_many(self, example_ids):
+        """Проверяет набор идентификаторов независимо от порядка в запросе."""
+        return tuple(
+            [
+                await self._entry(example)
+                for example_id in example_ids
+                if (example := self.examples.get(example_id)) is not None
+            ]
+        )
+
     async def list(self, criteria):
         """HTTP проверяет передачу критериев, реальные SQL-фильтры проверяет PostgreSQL."""
         result = []

@@ -242,6 +242,27 @@ class SqlAlchemyCatalogRepository:
             ).first()
             return self._entry(*result) if result is not None else None
 
+    async def get_many(self, example_ids: tuple[UUID, ...]) -> tuple[CatalogEntry, ...]:
+        """Проверяет все ссылки E одним SQL-снимком, включая серверный JOIN актуальности."""
+        if not example_ids:
+            return ()
+        async with self._sessions() as database:
+            records = await database.execute(
+                self._query().where(CatalogExampleModel.id.in_(example_ids))
+            )
+            return tuple(self._entry(record, current) for record, current in records)
+
+    async def scan(self, *, after: UUID | None, limit: int) -> tuple[CatalogEntry, ...]:
+        """Keyset-обход всего каталога без смещения при появлении новых записей."""
+        query = self._query()
+        if after is not None:
+            query = query.where(CatalogExampleModel.id > after)
+        async with self._sessions() as database:
+            records = await database.execute(
+                query.order_by(CatalogExampleModel.id).limit(limit)
+            )
+            return tuple(self._entry(record, current) for record, current in records)
+
     async def update(self, *, example: Example, expected_revision: int) -> CatalogEntry:
         """Правка снимка и добавление события — одна транзакция с CAS."""
         async with self._sessions() as database, database.begin():

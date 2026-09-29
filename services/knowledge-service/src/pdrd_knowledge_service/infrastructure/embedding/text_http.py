@@ -24,6 +24,7 @@ class HttpTextEmbeddingProvider:
         request_timeout_seconds: float,
         connect_timeout_seconds: float,
         health_timeout_seconds: float,
+        output_dimension: int = 4096,
     ) -> None:
         """Создаёт bounded shared-vLLM delegate."""
         self._delegate = HttpMultimodalEmbeddingProvider(
@@ -31,6 +32,7 @@ class HttpTextEmbeddingProvider:
             request_timeout_seconds=(request_timeout_seconds),
             connect_timeout_seconds=(connect_timeout_seconds),
             health_timeout_seconds=(health_timeout_seconds),
+            output_dimension=output_dimension,
         )
 
     async def embed(

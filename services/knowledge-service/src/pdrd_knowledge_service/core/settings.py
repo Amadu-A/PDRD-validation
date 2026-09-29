@@ -527,6 +527,18 @@ class QdrantSettings(BaseModel):
     )
 
 
+class ExperienceIndexSettings(BaseModel):
+    """Синхронизация Human Review и отдельный контроль допуска рабочего E."""
+
+    index_enabled: bool = False
+    base_url: str = "http://experience-service:8000"
+    key: SecretStr = SecretStr("")
+    poll_seconds: int = Field(default=300, ge=30, le=86400)
+    page_size: int = Field(default=50, ge=1, le=100)
+    min_score: float = Field(default=0.65, ge=0, le=1)
+    quality_report: Path = Path("/data/experience-quality/report.json")
+
+
 class SearchSettings(BaseModel):
     """Runtime RAG retrieval."""
 
@@ -556,7 +568,7 @@ class SearchSettings(BaseModel):
         default=False,
         description=(
             "Включает retrieval по Базе опыта E. "
-            "До реализации feedback loop и trusted experience ingestion "
+            "До успешной оценки на отдельных размеченных документах "
             "должен оставаться выключенным."
         ),
     )
@@ -701,6 +713,8 @@ class Settings(BaseSettings):
     search: SearchSettings = Field(
         default_factory=SearchSettings,
     )
+
+    experience: ExperienceIndexSettings = Field(default_factory=ExperienceIndexSettings)
 
     project_context: ProjectContextSettings = Field(
         default_factory=ProjectContextSettings,
