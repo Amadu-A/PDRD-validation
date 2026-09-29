@@ -40,7 +40,7 @@ trap - EXIT
 
 docker compose --profile review build \
     api-gateway experience-service experience-migrate document-service frontend review-frontend </dev/null
-# Применяет все миграции текущей ветки; этап 7 добавляет 20260928_0003.
+# Применяет все миграции текущей ветки, включая каталог и реестр ручных версий.
 docker compose --profile review run --rm --no-deps -T experience-migrate </dev/null
 docker compose --profile review run --rm --no-deps -T experience-migrate \
     python -m alembic -c alembic.ini current --check-heads --verbose </dev/null

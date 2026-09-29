@@ -60,11 +60,7 @@ def test_runner_uses_explicit_database_and_selected_tests_only() -> None:
 
     assert "python -m alembic -c alembic.ini upgrade head" in source
 
-    assert (
-        "python -m pytest -q "
-        "services/experience-service/tests/integration/"
-        "test_review_database.py" in source
-    )
+    assert "python -m pytest -q services/experience-service/tests/integration" in source
 
     # Под флагом DB-тестов запускаем только Experience integration.
     # Общий pytest и тесты других сервисов требуют своей среды.

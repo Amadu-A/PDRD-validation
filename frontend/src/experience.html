@@ -24,13 +24,31 @@
       <div>
         <h1 class="experience-page__title">Experienced User Base</h1>
         <p class="experience-page__description">
-          Замечания с подтверждёнными областями и решениями инженера.
+          Замечания с решениями инженера. Для обучения нужны подтверждённые области.
         </p>
+        <section class="experience-active" data-experience-server-only aria-label="Текущая конфигурация анализа">
+          <h2 class="experience-active__title">Для текущей работы и анализа</h2>
+          <p>Здесь применяются проверенные версии. Выбор для просмотра таблицы ниже их не меняет.</p>
+          <div class="experience-active__controls">
+            <label>Векторная база <select data-experience-active-vector><option value="">Не применена</option></select></label>
+            <label>Дообученная модель <select data-experience-active-model><option value="">Не применена</option></select></label>
+          </div>
+          <p data-experience-active-status role="status">Применение доступно после проверки качества версии.</p>
+        </section>
       </div>
+      <div class="experience-versions__toolbar">
+        <label data-experience-server-only>Просмотр
+          <select data-experience-version-kind><option value="vector">Векторные базы</option><option value="fine_tune">Дообучение</option></select>
+        </label>
+        <label data-experience-server-only>Модель <select data-experience-version-model></select></label>
+        <label data-experience-server-only>Версия <select data-experience-version><option value="">Все замечания</option></select></label>
+        <button type="button" class="experience-table__icon" data-experience-version-rename data-experience-server-only title="Переименовать версию" aria-label="Переименовать версию" disabled>✎</button>
+        <button type="button" class="experience-table__icon" data-experience-version-delete data-experience-server-only title="Удалить версию" aria-label="Удалить версию" disabled>⌫</button>
       <button class="experience-page__export" type="button" disabled data-experience-export
         title="ZIP с полными текстами и изображениями всех примеров по выбранным фильтрам">
         Выгрузить замечания
       </button>
+      </div>
     </header>
 
     <p class="experience-page__notice" role="status" data-experience-notice>
@@ -81,6 +99,10 @@
         </select>
       </label>
       <label class="experience-filter__field" data-experience-server-only>
+        <span>Раздел нормативного документа</span>
+        <input name="section_id" maxlength="128" placeholder="Например: СП 484.1311500.2020:6.3">
+      </label>
+      <label class="experience-filter__field" data-experience-server-only>
         <span>Задание обработки</span>
         <input name="job_id" type="text" maxlength="36" placeholder="UUID задания или пустое поле">
       </label>
@@ -91,6 +113,12 @@
       <button type="button" data-experience-previous>← Назад</button>
       <button type="button" data-experience-next>Далее →</button>
       <button type="button" data-experience-refresh>Обновить</button>
+      <button type="button" data-experience-delete-selection disabled>Удалить выбранное</button>
+      <button type="button" class="experience-table__icon" data-experience-select-all title="Выбрать все по фильтрам (до 1000)" aria-label="Выбрать все замечания по фильтрам">☑</button>
+      <button type="button" class="experience-table__icon" data-experience-clear-selection title="Очистить выбор" aria-label="Очистить выбор замечаний">☐</button>
+      <button type="button" data-experience-select-missing disabled>Выбрать отсутствующие в версии</button>
+      <span data-experience-selected-count role="status">Выбрано: 0</span>
+      <button type="button" data-experience-build-version disabled>Запуск индексации выбранных замечаний</button>
     </nav>
 
     <div class="experience-page__table-wrap">
@@ -98,11 +126,15 @@
         <caption data-experience-caption>Примеры Experience</caption>
         <thead>
           <tr>
+            <th scope="col" data-experience-server-only>Выбор</th>
             <th scope="col">Область</th>
             <th scope="col">Документ и лист</th>
             <th scope="col">Замечание и норматив</th>
             <th scope="col">Тег / решение</th>
             <th scope="col">Состояние</th>
+            <th scope="col" data-experience-server-only>Раздел нормативного документа</th>
+            <th scope="col" data-experience-server-only>Автор</th>
+            <th scope="col" data-experience-server-only>Дата создания</th>
             <th scope="col">Действия</th>
           </tr>
         </thead>
@@ -143,6 +175,14 @@
           <span>Ссылка на нормативный документ или раздел</span>
           <input name="normative_reference" maxlength="2000">
         </label>
+        <label class="experience-dialog__field" data-experience-server-only>
+          <span>Идентификатор раздела нормативного документа</span>
+          <input name="section_id" maxlength="128" placeholder="СП 484.1311500.2020:6.3">
+        </label>
+        <label class="experience-dialog__field" data-experience-server-only>
+          <span>Название раздела нормативного документа</span>
+          <input name="section_title" maxlength="300" placeholder="СП 484.1311500.2020, раздел 6.3">
+        </label>
         <fieldset data-experience-rejection-fields data-experience-server-only>
           <legend>Уточнение отрицательного примера</legend>
           <label class="experience-dialog__field">
@@ -174,6 +214,19 @@
       <h2>История изменений</h2>
       <div data-experience-history-content></div>
       <button type="button" data-experience-history-close>Закрыть</button>
+    </dialog>
+    <dialog class="experience-dialog" data-experience-version-dialog aria-labelledby="experienceVersionTitle">
+      <form data-experience-version-form>
+        <h2 id="experienceVersionTitle" data-experience-version-title>Новая версия</h2>
+        <p data-experience-version-summary></p>
+        <label class="experience-dialog__field">Название <input name="name" maxlength="200" required></label>
+        <label class="experience-dialog__field" data-experience-version-model-field>Базовая модель <input name="model" maxlength="200" required></label>
+        <p class="experience-dialog__error" data-experience-version-error role="alert"></p>
+        <div class="experience-dialog__actions">
+          <button type="button" data-experience-version-close>Отмена</button>
+          <button type="submit" data-experience-version-save>Сохранить</button>
+        </div>
+      </form>
     </dialog>
   </main>
 </body>

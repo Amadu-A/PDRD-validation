@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import hashlib
 from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -39,10 +40,13 @@ from .test_confirmed_areas_database import engine as engine
 pytestmark = pytest.mark.database
 
 
-async def prepared(engine):
+async def prepared(engine, *, source_sha256=None):
     """Создаёт и утверждает один VLM-пример через настоящие Review и Area repository."""
     job_id = uuid4()
-    review = initial(job_id)
+    review = replace(
+        initial(job_id),
+        source_sha256=source_sha256 or hashlib.sha256(job_id.bytes).hexdigest(),
+    )
     reviews, areas = adapters(engine)
     confirm = ConfirmArea(reviews, areas)
     revoke = RevokeArea(reviews, areas)
@@ -146,7 +150,7 @@ async def test_catalog_capture_is_idempotent_and_survives_repository_recreation(
                         "SELECT version_num FROM experience.alembic_version_experience"
                     )
                 )
-                == "20260928_0003"
+                == "20260929_0004"
             )
     finally:
         await remove_catalog(engine, approved.job_id)

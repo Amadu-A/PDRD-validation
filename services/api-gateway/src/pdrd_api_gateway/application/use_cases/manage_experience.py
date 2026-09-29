@@ -47,7 +47,54 @@ class ManageExperience:
                 403, "Серверный контекст не соответствует каталогу."
             )
         await self.access.require(context)
-        if example_id is not None:
+        if operation in {"delete_selection", "version_create"}:
+            # Права проверяются на каждое серверное задание до единой записи набора.
+            items = (command or {}).get("items", [])
+            selection = await self.service.execute(
+                context=replace(context, operation="selection_read"),
+                query=None,
+                command={"items": items},
+                index=None,
+            )
+            try:
+                rows = selection["items"]
+                if {row["id"] for row in rows} != {item["id"] for item in items}:
+                    raise ValueError("Несоответствующий выбор.")
+                jobs = tuple(dict.fromkeys(UUID(row["job_id"]) for row in rows))
+            except (KeyError, TypeError, ValueError) as error:
+                raise ReviewRequestError(
+                    503, "Каталог вернул некорректный выбор."
+                ) from error
+            for resource_job in jobs:
+                await self.access.require(replace(context, job_id=resource_job))
+        if example_id is not None and operation.startswith("version_"):
+            record = await self.service.execute(
+                context=replace(context, operation="version_read"),
+                query=None,
+                command=None,
+                index=None,
+            )
+            if (
+                not isinstance(record, dict)
+                or record.get("id") != str(example_id)
+                or not isinstance(record.get("members"), list)
+            ):
+                raise ReviewRequestError(
+                    503, "Реестр вернул некорректный состав версии."
+                )
+            try:
+                jobs = tuple(
+                    dict.fromkeys(UUID(item["job_id"]) for item in record["members"])
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                raise ReviewRequestError(
+                    503, "Реестр вернул некорректный источник версии."
+                ) from error
+            for resource_job in jobs:
+                await self.access.require(replace(context, job_id=resource_job))
+            if operation == "version_read":
+                return record
+        elif example_id is not None:
             record = await self.service.execute(
                 context=replace(context, operation="read"),
                 query=None,

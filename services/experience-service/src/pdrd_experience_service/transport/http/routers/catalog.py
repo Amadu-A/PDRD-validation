@@ -27,6 +27,7 @@ from pdrd_experience_service.transport.http.schemas.catalog import (
     CaptureCommand,
     CatalogQuery,
     CatalogUpdate,
+    DeleteSelection,
 )
 
 router = APIRouter(prefix="/internal/v1/experience", tags=["experience-internal"])
@@ -117,6 +118,30 @@ async def get_example(example_id: UUID, actor: Actor, container: Container) -> d
     del actor
     with catalog_errors():
         return entry_view(await connected(container).get(example_id))
+
+
+@router.post("/delete-selection")
+async def delete_selection(
+    command: DeleteSelection, actor: Actor, container: Container
+) -> dict:
+    """Скрывает удалённые записи; аудит и состав старых версий сохраняются."""
+    with catalog_errors():
+        return await connected(container).delete_many(
+            references=tuple((item.id, item.revision) for item in command.items),
+            actor=actor,
+        )
+
+
+@router.post("/read-selection")
+async def read_selection(
+    command: DeleteSelection, actor: Actor, container: Container
+) -> dict:
+    """Внутренний batch-read исключает N отдельных сетевых/SQL чтений в Gateway."""
+    del actor
+    with catalog_errors():
+        return await connected(container).read_selection(
+            tuple((item.id, item.revision) for item in command.items)
+        )
 
 
 @router.patch("/{example_id}")

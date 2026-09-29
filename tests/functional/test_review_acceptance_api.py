@@ -80,7 +80,11 @@ async def test_acceptance_geometry_rejection_and_training_selection(
         restored = (await browser.get(flow.endpoint)).json()
         assert restored["findings"] == review["findings"]
         records = (await listed(browser))["items"]
-        assert len(records) == (1 if tag else 0)
+        assert len(records) == 1
+        if not tag:
+            assert records[0]["tag"] == ("edited" if "edit" in actions else "bad")
+            assert records[0]["crops"] == [] and not records[0]["training_eligible"]
+            assert records[0]["source"]["issue_regions"] == []
         if tag:
             record = records[0]
             assert record["tag"] == tag and record["learning_use"] == learning_use

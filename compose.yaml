@@ -681,6 +681,7 @@ services:
     environment:
       <<: *knowledge-service-environment
       KNOWLEDGE_SERVICE_EXPERIENCE__INDEX_ENABLED: "true"
+      KNOWLEDGE_SERVICE_EXPERIENCE__POLL_SECONDS: "30"
     command: ["python", "-m", "pdrd_knowledge_service.experience_runtime", "watch"]
     volumes:
       - experience_index_quality:/data/experience-quality

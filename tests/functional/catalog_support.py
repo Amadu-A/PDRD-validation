@@ -2,9 +2,13 @@
 
 """Тестовые порты каталога для HTTP-проверок; настоящие транзакции проверяются отдельно."""
 
+from dataclasses import replace
+from datetime import UTC, datetime
+
 from pdrd_experience_service.application.catalog_snapshot import example_to_json
 from pdrd_experience_service.domain.area_confirmation import content_signature
 from pdrd_experience_service.domain.catalog import CatalogEntry
+from pdrd_experience_service.domain.catalog_identity import content_key
 from pdrd_experience_service.domain.experience_selection import ConfirmedFindingArea
 from pdrd_experience_service.domain.review import Origin, ReviewConflictError
 
@@ -43,6 +47,7 @@ class MemoryCatalog:
         """Источник Review и подтверждений остаётся отдельным портом."""
         self.reviews, self.areas = reviews, areas
         self.examples, self.events = {}, {}
+        self.occurrences = {}
 
     async def _entry(self, example):
         """Актуальность определяется текущим источником и подписью, а не UI."""
@@ -53,7 +58,7 @@ class MemoryCatalog:
             and review.revision == source.approved_revision
             and review.approved_revision == review.revision
         )
-        if current and source.origin is Origin.VLM:
+        if current and source.origin is Origin.VLM and source.issue_regions:
             area = self.areas.rows.get(source.finding_id)
             finding = next(
                 item for item in review.findings if item.finding_id == source.finding_id
@@ -78,6 +83,17 @@ class MemoryCatalog:
             raise ReviewConflictError("Stale areas.")
         created = 0
         for example in examples:
+            prior = next(
+                (
+                    item
+                    for item in self.examples.values()
+                    if content_key(item.source) == content_key(example.source)
+                ),
+                None,
+            )
+            if prior is not None:
+                self.occurrences.setdefault(prior.id, []).append(example.source)
+                continue
             if example.id not in self.examples:
                 self.examples[example.id] = example
                 self.events[example.id] = [
@@ -133,7 +149,9 @@ class MemoryCatalog:
                 ]
             ).lower()
             if (
-                (criteria.query and criteria.query.lower() not in haystack)
+                example.deleted
+                or (criteria.section_id and example.section_id != criteria.section_id)
+                or (criteria.query and criteria.query.lower() not in haystack)
                 or (tag and example.tag != tag)
                 or (decision and example.source.decision.value != decision)
                 or (
@@ -173,3 +191,24 @@ class MemoryCatalog:
     async def history(self, example_id):
         """История фиксирует все редакции без изменения старого снимка."""
         return tuple(self.events[example_id])
+
+    async def delete_many(self, *, references, actor):
+        """Сверяет весь набор до изменения какой-либо строки."""
+        if any(item not in self.examples for item, _ in references):
+            raise LookupError("Missing examples.")
+        if any(
+            self.examples[item].revision != revision or self.examples[item].deleted
+            for item, revision in references
+        ):
+            raise ReviewConflictError("Stale selection.")
+        for item, revision in references:
+            revised = replace(
+                self.examples[item],
+                deleted=True,
+                active=False,
+                revision=revision + 1,
+                updated_at=datetime.now(UTC),
+                curated_by=actor,
+            )
+            await self.update(example=revised, expected_revision=revision)
+        return len(references)

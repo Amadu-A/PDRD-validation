@@ -153,15 +153,18 @@ def test_prepare_does_not_delete_preexisting_temporary_file(tmp_path):
 
 
 def test_linux_deployment_runs_quality_before_index_mutations_and_checks_disabled_e():
-    """Общий и SQL gate наследуются штатным скриптом; полный sync предшествует watch."""
+    """Старый автоматический обход останавливается; новый worker стартует после quality/SQL gate."""
     source = (ROOT / "ops/deploy-experience-index.sh").read_text(encoding="utf-8")
     assert (
         source.index("deploy-review-services.sh")
         < source.index("prepare-experience-index.py")
-        < source.index("experience_runtime sync")
         < source.index("--wait-timeout 1200")
     )
     assert "Settings().search.experience_enabled is False" in source
+    assert source.index("stop experience-indexer") < source.index(
+        "deploy-review-services.sh"
+    )
+    assert "experience_runtime sync" not in source
     assert "down -v" not in source and "shared-vlm" not in source
 
 

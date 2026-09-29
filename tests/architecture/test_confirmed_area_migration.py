@@ -28,6 +28,11 @@ def test_new_tables_have_independent_version_and_composite_event_key() -> None:
         "experience.area_confirmation_events",
         "experience.catalog_examples",
         "experience.catalog_events",
+        "experience.catalog_occurrences",
+        "experience.artifact_versions",
+        "experience.artifact_members",
+        "experience.artifact_events",
+        "experience.applied_artifacts",
     } == set(Base.metadata.tables)
 
     assert [

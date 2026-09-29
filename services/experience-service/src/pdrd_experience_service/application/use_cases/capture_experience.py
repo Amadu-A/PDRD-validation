@@ -25,6 +25,7 @@ from pdrd_experience_service.application.ports.confirmed_areas import (
 from pdrd_experience_service.application.ports.review import ReviewRepository
 from pdrd_experience_service.core.observability import log_execution_time
 from pdrd_experience_service.domain.catalog import Example
+from pdrd_experience_service.domain.catalog_identity import content_key
 from pdrd_experience_service.domain.experience_selection import (
     select_experience_candidates,
 )
@@ -56,7 +57,7 @@ class CaptureExperience:
         statuses = await self.areas.load_status(review=review)
         confirmed = await self.areas.load_confirmed(job_id=job_id)
         candidates = select_experience_candidates(
-            session=review, confirmed_areas=confirmed
+            session=review, confirmed_areas=confirmed, include_unlocated_rejections=True
         )
         source = await self.source.load_completed(job_id)
         if (
@@ -73,19 +74,26 @@ class CaptureExperience:
         for candidate in candidates:
             example_id = uuid5(
                 NAMESPACE_URL,
-                f"pdrd-experience:{candidate.example_key}:review:{candidate.approved_revision}",
+                f"pdrd-experience-content-v1:{content_key(candidate)}",
             )
             existing = await self.catalog.get(example_id)
-            if existing is not None:
-                continue
-            images = await self.renderer.render(
-                pdf=source.pdf_content,
-                page_number=candidate.page_number,
-                regions=candidate.issue_regions,
+            # Повторный прогон сохраняет происхождение, но не дублирует crop.
+            images = (
+                await self.renderer.render(
+                    pdf=source.pdf_content,
+                    page_number=candidate.page_number,
+                    regions=candidate.issue_regions,
+                )
+                if candidate.issue_regions and existing is None
+                else ()
             )
-            if len(images) != len(candidate.issue_regions):
+            if existing is None and len(images) != len(candidate.issue_regions):
                 raise RuntimeError("Document Service вернул неполный crop.")
-            crops = tuple([await self.crops.put(content) for content in images])
+            crops = (
+                existing.example.crops
+                if existing
+                else tuple([await self.crops.put(content) for content in images])
+            )
             examples.append(
                 Example(
                     id=example_id,
@@ -102,6 +110,8 @@ class CaptureExperience:
                     created_at=at,
                     updated_at=at,
                     curated_by=actor,
+                    section_id=candidate.section_id,
+                    section_title=candidate.section_title,
                 )
             )
         if await self.reviews.load(job_id) != review:
@@ -117,6 +127,7 @@ class CaptureExperience:
         )
         return {
             **result,
-            "eligible": len(candidates),
+            "stored": len(candidates),
+            "eligible": sum(bool(item.issue_regions) for item in candidates),
             "excluded": len(review.findings) - len(candidates),
         }

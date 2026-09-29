@@ -3,7 +3,7 @@
 /** Crop, инженерная редакция с CAS и неизменяемая история в отдельных модальных окнах. */
 import { element } from "./rows.js";
 
-const FIELDS = ["document_title", "text", "normative_basis", "normative_reference", "active", "rejection_reason", "negative_target"];
+const FIELDS = ["document_title", "text", "normative_basis", "normative_reference", "active", "rejection_reason", "negative_target", "section_id", "section_title"];
 
 export function mountExperienceDialogs({ api, onSaved, document: dom = document }) {
   const find = (key) => dom.querySelector(`[data-experience-${key}]`);

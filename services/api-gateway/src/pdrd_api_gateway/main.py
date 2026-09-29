@@ -30,6 +30,9 @@ from pdrd_api_gateway.transport.http.routers.analysis_progress import (
 from pdrd_api_gateway.transport.http.routers.experience import (
     router as experience_router,
 )
+from pdrd_api_gateway.transport.http.routers.experience_versions import (
+    router as experience_versions_router,
+)
 from pdrd_api_gateway.transport.http.routers.health import (
     router as health_router,
 )
@@ -97,6 +100,7 @@ def create_app(
 
     application.include_router(review_router)
     application.include_router(experience_router)
+    application.include_router(experience_versions_router)
     application.include_router(review_source_router)
 
     application.include_router(

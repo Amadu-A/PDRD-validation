@@ -20,7 +20,7 @@ test("новое утверждение использует выполненн�
     session: { revision: 5, experience_capture: saved },
     api: { capture: () => { throw new Error("Лишний запрос"); } } });
   assert.equal(result, saved);
-  assert.match(experienceCaptureMessage(result), /проверенные примеры: 2/);
+  assert.match(experienceCaptureMessage(result), /сохранено замечаний: 2; с подтверждёнными областями: 2/);
 });
 
 test("ошибка автоматического переноса сохраняется с рекомендацией повторить скачивание", async () => {

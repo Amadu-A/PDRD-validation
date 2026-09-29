@@ -4,29 +4,49 @@
 
 import json
 from argparse import Namespace
+from uuid import UUID
 
 import pytest
 from pdrd_knowledge_service import experience_runtime as runtime
+from pdrd_knowledge_service.application.ports.experience_versions import VersionIndexJob
 from pdrd_knowledge_service.core.experience import ExperienceContainer
 from pdrd_knowledge_service.core.settings import ExperienceIndexSettings, Settings
+from pdrd_knowledge_service.infrastructure.experience_feed import parse_example
 
-from tests.experience_index_support import trusted_example
+from tests.experience_index_support import signed, trusted_example
 
 from .test_experience_quality import evaluation
 from .test_trusted_experience import services
 
 
+@pytest.mark.parametrize("use_version", [False, True])
 async def test_evaluation_writes_report_with_dataset_hash_without_enabling_main_search(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch, capsys, use_version
 ):
     """Проверяется инструмент оценки на synthetic fixture, а не качество производственной VLM."""
-    _, _, _, index, search = services((trusted_example(),))
+    example = parse_example(signed({**trusted_example().data, "section_id": "СП 1:6"}))
+    _, _, _, index, search = services((example,))
     await index.execute()
     monkeypatch.setattr(
         runtime,
         "build_experience_container",
         lambda settings, shadow: ExperienceContainer(index, search),
     )
+    version = VersionIndexJob(
+        UUID(int=100),
+        index.collection,
+        index.identity,
+        index.dimension,
+        "СП 1:6",
+        (example,),
+        "b" * 64,
+    )
+
+    async def prepare_version(settings, container, version_id):
+        assert version_id == version.id
+        return container, version
+
+    monkeypatch.setattr(runtime, "prepare_version_search", prepare_version)
     cases, _, findings = evaluation()
     dataset, output = tmp_path / "dataset.json", tmp_path / "quality/report.json"
     dataset.write_text(
@@ -45,7 +65,13 @@ async def test_evaluation_writes_report_with_dataset_hash_without_enabling_main_
         experience=ExperienceIndexSettings(key="private-key-" + "x" * 52),
     )
     await runtime.run(
-        Namespace(command="evaluate", dataset=dataset, output=output), settings
+        Namespace(
+            command="evaluate",
+            dataset=dataset,
+            output=output,
+            version=version.id if use_version else None,
+        ),
+        settings,
     )
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["approved"] and report["report_schema_version"] == 1
@@ -54,6 +80,10 @@ async def test_evaluation_writes_report_with_dataset_hash_without_enabling_main_
         and report["embedding_identity"] == index.identity
     )
     assert len(report["dataset_sha256"]) == 64 and report["top_k"] == search.top_k
+    if use_version:
+        assert report["version_id"] == str(version.id)
+        assert report["manifest_sha256"] == version.manifest_sha256
+        assert report["section_id"] == version.section_id
     assert (
         not settings.search.experience_enabled
         and settings.experience.key.get_secret_value() not in capsys.readouterr().out

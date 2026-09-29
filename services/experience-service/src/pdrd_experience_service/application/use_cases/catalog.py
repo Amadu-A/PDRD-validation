@@ -12,7 +12,7 @@ from pdrd_experience_service.application.ports.catalog import (
 )
 from pdrd_experience_service.core.observability import log_execution_time
 from pdrd_experience_service.domain.catalog import CatalogEntry, CatalogFilter
-from pdrd_experience_service.domain.review import ReviewConflictError
+from pdrd_experience_service.domain.review import ReviewConflictError, ReviewError
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +39,8 @@ class ManageCatalog:
     ) -> CatalogEntry:
         """CAS защищает от перезаписи правок второй вкладки."""
         entry = await self.get(example_id)
+        if entry.example.deleted:
+            raise LookupError("Пример Experience удалён.")
         if entry.example.revision != expected_revision:
             raise ReviewConflictError(
                 "Пример уже изменён; загрузите актуальную редакцию."
@@ -51,6 +53,8 @@ class ManageCatalog:
     async def image(self, *, example_id: UUID, index: int) -> bytes:
         """Не принимает путь или хеш от браузера: только номер области своего примера."""
         entry = await self.get(example_id)
+        if entry.example.deleted:
+            raise LookupError("Пример Experience удалён.")
         if not 0 <= index < len(entry.example.crops):
             raise LookupError("Область примера не найдена.")
         return await self.crops.read(entry.example.crops[index])
@@ -59,3 +63,33 @@ class ManageCatalog:
         """Существование проверяется до выдачи неизменяемого журнала."""
         await self.get(example_id)
         return await self.repository.history(example_id)
+
+    async def delete_many(
+        self, *, references: tuple[tuple[UUID, int], ...], actor: str
+    ) -> dict:
+        """Удаляет выбранные строки целиком либо сообщает конфликт без частичной записи."""
+        if (
+            not references
+            or len(references) > 1000
+            or len({item[0] for item in references}) != len(references)
+        ):
+            raise ReviewError("Выберите от 1 до 1000 различных замечаний.")
+        if not actor.strip():
+            raise ReviewError("Отсутствует серверный автор операции.")
+        deleted = await self.repository.delete_many(references=references, actor=actor)
+        return {"deleted": deleted}
+
+    async def read_selection(self, references: tuple[tuple[UUID, int], ...]) -> dict:
+        """Gateway получает задания всего выбора одним чтением для будущей проверки прав."""
+        entries = await self.repository.get_many(tuple(dict(references)))
+        if len(entries) != len(dict(references)):
+            raise LookupError("Часть выбранных замечаний не найдена.")
+        return {
+            "items": [
+                {
+                    "id": str(entry.example.id),
+                    "job_id": str(entry.example.source.job_id),
+                }
+                for entry in entries
+            ]
+        }

@@ -1,8 +1,8 @@
 # services/knowledge-service/src/pdrd_knowledge_service/experience_runtime.py
 
-"""CLI этапа 8: синхронизация E, проверочный поиск и оценка на отложенном наборе.
+"""CLI Experience: обработка ручных версий, проверочный поиск и оценка качества.
 
-Watch выполняет полный идемпотентный обход с паузой и восстановлением после сбоя.
+Watch берёт только вручную созданные задания; новый пример не запускает индексацию.
 Preview/evaluate не меняют рабочий флаг E, shared-модели и n8n workflows.
 """
 
@@ -16,8 +16,13 @@ import time
 from argparse import Namespace
 from contextlib import suppress
 from pathlib import Path
+from uuid import UUID, uuid4
 
-from pdrd_knowledge_service.core.experience import build_experience_container
+from pdrd_knowledge_service.core.experience import (
+    build_experience_container,
+    build_version_worker,
+    prepare_version_search,
+)
 from pdrd_knowledge_service.core.settings import Settings
 from pdrd_knowledge_service.domain.experience_quality import (
     quality_report,
@@ -45,8 +50,14 @@ async def run(arguments: Namespace, settings: Settings) -> None:
             "Индекс E требует отдельный служебный ключ длиной не менее 32 символов."
         )
     container = build_experience_container(settings, shadow=True)
+    version = None
+    if getattr(arguments, "version", None):
+        container, version = await prepare_version_search(
+            settings, container, arguments.version
+        )
+    search_options = {"section_id": version.section_id} if version else {}
     if arguments.command == "preview":
-        results = await container.search.execute(arguments.query)
+        results = await container.search.execute(arguments.query, **search_options)
         print(
             json.dumps(
                 [
@@ -101,7 +112,8 @@ async def run(arguments: Namespace, settings: Settings) -> None:
         for offset in range(0, len(cases), 20):
             results.extend(
                 await container.search.execute(
-                    [case["query"] for case in cases[offset : offset + 20]]
+                    [case["query"] for case in cases[offset : offset + 20]],
+                    **search_options,
                 )
             )
         report = quality_report(
@@ -121,6 +133,12 @@ async def run(arguments: Namespace, settings: Settings) -> None:
             top_k=container.search.top_k,
             min_score=container.search.min_score,
         )
+        if version:
+            report.update(
+                version_id=str(version.id),
+                manifest_sha256=version.manifest_sha256,
+                section_id=version.section_id,
+            )
         await asyncio.to_thread(
             write_json, arguments.output or settings.experience.quality_report, report
         )
@@ -128,8 +146,11 @@ async def run(arguments: Namespace, settings: Settings) -> None:
         return
     if not settings.experience.index_enabled:
         raise ValueError("Синхронизация E выключена конфигурацией.")
+    worker = build_version_worker(
+        settings, container, worker=f"experience_{uuid4().hex}"
+    )
     if arguments.command == "sync":
-        result = await container.index.execute()
+        result = await worker.execute()
         print(json.dumps(result, ensure_ascii=False))
         return
     stop = asyncio.Event()
@@ -139,16 +160,18 @@ async def run(arguments: Namespace, settings: Settings) -> None:
             loop.add_signal_handler(name, stop.set)
     while not stop.is_set():
         try:
-            result = await container.index.execute()
+            result = await worker.execute()
             await asyncio.to_thread(
                 write_json, STATUS, {**result, "last_success": time.time()}
             )
-            logger.info(
-                "experience_index_sync %s", json.dumps(result, ensure_ascii=False)
-            )
+            if result.get("claimed"):
+                logger.info(
+                    "experience_version_complete %s",
+                    json.dumps(result, ensure_ascii=False),
+                )
         except Exception:
             # Отдельный цикл восстановления не завершает процесс после временной ошибки.
-            logger.exception("experience_index_sync_failed")
+            logger.error("experience_version_failed: повтор после паузы")
         with suppress(TimeoutError):
             await asyncio.wait_for(stop.wait(), settings.experience.poll_seconds)
 
@@ -160,8 +183,10 @@ def main() -> None:
     commands.add_parser("sync")
     commands.add_parser("watch")
     preview = commands.add_parser("preview")
+    preview.add_argument("--version", type=UUID, required=True)
     preview.add_argument("query", nargs="+")
     evaluate = commands.add_parser("evaluate")
+    evaluate.add_argument("--version", type=UUID, required=True)
     evaluate.add_argument("dataset", type=Path)
     evaluate.add_argument("--output", type=Path)
     logging.basicConfig(

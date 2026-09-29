@@ -15,6 +15,9 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from pdrd_experience_service.infrastructure.database.artifact_models import (
+    ArtifactVersionModel,
+)
 from pdrd_experience_service.infrastructure.database.catalog_models import (
     CatalogExampleModel,
 )
@@ -42,6 +45,7 @@ class DatabaseReadinessProbe:
         if not self._expected_heads:
             raise RuntimeError("В поставке Experience отсутствуют миграции Alembic.")
         # Импорт catalog_models регистрирует также исходные Review/Area модели.
+        assert ArtifactVersionModel.metadata is CatalogExampleModel.metadata
         self._tables = tuple(
             sorted(
                 table.fullname

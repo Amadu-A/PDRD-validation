@@ -20,6 +20,7 @@ from pdrd_experience_service.application.ports.catalog import (
 )
 from pdrd_experience_service.core.observability import log_execution_time
 from pdrd_experience_service.domain.catalog import CatalogFilter
+from pdrd_experience_service.domain.index_projection import index_projection
 from pdrd_experience_service.domain.review import ReviewConflictError, ReviewError
 
 
@@ -63,8 +64,7 @@ class ExportCatalog:
                     active=entry.active,
                     requested_active=example.active,
                     source_current=entry.source_current,
-                    training_eligible=entry.active
-                    and example.learning_use != "needs_adjudication",
+                    training_eligible=index_projection(entry) is not None,
                 )
                 paths = []
                 for index, crop in enumerate(example.crops):
@@ -102,6 +102,11 @@ class ExportCatalog:
                     "learning_use",
                     "active",
                     "source_current",
+                    "source_sha256",
+                    "section_id",
+                    "section_title",
+                    "author",
+                    "created_at",
                 ]
             )
             for entry in entries:
@@ -117,6 +122,11 @@ class ExportCatalog:
                     example.learning_use,
                     entry.active,
                     entry.source_current,
+                    example.source.source_sha256,
+                    example.section_id,
+                    example.section_title,
+                    example.source.created_by,
+                    example.created_at.isoformat(),
                 ]
                 writer.writerow(
                     [

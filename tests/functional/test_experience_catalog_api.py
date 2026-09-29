@@ -120,6 +120,76 @@ async def listed(browser, **params):
     return response.json()
 
 
+async def test_direct_rejection_is_saved_without_inventing_confirmed_crop(catalog_flow):
+    """Крестик сохраняет Bad при утверждении, даже если область ранее не принимали."""
+    flow = catalog_flow
+    async with client(flow) as browser:
+        await browser.post(flow.endpoint + "/open")
+        assert (
+            await command(
+                browser,
+                flow,
+                0,
+                finding_id="vlm:1",
+                action="decide",
+                decision="rejected",
+            )
+        ).status_code == 200
+        assert (
+            await command(
+                browser,
+                flow,
+                1,
+                finding_id="vlm:2",
+                action="decide",
+                decision="accepted",
+            )
+        ).status_code == 200
+        assert (await listed(browser))["total"] == 0
+        approved = await command(browser, flow, 2, action="approve")
+        assert approved.status_code == 200, approved.text
+        rows = await listed(browser, tag="bad")
+        assert rows["total"] == 1
+        bad = rows["items"][0]
+        assert bad["source_current"] and not bad["training_eligible"]
+        assert bad["crops"] == [] and bad["source"]["issue_regions"] == []
+        assert (
+            await browser.get(f"/api/v1/experience/{bad['id']}/crops/0")
+        ).status_code == 404
+
+
+async def test_bulk_delete_is_atomic_and_does_not_reappear_after_capture(catalog_flow):
+    """CAS-конфликт одной строки не удаляет остальные; повторный PDF не воскрешает удалённое."""
+    flow = catalog_flow
+    async with client(flow) as browser:
+        revision = await prepare(browser, flow)
+        rows = (await listed(browser))["items"]
+        items = [{"id": item["id"], "revision": item["revision"]} for item in rows]
+        stale = [dict(item) for item in items]
+        stale[1]["revision"] += 1
+        assert (
+            await browser.post(
+                "/api/v1/experience/delete-selection", json={"items": stale}
+            )
+        ).status_code == 409
+        assert (await listed(browser))["total"] == 2
+        deleted = await browser.post(
+            "/api/v1/experience/delete-selection", json={"items": items}
+        )
+        assert deleted.status_code == 200 and deleted.json()["deleted"] == 2
+        assert (await listed(browser))["total"] == 0
+        again = await browser.post(
+            f"/api/v1/experience/capture/{flow.job_id}",
+            json={"expected_revision": revision},
+        )
+        assert again.status_code == 200 and again.json()["created"] == 0
+        assert (await listed(browser))["total"] == 0
+        events = (
+            await browser.get(f"/api/v1/experience/{items[0]['id']}/history")
+        ).json()["events"]
+        assert events[-1]["snapshot"]["deleted"] is True
+
+
 async def test_lan_frontend_approval_saves_experience_and_exports_reviewed_pdf(
     catalog_flow,
 ):

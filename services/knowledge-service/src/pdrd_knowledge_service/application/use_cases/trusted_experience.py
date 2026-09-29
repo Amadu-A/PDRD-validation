@@ -43,14 +43,21 @@ class SearchTrustedExperience:
     top_k: int = 3
     min_score: float = 0.65
     enabled: bool = False
+    require_section: bool = False
 
     @log_execution_time(operation="trusted_experience_search")
-    async def execute(self, queries: list[str]) -> tuple[ExperienceSearchResult, ...]:
+    async def execute(
+        self, queries: list[str], *, section_id: str | None = None
+    ) -> tuple[ExperienceSearchResult, ...]:
         """Выключенный режим не делает сетевых запросов и не нагружает shared GPU."""
         normalized = tuple(query.strip() for query in queries)
         if any(not query for query in normalized):
             raise ValueError("Запрос E не может быть пустым.")
-        if not self.enabled or not normalized:
+        if (
+            not self.enabled
+            or not normalized
+            or (self.require_section and not section_id)
+        ):
             return tuple(
                 ExperienceSearchResult(query, (), self.embedding_model)
                 for query in normalized
@@ -65,6 +72,11 @@ class SearchTrustedExperience:
             must=(
                 VectorSearchCondition("kind", (KIND,)),
                 VectorSearchCondition("embedding_identity", (self.identity,)),
+            )
+            + (
+                (VectorSearchCondition("section_id", (section_id,)),)
+                if section_id
+                else ()
             )
         )
         groups = await asyncio.gather(
@@ -87,6 +99,7 @@ class SearchTrustedExperience:
                     if (
                         payload["kind"] != KIND
                         or payload["embedding_identity"] != self.identity
+                        or (section_id and payload.get("section_id") != section_id)
                         or not math.isfinite(point.score)
                         or point.score < self.min_score
                     ):
@@ -116,6 +129,8 @@ class SearchTrustedExperience:
             for point, reference in candidates:
                 example = current.get(reference)
                 if example is None or reference.example_id in used:
+                    continue
+                if section_id and example.data.get("section_id") != section_id:
                     continue
                 target, index = (
                     point.payload.get("target"),

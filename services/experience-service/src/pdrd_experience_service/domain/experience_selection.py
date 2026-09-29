@@ -85,6 +85,8 @@ class ExperienceCandidate:
     updated_by: str
     confirmed_by: str
     confirmed_at: datetime
+    section_id: str = ""
+    section_title: str = ""
 
 
 def _example_key(
@@ -125,6 +127,7 @@ def select_experience_candidates(
     *,
     session: ReviewSession,
     confirmed_areas: tuple[ConfirmedFindingArea, ...],
+    include_unlocated_rejections: bool = False,
 ) -> tuple[ExperienceCandidate, ...]:
     """Отбирает только проверенные области после утверждения всего review.
 
@@ -185,15 +188,20 @@ def select_experience_candidates(
             area = by_id.get(finding.finding_id)
 
             if area is None:
-                # Принятое, но не локализованное замечание
-                # сохраняется в Review и может остаться в PDF.
-                continue
-
-            regions = area.regions
-            callout_box = None
-
-            confirmed_by = area.confirmed_by
-            confirmed_at = area.confirmed_at
+                # Отказ хранится в каталоге без выдуманной области. Он не допускается
+                # в обучающую проекцию, пока нет ранее принятой актуальной области.
+                if (
+                    not include_unlocated_rejections
+                    or finding.decision is not Decision.REJECTED
+                ):
+                    continue
+                regions, callout_box = (), None
+                confirmed_by, confirmed_at = "", finding.updated_at
+            else:
+                regions = area.regions
+                callout_box = None
+                confirmed_by = area.confirmed_by
+                confirmed_at = area.confirmed_at
 
         tag = finding.experience_tag
 

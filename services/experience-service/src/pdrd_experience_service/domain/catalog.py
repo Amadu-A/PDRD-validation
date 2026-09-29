@@ -41,6 +41,9 @@ class Example:
     created_at: datetime
     updated_at: datetime
     curated_by: str
+    section_id: str = ""
+    section_title: str = ""
+    deleted: bool = False
 
     @property
     def tag(self) -> str:
@@ -76,6 +79,8 @@ class Example:
             "active",
             "rejection_reason",
             "negative_target",
+            "section_id",
+            "section_title",
         }
         if not fields or not fields.keys() <= allowed:
             raise ReviewError("Можно менять только инженерные поля каталога.")
@@ -110,6 +115,8 @@ class Example:
             "normative_basis": 2000,
             "normative_reference": 2000,
             "rejection_reason": 1000,
+            "section_id": 128,
+            "section_title": 300,
         }
         if (
             not result.text
@@ -119,6 +126,10 @@ class Example:
             raise ReviewError("Проверьте длину и заполнение полей каталога.")
         if result.negative_target not in {"", "original", "revised", "both"}:
             raise ReviewError("Укажите объект отрицательного примера.")
+        if bool(result.section_id) != bool(result.section_title):
+            raise ReviewError(
+                "Идентификатор и название раздела нормативного документа задаются вместе."
+            )
         if bool(result.rejection_reason) != bool(result.negative_target):
             raise ReviewError("Причина отказа и объект разметки задаются вместе.")
         if result.source.decision is not Decision.REJECTED and (
@@ -144,6 +155,7 @@ class CatalogFilter:
     job_id: UUID | None = None
     offset: int = 0
     limit: int = 50
+    section_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,4 +168,4 @@ class CatalogEntry:
     @property
     def active(self) -> bool:
         """Отозванный источник исключает пример из автоматического использования."""
-        return self.example.active and self.source_current
+        return self.example.active and not self.example.deleted and self.source_current

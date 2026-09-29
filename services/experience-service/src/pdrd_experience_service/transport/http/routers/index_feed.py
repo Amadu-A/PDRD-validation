@@ -1,6 +1,6 @@
 # services/experience-service/src/pdrd_experience_service/transport/http/routers/index_feed.py
 
-"""Закрытый канал чтения E для Knowledge, с отдельным ключом без прав изменения Review."""
+"""Закрытый канал Knowledge: чтение E и аренда ручных задач без изменения Review/каталога."""
 
 import secrets
 from typing import Annotated
@@ -12,6 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from pdrd_experience_service.core.container import ApplicationContainer
 from pdrd_experience_service.domain.review import ReviewConflictError, ReviewError
 from pdrd_experience_service.transport.http.dependencies import get_container
+from pdrd_experience_service.transport.http.routers.catalog import catalog_errors
+from pdrd_experience_service.transport.http.schemas.artifacts import (
+    WorkerClaim,
+    WorkerResult,
+)
 
 Container = Annotated[ApplicationContainer, Depends(get_container)]
 
@@ -89,3 +94,34 @@ async def crop(
     return Response(
         content, media_type="image/png", headers={"Cache-Control": "no-store"}
     )
+
+
+@router.post("/versions/claim")
+async def claim(command: WorkerClaim, container: Container) -> dict:
+    """Индексный ключ может взять задачу и изменить её статус, но не каталог/Review."""
+    if container.artifacts is None:
+        raise HTTPException(503, "Реестр версий не подключён.")
+    with catalog_errors():
+        return await container.artifacts.claim(**command.model_dump())
+
+
+@router.post("/versions/{version_id}/result")
+async def result(version_id: UUID, command: WorkerResult, container: Container) -> dict:
+    """Готовность индекса не означает проверку качества или применение в рабочем анализе."""
+    if container.artifacts is None:
+        raise HTTPException(503, "Реестр версий не подключён.")
+    with catalog_errors():
+        return await container.artifacts.finish(
+            version_id=version_id,
+            worker=command.worker,
+            result=command.model_dump(exclude={"worker"}),
+        )
+
+
+@router.get("/versions/{version_id}")
+async def index_version(version_id: UUID, container: Container) -> dict:
+    """Служебный просмотр фиксированной версии для preview/evaluate."""
+    if container.artifacts is None:
+        raise HTTPException(503, "Реестр версий не подключён.")
+    with catalog_errors():
+        return await container.artifacts.get(version_id)

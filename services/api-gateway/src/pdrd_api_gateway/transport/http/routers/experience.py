@@ -11,6 +11,7 @@ from pdrd_api_gateway.application.ports.review import ReviewRequestError
 from pdrd_api_gateway.core.container import ApplicationContainer
 from pdrd_api_gateway.transport.http.routers.review import require_review_channel
 from pdrd_api_gateway.transport.http.schemas.experience import (
+    DeleteSelection,
     ExperienceQuery,
     ExperienceUpdate,
 )
@@ -75,6 +76,14 @@ async def capture_examples(
 async def example(example_id: UUID, container: Container) -> dict:
     """Проверяет задание примера через application policy."""
     return await invoke(container, operation="read", example_id=example_id)
+
+
+@router.post("/delete-selection")
+async def delete_selection(command: DeleteSelection, container: Container) -> dict:
+    """Один запрос сохраняет атомарное удаление всех выбранных строк."""
+    return await invoke(
+        container, operation="delete_selection", command=command.model_dump(mode="json")
+    )
 
 
 @router.patch("/{example_id}")

@@ -52,7 +52,7 @@ TEST_DATABASE_NAME = "pdrd_experience_test"
 TEST_DATABASE_USER = "experience_test"
 TEST_DATABASE_HOST = "experience-test-postgres"
 
-EXPECTED_MIGRATION = "20260928_0003"
+EXPECTED_MIGRATION = "20260929_0004"
 
 
 async def test_geometry_reset_and_audit_survive_repository_recreation(

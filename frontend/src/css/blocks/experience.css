@@ -1,6 +1,6 @@
 /* frontend/src/css/blocks/experience.css */
 
-/* Правая навигация и отдельная демонстрационная страница Experience. */
+/* Навигация, компактная таблица каталога и формы редактирования Experience. */
 .experience-nav,
 .experience-page {
   background: var(--color-surface);
@@ -31,10 +31,11 @@
 }
 
 .experience-page {
-  width: min(1280px, calc(100% - 32px));
+  width: min(1600px, calc(100% - 32px));
+  font-size: 13px;
   box-sizing: border-box;
   margin: var(--space-page) auto;
-  padding: var(--space-9);
+  padding: var(--space-6);
 }
 
 .experience-page__navigation {
@@ -51,6 +52,7 @@
 
 .experience-page__title {
   margin: 0;
+  font-size: 25px;
 }
 
 .experience-page__description {
@@ -58,13 +60,15 @@
 }
 
 .experience-page__export,
-.experience-table__edit,
+.experience-page__pagination button,
+.experience-table__icon,
 .experience-dialog button {
-  padding: var(--space-3) var(--space-5);
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border-control);
   border-radius: var(--radius-control);
   background: var(--color-surface);
   cursor: pointer;
+  font: inherit;
 }
 
 .experience-page__export:disabled {
@@ -82,16 +86,17 @@
 
 .experience-filter {
   display: flex;
+  align-items: end;
   flex-wrap: wrap;
-  gap: var(--space-5);
-  margin: var(--space-9) 0;
+  gap: var(--space-3);
+  margin: var(--space-5) 0;
 }
 
 .experience-filter__field,
 .experience-dialog__field {
   display: grid;
   gap: var(--space-2);
-  flex: 1 1 180px;
+  flex: 1 1 150px;
   font-weight: var(--font-weight-semibold);
 }
 
@@ -100,7 +105,7 @@
 .experience-dialog textarea {
   width: 100%;
   box-sizing: border-box;
-  padding: var(--space-3);
+  padding: var(--space-2);
   border: 1px solid var(--color-border-control);
   border-radius: var(--radius-control);
   font: inherit;
@@ -128,7 +133,7 @@
 
 .experience-table th,
 .experience-table td {
-  padding: var(--space-4);
+  padding: var(--space-2);
   border-bottom: 1px solid var(--color-border);
   vertical-align: top;
 }
@@ -145,7 +150,7 @@
 .experience-table__detail {
   margin-top: var(--space-2);
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .experience-table__preview {
@@ -157,8 +162,8 @@
 
 .experience-table__preview img {
   display: block;
-  width: 96px;
-  height: 60px;
+  width: 72px;
+  height: 46px;
   object-fit: contain;
   border: 1px solid var(--color-border);
 }
@@ -203,7 +208,19 @@
   display: flex;
   gap: var(--space-3);
   margin-bottom: var(--space-5);
+  flex-wrap: wrap;
+  align-items: center;
 }
+
+.experience-table__icon { width: 28px; height: 28px; padding: 0; font-size: 17px; }
+.experience-table__icon:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.experience-table__actions { white-space: nowrap; }
+.experience-table__actions button + button { margin-left: var(--space-1); }
+.experience-table__date { min-width: 110px; }
+.experience-table__selection { width: 24px; }
+.experience-table__row--member { background: var(--color-success-soft); }
+.experience-table input[type="checkbox"] { accent-color: var(--color-accent); }
+.experience-page button:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 
 .experience-page__pagination[hidden] {
   display: none;

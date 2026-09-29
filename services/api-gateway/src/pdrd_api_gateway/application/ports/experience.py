@@ -7,7 +7,22 @@ from typing import Literal, Protocol
 from uuid import UUID
 
 ExperienceOperation = Literal[
-    "list", "read", "curate", "deactivate", "crop", "history", "export", "capture"
+    "list",
+    "read",
+    "curate",
+    "deactivate",
+    "crop",
+    "history",
+    "export",
+    "capture",
+    "delete_selection",
+    "selection_read",
+    "version_list",
+    "version_create",
+    "version_read",
+    "version_rename",
+    "version_delete",
+    "version_apply",
 ]
 
 

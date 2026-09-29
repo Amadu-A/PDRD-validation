@@ -18,6 +18,9 @@
 import asyncio
 
 from alembic import context
+from pdrd_experience_service.infrastructure.database.artifact_models import (
+    ArtifactVersionModel,
+)
 from pdrd_experience_service.infrastructure.database.catalog_models import (
     CatalogExampleModel,
 )
@@ -42,6 +45,7 @@ def _configure(
     **options: object,
 ) -> None:
     """Настраивает отдельную цепочку миграций Experience Service."""
+    assert ArtifactVersionModel.metadata is CatalogExampleModel.metadata
     context.configure(
         target_metadata=CatalogExampleModel.metadata,
         include_schemas=True,

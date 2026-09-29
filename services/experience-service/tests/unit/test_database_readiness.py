@@ -21,6 +21,11 @@ from sqlalchemy.exc import SQLAlchemyError
 MIGRATION_DIRECTORY = Path(__file__).resolve().parents[2] / "alembic"
 CURRENT_HEAD = ScriptDirectory(str(MIGRATION_DIRECTORY)).get_current_head()
 TABLES = {
+    "experience.catalog_occurrences",
+    "experience.artifact_versions",
+    "experience.artifact_members",
+    "experience.artifact_events",
+    "experience.applied_artifacts",
     "experience.review_sessions",
     "experience.review_events",
     "experience.confirmed_areas",

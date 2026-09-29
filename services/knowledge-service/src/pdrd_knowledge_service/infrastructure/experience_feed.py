@@ -121,6 +121,10 @@ def parse_example(raw: dict) -> TrustedExample:
         ):
             if not isinstance(raw[key], str) or len(raw[key]) > 10000:
                 raise ValueError("Некорректные метаданные E.")
+        for key, maximum in (("section_id", 128), ("section_title", 300)):
+            value = raw.get(key, "")
+            if not isinstance(value, str) or len(value) > maximum:
+                raise ValueError("Некорректный раздел нормативного документа.")
         return TrustedExample(reference, raw)
     except (AttributeError, KeyError, TypeError, ValueError) as error:
         raise ExperienceFeedError(

@@ -4,6 +4,7 @@
 
 from pdrd_experience_service.application.catalog_snapshot import example_to_json
 from pdrd_experience_service.domain.catalog import CatalogEntry
+from pdrd_experience_service.domain.index_projection import index_projection
 
 
 def entry_view(entry: CatalogEntry) -> dict:
@@ -23,6 +24,6 @@ def entry_view(entry: CatalogEntry) -> dict:
         active=entry.active,
         requested_active=example.active,
         source_current=entry.source_current,
-        training_eligible=entry.active and example.learning_use != "needs_adjudication",
+        training_eligible=index_projection(entry) is not None,
     )
     return result

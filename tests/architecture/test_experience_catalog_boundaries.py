@@ -26,7 +26,8 @@ def test_catalog_domain_and_application_have_no_runtime_or_foreign_service_impor
         for layer in ("domain", "application"):
             for path in (root / layer).rglob("*.py"):
                 if not any(
-                    word in path.name for word in ("catalog", "experience", "crop")
+                    word in path.name
+                    for word in ("catalog", "experience", "crop", "artifact")
                 ):
                     continue
                 tree = ast.parse(path.read_text(encoding="utf-8-sig"))
@@ -88,7 +89,7 @@ def test_all_gateway_catalog_routes_require_closed_review_channel():
             for decorator in node.decorator_list
         )
     ]
-    assert len(endpoints) == 8
+    assert len(endpoints) == 9
     assert all(
         any(
             argument.arg == "container"
@@ -110,6 +111,8 @@ def test_catalog_frontend_is_modular_and_uses_real_crop_urls():
         "dialogs.js",
         "server-page.js",
         "capture.js",
+        "selection.js",
+        "versions.js",
     ):
         source = (root / name).read_text(encoding="utf-8")
         assert len(source.splitlines()) <= 250

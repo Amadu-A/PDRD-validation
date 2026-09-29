@@ -48,6 +48,30 @@ class CatalogExampleModel(Base):
     source_filename: Mapped[str] = mapped_column(Text)
     snapshot: Mapped[dict] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    content_key: Mapped[str] = mapped_column(String(64), index=True)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    section_id: Mapped[str] = mapped_column(String(128), default="", index=True)
+    section_title: Mapped[str] = mapped_column(String(300), default="")
+
+
+class CatalogOccurrenceModel(Base):
+    """Повторное утверждение того же примера: собственное происхождение каждого прогона."""
+
+    __tablename__ = "catalog_occurrences"
+    __table_args__ = ({"schema": "experience"},)
+    example_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("experience.catalog_examples.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    job_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    finding_id: Mapped[str] = mapped_column(String(256), primary_key=True)
+    approved_revision: Mapped[int] = mapped_column(Integer, primary_key=True)
+    area_revision: Mapped[int] = mapped_column(Integer)
+    area_signature: Mapped[str] = mapped_column(String(64))
+    source_sha256: Mapped[str] = mapped_column(String(64))
+    actor: Mapped[str] = mapped_column(String(128))
+    snapshot: Mapped[dict] = mapped_column(JSONB)
 
 
 class CatalogEventModel(Base):

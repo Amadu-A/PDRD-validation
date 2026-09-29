@@ -72,6 +72,12 @@ class CatalogRepository(Protocol):
         """Возвращает редакции и серверных авторов для просмотра аудита."""
         ...
 
+    async def delete_many(
+        self, *, references: tuple[tuple[UUID, int], ...], actor: str
+    ) -> int:
+        """CAS и удаление всего набора с сохранением аудита — одна транзакция."""
+        ...
+
     async def scan(self, *, after: UUID | None, limit: int) -> tuple[CatalogEntry, ...]:
         """Читает стабильную страницу по UUID, включая неактивные записи для отбора."""
         ...

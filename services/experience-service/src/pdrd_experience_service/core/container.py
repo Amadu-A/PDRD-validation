@@ -29,6 +29,7 @@ from pdrd_experience_service.application.ports.review import (
 from pdrd_experience_service.application.use_cases.approval_experience import (
     ApprovalExperience,
 )
+from pdrd_experience_service.application.use_cases.artifacts import ManageArtifacts
 from pdrd_experience_service.application.use_cases.capture_experience import (
     CaptureExperience,
 )
@@ -63,6 +64,9 @@ from pdrd_experience_service.infrastructure.analysis.http_source import (
 from pdrd_experience_service.infrastructure.crops import (
     DocumentCropRenderer,
     LocalCropStore,
+)
+from pdrd_experience_service.infrastructure.database.artifacts import (
+    SqlAlchemyArtifactRepository,
 )
 from pdrd_experience_service.infrastructure.database.catalog import (
     SqlAlchemyCatalogRepository,
@@ -122,6 +126,7 @@ class ApplicationContainer:
     export_catalog: ExportCatalog | None = None
     approval_experience: ApprovalExperience | None = None
     index_feed: ReadIndexFeed | None = None
+    artifacts: ManageArtifacts | None = None
 
     async def close(self) -> None:
         """Освобождает ресурсы, созданные Composition Root."""
@@ -275,4 +280,7 @@ def build_container(
         if capture is not None
         else None,
         index_feed=ReadIndexFeed(catalog_repository, crop_store),
+        artifacts=ManageArtifacts(
+            SqlAlchemyArtifactRepository(session_factory), catalog_repository
+        ),
     )

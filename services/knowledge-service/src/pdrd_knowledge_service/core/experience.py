@@ -9,11 +9,17 @@
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from uuid import UUID
 
+from pdrd_knowledge_service.application.ports.experience_versions import VersionIndexJob
 from pdrd_knowledge_service.application.use_cases.index_experience import (
     SyncExperienceIndex,
+)
+from pdrd_knowledge_service.application.use_cases.index_experience_version import (
+    RunExperienceVersion,
+    SelectedExperienceFeed,
 )
 from pdrd_knowledge_service.application.use_cases.trusted_experience import (
     SearchTrustedExperience,
@@ -26,6 +32,9 @@ from pdrd_knowledge_service.infrastructure.embedding.text_http import (
     HttpTextEmbeddingProvider,
 )
 from pdrd_knowledge_service.infrastructure.experience_feed import HttpExperienceFeed
+from pdrd_knowledge_service.infrastructure.experience_versions import (
+    HttpExperienceVersionQueue,
+)
 from pdrd_knowledge_service.infrastructure.vector_store.qdrant import QdrantVectorStore
 
 
@@ -155,5 +164,49 @@ def build_experience_container(
             settings.search.experience_top_k,
             options.min_score,
             enabled=shadow or settings.search.experience_enabled,
+            require_section=not shadow,
         ),
     )
+
+
+def build_version_worker(
+    settings: Settings, container: ExperienceContainer, *, worker: str
+) -> RunExperienceVersion:
+    """Очередь ручных версий использует ту же модель; альтернативы требуют своего совместимого worker."""
+    source = HttpExperienceFeed(
+        settings.experience.base_url, settings.experience.key.get_secret_value()
+    )
+    return RunExperienceVersion(
+        HttpExperienceVersionQueue(source),
+        container.index,
+        worker,
+        settings.embedding_model,
+    )
+
+
+async def prepare_version_search(
+    settings: Settings, container: ExperienceContainer, version_id: UUID
+) -> tuple[ExperienceContainer, VersionIndexJob]:
+    """CLI выбирает готовую версию для эксперимента, не меняя applied или рабочий флаг."""
+    source = HttpExperienceFeed(
+        settings.experience.base_url, settings.experience.key.get_secret_value()
+    )
+    job = await HttpExperienceVersionQueue(source).read(
+        version_id=version_id,
+        model=settings.embedding_model,
+        identity=container.index.identity,
+        dimension=container.index.dimension,
+    )
+    return ExperienceContainer(
+        replace(
+            container.index,
+            collection=job.collection,
+            source=SelectedExperienceFeed(source, job.members),
+        ),
+        replace(
+            container.search,
+            collection=job.collection,
+            require_section=True,
+            source=SelectedExperienceFeed(source, job.members),
+        ),
+    ), job

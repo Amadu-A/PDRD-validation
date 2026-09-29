@@ -62,4 +62,5 @@ class TrustedExample:
             "target": target,
             "crop_index": crop_index,
             "index_point_id": self.point_id(target=target, crop_index=crop_index),
+            "section_id": self.data.get("section_id", ""),
         }

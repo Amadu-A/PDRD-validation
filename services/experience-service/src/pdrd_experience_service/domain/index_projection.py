@@ -58,6 +58,8 @@ def index_projection(entry: CatalogEntry) -> dict | None:
         "text": example.text,
         "normative_basis": example.normative_basis,
         "normative_reference": example.normative_reference,
+        "section_id": example.section_id,
+        "section_title": example.section_title,
         "texts": texts,
         "crops": [
             {"sha256": crop.sha256, "width": crop.width, "height": crop.height}

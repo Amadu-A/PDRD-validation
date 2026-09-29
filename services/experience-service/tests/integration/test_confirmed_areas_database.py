@@ -116,7 +116,7 @@ async def engine() -> AsyncIterator[AsyncEngine]:
                 text("SELECT version_num FROM experience.alembic_version_experience")
             )
 
-            assert revision == "20260928_0003"
+            assert revision == "20260929_0004"
 
         assert await DatabaseReadinessProbe(
             instance,

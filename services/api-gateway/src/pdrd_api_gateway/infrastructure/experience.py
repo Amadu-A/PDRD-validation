@@ -81,7 +81,17 @@ class HttpExperienceService:
             "deactivate": ("DELETE", f"/{example}"),
             "crop": ("GET", f"/{example}/crops/{index}"),
             "history": ("GET", f"/{example}/history"),
+            "delete_selection": ("POST", "/delete-selection"),
+            "selection_read": ("POST", "/read-selection"),
+            "version_list": ("GET", ""),
+            "version_create": ("POST", ""),
+            "version_read": ("GET", f"/{example}"),
+            "version_rename": ("PATCH", f"/{example}"),
+            "version_delete": ("POST", f"/{example}/delete"),
+            "version_apply": ("POST", f"/{example}/apply"),
         }[operation]
+        if operation.startswith("version_"):
+            base = f"{self.base_url.rstrip('/')}/internal/v1/experience-versions"
         try:
             async with httpx.AsyncClient(
                 timeout=300, follow_redirects=False, transport=self.transport
@@ -94,16 +104,27 @@ class HttpExperienceService:
                         "X-Review-Actor": context.actor,
                     },
                     params=query,
-                    json=command if operation in {"curate", "capture"} else None,
+                    json=command if method in {"POST", "PATCH"} else None,
                 )
         except httpx.HTTPError as error:
             raise ReviewRequestError(
                 503, "Каталог Experience временно недоступен."
             ) from error
         if response.status_code in {404, 409, 422}:
+            detail = None
+            if operation.startswith("version_"):
+                try:
+                    payload = response.json()
+                    detail = (
+                        payload.get("detail") if isinstance(payload, dict) else None
+                    )
+                except ValueError:
+                    pass
             raise ReviewRequestError(
                 response.status_code,
-                {
+                detail
+                if isinstance(detail, str)
+                else {
                     404: "Пример или Review не найден.",
                     409: "Редакция изменена или Review не утверждён.",
                     422: "Проверьте поля каталога и причину отрицательной разметки.",
@@ -130,6 +151,11 @@ class HttpExperienceService:
                 raise ValueError("Некорректный пример.")
             if operation == "capture" and payload.get("job_id") != str(context.job_id):
                 raise ValueError("Некорректное задание.")
+            if (
+                operation in {"version_read", "version_rename", "version_delete"}
+                and payload.get("id") != example
+            ):
+                raise ValueError("Некорректная версия.")
             return payload
         except (ValueError, TypeError) as error:
             raise ReviewRequestError(
