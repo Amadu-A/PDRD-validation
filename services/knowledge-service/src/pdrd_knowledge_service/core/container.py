@@ -12,6 +12,9 @@ from pdrd_knowledge_service.application.normative_catalog_defaults import (
 from pdrd_knowledge_service.application.ports.persistence import (
     NormativeCatalogUnitOfWorkFactory,
 )
+from pdrd_knowledge_service.application.use_cases.applied_experience import (
+    SearchAppliedExperience,
+)
 from pdrd_knowledge_service.application.use_cases.experience import (
     SearchExperience,
 )
@@ -121,7 +124,9 @@ class ApplicationContainer:
 
     search_user_packages: SearchUserPackages
 
-    search_experience: SearchExperience | SearchTrustedExperience
+    search_experience: (
+        SearchExperience | SearchTrustedExperience | SearchAppliedExperience
+    )
 
     check_readiness: CheckReadiness
 
@@ -361,7 +366,7 @@ def build_container() -> ApplicationContainer:
         vector_store=vector_store,
         normative_collection=(settings.qdrant.normative_collection),
         experience_collection=(
-            search_experience.collection
+            None
             if settings.search.experience_enabled
             else settings.qdrant.experience_collection
         ),

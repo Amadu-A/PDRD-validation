@@ -4,7 +4,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from pdrd_api_gateway.transport.http.routers.experience import Container, invoke
 from pdrd_api_gateway.transport.http.schemas.experience_versions import (
@@ -33,6 +33,20 @@ async def create(command: CreateVersion, container: Container) -> dict:
 async def version(version_id: UUID, container: Container) -> dict:
     """Состав используется для подсветки и выбора отсутствующих примеров."""
     return await invoke(container, operation="version_read", example_id=version_id)
+
+
+@router.get("/{version_id}/dataset")
+async def dataset(version_id: UUID, container: Container) -> Response:
+    """Gateway проверяет задания всех frozen members до получения архива."""
+    content = await invoke(container, operation="version_export", example_id=version_id)
+    return Response(
+        content,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="experience-dataset-{version_id}.zip"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.patch("/{version_id}")

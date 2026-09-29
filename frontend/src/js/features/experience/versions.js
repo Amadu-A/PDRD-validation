@@ -6,16 +6,22 @@
  */
 import { element } from "./rows.js";
 import { experienceVersionStatus } from "./version-status.js";
+import { mountExperienceVersionActions } from "./version-actions.js";
 
 const DEFAULT_MODELS = { vector: "shared-embedding", fine_tune: "shared-vlm" };
 
 /** Подключает события реестра, сохраняя выбор строк при смене просматриваемой версии. */
-export function mountExperienceVersions({ api, selection, onViewed, notice, document: dom = document }) {
+export function mountExperienceVersions({ api, selection, onViewed, notice, download, document: dom = document }) {
   const find = (key) => dom.querySelector(`[data-experience-${key}]`);
   const kind = find("version-kind"), model = find("version-model"), choice = find("version");
   const dialog = find("version-dialog"), form = find("version-form"), save = find("version-save");
-  let versions = [], applied = [], viewing = null, editing = false, creationKind = "vector", busy = false, generation = 0, registryGeneration = 0;
+  let versions = [], applied = [], viewing = null, workingSection = null, editing = false, creationKind = "vector", busy = false, generation = 0, registryGeneration = 0;
   const report = (error) => { notice.textContent = error.detail ?? error.message; };
+  const actions = mountExperienceVersionActions({ api, current: () => viewing, isBusy: () => busy,
+    setBusy, repaint: paint, download, notice, document: dom, onUpdated: async (record) => {
+      if (viewing?.id === record.id) viewing = record;
+      await reload();
+    } });
   /** Сохраняет блокировку подготовки при уведомлениях выбора во время записи версии. */
   function setBusy(value) { busy = value; selection.setPreparationBusy(value); }
   /** Перестраивает безопасные option-узлы, сохраняя доступное значение выбора. */
@@ -33,6 +39,7 @@ export function mountExperienceVersions({ api, selection, onViewed, notice, docu
     options(model, models.map((value) => ({ value, label: value })), "Все модели");
     const visible = versions.filter((item) => item.kind === kind.value && (!model.value || item.model === model.value));
     options(choice, visible.map((item) => ({ value: item.id, label: `${item.name} · ${experienceVersionStatus(item).label} · ${new Date(item.created_at).toLocaleDateString("ru")}` })), "Все замечания");
+    kind.disabled = busy; model.disabled = busy; choice.disabled = busy;
     find("version-rename").disabled = !viewing || busy;
     find("version-delete").disabled = !viewing || busy;
     for (const key of ["build-version", "prepare-fine-tune"]) find(key).disabled = busy || selection.isBusy() || !selection.references().length;
@@ -46,15 +53,23 @@ export function mountExperienceVersions({ api, selection, onViewed, notice, docu
       find("version-failure-status").textContent = viewing.error || "";
       find("version-failure-status").hidden = !viewing.error;
     }
+    const sections = [...new Set(applied.map((item) => item.section_id))];
+    const currentSection = viewing?.section_id ?? workingSection ?? (sections.length === 1 ? sections[0] : null);
+    const sectionTitle = versions.find((item) => item.section_id === currentSection)?.section_title ?? currentSection;
+    find("active-section").textContent = currentSection
+      ? `Рабочие назначения для нормативного раздела: ${sectionTitle}.`
+      : `Назначено версий: ${applied.length}. Просмотрите версию, чтобы увидеть рабочее назначение её нормативного раздела.`;
     for (const [type, key] of [["vector", "active-vector"], ["fine_tune", "active-model"]]) {
       const select = find(key);
-      options(select, versions.filter((item) => item.kind === type).map((item) => ({ value: item.id,
+      select.disabled = busy;
+      options(select, versions.filter((item) => item.kind === type && (!currentSection || item.section_id === currentSection)).map((item) => ({ value: item.id,
         label: `${item.name} · ${item.section_title} · ${experienceVersionStatus(item).canApply ? "проверена" : "применение недоступно"}`,
         disabled: !experienceVersionStatus(item).canApply })), "Не применена");
-      const configured = applied.find((item) => item.kind === type);
+      const configured = applied.find((item) => item.kind === type && item.section_id === currentSection);
       select.value = configured?.version_id ?? "";
       select.className = configured ? "experience-active__select--applied" : "";
     }
+    actions.paint();
   }
   /** Обновляет серверный реестр; устаревший ответ не заменяет более новый. */
   async function reload() {
@@ -77,8 +92,10 @@ export function mountExperienceVersions({ api, selection, onViewed, notice, docu
   /** Загружает состав для подсветки, сохраняя ручной выбор и рабочие назначения. */
   async function view() {
     const request = ++generation;
+    const requestedId = choice.value;
+    viewing = null; paint();
     try {
-      const record = choice.value ? await api.version(choice.value) : null;
+      const record = requestedId ? await api.version(requestedId) : null;
       if (request !== generation) return;
       viewing = record; selection.setMembers(record?.members ?? []); paint();
       await onViewed(record);
@@ -98,9 +115,9 @@ export function mountExperienceVersions({ api, selection, onViewed, notice, docu
     find("version-model-field").hidden = rename; find("version-error").textContent = "";
     dialog.showModal(); form.elements.namedItem("name").focus();
   }
-  kind.addEventListener("change", () => { generation += 1; viewing = null; model.value = ""; choice.value = ""; paint(); void view(); });
-  model.addEventListener("change", () => { viewing = null; choice.value = ""; paint(); void view(); });
-  choice.addEventListener("change", view);
+  kind.addEventListener("change", () => { if (busy) return; generation += 1; viewing = null; model.value = ""; choice.value = ""; paint(); void view(); });
+  model.addEventListener("change", () => { if (busy) return; viewing = null; choice.value = ""; paint(); void view(); });
+  choice.addEventListener("change", () => { if (!busy) return view(); });
   for (const [key, type] of [["build-version", "vector"], ["prepare-fine-tune", "fine_tune"]]) {
     find(key).addEventListener("click", () => { if (selection.references().length && !busy && !selection.isBusy()) open(false, type); });
   }
@@ -128,9 +145,14 @@ export function mountExperienceVersions({ api, selection, onViewed, notice, docu
     const select = find(key), chosen = versions.find((item) => item.id === select.value);
     if (!chosen || busy || !experienceVersionStatus(chosen).canApply) { paint(); return; }
     setBusy(true); select.disabled = true;
-    try { await api.applyVersion(chosen.id, chosen.revision); await reload(); find("active-status").textContent = `Назначение версии «${chosen.name}» для раздела «${chosen.section_title}» сохранено в реестре. Подключение к рабочему анализу ещё не реализовано.`; }
+    try {
+      await api.applyVersion(chosen.id, chosen.revision); workingSection = chosen.section_id; await reload();
+      find("active-status").textContent = chosen.kind === "vector"
+        ? `Версия «${chosen.name}» назначена для нормативного раздела «${chosen.section_title}». Рабочее использование определяется настройкой E.`
+        : `Назначение модели «${chosen.name}» сохранено для раздела «${chosen.section_title}». Загрузка весов и переключение VLM ещё не подключены.`;
+    }
     catch (error) { report(error); paint(); }
-    finally { setBusy(false); select.disabled = false; }
+    finally { setBusy(false); paint(); }
   });
   return { reload };
 }

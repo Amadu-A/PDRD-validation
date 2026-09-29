@@ -207,10 +207,10 @@ def test_valid_report_acceptance_and_missing_report_rejection(tmp_path):
     )
 
 
-def test_main_composition_requires_real_report_but_cli_shadow_does_not_enable_production(
+def test_main_composition_uses_registry_admission_without_enabling_shadow_in_production(
     tmp_path,
 ):
-    """Операторский preview не меняет флаг API и не превращает тесты в оценку качества."""
+    """Локальный отчёт не открывает API; рабочий поиск проверяет допуск владельца каждый запрос."""
     settings = Settings(
         _env_file=None,
         experience=ExperienceIndexSettings(
@@ -221,14 +221,15 @@ def test_main_composition_requires_real_report_but_cli_shadow_does_not_enable_pr
     assert not build_experience_container(settings).search.enabled
     assert build_experience_container(settings, shadow=True).search.enabled
     settings.search = SearchSettings(experience_enabled=True)
-    with pytest.raises(ValueError):
-        build_experience_container(settings)
+    search = build_experience_container(settings).search
+    assert search.enabled and search.search.collection == ""
+    assert not settings.experience.quality_report.exists()
 
 
-def test_readiness_requires_new_human_review_collection_when_working_e_is_enabled(
+def test_readiness_does_not_require_legacy_collection_for_applied_versions(
     tmp_path, monkeypatch
 ):
-    """Прежняя legacy-коллекция не может подтвердить готовность нового рабочего поиска."""
+    """Версии разделов выбирают свои коллекции при поиске; готовность API не требует legacy E."""
     from pdrd_knowledge_service.core import container as composition
 
     path = tmp_path / "report.json"
@@ -246,8 +247,5 @@ def test_readiness_requires_new_human_review_collection_when_working_e_is_enable
     path.write_text(json.dumps(data), encoding="utf-8")
     monkeypatch.setattr(composition, "get_settings", lambda: settings)
     container = composition.build_container()
-    assert (
-        container.check_readiness.experience_collection
-        == container.search_experience.collection
-        == collection
-    )
+    assert container.check_readiness.experience_collection is None
+    assert container.search_experience.search.collection == ""

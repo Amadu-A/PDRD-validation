@@ -36,3 +36,28 @@ class ExperienceVersionQueue(Protocol):
     ) -> None:
         """Продлевает аренду или завершает задание."""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class AppliedExperienceVersion:
+    """Применённый состав и отпечаток проверенного отчёта для одного раздела."""
+
+    job: VersionIndexJob
+    quality_sha256: str
+
+
+class AppliedExperienceVersions(Protocol):
+    """Читает рабочее назначение у владельца, не меняет его и не допускает версии."""
+
+    async def applied(
+        self,
+        *,
+        section_id: str,
+        model: str,
+        identity: str,
+        dimension: int,
+        top_k: int,
+        min_score: float,
+    ) -> AppliedExperienceVersion | None:
+        """Возвращает только совместимую проверенную версию запрошенного раздела."""
+        ...

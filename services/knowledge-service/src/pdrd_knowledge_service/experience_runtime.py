@@ -15,6 +15,7 @@ import signal
 import time
 from argparse import Namespace
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -128,10 +129,15 @@ async def run(arguments: Namespace, settings: Settings) -> None:
         report.update(
             dataset_sha256=hashlib.sha256(content).hexdigest(),
             embedding_identity=container.index.identity,
+            model=settings.embedding_model,
+            dimension=container.index.dimension,
             collection=container.index.collection,
-            evaluated_at=time.time(),
+            evaluated_at=datetime.now(UTC).isoformat(),
             top_k=container.search.top_k,
             min_score=container.search.min_score,
+            evaluation_document_sha256=sorted(
+                {case["source_sha256"] for case in (*cases, *finding_cases)}
+            ),
         )
         if version:
             report.update(

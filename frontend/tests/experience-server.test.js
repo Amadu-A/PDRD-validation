@@ -275,7 +275,7 @@ test("ошибка подготовки версии сохраняется в �
   assert.equal(ui.get("version-failure-status").textContent, "Сервис эмбеддингов недоступен");
 });
 
-test("допущенное назначение сохраняется в реестре и не выдаётся за переключение рабочего анализа", async () => {
+test("допущенная версия назначается для раздела без заявления об автоматическом включении E", async () => {
   const ui = setup(); const api = apiStub(); const applies = []; let applied = [];
   const version = { id: "approved", kind: "vector", name: "Проверенная", model: "shared-embedding", status: "ready",
     section_id: "СП 1:6", section_title: "Раздел 6", members: [], created_at: "2026-09-29T10:00:00Z", revision: 3,
@@ -288,8 +288,8 @@ test("допущенное назначение сохраняется в рее
   assert.deepEqual(applies, [["approved", 3]]);
   assert.equal(ui.get("active-vector").value, "approved");
   assert.match(ui.get("active-vector").className, /applied/);
-  assert.match(ui.get("active-status").textContent, /сохранено в реестре/);
-  assert.match(ui.get("active-status").textContent, /Подключение к рабочему анализу ещё не реализовано/);
+  assert.match(ui.get("active-status").textContent, /назначена для нормативного раздела/);
+  assert.match(ui.get("active-status").textContent, /Рабочее использование определяется настройкой E/);
 });
 
 test("удаление последней строки страницы возвращает на существующую страницу", async () => {

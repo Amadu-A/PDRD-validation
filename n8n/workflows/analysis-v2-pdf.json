@@ -604,7 +604,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ queries: $json.experience_queries ?? [] }) }}",
+        "body": "={{ JSON.stringify({ queries: $json.experience_queries ?? [], section_id: $('POST /analysis/v2/pdf').first().json.body?.normative_section_id ?? null }) }}",
         "options": {
           "timeout": 1800000
         }

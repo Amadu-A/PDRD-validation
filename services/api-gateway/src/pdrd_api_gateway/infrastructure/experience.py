@@ -89,6 +89,9 @@ class HttpExperienceService:
             "version_rename": ("PATCH", f"/{example}"),
             "version_delete": ("POST", f"/{example}/delete"),
             "version_apply": ("POST", f"/{example}/apply"),
+            "version_export": ("GET", f"/{example}/dataset"),
+            "version_quality": ("POST", f"/{example}/quality"),
+            "version_quality_revoke": ("DELETE", f"/{example}/quality"),
         }[operation]
         if operation.startswith("version_"):
             base = f"{self.base_url.rstrip('/')}/internal/v1/experience-versions"
@@ -104,7 +107,7 @@ class HttpExperienceService:
                         "X-Review-Actor": context.actor,
                     },
                     params=query,
-                    json=command if method in {"POST", "PATCH"} else None,
+                    json=command if method in {"POST", "PATCH", "DELETE"} else None,
                 )
         except httpx.HTTPError as error:
             raise ReviewRequestError(
@@ -132,7 +135,7 @@ class HttpExperienceService:
             )
         if response.status_code != 200:
             raise ReviewRequestError(503, "Каталог Experience временно недоступен.")
-        if operation in {"crop", "export"}:
+        if operation in {"crop", "export", "version_export"}:
             media = "image/png" if operation == "crop" else "application/zip"
             signature = b"\x89PNG\r\n\x1a\n" if operation == "crop" else b"PK"
             if response.headers.get("content-type", "").split(";")[
@@ -152,7 +155,14 @@ class HttpExperienceService:
             if operation == "capture" and payload.get("job_id") != str(context.job_id):
                 raise ValueError("Некорректное задание.")
             if (
-                operation in {"version_read", "version_rename", "version_delete"}
+                operation
+                in {
+                    "version_read",
+                    "version_rename",
+                    "version_delete",
+                    "version_quality",
+                    "version_quality_revoke",
+                }
                 and payload.get("id") != example
             ):
                 raise ValueError("Некорректная версия.")

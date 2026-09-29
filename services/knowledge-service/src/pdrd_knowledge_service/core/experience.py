@@ -7,13 +7,14 @@
 """
 
 import json
-import math
-import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import UUID
 
 from pdrd_knowledge_service.application.ports.experience_versions import VersionIndexJob
+from pdrd_knowledge_service.application.use_cases.applied_experience import (
+    SearchAppliedExperience,
+)
 from pdrd_knowledge_service.application.use_cases.index_experience import (
     SyncExperienceIndex,
 )
@@ -25,6 +26,7 @@ from pdrd_knowledge_service.application.use_cases.trusted_experience import (
     SearchTrustedExperience,
 )
 from pdrd_knowledge_service.core.settings import Settings
+from pdrd_knowledge_service.domain.experience_admission import require_quality_metrics
 from pdrd_knowledge_service.infrastructure.embedding.multimodal_http import (
     HttpMultimodalEmbeddingProvider,
 )
@@ -44,62 +46,13 @@ def require_quality_report(
     """Отсутствие/ошибка/несовместимость отчёта запрещает запуск рабочего E."""
     try:
         report = json.loads(path.read_text(encoding="utf-8"))
-        if (
-            type(report["report_schema_version"]) is not int
-            or report["report_schema_version"] != 1
-            or report["approved"] is not True
-            or report["embedding_identity"] != identity
-            or report["collection"] != collection
-            or type(report["top_k"]) is not int
-            or report["top_k"] != top_k
-            or report["min_score"] != min_score
-        ):
-            raise ValueError("Оценка E не одобрена для текущего индекса.")
-        for count in ("retrieval_cases", "finding_documents", "forbidden_hits"):
-            if type(report[count]) is not int or report[count] < 0:
-                raise ValueError("Некорректный объём оценки E.")
-        for value in (report["recall_at_k"], report["min_score"]):
-            if (
-                type(value) not in (int, float)
-                or not math.isfinite(value)
-                or not 0 <= value <= 1
-            ):
-                raise ValueError("Некорректная метрика E.")
-        if (
-            report["retrieval_cases"] < 20
-            or report["finding_documents"] < 5
-            or report["recall_at_k"] < 0.8
-            or report["forbidden_hits"] != 0
-        ):
-            raise ValueError("Недостаточная оценка E.")
-        baseline, augmented = report["baseline"], report["with_experience"]
-        for metrics in (baseline, augmented):
-            for name in ("precision", "recall"):
-                value = metrics[name]
-                if (
-                    type(value) not in (int, float)
-                    or not math.isfinite(value)
-                    or not 0 <= value <= 1
-                ):
-                    raise ValueError("Некорректная метрика анализа.")
-            if (
-                type(metrics["false_positives"]) is not int
-                or metrics["false_positives"] < 0
-            ):
-                raise ValueError("Некорректное число ложных замечаний.")
-        if (
-            augmented["precision"] < baseline["precision"]
-            or augmented["recall"] < baseline["recall"]
-            or augmented["false_positives"] > baseline["false_positives"]
-        ):
-            raise ValueError("Оценка E ухудшила качество.")
-        if not (
-            augmented["precision"] > baseline["precision"]
-            or augmented["recall"] > baseline["recall"]
-        ):
-            raise ValueError("Оценка E не показала улучшения.")
-        if not re.fullmatch(r"[a-f0-9]{64}", report["dataset_sha256"]):
-            raise ValueError("Отчёт E не привязан к датасету.")
+        require_quality_metrics(
+            report,
+            identity=identity,
+            collection=collection,
+            top_k=top_k,
+            min_score=min_score,
+        )
     except (OSError, ValueError, TypeError, KeyError) as error:
         raise ValueError(
             "Рабочий E требует успешную оценку на отложенных документах."
@@ -111,7 +64,7 @@ class ExperienceContainer:
     """Общие зависимости рабочего и проверочного поиска, без чужих SQL-репозиториев."""
 
     index: SyncExperienceIndex
-    search: SearchTrustedExperience
+    search: SearchTrustedExperience | SearchAppliedExperience
 
 
 def build_experience_container(
@@ -121,16 +74,12 @@ def build_experience_container(
     options = settings.experience
     identity = settings.embedding_identity.fingerprint
     collection = settings.embedding_index_plan.experience_target + "_human_review_v1"
-    if settings.search.experience_enabled and not shadow:
-        if len(options.key.get_secret_value()) < 32:
-            raise ValueError("Рабочий E требует служебный ключ Experience.")
-        require_quality_report(
-            options.quality_report,
-            identity=identity,
-            collection=collection,
-            top_k=settings.search.experience_top_k,
-            min_score=options.min_score,
-        )
+    if (
+        settings.search.experience_enabled
+        and not shadow
+        and len(options.key.get_secret_value()) < 32
+    ):
+        raise ValueError("Рабочий E требует служебный ключ Experience.")
     source = HttpExperienceFeed(options.base_url, options.key.get_secret_value())
     vectors = QdrantVectorStore(
         base_url=settings.qdrant.base_url,
@@ -144,6 +93,18 @@ def build_experience_container(
         "health_timeout_seconds": settings.embedding.health_timeout_seconds,
         "output_dimension": settings.embedding_dimension,
     }
+    trusted_search = SearchTrustedExperience(
+        HttpTextEmbeddingProvider(**common),
+        vectors,
+        source,
+        collection if shadow else "",
+        settings.embedding_model,
+        identity,
+        settings.search.experience_top_k,
+        options.min_score,
+        enabled=shadow,
+        require_section=not shadow,
+    )
     return ExperienceContainer(
         index=SyncExperienceIndex(
             source,
@@ -154,17 +115,15 @@ def build_experience_container(
             settings.embedding_dimension,
             options.page_size,
         ),
-        search=SearchTrustedExperience(
-            HttpTextEmbeddingProvider(**common),
-            vectors,
-            source,
-            collection,
-            settings.embedding_model,
-            identity,
-            settings.search.experience_top_k,
-            options.min_score,
-            enabled=shadow or settings.search.experience_enabled,
-            require_section=not shadow,
+        search=(
+            trusted_search
+            if shadow
+            else SearchAppliedExperience(
+                trusted_search,
+                HttpExperienceVersionQueue(source),
+                settings.embedding_dimension,
+                enabled=settings.search.experience_enabled,
+            )
         ),
     )
 
@@ -191,6 +150,8 @@ async def prepare_version_search(
     source = HttpExperienceFeed(
         settings.experience.base_url, settings.experience.key.get_secret_value()
     )
+    if not isinstance(container.search, SearchTrustedExperience):
+        raise ValueError("Выбор версии доступен только операторскому проверочному CLI.")
     job = await HttpExperienceVersionQueue(source).read(
         version_id=version_id,
         model=settings.embedding_model,

@@ -443,6 +443,7 @@ async def search_experience(
     try:
         results = await container.search_experience.execute(
             request.queries,
+            **({"section_id": request.section_id} if request.section_id else {}),
         )
 
     except ValueError as error:

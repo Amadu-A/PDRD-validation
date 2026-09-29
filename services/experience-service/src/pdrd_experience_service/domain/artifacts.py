@@ -38,6 +38,7 @@ class ArtifactVersion:
     deleted: bool = False
     quality_approved: bool = False
     weights_sha256: str = ""
+    quality_report: dict | None = None
 
 
 def manifest_hash(

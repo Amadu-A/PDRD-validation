@@ -80,6 +80,12 @@ async def test_evaluation_writes_report_with_dataset_hash_without_enabling_main_
         and report["embedding_identity"] == index.identity
     )
     assert len(report["dataset_sha256"]) == 64 and report["top_k"] == search.top_k
+    assert report["dimension"] == index.dimension
+    assert report["model"] == settings.embedding_model
+    assert report["evaluation_document_sha256"] == sorted(
+        {case["source_sha256"] for case in (*cases, *findings)}
+    )
+    assert report["evaluated_at"].endswith("+00:00")
     if use_version:
         assert report["version_id"] == str(version.id)
         assert report["manifest_sha256"] == version.manifest_sha256

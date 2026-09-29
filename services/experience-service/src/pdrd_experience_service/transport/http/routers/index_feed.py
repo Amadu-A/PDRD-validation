@@ -63,6 +63,18 @@ async def feed(
     return await container.index_feed.page(after=after, limit=limit)
 
 
+@router.get("/applied")
+async def applied(
+    container: Container,
+    section_id: Annotated[str, Query(min_length=1, max_length=200)],
+) -> dict:
+    """Служебный поиск читает только пригодную применённую версию своего раздела."""
+    if container.artifacts is None:
+        raise HTTPException(503, "Реестр версий не подключён.")
+    with catalog_errors():
+        return await container.artifacts.read_applied(section_id)
+
+
 @router.post("/verify")
 async def verify(request: VerifyRequest, container: Container) -> dict:
     """Отбрасывает устаревшие либо исключённые примеры и возвращает доверенное содержимое."""

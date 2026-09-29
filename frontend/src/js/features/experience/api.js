@@ -13,8 +13,8 @@ function parameters(criteria = {}) {
 }
 
 /** Проверяет ZIP, чтобы HTTP-ошибка или HTML не скачались как архив примеров. */
-async function archive(criteria) {
-  const response = await fetch(`${BASE}/export?${parameters(criteria)}`, { cache: "no-store" });
+async function archive(url, filename = "experience.zip") {
+  const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     throw new ApiError(response.status, typeof payload.detail === "string" ? payload.detail : "Не удалось выгрузить Experience.");
@@ -23,7 +23,7 @@ async function archive(criteria) {
   const signature = new Uint8Array(await blob.slice(0, 2).arrayBuffer());
   if (response.headers.get("content-type")?.split(";")[0] !== "application/zip"
       || signature[0] !== 80 || signature[1] !== 75) throw new Error("Сервер вернул файл неверного формата.");
-  return { blob, filename: "experience.zip" };
+  return { blob, filename };
 }
 
 /** Одинаковый адаптер используется страницей каталога и переносом из Review. */
@@ -43,9 +43,12 @@ export function createExperienceApi() {
     renameVersion: (id, revision, name) => send(`/api/v1/experience-versions/${encode(id)}`, "PATCH", { expected_revision: revision, name }),
     deleteVersion: (id, revision) => send(`/api/v1/experience-versions/${encode(id)}/delete`, "POST", { expected_revision: revision }),
     applyVersion: (id, revision) => send(`/api/v1/experience-versions/${encode(id)}/apply`, "POST", { expected_revision: revision }),
+    exportVersion: (id) => archive(`/api/v1/experience-versions/${encode(id)}/dataset`, "experience-version.zip"),
+    approveVersionQuality: (id, revision, report) => send(`/api/v1/experience-versions/${encode(id)}/quality`, "POST", { expected_revision: revision, report }),
+    revokeVersionQuality: (id, revision) => send(`/api/v1/experience-versions/${encode(id)}/quality`, "DELETE", { expected_revision: revision }),
     capture: (jobId, revision) => send(`${BASE}/capture/${encode(jobId)}`, "POST", { expected_revision: revision }),
     imageUrl: (id, index = 0) => `${BASE}/${encode(id)}/crops/${index}`,
     history: (id) => fetchJson(`${BASE}/${encode(id)}/history`, { cache: "no-store" }),
-    export: archive,
+    export: (criteria) => archive(`${BASE}/export?${parameters(criteria)}`),
   };
 }

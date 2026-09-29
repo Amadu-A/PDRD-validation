@@ -41,6 +41,9 @@ from pdrd_experience_service.application.use_cases.confirm_areas import (
     ConfirmArea,
     RevokeArea,
 )
+from pdrd_experience_service.application.use_cases.export_artifact_dataset import (
+    ExportArtifactDataset,
+)
 from pdrd_experience_service.application.use_cases.export_catalog import ExportCatalog
 from pdrd_experience_service.application.use_cases.export_review import ExportReview
 from pdrd_experience_service.application.use_cases.index_feed import ReadIndexFeed
@@ -130,6 +133,7 @@ class ApplicationContainer:
     approval_experience: ApprovalExperience | None = None
     index_feed: ReadIndexFeed | None = None
     artifacts: ManageArtifacts | None = None
+    export_artifact_dataset: ExportArtifactDataset | None = None
 
     async def close(self) -> None:
         """Освобождает ресурсы, созданные Composition Root."""
@@ -236,6 +240,7 @@ def build_container(
         migration_directory=actual_settings.migration_directory,
     )
     catalog_repository = SqlAlchemyCatalogRepository(session_factory)
+    artifact_repository = SqlAlchemyArtifactRepository(session_factory)
     crop_store = LocalCropStore(actual_settings.crop_root)
     capture_source = analysis_source or (
         GatewayAnalysisSource(
@@ -284,8 +289,9 @@ def build_container(
         else None,
         index_feed=ReadIndexFeed(catalog_repository, crop_store),
         artifacts=ManageArtifacts(
-            SqlAlchemyArtifactRepository(session_factory),
+            artifact_repository,
             catalog_repository,
             RefreshCatalogSources(capture) if capture is not None else None,
         ),
+        export_artifact_dataset=ExportArtifactDataset(artifact_repository, crop_store),
     )

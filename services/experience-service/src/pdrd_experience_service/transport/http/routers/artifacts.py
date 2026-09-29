@@ -13,6 +13,10 @@ from pdrd_experience_service.transport.http.dependencies import (
     trusted_actor,
 )
 from pdrd_experience_service.transport.http.routers.catalog import catalog_errors
+from pdrd_experience_service.transport.http.schemas.artifact_quality import (
+    QualityRevision,
+    RegisterQuality,
+)
 from pdrd_experience_service.transport.http.schemas.artifacts import (
     ChangeVersion,
     CreateVersion,
@@ -94,4 +98,32 @@ async def apply(
     with catalog_errors():
         return await connected(container).apply(
             version_id=version_id, revision=command.expected_revision, actor=actor
+        )
+
+
+@router.post("/{version_id}/quality")
+async def quality(
+    version_id: UUID, command: RegisterQuality, actor: Actor, container: Container
+) -> dict:
+    """Принимает отчёт независимой оценки; не переключает рабочую версию."""
+    with catalog_errors():
+        return await connected(container).record_quality(
+            version_id=version_id,
+            revision=command.expected_revision,
+            report=command.report,
+            actor=actor,
+        )
+
+
+@router.delete("/{version_id}/quality")
+async def revoke_quality(
+    version_id: UUID, command: QualityRevision, actor: Actor, container: Container
+) -> dict:
+    """Снимает допуск и назначение согласованно, сохраняя предыдущий отчёт в аудите."""
+    with catalog_errors():
+        return await connected(container).record_quality(
+            version_id=version_id,
+            revision=command.expected_revision,
+            report=None,
+            actor=actor,
         )

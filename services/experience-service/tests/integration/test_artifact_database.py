@@ -33,6 +33,8 @@ from pdrd_experience_service.infrastructure.database.catalog_models import (
 )
 from sqlalchemy import delete, func, select, text, update
 
+from tests.artifact_quality_support import report_for
+
 from .test_catalog_database import prepared, rejected_source, remove_catalog
 from .test_confirmed_areas_database import engine as engine
 
@@ -67,6 +69,219 @@ async def test_upgrade_preserves_existing_catalog_and_backfills_dedup_key(engine
             ) == content_key(data[4].source)
     finally:
         await asyncio.to_thread(alembic_command.upgrade, configuration, "head")
+        await remove_catalog(engine, data[3].job_id)
+
+
+async def create_ready_vector(data, versions, name="Проверка допуска"):
+    """Фиксирует серверный состав и только готовность; качество ещё отсутствует."""
+    entries, _ = await data[5].list(CatalogFilter(job_id=data[3].job_id))
+    example = entries[0].example
+    manager = ManageArtifacts(versions, data[5])
+    record = await manager.create(
+        kind="vector",
+        name=name,
+        model="shared-embedding",
+        references=((example.id, example.revision),),
+        actor="integration:1",
+    )
+    version_id = UUID(record["id"])
+    await versions.claim(
+        worker="quality_test", model="shared-embedding", identity="a" * 16, dimension=3
+    )
+    return await versions.finish(
+        version_id=version_id, worker="quality_test", result={"status": "ready"}
+    )
+
+
+async def prepare_quality_catalog(engine):
+    """Подготавливает реальный каталог с проверенной областью и разделом."""
+    data = await prepared(engine)
+    await data[5].capture(
+        review=data[3],
+        area_versions=data[7],
+        examples=(data[4],),
+        actor="integration:1",
+    )
+    await ManageCatalog(data[5], None).update(
+        example_id=data[4].id,
+        expected_revision=0,
+        fields={"section_id": "СП 1:6.3", "section_title": "СП 1, раздел 6.3"},
+        actor="integration:1",
+    )
+    return data
+
+
+async def remove_versions(data, ids):
+    """Удаляет только собственные данные из изолированной тестовой базы."""
+    async with data[6]() as database, database.begin():
+        for model in (
+            AppliedArtifactModel,
+            ArtifactEventModel,
+            ArtifactMemberModel,
+            ArtifactVersionModel,
+        ):
+            column = model.id if model is ArtifactVersionModel else model.version_id
+            await database.execute(delete(model).where(column.in_(ids)))
+
+
+async def test_quality_cas_and_revoke_are_atomic_and_keep_report_history(engine):
+    """Конкурентные отчёты не теряют ревизии; отзыв снимает назначение и остаётся в аудите."""
+    data = await prepare_quality_catalog(engine)
+    versions, ids = SqlAlchemyArtifactRepository(data[6]), []
+    try:
+        ready = await create_ready_vector(data, versions)
+        ids.append(ready.id)
+        report = report_for(ready)
+        results = await asyncio.gather(
+            *[
+                versions.record_quality(
+                    version_id=ready.id,
+                    revision=ready.revision,
+                    report=report,
+                    actor=f"integration:{actor}",
+                )
+                for actor in (1, 2)
+            ],
+            return_exceptions=True,
+        )
+        assert sum(isinstance(item, ReviewConflictError) for item in results) == 1
+        approved = await versions.get(ready.id)
+        assert approved.quality_approved and approved.quality_report == report
+        assert await versions.applied() == ()
+        await versions.apply(
+            version_id=ready.id, revision=approved.revision, actor="integration:1"
+        )
+        active = await versions.get(ready.id)
+        assert (
+            await ManageArtifacts(versions, data[5]).read_applied(active.section_id)
+        )["item"]["id"] == str(active.id)
+        with pytest.raises(ReviewConflictError):
+            await versions.delete(
+                version_id=ready.id, revision=active.revision, actor="integration:1"
+            )
+        with pytest.raises(ReviewConflictError):
+            await versions.record_quality(
+                version_id=ready.id,
+                revision=approved.revision,
+                report=None,
+                actor="integration:1",
+            )
+        assert len(await versions.applied()) == 1
+        revoked = await versions.record_quality(
+            version_id=ready.id,
+            revision=active.revision,
+            report=None,
+            actor="integration:1",
+        )
+        assert not revoked.quality_approved and revoked.members == ready.members
+        assert await versions.applied() == ()
+        async with data[6]() as database:
+            events = (
+                await database.scalars(
+                    select(ArtifactEventModel).where(
+                        ArtifactEventModel.version_id == ready.id
+                    )
+                )
+            ).all()
+            admissions = [
+                event for event in events if event.operation == "quality_report"
+            ]
+            assert (
+                len(admissions) == 1
+                and admissions[0].snapshot["quality_report"] == report
+            )
+            assert (
+                len([event for event in events if event.operation == "quality_revoke"])
+                == 1
+            )
+        await versions.delete(
+            version_id=ready.id, revision=revoked.revision, actor="integration:1"
+        )
+    finally:
+        await remove_versions(data, ids)
+        await remove_catalog(engine, data[3].job_id)
+
+
+@pytest.mark.parametrize("already_applied", [False, True])
+async def test_changed_catalog_blocks_quality_and_runtime_without_changing_manifest(
+    engine, already_applied
+):
+    """Устаревшая редакция не получает новый допуск и исчезает из рабочего поиска."""
+    data = await prepare_quality_catalog(engine)
+    versions, ids = SqlAlchemyArtifactRepository(data[6]), []
+    try:
+        ready = await create_ready_vector(data, versions)
+        ids.append(ready.id)
+        report = report_for(ready)
+        if already_applied:
+            approved = await versions.record_quality(
+                version_id=ready.id,
+                revision=ready.revision,
+                report=report,
+                actor="integration:1",
+            )
+            await versions.apply(
+                version_id=ready.id, revision=approved.revision, actor="integration:1"
+            )
+        current = await versions.get(ready.id)
+        await ManageCatalog(data[5], None).update(
+            example_id=data[4].id,
+            expected_revision=1,
+            fields={"text": "Исправленный каталог"},
+            actor="integration:1",
+        )
+        with pytest.raises(ReviewConflictError):
+            await versions.record_quality(
+                version_id=ready.id,
+                revision=current.revision,
+                report=report,
+                actor="integration:1",
+            )
+        if already_applied:
+            with pytest.raises(ReviewConflictError):
+                await versions.apply(
+                    version_id=ready.id,
+                    revision=current.revision,
+                    actor="integration:1",
+                )
+        assert (await versions.get(ready.id)).manifest_sha256 == ready.manifest_sha256
+        assert (
+            await ManageArtifacts(versions, data[5]).read_applied(ready.section_id)
+        )["item"] is None
+    finally:
+        await remove_versions(data, ids)
+        await remove_catalog(engine, data[3].job_id)
+
+
+async def test_replacement_and_explicit_rollback_choose_one_version_per_section(engine):
+    """Откат снова назначает проверенную предыдущую коллекцию, не смешивая составы."""
+    data = await prepare_quality_catalog(engine)
+    versions, ids = SqlAlchemyArtifactRepository(data[6]), []
+    try:
+        for name in ("Первая", "Вторая"):
+            ready = await create_ready_vector(data, versions, name=name)
+            ids.append(ready.id)
+            approved = await versions.record_quality(
+                version_id=ready.id,
+                revision=ready.revision,
+                report=report_for(ready),
+                actor="integration:1",
+            )
+            await versions.apply(
+                version_id=ready.id, revision=approved.revision, actor="integration:1"
+            )
+        assert len(await versions.applied()) == 1
+        assert (await versions.applied())[0]["version_id"] == str(ids[1])
+        first = await versions.get(ids[0])
+        await versions.apply(
+            version_id=first.id, revision=first.revision, actor="integration:1"
+        )
+        assert (await versions.applied())[0]["version_id"] == str(ids[0])
+        assert (
+            await ManageArtifacts(versions, data[5]).read_applied(first.section_id)
+        )["item"]["collection"] == first.collection
+    finally:
+        await remove_versions(data, ids)
         await remove_catalog(engine, data[3].job_id)
 
 

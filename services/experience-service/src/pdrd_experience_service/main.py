@@ -22,6 +22,9 @@ from pdrd_experience_service.core.container import (
     build_container,
 )
 from pdrd_experience_service.core.observability import configure_catalog_logging
+from pdrd_experience_service.transport.http.routers.artifact_dataset import (
+    router as artifact_dataset_router,
+)
 from pdrd_experience_service.transport.http.routers.artifacts import (
     router as artifacts_router,
 )
@@ -81,6 +84,7 @@ def create_app(
         application.include_router(review_router)
         application.include_router(catalog_router)
         application.include_router(artifacts_router)
+        application.include_router(artifact_dataset_router)
 
     if (
         application_container.settings.enabled

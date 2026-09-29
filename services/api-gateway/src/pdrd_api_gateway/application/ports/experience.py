@@ -23,6 +23,9 @@ ExperienceOperation = Literal[
     "version_rename",
     "version_delete",
     "version_apply",
+    "version_export",
+    "version_quality",
+    "version_quality_revoke",
 ]
 
 

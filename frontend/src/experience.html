@@ -30,7 +30,8 @@
         <section class="experience-active" data-experience-server-only aria-label="Текущая конфигурация анализа">
           <h2 class="experience-active__title">Для текущей работы и анализа</h2>
           <p>Здесь хранятся рабочие назначения проверенных версий. Выбор для просмотра таблицы ниже их не меняет.</p>
-          <p class="experience-active__availability">Подключение выбранных версий к рабочему анализу ещё не реализовано. Индексация создаёт коллекцию для проверочного поиска; подготовка набора не запускает обучение VLM.</p>
+          <p class="experience-active__availability">Векторная версия применяется к своему нормативному разделу после допуска качества. Рабочее использование E включается отдельно в конфигурации анализа. Подготовка набора не запускает обучение и не переключает VLM.</p>
+          <p data-experience-active-section role="status">Просмотрите версию, чтобы увидеть рабочее назначение её нормативного раздела.</p>
           <div class="experience-active__controls">
             <label>Векторная база <select data-experience-active-vector><option value="">Не применена</option></select></label>
             <label>Дообученная модель <select data-experience-active-model><option value="">Не применена</option></select></label>
@@ -59,6 +60,19 @@
       <p data-experience-version-quality-status></p>
       <p data-experience-version-apply-status></p>
       <p class="experience-version-status__error" data-experience-version-failure-status hidden></p>
+      <div class="experience-version-status__actions">
+        <button type="button" class="experience-version-status__button" data-experience-version-dataset disabled>Выгрузить фиксированный набор версии</button>
+      </div>
+      <section class="experience-version-status__quality" data-experience-quality-controls hidden aria-label="Независимая оценка качества версии">
+        <p>Для допуска нужны отдельные размеченные документы, не включённые в эту базу: минимум 5 документов и 20 поисковых запросов. Сервер проверяет принадлежность отчёта и метрики. Тесты приложения не заменяют эту оценку.</p>
+        <div class="experience-version-status__actions">
+          <label class="experience-version-status__file">JSON-отчёт независимой оценки
+            <input type="file" accept="application/json,.json" data-experience-quality-file disabled>
+          </label>
+          <button type="button" class="experience-version-status__button" data-experience-quality-submit disabled>Загрузить отчёт и проверить допуск</button>
+          <button type="button" class="experience-version-status__button" data-experience-quality-revoke disabled>Отозвать допуск</button>
+        </div>
+      </section>
     </section>
 
     <p class="experience-page__notice" role="status" data-experience-notice>

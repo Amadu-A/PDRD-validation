@@ -52,3 +52,9 @@ class ArtifactRepository(Protocol):
     async def apply(self, *, version_id: UUID, revision: int, actor: str) -> dict:
         """Допускает только ready артефакт с одобренным качеством."""
         ...
+
+    async def record_quality(
+        self, *, version_id: UUID, revision: int, report: dict | None, actor: str
+    ) -> ArtifactVersion:
+        """CAS, проверка отчёта, отзыв назначения и аудит выполняются вместе."""
+        ...

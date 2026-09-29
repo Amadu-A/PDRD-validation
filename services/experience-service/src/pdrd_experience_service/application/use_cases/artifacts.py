@@ -13,6 +13,10 @@ from pdrd_experience_service.application.use_cases.refresh_catalog_sources impor
     RefreshCatalogSources,
 )
 from pdrd_experience_service.core.observability import log_execution_time
+from pdrd_experience_service.domain.artifact_projection import (
+    artifact_member_projection,
+)
+from pdrd_experience_service.domain.artifact_quality import validate_quality_report
 from pdrd_experience_service.domain.artifacts import (
     ArtifactVersion,
     manifest_hash,
@@ -91,7 +95,7 @@ class ManageArtifacts:
             example = entry.example
             if example.revision != expected[example.id]:
                 raise ReviewConflictError("Замечания изменены; обновите выбор.")
-            projection = index_projection(entry)
+            projection = artifact_member_projection(entry, kind=kind)
             reason = exclusion_reason(entry)
             if not example.section_id or not example.section_title:
                 reason = (
@@ -175,6 +179,51 @@ class ManageArtifacts:
             dimension=dimension,
         )
         return {"item": version_view(item) if item else None}
+
+    async def record_quality(
+        self, *, version_id: UUID, revision: int, report: dict | None, actor: str
+    ) -> dict:
+        """Сохраняет отчёт или отзывает допуск; загрузка сама не применяет версию."""
+        return version_view(
+            await self.repository.record_quality(
+                version_id=version_id, revision=revision, report=report, actor=actor
+            )
+        )
+
+    async def read_applied(self, section_id: str) -> dict:
+        """Выдаёт Knowledge только проверенный неизменившийся состав своего раздела."""
+        references = await self.repository.applied()
+        reference = next(
+            (
+                item
+                for item in references
+                if item["kind"] == "vector" and item["section_id"] == section_id
+            ),
+            None,
+        )
+        if reference is None:
+            return {"item": None}
+        version = await self.repository.get(UUID(reference["version_id"]))
+        if version is None or version.deleted or not version.quality_approved:
+            return {"item": None}
+        try:
+            if version.section_id != section_id or not validate_quality_report(
+                version.quality_report, version
+            ):
+                return {"item": None}
+        except ReviewError:
+            return {"item": None}
+        entries = await self.catalog.get_many(
+            tuple(UUID(item["example_id"]) for item in version.members)
+        )
+        current = {str(entry.example.id): entry for entry in entries}
+        if len(current) != len(version.members) or any(
+            exclusion_reason(current[item["example_id"]])
+            or index_projection(current[item["example_id"]]) != item
+            for item in version.members
+        ):
+            return {"item": None}
+        return {"item": version_view(version)}
 
     async def finish(self, *, version_id: UUID, worker: str, result: dict) -> dict:
         """Аренда и результат не дают права назначать качество версии."""

@@ -41,7 +41,7 @@ export async function mountExperienceCatalog({ api, document: dom = document, do
     // Обновляем чекбоксы на месте: keyboard focus не теряется при выборе строки.
     for (const row of rows.children) row.children[0].children[0].checked = selection.selected.has(row.dataset.experienceId);
   }, onSaved: () => load(), notice, document: dom });
-  const versions = mountExperienceVersions({ api, selection, notice, document: dom, onViewed: async (version) => {
+  const versions = mountExperienceVersions({ api, selection, notice, download, document: dom, onViewed: async (version) => {
     filter.elements.namedItem("section_id").value = version?.section_id ?? "";
     await load(true, true);
   } });

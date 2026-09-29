@@ -11,13 +11,17 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pdrd_experience_service.application.use_cases.artifacts import version_view
+from pdrd_experience_service.domain.artifact_projection import (
+    artifact_member_projection,
+)
+from pdrd_experience_service.domain.artifact_quality import validate_quality_report
 from pdrd_experience_service.domain.artifacts import ArtifactVersion, validate_name
-from pdrd_experience_service.domain.index_projection import index_projection
+from pdrd_experience_service.domain.index_projection import exclusion_reason
 from pdrd_experience_service.domain.review import ReviewConflictError, ReviewError
 from pdrd_experience_service.infrastructure.database.artifact_models import (
     AppliedArtifactModel,
@@ -107,8 +111,8 @@ class SqlAlchemyArtifactRepository:
                 )
             ).all()
             projections = {
-                str(row.id): index_projection(
-                    SqlAlchemyCatalogRepository._entry(row, current)
+                str(row.id): artifact_member_projection(
+                    SqlAlchemyCatalogRepository._entry(row, current), kind=version.kind
                 )
                 for row, current in rows
             }
@@ -291,6 +295,10 @@ class SqlAlchemyArtifactRepository:
                     "Для рабочего анализа нужна готовая версия с проверенным качеством. "
                     "Набор для дообучения ещё не является моделью."
                 )
+            if version.kind == "vector":
+                if not validate_quality_report(version.quality_report, version):
+                    raise ReviewError("Отчёт качества не разрешает применение версии.")
+                await self._require_current_members(database, version)
             at = datetime.now(UTC)
             await database.execute(
                 insert(AppliedArtifactModel)
@@ -309,6 +317,7 @@ class SqlAlchemyArtifactRepository:
                     set_={"version_id": version_id, "actor": actor, "applied_at": at},
                 )
             )
+            version = replace(version, revision=revision + 1)
             self._save(database, row, version, actor, "apply")
         return {
             "kind": version.kind,
@@ -316,3 +325,67 @@ class SqlAlchemyArtifactRepository:
             "version_id": str(version_id),
             "applied_at": at.isoformat(),
         }
+
+    @staticmethod
+    async def _require_current_members(
+        database: AsyncSession, version: ArtifactVersion
+    ) -> None:
+        """Блокирует выбранные строки и запрещает допуск изменившегося состава."""
+        ids = [UUID(item["example_id"]) for item in version.members]
+        rows = (
+            await database.execute(
+                SqlAlchemyCatalogRepository._query()
+                .where(CatalogExampleModel.id.in_(ids))
+                .order_by(CatalogExampleModel.id)
+                .with_for_update(of=CatalogExampleModel)
+            )
+        ).all()
+        entries = {
+            str(row.id): SqlAlchemyCatalogRepository._entry(row, current)
+            for row, current in rows
+        }
+        if len(entries) != len(version.members) or any(
+            exclusion_reason(entries[item["example_id"]])
+            or artifact_member_projection(
+                entries[item["example_id"]], kind=version.kind
+            )
+            != item
+            for item in version.members
+        ):
+            raise ReviewConflictError(
+                "Состав версии изменился в каталоге; создайте и оцените новую версию."
+            )
+
+    async def record_quality(
+        self, *, version_id: UUID, revision: int, report: dict | None, actor: str
+    ) -> ArtifactVersion:
+        """Допуск/отзыв и снятие рабочего назначения сохраняются одной транзакцией."""
+        async with self._sessions() as database, database.begin():
+            row = await self._locked(database, version_id, revision)
+            version = decode_version(row.snapshot)
+            approved = (
+                validate_quality_report(report, version)
+                if report is not None
+                else False
+            )
+            if approved:
+                await self._require_current_members(database, version)
+            await database.execute(
+                delete(AppliedArtifactModel).where(
+                    AppliedArtifactModel.version_id == version_id
+                )
+            )
+            version = replace(
+                version,
+                quality_approved=approved,
+                quality_report=report,
+                revision=revision + 1,
+            )
+            self._save(
+                database,
+                row,
+                version,
+                actor,
+                "quality_report" if report is not None else "quality_revoke",
+            )
+        return version
