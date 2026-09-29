@@ -165,7 +165,10 @@ Compose использует отдельный volume `experience_crops`:
 переиспользуются при повторе. Сборщик таких файлов пока не реализован;
 volume не очищается скриптом развёртывания.
 
-Windows: общий quality gate, затем коммит и push при успешном результате:
+Windows: общий quality gate, затем коммит и push при успешном результате.
+`-Push` использует все настроенные push-адреса `origin`: публичный
+`Amadu-A/PDRD-validation` и приватный `neo-term-it/PDRD-validation`.
+Настройки Git скрипт не переписывает.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\ops\check-quality.ps1 -CommitMessage "feat: persist verified Experience catalog" -Push
@@ -176,8 +179,7 @@ Linux после синхронизации ветки:
 ```bash
 cd ~/projects/PDRD-validation || exit 1
 git switch feature/experience-base &&
-git fetch git@github.com:Amadu-A/PDRD-validation.git feature/experience-base &&
-git merge --ff-only FETCH_HEAD &&
+git pull --ff-only &&
 bash ops/deploy-experience-catalog.sh </dev/null
 ```
 
@@ -185,6 +187,16 @@ bash ops/deploy-experience-catalog.sh </dev/null
 проверяет актуальную миграцию, затем обновляет только проектные сервисы Review.
 В отдельном тестовом PostgreSQL ожидаются 18 проверок с реальными транзакциями.
 Старый `ops/deploy-reviewed-pdf.sh` использует тот же общий сценарий.
+На сервере `origin`/upstream указывает на приватный репозиторий;
+`git pull --ff-only` сохраняет этот источник и запрещает случайный merge.
+
+Readiness сверяет все применённые версии с head поставленной цепочки Alembic
+и наличие всех собственных ORM-таблиц, включая каталог и его аудит.
+Версия миграции не дублируется литералом в проверке готовности.
+Образ задаёт `EXPERIENCE_SERVICE_MIGRATION_DIRECTORY=/app/alembic`:
+установленный Python wheel лежит в site-packages, а миграции поставляются
+в `/app/alembic`. Composition Root явно передаёт путь адаптеру.
+В checkout используется каталог миграций этого сервиса.
 
 Для UI на Windows в отдельном терминале:
 

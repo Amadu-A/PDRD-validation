@@ -140,6 +140,8 @@ class Settings(BaseSettings):
     gateway_base_url: str = "http://api-gateway:8000"
     document_base_url: str = "http://document-service:8301"
     crop_root: Path = Path("/data/experience/crops")
+    # В checkout миграции рядом с src; образ задаёт /app/alembic через env.
+    migration_directory: Path = Path(__file__).resolve().parents[3] / "alembic"
 
     database: DatabaseSettings = Field(
         default_factory=DatabaseSettings,

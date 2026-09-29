@@ -5,6 +5,8 @@ FROM python:3.12.13-slim-bookworm AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+# Миграции поставляются отдельно от установленного wheel в site-packages.
+ENV EXPERIENCE_SERVICE_MIGRATION_DIRECTORY=/app/alembic
 WORKDIR /app
 COPY pyproject.toml alembic.ini /app/
 COPY alembic /app/alembic

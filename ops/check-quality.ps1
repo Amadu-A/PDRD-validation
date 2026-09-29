@@ -9,7 +9,8 @@
 
 -Fix сначала применяет исправления Ruff. -CommitMessage после успешных проверок
 коммитит все неигнорируемые изменения на feature/experience-base. -Push требует
--CommitMessage и отправляет эту ветку в GitHub через системный OpenSSH.
+-CommitMessage и отправляет эту ветку по всем push-адресам origin через
+системный OpenSSH, включая настроенный приватный репозиторий.
 Без этих параметров скрипт только проверяет рабочую копию.
 #>
 
@@ -129,7 +130,7 @@ try {
             $sshCommand = $sshExecutable.Replace("\", "/")
             Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @(
                 "-c", "core.sshCommand=$sshCommand", "push",
-                "git@github.com:Amadu-A/PDRD-validation.git", "feature/experience-base"
+                "origin", "feature/experience-base"
             )) "Push не завершён; коммит сохранён локально."
         }
     }

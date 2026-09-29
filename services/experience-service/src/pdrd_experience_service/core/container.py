@@ -217,6 +217,7 @@ def build_container(
     readiness = DatabaseReadinessProbe(
         engine=engine,
         timeout_seconds=(actual_settings.database.connect_timeout_seconds),
+        migration_directory=actual_settings.migration_directory,
     )
     catalog_repository = SqlAlchemyCatalogRepository(session_factory)
     crop_store = LocalCropStore(actual_settings.crop_root)
