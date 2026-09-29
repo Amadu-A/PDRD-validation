@@ -9,8 +9,8 @@
 
 -Fix сначала применяет исправления Ruff. -CommitMessage после успешных проверок
 коммитит все неигнорируемые изменения на feature/experience-base. -Push требует
--CommitMessage и отправляет эту ветку по всем push-адресам origin через
-системный OpenSSH, включая настроенный приватный репозиторий.
+-CommitMessage и отправляет эту ветку по push-адресам origin через
+системный OpenSSH. Отдельные remotes, например neoterm, пушатся отдельно.
 Без этих параметров скрипт только проверяет рабочую копию.
 #>
 
@@ -108,6 +108,17 @@ try {
         "-m", "pytest", "-q", "--import-mode=importlib",
         "-p", "no:cacheprovider", "--basetemp", $pytestBase
     ) "Pytest завершился с ошибкой."
+
+    # PowerShell не раскрывает маску для внешней команды; передаём Node реальные файлы.
+    $jsTestFiles = @(
+        Get-ChildItem -LiteralPath (Join-Path $repositoryRoot "frontend/tests") -Filter "*.test.js" -File |
+            Sort-Object Name |
+            ForEach-Object { $_.FullName }
+    )
+    if ($jsTestFiles.Count -eq 0) {
+        throw "Frontend-тесты *.test.js не найдены."
+    }
+    Invoke-CheckedCommand $nodeCommand.Source (@("--test") + $jsTestFiles) "Frontend-тесты завершились с ошибкой."
     Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @("diff", "--check")) "Git обнаружил ошибки пробелов."
 
     if ($hasCommitMessage) {

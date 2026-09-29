@@ -14,6 +14,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from pdrd_knowledge_service.application.ports.experience_feed import ExperienceFeedError
+from pdrd_knowledge_service.application.ports.vector_store import VectorStoreError
 from pdrd_knowledge_service.application.use_cases.applied_experience import (
     SearchAppliedExperience,
 )
@@ -130,6 +131,18 @@ async def test_no_working_assignment_never_calls_gpu_or_legacy_collection(condit
     assert all(not result.sources for result in results)
     assert not embedding.calls and not vectors.searches
     assert len(calls) == (1 if condition == "no_applied" else 0)
+
+
+async def test_missing_applied_collection_fails_before_embedding():
+    """Готовый реестр без коллекции Qdrant не расходует GPU и не даёт пустой успех."""
+    search, _, _, embedding, vectors, calls = await prepared(version())
+    vectors.exists = False
+
+    with pytest.raises(VectorStoreError, match="Коллекция применённой версии"):
+        await search.execute(["Шлейф"], section_id="СП 1:6")
+
+    assert calls == ["СП 1:6"]
+    assert not embedding.calls and not vectors.searches
 
 
 async def test_each_normative_section_uses_only_its_applied_collection_and_members():

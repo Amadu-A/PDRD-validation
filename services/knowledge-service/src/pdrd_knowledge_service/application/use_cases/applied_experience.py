@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from pdrd_knowledge_service.application.ports.experience_versions import (
     AppliedExperienceVersions,
 )
+from pdrd_knowledge_service.application.ports.vector_store import VectorStoreError
 from pdrd_knowledge_service.application.use_cases.index_experience_version import (
     SelectedExperienceFeed,
 )
@@ -53,6 +54,10 @@ class SearchAppliedExperience:
         applied = await self.versions.applied(**options)
         if applied is None:
             return empty
+        if not await self.search.vector_store.collection_exists(applied.job.collection):
+            raise VectorStoreError(
+                "Коллекция применённой версии E отсутствует в Qdrant."
+            )
         search = replace(
             self.search,
             collection=applied.job.collection,

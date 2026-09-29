@@ -1412,7 +1412,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\ops\check-quality.ps1
 ```
 
 Скрипт проверяет Python и Node, `pip check`, Ruff check/format,
-общий pytest с новым `--basetemp` и `git diff --check`.
+общий pytest с новым `--basetemp`, все `frontend/tests/*.test.js` через Node
+и `git diff --check`.
 Параметр `-Fix` применяет исправления Ruff перед проверками.
 Для коммита и push после успешной проверки на `feature/experience-base`:
 
@@ -1421,7 +1422,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\ops\check-quality.ps1 -Com
 ```
 
 `-CommitMessage` включает все неигнорируемые изменения рабочей копии;
-`-Push` использует системный OpenSSH и все настроенные push-адреса `origin`, включая приватный репозиторий.
+`-Push` использует системный OpenSSH и push-адреса `origin`.
+При отдельном remote `neoterm` приватную ветку отправляют командой
+`git push neoterm feature/experience-base` после успешного quality gate.
 Ненулевой код любого шага останавливает скрипт.
 `ExecutionPolicy Bypass` действует только для этого запуска PowerShell.
 
