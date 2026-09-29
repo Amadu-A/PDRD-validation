@@ -13,6 +13,10 @@ from uuid import uuid4
 
 import pytest
 from pdrd_experience_service.application.catalog_snapshot import example_to_json
+from pdrd_experience_service.application.use_cases.confirm_areas import (
+    ConfirmArea,
+    RevokeArea,
+)
 from pdrd_experience_service.domain.area_confirmation import ConfirmationMode
 from pdrd_experience_service.domain.catalog import CatalogFilter, Crop, Example
 from pdrd_experience_service.domain.experience_selection import (
@@ -38,7 +42,9 @@ async def prepared(engine):
     """Создаёт и утверждает один VLM-пример через настоящие Review и Area repository."""
     job_id = uuid4()
     review = initial(job_id)
-    reviews, areas, confirm, revoke = adapters(engine)
+    reviews, areas = adapters(engine)
+    confirm = ConfirmArea(reviews, areas)
+    revoke = RevokeArea(reviews, areas)
     await reviews.insert(review)
     await confirm.execute(
         job_id=job_id,
@@ -274,7 +280,7 @@ async def test_review_edit_invalidates_examples_without_deleting_history(engine)
             at=datetime.now(UTC),
             expected_revision=approved.revision,
         )
-        await reviews.save(updated, expected_revision=approved.revision)
+        await reviews.update(updated, expected_revision=approved.revision)
         entry = await catalog.get(example.id)
         assert not entry.active and not entry.source_current
         assert entry.example.source.text == example.source.text
