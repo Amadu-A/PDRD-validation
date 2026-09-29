@@ -24,7 +24,12 @@ from pdrd_experience_service.domain.catalog import CatalogFilter, Crop, Example
 from pdrd_experience_service.domain.experience_selection import (
     select_experience_candidates,
 )
-from pdrd_experience_service.domain.review import Decision, ReviewConflictError
+from pdrd_experience_service.domain.review import (
+    Decision,
+    ProposedRegion,
+    Rectangle,
+    ReviewConflictError,
+)
 from pdrd_experience_service.infrastructure.database.catalog import (
     SqlAlchemyCatalogRepository,
 )
@@ -49,6 +54,24 @@ async def rejected_source(engine, *, scenario="original", sha=None):
     if scenario == "unlocated":
         review = replace(
             review, findings=(replace(review.findings[0], proposed_regions=()),)
+        )
+    elif scenario == "multiple":
+        review = replace(
+            review,
+            findings=(
+                replace(
+                    review.findings[0],
+                    proposed_regions=(
+                        *review.findings[0].proposed_regions,
+                        ProposedRegion(
+                            Rectangle(780, 100, 980, 400),
+                            "analysis_vlm",
+                            0.9,
+                            "analysis_vlm",
+                        ),
+                    ),
+                ),
+            ),
         )
     reviews, areas = adapters(engine)
     await reviews.insert(review)
@@ -82,7 +105,10 @@ async def rejected_source(engine, *, scenario="original", sha=None):
     example = Example(
         uuid4(),
         source,
-        (Crop("b" * 64, 200, 100),) if source.issue_regions else (),
+        tuple(
+            Crop(hashlib.sha256(str(index).encode()).hexdigest(), 200, 100)
+            for index in range(len(source.issue_regions))
+        ),
         0,
         "План",
         source.text,
@@ -102,7 +128,7 @@ async def rejected_source(engine, *, scenario="original", sha=None):
     return approved, example, repository
 
 
-@pytest.mark.parametrize("scenario", ["original", "moved", "unlocated"])
+@pytest.mark.parametrize("scenario", ["original", "moved", "unlocated", "multiple"])
 async def test_bad_without_confirmation_persists_original_and_modified_regions(
     engine, scenario
 ):
@@ -123,8 +149,11 @@ async def test_bad_without_confirmation_persists_original_and_modified_regions(
             record.example.source.display_regions == review.findings[0].display_regions
         )
         assert bool(record.example.crops) == (scenario != "unlocated")
+        assert len(record.example.crops) == len(record.example.source.issue_regions)
         if scenario != "unlocated":
-            assert record.example.source.issue_regions == (BOX,)
+            assert record.example.source.issue_regions == tuple(
+                item.bbox for item in review.findings[0].proposed_regions
+            )
         repeated = await catalog.capture(
             review=review, area_versions=(), examples=(example,), actor="integration:1"
         )
