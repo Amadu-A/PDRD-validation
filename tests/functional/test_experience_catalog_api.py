@@ -33,6 +33,8 @@ from pdrd_experience_service.application.use_cases.confirm_areas import (
     RevokeArea,
 )
 from pdrd_experience_service.application.use_cases.export_catalog import ExportCatalog
+from pdrd_experience_service.application.use_cases.export_review import ExportReview
+from pdrd_experience_service.application.use_cases.review import ChangeReview
 from pdrd_experience_service.infrastructure.analysis.http_source import (
     GatewayAnalysisSource,
 )
@@ -43,6 +45,7 @@ from pdrd_experience_service.infrastructure.crops import (
 from pdrd_experience_service.main import create_app as experience_app
 
 from tests.functional.catalog_support import CatalogAreas, MemoryCatalog
+from tests.functional.reviewed_pdf_support import MemoryReviewConfirmationCommitter
 from tests.functional.test_review_api import INTERNAL_KEY, client, command
 from tests.functional.test_review_api import flow as flow
 from tests.functional.test_reviewed_pdf_api import pdf_flow as pdf_flow
@@ -68,6 +71,10 @@ def catalog_flow(pdf_flow, tmp_path):
     experience = replace(
         flow.network.apps["experience"].state.container,
         confirmed_areas=areas,
+        export_review=ExportReview(flow.reviews, areas),
+        change_review=ChangeReview(
+            flow.reviews, MemoryReviewConfirmationCommitter(flow.reviews, areas)
+        ),
         confirm_area=ConfirmArea(flow.reviews, areas),
         revoke_area=RevokeArea(flow.reviews, areas),
         catalog=ManageCatalog(catalog, crops),

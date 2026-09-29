@@ -4,6 +4,7 @@
 
 from pdrd_experience_service.domain.area_confirmation import (
     AreaConfirmationReceipt,
+    build_confirmation,
     content_signature,
 )
 from pdrd_experience_service.domain.review import ReviewConflictError
@@ -72,3 +73,46 @@ class MemoryAreas:
             raise ReviewConflictError("Устаревшая версия.")
         self.rows[finding_id] = (confirmation, revision + 1, False)
         return AreaConfirmationReceipt(job_id, finding_id, revision + 1, False)
+
+
+class MemoryReviewConfirmationCommitter:
+    """Проверяет команду целиком до записи; реальные откаты проверяет PostgreSQL."""
+
+    def __init__(self, reviews, areas):
+        """Внедряет те же снимки и области, которые читают HTTP-маршруты."""
+        self.reviews, self.areas = reviews, areas
+
+    async def save(self, *, review, expected_revision, confirmations):
+        """Идемпотентно записывает области вместе с решением тестового Review."""
+        current = await self.reviews.load(review.job_id)
+        if current.revision != expected_revision:
+            raise ReviewConflictError("Устаревшая версия.")
+        rows = dict(self.areas.rows)
+        for area in confirmations:
+            assert (
+                build_confirmation(
+                    session=review,
+                    finding_id=area.finding_id,
+                    regions=area.regions,
+                    mode=area.mode,
+                    note=area.note,
+                    actor=area.confirmed_by,
+                    at=area.confirmed_at,
+                    expected_review_revision=review.revision,
+                )
+                == area
+            )
+            previous = rows.get(area.finding_id)
+            if (
+                previous
+                and previous[2]
+                and (
+                    previous[0].content_signature == area.content_signature
+                    and previous[0].regions == area.regions
+                )
+            ):
+                continue
+            rows[area.finding_id] = (area, (previous[1] if previous else 0) + 1, True)
+        if review != current:
+            await self.reviews.update(review, expected_revision=expected_revision)
+        self.areas.rows = rows

@@ -25,6 +25,9 @@ from pdrd_experience_service.domain.review import (
     ReviewError,
     ReviewSession,
 )
+from pdrd_experience_service.domain.review_confirmation import (
+    reviewed_area_confirmations,
+)
 
 JOB = UUID(int=101)
 DOC = UUID(int=102)
@@ -32,6 +35,64 @@ NOW = datetime(2026, 9, 28, tzinfo=UTC)
 
 BOX = Rectangle(100, 150, 250, 300)
 CORRECTED = Rectangle(300, 250, 400, 375)
+
+
+@pytest.mark.parametrize("decision", [Decision.PENDING, Decision.REJECTED])
+def test_unaccepted_finding_does_not_confirm_current_area(decision) -> None:
+    """Ожидание и крестик никогда не создают принятую область для Experience."""
+    session = opened()
+    if decision is not Decision.PENDING:
+        session = session.decide(
+            finding_id="vlm:1",
+            decision=decision,
+            actor="engineer:1",
+            at=NOW,
+            expected_revision=0,
+        )
+    assert reviewed_area_confirmations(review=session, actor="engineer:1", at=NOW) == ()
+    with pytest.raises(ReviewError):
+        confirm(session, mode=ConfirmationMode.DECISION)
+
+
+def test_accept_geometry_only_confirms_current_area_without_changing_wise() -> None:
+    """Растягивание рамки требует принятия, сохраняет Wise и исходные предложения VLM."""
+    changed = opened().change_geometry(
+        finding_id="vlm:1",
+        regions=(CORRECTED,),
+        callout_box=None,
+        actor="engineer:1",
+        at=NOW,
+        expected_revision=0,
+    )
+    assert reviewed_area_confirmations(review=changed, actor="engineer:1", at=NOW) == ()
+    accepted = changed.decide(
+        finding_id="vlm:1",
+        decision=Decision.ACCEPTED,
+        actor="engineer:1",
+        at=NOW,
+        expected_revision=changed.revision,
+    )
+    (area,) = reviewed_area_confirmations(review=accepted, actor="engineer:1", at=NOW)
+    assert area.regions == (CORRECTED,)
+    assert area.mode is ConfirmationMode.DECISION and area.note == ""
+    assert accepted.findings[0].experience_tag == "wise"
+    assert accepted.findings[0].proposed_regions[0].bbox == BOX
+    with pytest.raises(ReviewError):
+        confirm(accepted, mode=ConfirmationMode.DECISION, regions=(BOX,))
+
+
+def test_accept_unlocated_finding_does_not_invent_confirmation() -> None:
+    """Принятое замечание без координат не получает рамку соседнего замечания."""
+    accepted = opened().decide(
+        finding_id="vlm:2",
+        decision=Decision.ACCEPTED,
+        actor="engineer:1",
+        at=NOW,
+        expected_revision=0,
+    )
+    assert (
+        reviewed_area_confirmations(review=accepted, actor="engineer:1", at=NOW) == ()
+    )
 
 
 def test_geometry_and_undo_invalidate_old_confirmation_signature() -> None:

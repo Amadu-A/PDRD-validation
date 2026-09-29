@@ -5,11 +5,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mountReviewedPdf } from "../src/js/features/review/pdf-controls.js";
-import { mountAreaConfirmations } from "../src/js/features/review/area-controls.js";
 import { createReviewSync } from "../src/js/features/review/sync.js";
 import { FakeElement } from "./helpers/fake-dom.js";
 
-function fixture(t, { approved = false, pendingCount = 0 } = {}) {
+function fixture(t, { approved = false, pendingCount = 0, legacy = false } = {}) {
   const previous = globalThis.document;
   globalThis.document = { createElement: (tag) => new FakeElement(tag) };
   t.after(() => { globalThis.document = previous; });
@@ -18,6 +17,7 @@ function fixture(t, { approved = false, pendingCount = 0 } = {}) {
   root.selectors.set("[data-analysis-pdf-reviewed]", button);
   button.after = (node) => { button.description = node; };
   let session = { revision: 5, approved_revision: approved ? 5 : null, pending_count: pendingCount };
+  if (legacy) session.findings = [{ finding_id: "vlm:1", origin: "vlm", decision: "accepted", proposed_regions: [{}] }];
   const calls = [];
   const downloads = [];
   const busy = [];
@@ -28,6 +28,7 @@ function fixture(t, { approved = false, pendingCount = 0 } = {}) {
     sync: { get session() { return session; }, run: async (command) => {
       calls.push(command);
       session = { ...session, revision: 6, approved_revision: 6,
+        area_confirmations: [{ finding_id: "vlm:1", valid: true }],
         experience_capture: { status: "saved", eligible: 2, excluded: 1, created: 2 } };
       return session;
     } },
@@ -43,6 +44,15 @@ function fixture(t, { approved = false, pendingCount = 0 } = {}) {
     async click() { for (const handler of button.listeners.get("click") ?? []) await handler(); },
   };
 }
+
+test("ранее утверждённый отчёт без аудита области обновляется той же кнопкой PDF", async (t) => {
+  const f = fixture(t, { approved: true, legacy: true });
+  await f.click();
+  assert.deepEqual(f.calls, [{ action: "approve" }, ["job:1", 6]]);
+  await f.click();
+  assert.equal(f.calls.filter((command) => command.action === "approve").length, 1);
+  assert.equal(f.downloads.length, 2);
+});
 
 test("ожидающие решения блокируют PDF и пояснение доступно рядом с кнопкой", async (t) => {
   const f = fixture(t, { pendingCount: 1 });
@@ -106,71 +116,15 @@ test("поздний ответ старого отчёта не скачива�
   assert.equal((f.button.listeners.get("click") ?? []).length, 0);
 });
 
-test("проверка области и PDF используют общую блокировку без параллельных запросов", async (t) => {
-  const previousDocument = globalThis.document;
-  const previousWindow = globalThis.window;
-  globalThis.document = { createElement: (tag) => new FakeElement(tag) };
-  globalThis.window = { prompt: () => null };
-  t.after(() => {
-    globalThis.document = previousDocument;
-    globalThis.window = previousWindow;
-  });
-  const root = new FakeElement();
-  const button = new FakeElement("button");
-  root.selectors.set("[data-analysis-pdf-reviewed]", button);
-  button.after = (node) => { button.description = node; };
-  const preview = new FakeElement();
-  preview.dataset.reviewPreview = "";
-  preview.after = (node) => root.append(node);
-  root.append(preview);
-  const item = new FakeElement("article");
-  item.className = "analysis-result__finding";
-  item.dataset.findingId = "vlm:1";
-  root.append(item);
-  const box = { x_min: 10, y_min: 20, x_max: 200, y_max: 100 };
-  const session = { revision: 5, approved_revision: 5, pending_count: 0, area_confirmations: [],
-    findings: [{ finding_id: "vlm:1", origin: "vlm", proposed_regions: [{ bbox: box }] }] };
-  const requests = [];
-  let finishArea;
-  let finishPdf;
-  let areas;
-  let pdf;
-  const apply = (busy = false) => {
-    const status = { mode: "saved", session, pending: 0, busy };
-    areas?.update(status);
-    pdf?.update(status);
-  };
-  const sync = { get session() { return session; }, run: (command) => {
-    requests.push(command.action);
-    return new Promise((resolve) => { finishArea = resolve; });
-  } };
-  pdf = mountReviewedPdf({ root, jobId: "job:1", sync, onBusy: apply,
-    experienceApi: { capture: async () => ({ eligible: 1, excluded: 0, created: 0 }) },
-    api: { pdf: () => { requests.push("pdf"); return new Promise((resolve) => { finishPdf = resolve; }); } }, download: () => {},
-  });
-  areas = mountAreaConfirmations({ root, sync, onBusy: apply,
-    snapshot: () => [{ finding_id: "vlm:1", regions: [box] }],
-  });
-  apply();
-  const areaButton = item.children[0];
-  const click = async (node) => { for (const handler of node.listeners.get("click") ?? []) await handler(); };
-  const confirming = click(areaButton);
-  assert.equal(button.disabled, true);
-  await click(button);
-  assert.deepEqual(requests, ["confirm_area"]);
-  finishArea(session);
-  await confirming;
-  const generating = click(button);
-  await new Promise(setImmediate);
-  assert.equal(areaButton.disabled, true);
-  await click(areaButton);
-  assert.deepEqual(requests, ["confirm_area", "pdf"]);
-  finishPdf({ filename: "Итоговый.pdf" });
-  await generating;
-  assert.equal(areaButton.disabled, false);
-  assert.equal(button.disabled, false);
-  areas.dispose();
-  pdf.dispose();
+test("внешняя блокировка Review не допускает скачивание во время изменения рамки", async (t) => {
+  const f = fixture(t);
+  f.status({ busy: true });
+  assert.equal(f.button.disabled, true);
+  await f.click();
+  assert.equal(f.calls.length, 0);
+  f.status({ busy: false });
+  await f.click();
+  assert.deepEqual(f.calls, [{ action: "approve" }, ["job:1", 6]]);
 });
 
 test("после последнего решения PDF активен, rejected и Gold не требуют дополнительных действий", async (t) => {

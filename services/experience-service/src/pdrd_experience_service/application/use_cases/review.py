@@ -10,6 +10,9 @@ from pdrd_experience_service.application.ports.review import (
     CompletedAnalysisReader,
     ReviewRepository,
 )
+from pdrd_experience_service.application.ports.review_confirmation import (
+    ReviewConfirmationCommitter,
+)
 from pdrd_experience_service.domain.review import (
     ApprovedReview,
     Decision,
@@ -17,11 +20,14 @@ from pdrd_experience_service.domain.review import (
     ReviewConflictError,
     ReviewSession,
 )
+from pdrd_experience_service.domain.review_confirmation import (
+    reviewed_area_confirmations,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class OpenReview:
-    """Start one review from server-authenticated original analysis content."""
+    """Открывает Review по исходному анализу, полученному сервером."""
 
     analyses: CompletedAnalysisReader
     repository: ReviewRepository
@@ -32,7 +38,7 @@ class OpenReview:
         job_id: UUID,
         actor: str,
     ) -> ReviewSession:
-        """Open review once; concurrently opened reviews must not replace originals."""
+        """Сохраняет оригиналы один раз, включая конкурентное открытие Review."""
         existing = await self.repository.load(job_id)
 
         if existing is not None:
@@ -68,9 +74,10 @@ class OpenReview:
 
 @dataclass(frozen=True, slots=True)
 class ChangeReview:
-    """Perform one revision-checked command without infrastructure assumptions."""
+    """Исполняет команды с проверкой ревизии через внедрённые порты хранения."""
 
     repository: ReviewRepository
+    confirmations: ReviewConfirmationCommitter | None = None
 
     async def decide(
         self,
@@ -81,18 +88,30 @@ class ChangeReview:
         actor: str,
         expected_revision: int,
     ) -> ReviewSession:
-        """Persist one human decision with optimistic concurrency."""
+        """Атомарно сохраняет решение и принятые им текущие области замечания."""
         current = await self._require(job_id)
+        at = datetime.now(UTC)
 
         updated = current.decide(
             finding_id=finding_id,
             decision=decision,
             actor=actor,
-            at=datetime.now(UTC),
+            at=at,
             expected_revision=expected_revision,
         )
 
-        if updated is not current:
+        areas = reviewed_area_confirmations(
+            review=updated, finding_id=finding_id, actor=actor, at=at
+        )
+        if self.confirmations is not None:
+            await self.confirmations.save(
+                review=updated,
+                expected_revision=current.revision,
+                confirmations=areas,
+            )
+        elif areas:
+            raise RuntimeError("Атомарное сохранение решения и области не подключено.")
+        elif updated is not current:
             await self.repository.update(
                 updated,
                 expected_revision=current.revision,
@@ -195,7 +214,7 @@ class ChangeReview:
         actor: str,
         expected_revision: int,
     ) -> ReviewSession:
-        """Сохраняет области отображения; подтверждение Experience остаётся отдельным."""
+        """Сохраняет геометрию без подтверждения; её примет следующая зелёная галочка."""
         current = await self._require(job_id)
         updated = current.change_geometry(
             finding_id=finding_id,
@@ -216,16 +235,26 @@ class ChangeReview:
         actor: str,
         expected_revision: int,
     ) -> ReviewSession:
-        """Seal a complete revision, or reject export of pending findings."""
+        """Утверждает полный Review и его принятые области одним серверным действием."""
         current = await self._require(job_id)
+        at = datetime.now(UTC)
 
         updated = current.approve(
             actor=actor,
-            at=datetime.now(UTC),
+            at=at,
             expected_revision=expected_revision,
         )
 
-        if updated is not current:
+        areas = reviewed_area_confirmations(review=updated, actor=actor, at=at)
+        if self.confirmations is not None:
+            await self.confirmations.save(
+                review=updated,
+                expected_revision=current.revision,
+                confirmations=areas,
+            )
+        elif areas:
+            raise RuntimeError("Атомарное сохранение решения и области не подключено.")
+        elif updated is not current:
             await self.repository.update(
                 updated,
                 expected_revision=current.revision,

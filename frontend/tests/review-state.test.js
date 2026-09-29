@@ -6,6 +6,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createReviewState, REVIEW_DECISIONS } from "../src/js/features/review/state.js";
 
+test("изменение только области и принятие сохраняют Wise, текст — Edited, ручное — Gold", () => {
+  const state = createReviewState();
+  for (const [id, origin] of [["wise", "vlm"], ["edited", "vlm"], ["gold", "manual"]]) {
+    state.register(id, "Исходный текст", { origin });
+    state.decide(id, REVIEW_DECISIONS.ACCEPTED);
+    if (id === "edited") state.edit(id, "Исправленный текст");
+    state.invalidate(id);
+    assert.equal(state.get(id).decision, REVIEW_DECISIONS.PENDING);
+    state.decide(id, REVIEW_DECISIONS.ACCEPTED);
+    assert.equal(state.get(id).experienceTag, id);
+  }
+});
+
 test("регистрация и решения независимы между findings", () => {
   const state = createReviewState();
   state.register("A", "Первое замечание");

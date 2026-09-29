@@ -28,7 +28,7 @@ class LearningUse(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ConfirmedFindingArea:
-    """Области VLM finding, отдельно подтверждённые инженером на сервере."""
+    """Области VLM finding, принятые инженером и проверенные сервером."""
 
     job_id: UUID
     finding_id: str

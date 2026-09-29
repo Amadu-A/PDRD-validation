@@ -79,6 +79,9 @@ from pdrd_experience_service.infrastructure.database.health import (
 from pdrd_experience_service.infrastructure.database.repository import (
     SqlAlchemyReviewRepository,
 )
+from pdrd_experience_service.infrastructure.database.review_confirmation import (
+    SqlAlchemyReviewConfirmationCommitter,
+)
 
 ShutdownCallback = Callable[[], Awaitable[None]]
 
@@ -174,6 +177,9 @@ def build_container(
 
     change_review = ChangeReview(
         repository=reviews,
+        confirmations=SqlAlchemyReviewConfirmationCommitter(
+            session_factory, confirmed_areas
+        ),
     )
 
     confirm_area = ConfirmArea(

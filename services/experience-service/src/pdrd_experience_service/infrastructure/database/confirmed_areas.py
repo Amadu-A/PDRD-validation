@@ -210,65 +210,10 @@ class SqlAlchemyConfirmedAreasRepository:
                         "или редакции."
                     )
 
-                key = (
-                    confirmation.job_id,
-                    confirmation.finding_id,
-                )
-
-                row = await database.get(
-                    ConfirmedAreaModel,
-                    key,
-                    with_for_update=True,
-                )
-
-                current_revision = 0 if row is None else row.revision
-
-                if current_revision != expected_confirmation_revision:
-                    raise ReviewConflictError("Подтверждение области уже изменено.")
-
-                before = None if row is None else _area_snapshot(row)
-
-                action = "confirmed" if row is None else "corrected"
-
-                if row is None:
-                    row = ConfirmedAreaModel(
-                        job_id=confirmation.job_id,
-                        finding_id=confirmation.finding_id,
-                    )
-                    database.add(row)
-
-                row.revision = current_revision + 1
-                row.page_number = confirmation.page_number
-                row.source_sha256 = confirmation.source_sha256
-                row.content_signature = confirmation.content_signature
-                row.review_revision = confirmation.review_revision
-                row.regions = _boxes(confirmation.regions)
-                row.mode = confirmation.mode.value
-                row.note = confirmation.note
-                row.confirmed_by = confirmation.confirmed_by
-                row.confirmed_at = confirmation.confirmed_at
-                row.active = True
-
-                # Родительская строка должна попасть в PostgreSQL
-                # раньше события, которое на неё ссылается.
-                await database.flush()
-
-                database.add(
-                    self._audit_row(
-                        row=row,
-                        action=action,
-                        actor=confirmation.confirmed_by,
-                        at=confirmation.confirmed_at,
-                        before=before,
-                        reason=confirmation.note,
-                    )
-                )
-
-                result = AreaConfirmationReceipt(
-                    job_id=row.job_id,
-                    finding_id=row.finding_id,
-                    confirmation_revision=row.revision,
-                    active=True,
+                result = await self.write_confirmation(
+                    database,
+                    confirmation=confirmation,
+                    expected_confirmation_revision=expected_confirmation_revision,
                 )
 
         except IntegrityError as error:
@@ -282,6 +227,76 @@ class SqlAlchemyConfirmedAreasRepository:
             raise
 
         return result
+
+    async def write_confirmation(
+        self,
+        database: AsyncSession,
+        *,
+        confirmation: AreaConfirmation,
+        expected_confirmation_revision: int | None = None,
+        keep_current: bool = False,
+    ) -> AreaConfirmationReceipt:
+        """Пишет проверенную область в уже открытой транзакции с блокировкой Review.
+
+        Внешний save проверяет отдельный CAS. Совместное решение использует
+        блокировку Review и сохраняет актуальное подтверждение без нового события.
+        Вызов не открывает и не фиксирует самостоятельную транзакцию.
+        """
+        row = await database.get(
+            ConfirmedAreaModel,
+            (confirmation.job_id, confirmation.finding_id),
+            with_for_update=True,
+        )
+        current_revision = 0 if row is None else row.revision
+        if (
+            expected_confirmation_revision is not None
+            and current_revision != expected_confirmation_revision
+        ):
+            raise ReviewConflictError("Подтверждение области уже изменено.")
+        boxes = _boxes(confirmation.regions)
+        if (
+            keep_current
+            and row is not None
+            and row.active
+            and row.content_signature == confirmation.content_signature
+            and row.source_sha256 == confirmation.source_sha256
+            and row.page_number == confirmation.page_number
+            and row.regions == boxes
+        ):
+            return AreaConfirmationReceipt(
+                row.job_id, row.finding_id, row.revision, True
+            )
+        before = None if row is None else _area_snapshot(row)
+        action = "confirmed" if row is None else "corrected"
+        if row is None:
+            row = ConfirmedAreaModel(
+                job_id=confirmation.job_id, finding_id=confirmation.finding_id
+            )
+            database.add(row)
+        row.revision = current_revision + 1
+        row.page_number = confirmation.page_number
+        row.source_sha256 = confirmation.source_sha256
+        row.content_signature = confirmation.content_signature
+        row.review_revision = confirmation.review_revision
+        row.regions = boxes
+        row.mode = confirmation.mode.value
+        row.note = confirmation.note
+        row.confirmed_by = confirmation.confirmed_by
+        row.confirmed_at = confirmation.confirmed_at
+        row.active = True
+        # FK события требует строку области; flush не завершает общую транзакцию.
+        await database.flush()
+        database.add(
+            self._audit_row(
+                row=row,
+                action=action,
+                actor=confirmation.confirmed_by,
+                at=confirmation.confirmed_at,
+                before=before,
+                reason=confirmation.note,
+            )
+        )
+        return AreaConfirmationReceipt(row.job_id, row.finding_id, row.revision, True)
 
     async def revoke(
         self,

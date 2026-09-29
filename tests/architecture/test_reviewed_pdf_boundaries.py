@@ -35,6 +35,19 @@ PACKAGES = (
     ("experience-service", "pdrd_experience_service"),
     ("document-service", "pdrd_document_service"),
 )
+
+
+def test_review_has_one_acceptance_action_without_area_dialogs():
+    """Фронт принимает область через decide, отдельные подтверждения в UI не возвращаются."""
+    feature = ROOT / "frontend/src/js/features/review"
+    assert not (feature / "area-controls.js").exists()
+    for file in feature.glob("*.js"):
+        text = file.read_text(encoding="utf-8")
+        assert "confirm_area" not in text, file
+        assert "revoke_area" not in text, file
+        assert "window.prompt" not in text, file
+
+
 FRAMEWORKS = (
     "fastapi",
     "httpx",

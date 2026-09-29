@@ -2,7 +2,7 @@
 
 /** DOM единого действия утверждения/PDF/Experience; очередь CAS и клиенты внедряются извне. */
 
-import { reviewedPdfAvailability } from "./pdf-model.js";
+import { requiresAreaAcceptance, reviewedPdfAvailability } from "./pdf-model.js";
 import { downloadReviewedPdf } from "./download.js";
 import { createExperienceApi } from "../experience/api.js";
 import { captureApprovedExperience, experienceCaptureMessage } from "../experience/capture.js";
@@ -39,7 +39,7 @@ export function mountReviewedPdf({ root, jobId, api, sync, onBusy = () => {}, do
     update();
     try {
       let session = sync.session;
-      const approvedNow = session.approved_revision !== session.revision;
+      const approvedNow = session.approved_revision !== session.revision || requiresAreaAcceptance(session);
       if (approvedNow) session = await sync.run({ action: "approve" });
       if (disposed) return;
       const capture = await captureApprovedExperience({ jobId, session, approvedNow, api: experienceApi });

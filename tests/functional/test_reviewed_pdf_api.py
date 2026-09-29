@@ -31,9 +31,13 @@ from pdrd_experience_service.application.use_cases.confirm_areas import (
     RevokeArea,
 )
 from pdrd_experience_service.application.use_cases.export_review import ExportReview
+from pdrd_experience_service.application.use_cases.review import ChangeReview
 from pdrd_experience_service.main import create_app as experience_app
 
-from tests.functional.reviewed_pdf_support import MemoryAreas
+from tests.functional.reviewed_pdf_support import (
+    MemoryAreas,
+    MemoryReviewConfirmationCommitter,
+)
 from tests.functional.test_review_api import BOX, CARD, client, command
 from tests.functional.test_review_api import flow as flow
 
@@ -61,6 +65,9 @@ def pdf_flow(flow, tmp_path):
     experience = replace(
         flow.experience,
         confirmed_areas=areas,
+        change_review=ChangeReview(
+            flow.reviews, MemoryReviewConfirmationCommitter(flow.reviews, areas)
+        ),
         confirm_area=ConfirmArea(flow.reviews, areas),
         revoke_area=RevokeArea(flow.reviews, areas),
         export_review=ExportReview(flow.reviews, areas),
@@ -102,26 +109,23 @@ def pdf_flow(flow, tmp_path):
     return flow
 
 
-async def prepare(browser, flow, *, confirm=True, reject_first=False):
+async def prepare(browser, flow, *, reject_first=False):
     """Рассматривает обе VLM-находки и добавляет принятый дробный Gold."""
     response = await browser.post(flow.endpoint + "/open")
     assert response.status_code == 200, response.text
     revision = response.json()["revision"]
-    if confirm:
+    if reject_first:
         response = await command(
             browser,
             flow,
             revision,
-            action="confirm_area",
+            action="decide",
             finding_id="vlm:1",
-            expected_confirmation_revision=0,
-            regions=[BOX],
-            mode="proposed",
-            note="",
+            decision="accepted",
         )
         assert response.status_code == 200, response.text
         assert response.json()["area_confirmations"][0]["valid"]
-        assert response.json()["revision"] == revision
+        revision = response.json()["revision"]
     bodies = [
         {
             "action": "decide",
@@ -302,11 +306,11 @@ async def test_source_pdf_replacement_is_rejected_on_cache_hit(pdf_flow):
         )
 
 
-async def test_unconfirmed_vlm_is_only_text_without_artificial_geometry(pdf_flow):
-    """Принятие VLM не подтверждает область; Gold остаётся на листе."""
+async def test_unlocated_vlm_is_only_text_without_artificial_geometry(pdf_flow):
+    """Accept принимает имеющиеся рамки; замечание без области остаётся текстом."""
     f = pdf_flow
     async with client(f) as browser:
-        revision = await prepare(browser, f, confirm=False)
+        revision = await prepare(browser, f)
         response = await pdf(browser, f, revision)
         assert response.status_code == 200
         with fitz.open(stream=response.content, filetype="pdf") as document:
@@ -314,8 +318,10 @@ async def test_unconfirmed_vlm_is_only_text_without_artificial_geometry(pdf_flow
             notes = [
                 note.info["content"] for note in page.annots() if note.type[1] == "Text"
             ]
-            assert len(notes) == 1 and "Gold" in notes[0]
+            assert len(notes) == 2 and any("Gold" in note for note in notes)
+            assert not any("Замечание без координат" in note for note in notes)
             assert "Исходный полный текст VLM" in document[1].get_text()
+            assert "Замечание без координат" in document[1].get_text()
 
 
 async def test_all_rejected_review_can_produce_pdf_with_empty_accepted_list(pdf_flow):

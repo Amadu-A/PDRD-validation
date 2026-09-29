@@ -5,12 +5,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fetchPdf, ApiError } from "../src/js/api.js";
-import { areaConfirmationCommand, reviewedPdfAvailability } from "../src/js/features/review/pdf-model.js";
+import { requiresAreaAcceptance, reviewedPdfAvailability } from "../src/js/features/review/pdf-model.js";
 import { createReviewSync } from "../src/js/features/review/sync.js";
 import { mountReviewedPdf } from "../src/js/features/review/pdf-controls.js";
 
 const JOB = "00000000-0000-4000-8000-000000000001";
-const BOX = { x_min: 10.25, y_min: 20, x_max: 200, y_max: 100 };
+
+test("старое принятое Review подтверждает текущую область при PDF, Bad не получает новую", () => {
+  const located = { finding_id: "vlm:1", origin: "vlm", decision: "accepted", proposed_regions: [{}] };
+  assert.equal(requiresAreaAcceptance({ findings: [located] }), true);
+  assert.equal(requiresAreaAcceptance({ findings: [located], area_confirmations: [{ finding_id: "vlm:1", valid: true }] }), false);
+  assert.equal(requiresAreaAcceptance({ findings: [{ ...located, decision: "rejected" }] }), false);
+  assert.equal(requiresAreaAcceptance({ findings: [{ ...located, proposed_regions: [] }] }), false);
+  assert.equal(requiresAreaAcceptance({ findings: [{ ...located, origin: "manual" }] }), false);
+});
 
 test("PDF требует сохранённых решений всех находок, в том числе Gold", () => {
   const session = { revision: 5, pending_count: 0 };
@@ -18,19 +26,6 @@ test("PDF требует сохранённых решений всех нахо
   for (const patch of [{ mode: "local" }, { mode: "saving" }, { pending: 1 }, { busy: true }, { session: { pending_count: 1 } }, { mode: "conflict" }]) {
     assert.equal(reviewedPdfAvailability({ mode: "saved", session, ...patch }).enabled, false);
   }
-});
-
-test("область проверяется явно, дробные координаты сохраняются, правка требует причины", () => {
-  const finding = { origin: "vlm", finding_id: "vlm:1", proposed_regions: [{ bbox: BOX }] };
-  const command = areaConfirmationCommand(finding, { revision: 2 }, [BOX]);
-  assert.equal(command.action, "confirm_area");
-  assert.equal(command.mode, "proposed");
-  assert.equal(command.regions[0].x_min, 10.25);
-  assert.equal(command.expected_confirmation_revision, 2);
-  const changed = { ...BOX, x_min: 15 };
-  assert.throws(() => areaConfirmationCommand(finding, null, [changed]), /причину/);
-  assert.equal(areaConfirmationCommand(finding, null, [changed], "Рамка охватывала другой элемент").mode, "redrawn");
-  assert.throws(() => areaConfirmationCommand({ ...finding, origin: "manual" }, null, [BOX]));
 });
 
 test("утверждение ждёт очереди правок и использует её последнюю ревизию", async () => {

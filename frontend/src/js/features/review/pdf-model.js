@@ -1,6 +1,15 @@
 // frontend/src/js/features/review/pdf-model.js
 
-/** Чистые правила доступности итогового PDF и явного подтверждения VLM-областей. */
+/** Доступность итогового PDF: принятие замечания одновременно принимает его область. */
+
+/** Старое принятое Review получает аудит областей при нажатии той же кнопки PDF. */
+export function requiresAreaAcceptance(session) {
+  const confirmed = new Set((session.area_confirmations ?? []).filter((area) => area.valid).map((area) => area.finding_id));
+  return (session.findings ?? []).some((finding) => finding.origin === "vlm"
+    && finding.decision === "accepted"
+    && (finding.display_regions ?? finding.proposed_regions ?? []).length > 0
+    && !confirmed.has(finding.finding_id));
+}
 
 export function reviewedPdfAvailability({ mode, pending = 0, session, busy = false }) {
   if (mode === "local") return { enabled: false, message: "Серверный Review недоступен. Итоговый PDF можно скачать после восстановления сервиса." };
@@ -8,15 +17,4 @@ export function reviewedPdfAvailability({ mode, pending = 0, session, busy = fal
   if (busy || mode !== "saved" || pending) return { enabled: false, message: "Дождитесь сохранения Review. При ошибке загрузите серверную версию." };
   if (!session || session.pending_count !== 0) return { enabled: false, message: "Сначала примите или отклоните все замечания." };
   return { enabled: true, message: "Принятые замечания попадут на листы с проверенной областью и в текстовый список. Замечания без подтверждённой области — только в текстовый список." };
-}
-
-export function areaConfirmationCommand(finding, status, regions, note = "") {
-  if (finding.origin !== "vlm" || !regions.length) throw new Error("У замечания нет области для проверки.");
-  const proposals = finding.proposed_regions.map((area) => area.bbox);
-  const sameBox = (left, right) => ["x_min", "y_min", "x_max", "y_max"].every((key) => left[key] === right[key]);
-  const proposed = regions.every((box) => proposals.some((candidate) => sameBox(candidate, box)));
-  if (!proposed && !note.trim()) throw new Error("Для изменённой области укажите причину исправления.");
-  return { action: "confirm_area", finding_id: finding.finding_id,
-    expected_confirmation_revision: status?.revision ?? 0, regions,
-    mode: proposed ? "proposed" : "redrawn", note: note.trim() };
 }

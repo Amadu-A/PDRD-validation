@@ -42,6 +42,11 @@ from pdrd_experience_service.infrastructure.analysis.http_source import (
 )
 from pdrd_experience_service.main import create_app as experience_app
 
+from tests.functional.reviewed_pdf_support import (
+    MemoryAreas,
+    MemoryReviewConfirmationCommitter,
+)
+
 UI_KEY = "test-review-ui-channel-00000000000000"
 INTERNAL_KEY = "test-review-internal-channel-00000000"
 BOX = {"x_min": 10, "y_min": 20, "x_max": 120, "y_max": 140}
@@ -187,6 +192,7 @@ def flow():
     jobs, artifacts = Jobs(job_id, document_id), Artifacts(document_id)
     network = ServiceTransport()
     reviews = MemoryReviews()
+    areas = MemoryAreas(reviews)
     gateway = GatewayContainer(
         settings=GatewaySettings(
             _env_file=None,
@@ -229,7 +235,10 @@ def flow():
             ),
             repository=reviews,
         ),
-        change_review=ChangeReview(reviews),
+        change_review=ChangeReview(
+            reviews, MemoryReviewConfirmationCommitter(reviews, areas)
+        ),
+        confirmed_areas=areas,
     )
     network.apps = {
         "gateway": gateway_app(gateway),

@@ -1,6 +1,6 @@
 # services/experience-service/src/pdrd_experience_service/domain/area_confirmation.py
 
-"""Правила явного подтверждения областей замечаний инженером.
+"""Правила принятия областей замечаний инженером.
 
 Отделяет предложенные VLM-рамки от проверенной человеком геометрии.
 Подпись связывает подтверждение с PDF, текстом и последней правкой,
@@ -16,6 +16,7 @@ from uuid import UUID
 
 from pdrd_experience_service.domain.review import (
     Action,
+    Decision,
     Origin,
     Rectangle,
     ReviewConflictError,
@@ -26,10 +27,11 @@ from pdrd_experience_service.domain.review import (
 
 
 class ConfirmationMode(StrEnum):
-    """Способ получения области, явно выбранный инженером."""
+    """Принятие вместе с замечанием либо прежняя отдельная операция API."""
 
     PROPOSED = "proposed"
     REDRAWN = "redrawn"
+    DECISION = "decision"
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +196,15 @@ def build_confirmation(
         if not offered or any(box not in offered for box in regions):
             raise ReviewError(
                 "Подтверждаемая VLM-область отсутствует в исходном Review."
+            )
+
+    if mode is ConfirmationMode.DECISION:
+        current_regions = finding.display_regions
+        if current_regions is None:
+            current_regions = tuple(area.bbox for area in finding.proposed_regions)
+        if finding.decision is not Decision.ACCEPTED or regions != current_regions:
+            raise ReviewError(
+                "Решение подтверждает только текущую сохранённую область замечания."
             )
 
     if not isinstance(note, str) or len(note.strip()) > 1000:

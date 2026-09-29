@@ -11,7 +11,6 @@ import { reviewEntries } from "./commands.js";
 import { createReviewSync } from "./sync.js";
 import { mountReviewTooltips } from "./tooltips.js";
 import { mountReviewedPdf } from "./pdf-controls.js";
-import { mountAreaConfirmations } from "./area-controls.js";
 
 const MESSAGES = {
   loading: "Восстанавливаем решения с сервера…",
@@ -45,7 +44,6 @@ export function createReviewPersistence({ api = createReviewApi() } = {}) {
     active.controller.dispose();
     active.tooltips();
     active.pdf?.dispose();
-    active.areas?.dispose();
     active = null;
   }
 
@@ -53,7 +51,6 @@ export function createReviewPersistence({ api = createReviewApi() } = {}) {
     clear();
     let sync = null;
     let pdf = null;
-    let areas = null;
     let busy = false;
     let latestStatus = { mode: "loading" };
     const controller = createReviewController({ onChange: () => sync?.changed() });
@@ -89,7 +86,6 @@ export function createReviewPersistence({ api = createReviewApi() } = {}) {
       retry.hidden = status.mode !== "error" || status.pending === 0;
       reload.hidden = !["error", "conflict", "saved"].includes(status.mode);
       pdf?.update({ ...status, busy });
-      areas?.update({ ...status, busy });
     }
     const onBusy = (value) => { busy = value; applyStatus(); };
     const snapshot = () => reviewEntries(controller.getReviewSnapshot(), controller.getManualSnapshot());
@@ -100,9 +96,7 @@ export function createReviewPersistence({ api = createReviewApi() } = {}) {
       onStatus: applyStatus,
     });
     pdf = mountReviewedPdf({ root, jobId, api, sync, onBusy });
-    areas = mountAreaConfirmations({ root, sync, snapshot, onBusy });
     active.pdf = pdf;
-    active.areas = areas;
     active.sync = sync;
     sessions.add(sync);
     retry.addEventListener("click", () => { void sync.retry(); });
