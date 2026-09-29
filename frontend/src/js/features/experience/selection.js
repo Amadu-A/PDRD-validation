@@ -6,13 +6,15 @@ export function createExperienceSelection({ api, criteria, onChanged, onSaved, n
   const selected = new Map();
   let members = new Map();
   let busy = false;
+  let preparing = false;
   let generation = 0;
   const report = (error) => { notice.textContent = error.detail ?? error.message; };
   const references = () => [...selected].map(([id, revision]) => ({ id, revision }));
   function changed() {
     find("selected-count").textContent = `Выбрано: ${selected.size}`;
     find("delete-selection").disabled = busy || !selected.size;
-    find("build-version").disabled = busy || !selected.size;
+    find("build-version").disabled = busy || preparing || !selected.size;
+    find("prepare-fine-tune").disabled = busy || preparing || !selected.size;
     find("select-all").disabled = busy;
     find("select-missing").disabled = busy || !members.size;
     onChanged();
@@ -58,6 +60,10 @@ export function createExperienceSelection({ api, criteria, onChanged, onSaved, n
   find("select-missing").addEventListener("click", () => scan(true));
   find("clear-selection").addEventListener("click", clear);
   return { selected, references, toggle, clear, changed,
+    /** Не позволяет запустить подготовку набора во время изменения или сканирования выбора. */
+    isBusy: () => busy,
+    /** Блокирует обе кнопки подготовки, не изменяя чекбоксы и подсветку состава версии. */
+    setPreparationBusy(value) { preparing = value; changed(); },
     remove: (example) => remove([{ id: example.id, revision: example.revision }]),
     memberRevision: (id) => members.get(id) ?? null,
     refreshRevisions(items) { for (const item of items) { if (selected.get(item.id) === item.previous_revision) selected.set(item.id, item.revision); } changed(); },

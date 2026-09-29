@@ -14,6 +14,12 @@ function apiStub() {
     export: async () => ({ blob: new Blob(["PK"]), filename: "experience.zip" }) };
 }
 
+/** Повторяет ответ списка версий: полный состав доступен только в отдельном GET версии. */
+function versionSummary(version) {
+  const { members, ...summary } = version;
+  return { ...summary, member_count: members.length };
+}
+
 test("серверные строки, все области, редактирование и история доступны без демо", async () => {
   const ui = setup(); const api = apiStub(); const writes = [];
   api.update = async (...args) => { writes.push(args); return record({ revision: 1 }); };
@@ -145,6 +151,8 @@ test("конфликт удаления сохраняет выбор; очис�
   ui.get("clear-selection").click();
   assert.equal(checkbox.checked, false);
   assert.equal(ui.get("rows").children[0].children[0].children[0], checkbox);
+  assert.equal(ui.get("build-version").disabled, true);
+  assert.equal(ui.get("prepare-fine-tune").disabled, true);
 });
 
 test("просмотр версии подсвечивает состав и выбирает отсутствующие редакции без применения", async () => {
@@ -154,7 +162,7 @@ test("просмотр версии подсвечивает состав и в�
     section_id: "СП 1:6", section_title: "Раздел 6", created_at: "2026-09-29T10:00:00Z", revision: 0,
     quality_approved: true, members: [{ example_id: "included", example_revision: 1 }, { example_id: "updated", example_revision: 1 }] };
   api.list = async () => ({ items: rows, total: rows.length });
-  api.versions = async () => ({ items: [version], applied: [] }); api.version = async () => version;
+  api.versions = async () => ({ items: [versionSummary(version)], applied: [] }); api.version = async () => version;
   api.applyVersion = async (...args) => { applies.push(args); };
   const controller = await mountExperienceCatalog({ api });
   controller.selection.toggle(rows[2], true);
@@ -175,19 +183,113 @@ test("просмотр версии подсвечивает состав и в�
   assert.deepEqual(controller.selection.references().map((item) => item.id), ["updated", "missing"]);
 });
 
-test("новая версия отправляет только выбранные редакции, модель и название", async () => {
+test("подготовка набора доступна при просмотре векторных баз и сохраняет выбор редакций", async () => {
   const ui = setup(); const api = apiStub(); const writes = [];
   const version = { id: "dataset", kind: "fine_tune", name: "Набор", model: "shared-vlm", status: "prepared",
     section_id: "СП 1:6", section_title: "Раздел 6", members: [], created_at: "2026-09-29T10:00:00Z", revision: 0 };
   api.createVersion = async (fields) => { writes.push(fields); return version; };
-  api.versions = async () => ({ items: writes.length ? [version] : [], applied: [] }); api.version = async () => version;
+  api.versions = async () => ({ items: writes.length ? [versionSummary(version)] : [], applied: [] }); api.version = async () => version;
+  const controller = await mountExperienceCatalog({ api });
+  assert.equal(ui.get("version-kind").value, "vector");
+  assert.equal(ui.get("prepare-fine-tune").disabled, true);
+  assert.equal(ui.get("build-version").disabled, true);
+  const checkbox = ui.get("rows").children[0].children[0].children[0]; checkbox.checked = true; checkbox.emit("change");
+  assert.equal(ui.get("prepare-fine-tune").disabled, false);
+  assert.equal(ui.get("build-version").disabled, false);
+  assert.equal(writes.length, 0);
+  ui.get("prepare-fine-tune").click(); ui.versionFields.name.value = "Набор";
+  assert.match(ui.get("version-summary").textContent, /Фактическое обучение и новые веса пока не создаются/);
+  await ui.get("version-form").emit("submit");
+  assert.deepEqual(writes, [{ kind: "fine_tune", name: "Набор", model: "shared-vlm", items: [{ id: "example-1", revision: 0 }] }]);
+  assert.deepEqual(controller.selection.references(), [{ id: "example-1", revision: 0 }]);
+  assert.equal(ui.get("version-kind").value, "fine_tune");
+  assert.match(ui.get("version-build-status").textContent, /Обученные веса отсутствуют/);
+  assert.match(ui.get("version-apply-status").textContent, /набор данных ещё не является дообученной моделью/);
+});
+
+test("индексация остаётся отдельным действием при просмотре наборов дообучения", async () => {
+  const ui = setup(); const api = apiStub(); const writes = [];
+  const version = { id: "vector-version", kind: "vector", name: "Векторная", model: "shared-embedding", status: "queued",
+    section_id: "СП 1:6", section_title: "Раздел 6", members: [], created_at: "2026-09-29T10:00:00Z", revision: 0 };
+  api.createVersion = async (fields) => { writes.push(fields); return version; };
+  api.versions = async () => ({ items: writes.length ? [versionSummary(version)] : [], applied: [] }); api.version = async () => version;
+  const controller = await mountExperienceCatalog({ api });
+  controller.selection.toggle(record(), true);
+  ui.get("version-kind").value = "fine_tune"; await ui.get("version-kind").emit("change");
+  await new Promise((done) => setImmediate(done));
+  ui.get("version-model").value = "another-vlm";
+  ui.get("build-version").click(); ui.versionFields.name.value = "Векторная";
+  assert.match(ui.get("version-summary").textContent, /эмбеддинговая модель не переобучается/);
+  await ui.get("version-form").emit("submit");
+  assert.deepEqual(writes, [{ kind: "vector", name: "Векторная", model: "shared-embedding", items: [{ id: "example-1", revision: 0 }] }]);
+  assert.deepEqual(controller.selection.references(), [{ id: "example-1", revision: 0 }]);
+  assert.equal(ui.get("version-kind").value, "vector");
+});
+
+test("готовая непроверенная коллекция объясняет блокировку и не отправляет применение", async () => {
+  const ui = setup(); const api = apiStub(); const applies = [];
+  const version = { id: "v1", kind: "vector", name: "Первая", model: "shared-embedding", status: "ready",
+    section_id: "СП 1:6", section_title: "Раздел 6", created_at: "2026-09-29T10:00:00Z", revision: 0,
+    quality_approved: false, members: [{ example_id: "example-1", example_revision: 0 }] };
+  api.versions = async () => ({ items: [versionSummary(version)], applied: [] }); api.version = async () => version;
+  api.applyVersion = async (...args) => { applies.push(args); };
+  await mountExperienceCatalog({ api });
+  ui.get("version").value = "v1"; await ui.get("version").emit("change");
+  assert.equal(ui.get("version-status").hidden, false);
+  assert.match(ui.get("version-build-status").textContent, /Коллекция Qdrant создана/);
+  assert.match(ui.get("version-quality-status").textContent, /проверка и допуск ещё не завершены/);
+  assert.match(ui.get("version-apply-status").textContent, /готовность коллекции не заменяет проверку качества/);
+  assert.equal(ui.get("active-vector").children[1].disabled, true);
+  ui.get("active-vector").value = "v1"; await ui.get("active-vector").emit("change");
+  assert.equal(applies.length, 0);
+  assert.equal(ui.get("active-vector").value, "");
+});
+
+test("подготовленный набор без весов не становится применяемой моделью даже при допуске качества", async () => {
+  const ui = setup(); const api = apiStub(); const applies = [];
+  const version = { id: "dataset", kind: "fine_tune", name: "Набор", model: "shared-vlm", status: "ready",
+    section_id: "СП 1:6", section_title: "Раздел 6", members: [], created_at: "2026-09-29T10:00:00Z", revision: 0,
+    quality_approved: true, weights_sha256: "" };
+  api.versions = async () => ({ items: [versionSummary(version)], applied: [] }); api.version = async () => version;
+  api.applyVersion = async (...args) => { applies.push(args); };
   await mountExperienceCatalog({ api });
   ui.get("version-kind").value = "fine_tune"; await ui.get("version-kind").emit("change");
   await new Promise((done) => setImmediate(done));
-  const checkbox = ui.get("rows").children[0].children[0].children[0]; checkbox.checked = true; checkbox.emit("change");
-  ui.get("build-version").click(); ui.versionFields.name.value = "Набор";
-  await ui.get("version-form").emit("submit");
-  assert.deepEqual(writes, [{ kind: "fine_tune", name: "Набор", model: "shared-vlm", items: [{ id: "example-1", revision: 0 }] }]);
+  ui.get("version").value = "dataset"; await ui.get("version").emit("change");
+  assert.match(ui.get("version-build-status").textContent, /Обученные веса отсутствуют/);
+  assert.equal(ui.get("active-model").children[1].disabled, true);
+  ui.get("active-model").value = "dataset"; await ui.get("active-model").emit("change");
+  assert.equal(applies.length, 0);
+});
+
+test("ошибка подготовки версии сохраняется в отдельном статусе после обновления каталога", async () => {
+  const ui = setup(); const api = apiStub();
+  const version = { id: "failed", kind: "vector", name: "Сбой", model: "shared-embedding", status: "failed",
+    section_id: "СП 1:6", section_title: "Раздел 6", members: [], created_at: "2026-09-29T10:00:00Z", revision: 0,
+    error: "Сервис эмбеддингов недоступен", quality_approved: false };
+  api.versions = async () => ({ items: [versionSummary(version)], applied: [] }); api.version = async () => version;
+  await mountExperienceCatalog({ api });
+  ui.get("version").value = "failed"; await ui.get("version").emit("change");
+  await ui.get("refresh").click();
+  assert.equal(ui.get("version-failure-status").hidden, false);
+  assert.equal(ui.get("version-failure-status").textContent, "Сервис эмбеддингов недоступен");
+});
+
+test("допущенное назначение сохраняется в реестре и не выдаётся за переключение рабочего анализа", async () => {
+  const ui = setup(); const api = apiStub(); const applies = []; let applied = [];
+  const version = { id: "approved", kind: "vector", name: "Проверенная", model: "shared-embedding", status: "ready",
+    section_id: "СП 1:6", section_title: "Раздел 6", members: [], created_at: "2026-09-29T10:00:00Z", revision: 3,
+    quality_approved: true };
+  api.versions = async () => ({ items: [versionSummary(version)], applied }); api.version = async () => version;
+  api.applyVersion = async (...args) => { applies.push(args); applied = [{ kind: "vector", version_id: "approved", section_id: "СП 1:6" }]; };
+  await mountExperienceCatalog({ api });
+  assert.equal(ui.get("active-vector").children[1].disabled, false);
+  ui.get("active-vector").value = "approved"; await ui.get("active-vector").emit("change");
+  assert.deepEqual(applies, [["approved", 3]]);
+  assert.equal(ui.get("active-vector").value, "approved");
+  assert.match(ui.get("active-vector").className, /applied/);
+  assert.match(ui.get("active-status").textContent, /сохранено в реестре/);
+  assert.match(ui.get("active-status").textContent, /Подключение к рабочему анализу ещё не реализовано/);
 });
 
 test("удаление последней строки страницы возвращает на существующую страницу", async () => {
@@ -209,7 +311,7 @@ test("обновление после удаления версии в друг�
   const version = { id: "v1", kind: "vector", name: "Версия", model: "shared-embedding", status: "ready",
     created_at: "2026-09-29T10:00:00Z", section_id: "СП 1:6", section_title: "Раздел 6",
     members: [{ example_id: "example-1", example_revision: 0 }] };
-  api.versions = async () => ({ items: deleted ? [] : [version], applied: [] }); api.version = async () => version;
+  api.versions = async () => ({ items: deleted ? [] : [versionSummary(version)], applied: [] }); api.version = async () => version;
   const controller = await mountExperienceCatalog({ api });
   ui.get("version").value = "v1"; await ui.get("version").emit("change");
   assert.equal(controller.selection.memberRevision("example-1"), 0);
@@ -217,4 +319,60 @@ test("обновление после удаления версии в друг�
   assert.equal(controller.selection.memberRevision("example-1"), null);
   assert.equal(ui.filter.section_id.value, "");
   assert.doesNotMatch(ui.get("rows").children[0].className, /member/);
+});
+
+test("сводки реестра без members сохраняют полный состав, статус и чекбоксы после обновления и переименования", async () => {
+  const ui = setup(); const api = apiStub(); const renames = [];
+  const rows = [record({ id: "included", revision: 1 }), record({ id: "selected", revision: 2 })];
+  let version = { id: "v1", kind: "vector", name: "Первая", model: "shared-embedding", status: "queued",
+    section_id: "СП 1:6", section_title: "Раздел 6", created_at: "2026-09-29T10:00:00Z", revision: 0,
+    quality_approved: false, members: [{ example_id: "included", example_revision: 1 }] };
+  api.list = async () => ({ items: rows, total: rows.length });
+  api.versions = async () => ({ items: [versionSummary(version)], applied: [] });
+  api.version = async () => ({ ...version, members: [...version.members] });
+  api.renameVersion = async (...args) => { renames.push(args); version = { ...version, name: args[2], revision: version.revision + 1 }; return version; };
+  const controller = await mountExperienceCatalog({ api });
+  controller.selection.toggle(rows[1], true);
+  const chosen = controller.selection.references();
+  ui.get("version").value = "v1"; await ui.get("version").emit("change");
+  version = { ...version, status: "ready" };
+  await ui.get("refresh").click();
+  assert.match(ui.get("version-build-status").textContent, /Индексация: готова.*В составе 1 замечаний/);
+  assert.match(ui.get("rows").children[0].className, /member/);
+  assert.equal(controller.selection.memberRevision("included"), 1);
+  assert.deepEqual(controller.selection.references(), chosen);
+  assert.equal(ui.get("rows").children[1].children[0].children[0].checked, true);
+  ui.get("version-rename").click(); ui.versionFields.name.value = "Переименована";
+  await ui.get("version-form").emit("submit");
+  assert.deepEqual(renames, [["v1", 0, "Переименована"]]);
+  assert.equal(ui.get("version-status-title").textContent, "Просмотр: Переименована");
+  assert.match(ui.get("version-build-status").textContent, /В составе 1 замечаний/);
+  assert.equal(ui.get("version-dialog").open, false);
+  assert.equal(ui.get("version-error").textContent, "");
+  assert.deepEqual(controller.selection.references(), chosen);
+  assert.equal(controller.selection.memberRevision("included"), 1);
+  assert.equal(ui.get("rows").children[1].children[0].children[0].checked, true);
+});
+
+test("уведомления выбора не разблокируют повторную подготовку во время сохранения версии", async () => {
+  const ui = setup(); const api = apiStub(); const pending = deferred(); const writes = []; let created = false;
+  const version = { id: "new", kind: "vector", name: "Новая", model: "shared-embedding", status: "queued",
+    section_id: "СП 1:6", section_title: "Раздел 6", created_at: "2026-09-29T10:00:00Z", revision: 0,
+    quality_approved: false, members: [{ example_id: "example-1", example_revision: 0 }] };
+  api.createVersion = async (fields) => { writes.push(fields); const result = await pending.promise; created = true; return result; };
+  api.versions = async () => ({ items: created ? [versionSummary(version)] : [], applied: [] }); api.version = async () => version;
+  const controller = await mountExperienceCatalog({ api });
+  controller.selection.toggle(record(), true);
+  ui.get("build-version").click(); ui.versionFields.name.value = "Новая";
+  const saveRequest = ui.get("version-form").emit("submit");
+  controller.selection.changed();
+  assert.equal(ui.get("build-version").disabled, true);
+  assert.equal(ui.get("prepare-fine-tune").disabled, true);
+  ui.get("prepare-fine-tune").click();
+  assert.equal(ui.get("version-title").textContent, "Новая векторная база");
+  pending.resolve(version); await saveRequest;
+  assert.equal(writes.length, 1);
+  assert.deepEqual(controller.selection.references(), [{ id: "example-1", revision: 0 }]);
+  assert.equal(ui.get("build-version").disabled, false);
+  assert.equal(ui.get("prepare-fine-tune").disabled, false);
 });

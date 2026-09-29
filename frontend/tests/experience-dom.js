@@ -28,9 +28,10 @@ export function setup() {
     "caption", "pagination", "image-dialog", "large-image", "image-original", "image-close",
     "edit-dialog", "edit-form", "edit-error", "edit-save", "edit-reload", "edit-close",
     "rejection-fields", "source-text", "history-dialog", "history-content", "history-close"];
-  keys.push("delete-selection", "selected-count", "select-all", "clear-selection", "select-missing", "build-version",
+  keys.push("delete-selection", "selected-count", "select-all", "clear-selection", "select-missing", "build-version", "prepare-fine-tune",
     "version-kind", "version-model", "version", "version-rename", "version-delete", "active-vector", "active-model", "active-status",
-    "version-dialog", "version-form", "version-title", "version-summary", "version-model-field", "version-error", "version-close", "version-save");
+    "version-dialog", "version-form", "version-title", "version-summary", "version-model-field", "version-error", "version-close", "version-save",
+    "version-status", "version-status-title", "version-build-status", "version-quality-status", "version-apply-status", "version-failure-status");
   for (const key of keys) elements.set(`[data-experience-${key}]`, new Node());
   const filter = Object.fromEntries(["query", "tag", "decision", "active", "learning_use", "job_id", "section_id"].map((name) => [name, new Node()]));
   const fields = Object.fromEntries(["document_title", "text", "normative_basis", "normative_reference", "active", "rejection_reason", "negative_target", "section_id", "section_title"].map((name) => [name, new Node()]));
