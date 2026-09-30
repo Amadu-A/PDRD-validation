@@ -70,6 +70,7 @@ testpaths = [
     "services/multimodal-embedding-service/tests",
     "services/experience-service/tests",
     "services/user-service/tests",
+    "services/auth-service/tests",
 ]
 
 markers = [

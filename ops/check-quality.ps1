@@ -70,13 +70,15 @@ Push-Location $repositoryRoot
 try {
     # Совпадает с UTF-8 OutputEncoding PowerShell и сохраняет русский вывод pytest.
     $env:PYTHONIOENCODING = "utf-8"
-    # Новый user-service ещё может отсутствовать в существующем локальном venv.
+    # Новые сервисы ещё могут отсутствовать в существующем локальном venv.
     $userServiceSource = Join-Path $repositoryRoot "services\user-service\src"
+    $authServiceSource = Join-Path $repositoryRoot "services\auth-service\src"
+    $identitySources = "$userServiceSource$([IO.Path]::PathSeparator)$authServiceSource"
     if ([string]::IsNullOrEmpty($previousPythonPath)) {
-        $env:PYTHONPATH = $userServiceSource
+        $env:PYTHONPATH = $identitySources
     }
     else {
-        $env:PYTHONPATH = "$userServiceSource$([IO.Path]::PathSeparator)$previousPythonPath"
+        $env:PYTHONPATH = "$identitySources$([IO.Path]::PathSeparator)$previousPythonPath"
     }
     $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
     if (-not $nodeCommand) {
