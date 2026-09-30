@@ -4,6 +4,8 @@
 
 from pathlib import Path
 
+import yaml
+
 ROOT = (
     Path(
         __file__,
@@ -17,6 +19,8 @@ UP_SCRIPT = ROOT / "scripts" / "up.sh"
 CHECK_STACK_SCRIPT = ROOT / "scripts" / "check-stack.sh"
 
 EMBEDDING_MIGRATION_SCRIPT = ROOT / "scripts" / "migrate-embedding-indexes.sh"
+
+USER_TEST_COMPOSE = ROOT / "ops" / "compose.user-test.yaml"
 
 
 def test_one_command_startup_script_exists() -> None:
@@ -114,6 +118,91 @@ def test_optional_experience_profiles_use_the_one_command_startup() -> None:
     ].split("\nfi", 1)[0]
     assert 'check_service_state "experience-indexer"' in index_checks
     assert '"Review frontend -> API Gateway proxy"' in stack_check
+
+
+def test_identity_profile_runs_private_user_service_after_its_migrations() -> None:
+    """User Service запускается явно, после миграции и без публикации HTTP-порта."""
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    services = compose["services"]
+    migrator = services["user-migrate"]
+    user_service = services["user-service"]
+
+    assert migrator["profiles"] == ["identity"]
+    assert user_service["profiles"] == ["identity"]
+    assert migrator["build"]["context"] == "./services/user-service"
+    assert user_service["build"]["context"] == "./services/user-service"
+    assert migrator["command"] == [
+        "python",
+        "-m",
+        "alembic",
+        "-c",
+        "alembic.ini",
+        "upgrade",
+        "head",
+    ]
+    assert migrator["depends_on"]["postgres"]["condition"] == "service_healthy"
+    assert (
+        user_service["depends_on"]["user-migrate"]["condition"]
+        == "service_completed_successfully"
+    )
+    assert "ports" not in migrator and "ports" not in user_service
+    assert "env_file" not in migrator
+    assert migrator["networks"] == ["app-net"]
+    assert user_service["networks"] == ["app-net"]
+    assert user_service["environment"]["USER_SERVICE_ENABLED"] == "true"
+    assert "USER_SERVICE_INTERNAL_KEY" not in migrator["environment"]
+    assert (
+        user_service["environment"]["USER_SERVICE_INTERNAL_KEY"]
+        == "${USER_SERVICE_INTERNAL_KEY:-}"
+    )
+    assert "USER_SERVICE_DATABASE__PASSWORD" in user_service["environment"]
+    assert "/health/ready" in " ".join(user_service["healthcheck"]["test"])
+
+
+def test_identity_profile_is_checked_by_one_command_scripts() -> None:
+    """Запуск требует секрет и проверяет миграции и внутреннюю готовность сервиса."""
+    startup = UP_SCRIPT.read_text(encoding="utf-8")
+    stack_check = CHECK_STACK_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'if profile_enabled "identity"; then' in startup
+    assert 'validate_secret "USER_SERVICE_INTERNAL_KEY"' in startup
+    assert "${#USER_SERVICE_INTERNAL_KEY} < 32" in startup
+    assert "log_services+=(user-migrate user-service)" in startup
+    assert "--profile identity" not in startup
+    identity_checks = stack_check.split('if profile_enabled "identity"; then', 1)[
+        1
+    ].split("\nfi", 1)[0]
+    assert 'check_completed_service "user-migrate"' in identity_checks
+    assert 'check_service_state "user-service"' in identity_checks
+    assert "User Service ready (internal)" in stack_check
+    assert "docker compose exec" in stack_check
+
+
+def test_user_database_runner_is_isolated_from_project_state() -> None:
+    """Интеграционные проверки используют временную БД и отдельную сеть."""
+    compose = yaml.safe_load(USER_TEST_COMPOSE.read_text(encoding="utf-8"))
+    services = compose["services"]
+    database = services["user-test-postgres"]
+    runner = services["user-test-runner"]
+
+    assert compose["name"] == "pdrd-user-service-test"
+    assert set(services) == {"user-test-postgres", "user-test-runner"}
+    assert compose["networks"]["user-test-only"]["internal"] is True
+    assert "/var/lib/postgresql/data" in database["tmpfs"]
+    assert "volumes" not in compose
+    for service in services.values():
+        assert "ports" not in service
+        assert "env_file" not in service
+        assert service["networks"] == ["user-test-only"]
+    assert runner["build"]["dockerfile"] == "ops/Dockerfile.quality"
+    assert runner["environment"]["PDRD_RUN_DATABASE_TESTS"] == "1"
+    assert (
+        "user-test-postgres" in runner["environment"]["USER_SERVICE_TEST_DATABASE_URL"]
+    )
+    commands = "\n".join(runner["command"])
+    assert "alembic -c alembic.ini upgrade head" in commands
+    assert "alembic -c alembic.ini current --check-heads" in commands
+    assert "services/user-service/tests/integration" in commands
 
 
 def test_startup_does_not_destroy_persistent_state() -> None:

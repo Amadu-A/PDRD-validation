@@ -1,0 +1,56 @@
+# ops/compose.user-test.yaml
+# Изолированная проверка миграций и PostgreSQL-контракта User Service.
+# Контейнеры не используют рабочую сеть, volume или секреты PDRD.
+
+name: pdrd-user-service-test
+
+services:
+  user-test-postgres:
+    image: postgres:16-alpine
+    restart: "no"
+    environment:
+      POSTGRES_DB: pdrd_user_test
+      POSTGRES_USER: user_test
+      POSTGRES_PASSWORD: user-test-only
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user_test -d pdrd_user_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks: [user-test-only]
+
+  user-test-runner:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.quality
+    restart: "no"
+    depends_on:
+      user-test-postgres:
+        condition: service_healthy
+    environment:
+      PDRD_RUN_DATABASE_TESTS: "1"
+      USER_SERVICE_ENVIRONMENT: test
+      USER_SERVICE_ENABLED: "true"
+      USER_SERVICE_INTERNAL_KEY: user-test-only-internal-key-32-characters
+      USER_SERVICE_TEST_DATABASE_URL: postgresql+asyncpg://user_test:user-test-only@user-test-postgres:5432/pdrd_user_test
+      USER_SERVICE_DATABASE__HOST: user-test-postgres
+      USER_SERVICE_DATABASE__PORT: 5432
+      USER_SERVICE_DATABASE__NAME: pdrd_user_test
+      USER_SERVICE_DATABASE__USER: user_test
+      USER_SERVICE_DATABASE__PASSWORD: user-test-only
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        set -eu
+        cd /workspace/services/user-service
+        python -m alembic -c alembic.ini upgrade head
+        python -m alembic -c alembic.ini current --check-heads --verbose
+        cd /workspace
+        python -m pytest -q services/user-service/tests/integration
+    networks: [user-test-only]
+
+networks:
+  user-test-only:
+    internal: true

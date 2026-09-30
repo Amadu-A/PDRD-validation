@@ -54,6 +54,13 @@ x-experience-environment: &experience-environment
   EXPERIENCE_SERVICE_REVIEW_API_ENABLED: ${API_GATEWAY_REVIEW__ENABLED:-false}
   EXPERIENCE_SERVICE_INTERNAL_KEY: ${API_GATEWAY_REVIEW__INTERNAL_KEY:-}
 
+x-user-service-database-environment: &user-service-database-environment
+  USER_SERVICE_DATABASE__HOST: postgres
+  USER_SERVICE_DATABASE__PORT: 5432
+  USER_SERVICE_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
+  USER_SERVICE_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
+  USER_SERVICE_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+
 services:
   postgres:
     image: postgres:${PDRD_POSTGRES_VERSION:-16-alpine}
@@ -619,6 +626,43 @@ services:
     networks:
       - app-net
       - ai-shared
+
+  user-migrate:
+    build:
+      context: ./services/user-service
+      target: runtime
+    profiles: [identity]
+    restart: "no"
+    environment: *user-service-database-environment
+    command: ["python", "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+    networks: [app-net]
+
+  user-service:
+    build:
+      context: ./services/user-service
+      target: runtime
+    profiles: [identity]
+    restart: unless-stopped
+    env_file: *app-env-files
+    environment:
+      <<: *user-service-database-environment
+      USER_SERVICE_ENABLED: "true"
+      USER_SERVICE_INTERNAL_KEY: ${USER_SERVICE_INTERNAL_KEY:-}
+    depends_on:
+      user-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *default-logging
+    networks: [app-net]
 
   experience-migrate:
     build:

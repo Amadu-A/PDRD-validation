@@ -55,6 +55,12 @@ fi
 
 validate_secret "PDRD_POSTGRES_PASSWORD"
 validate_secret "PDRD_RABBITMQ_PASSWORD"
+if profile_enabled "identity"; then
+    validate_secret "USER_SERVICE_INTERNAL_KEY"
+    if (( ${#USER_SERVICE_INTERNAL_KEY} < 32 )); then
+        die "USER_SERVICE_INTERNAL_KEY должен содержать не менее 32 символов."
+    fi
+fi
 
 PDRD_RABBITMQ_USER="${PDRD_RABBITMQ_USER:-pdrd_validation}"
 PDRD_RABBITMQ_VHOST="${PDRD_RABBITMQ_VHOST:-pdrd-validation}"
@@ -239,7 +245,7 @@ docker compose run \
 echo
 echo "=== Application stack ==="
 
-# При профиле review Compose сначала выполнит experience-migrate через depends_on.
+# При выбранных профилях Compose сначала выполнит миграции через depends_on.
 docker compose up -d --remove-orphans
 
 echo
@@ -278,6 +284,9 @@ while true; do
 
         if profile_enabled "review"; then
             log_services+=(experience-migrate experience-service review-frontend)
+        fi
+        if profile_enabled "identity"; then
+            log_services+=(user-migrate user-service)
         fi
         if profile_enabled "experience-index"; then
             log_services+=(experience-indexer)

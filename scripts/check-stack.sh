@@ -183,6 +183,11 @@ if profile_enabled "review"; then
     check_service_state "review-frontend"
 fi
 
+if profile_enabled "identity"; then
+    check_completed_service "user-migrate"
+    check_service_state "user-service"
+fi
+
 if profile_enabled "experience-index"; then
     check_service_state "experience-indexer"
 fi
@@ -222,6 +227,20 @@ if profile_enabled "review"; then
     check_http \
         "Review frontend -> API Gateway proxy" \
         "http://127.0.0.1:${REVIEW_FRONTEND_PORT:-8081}/api/v1/review/config"
+fi
+
+if profile_enabled "identity"; then
+    if docker compose exec \
+        -T \
+        user-service \
+        python3 \
+        -c 'import json, urllib.request; payload=json.load(urllib.request.urlopen("http://127.0.0.1:8000/health/ready", timeout=5)); assert payload.get("status") == "ready"' \
+        >/dev/null 2>&1; then
+
+        ok "User Service ready (internal)"
+    else
+        bad "User Service ready (internal)"
+    fi
 fi
 
 check_http \
