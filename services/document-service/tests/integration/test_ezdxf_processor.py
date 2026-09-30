@@ -5,6 +5,7 @@
 import io
 
 import ezdxf
+import pytest
 from pdrd_document_service.domain.cad import CadFormat
 from pdrd_document_service.infrastructure.cad.converter import (
     LibreDwgNormalizer,
@@ -92,8 +93,11 @@ def build_processor() -> EzdxfCadProcessor:
     )
 
 
+@pytest.mark.filterwarnings(
+    "error:Setting the shape on a NumPy array has been deprecated:DeprecationWarning"
+)
 def test_processor_extracts_geometry_text_and_png() -> None:
-    """Проверяет полный pipeline DXF."""
+    """Проверяет DXF pipeline и совместимость зависимостей без устаревшего API NumPy."""
     processor = build_processor()
 
     result = processor.process(

@@ -1,0 +1,89 @@
+# ops/compose.experience-test.yaml
+#
+# Изолированное окружение интеграционного тестирования Experience Service.
+#
+# Назначение:
+# - создать отдельный временный PostgreSQL;
+# - применить миграции Experience Service;
+# - проверить сохранение Human Review;
+# - проверить подтверждение, исправление и отзыв областей;
+# - испытать конкурентные транзакции.
+#
+# Окружение не подключается к рабочему стеку PDRD.
+# Рабочие Docker volumes и учётные данные не используются.
+
+services:
+  experience-test-postgres:
+    image: postgres:16-alpine
+
+    restart: "no"
+
+    environment:
+      POSTGRES_DB: pdrd_experience_test
+      POSTGRES_USER: experience_test
+      POSTGRES_PASSWORD: experience-test-only
+
+    # Данные существуют только в тестовом контейнере.
+    tmpfs:
+      - /var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U experience_test -d pdrd_experience_test
+
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+    networks:
+      - experience-test-only
+
+  experience-test-runner:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.quality
+
+    restart: "no"
+
+    depends_on:
+      experience-test-postgres:
+        condition: service_healthy
+
+    environment:
+      PDRD_RUN_DATABASE_TESTS: "1"
+
+      # Миграция и тесты используют один временный PostgreSQL.
+      EXPERIENCE_SERVICE_DATABASE_URL: &test_url postgresql+asyncpg://experience_test:experience-test-only@experience-test-postgres:5432/pdrd_experience_test
+      EXPERIENCE_SERVICE_TEST_DATABASE_URL: *test_url
+
+    entrypoint:
+      - /bin/sh
+      - -ec
+
+    command:
+      - |
+        set -eu
+
+        echo "=== ПРИМЕНЕНИЕ МИГРАЦИЙ ==="
+
+        cd /workspace/services/experience-service
+
+        python -m alembic -c alembic.ini upgrade head
+
+        echo "=== ПРОВЕРКА АКТУАЛЬНОЙ ВЕРСИИ ==="
+
+        python -m alembic -c alembic.ini current --check-heads --verbose
+
+        echo "=== ИНТЕГРАЦИОННЫЕ ТЕСТЫ ==="
+
+        cd /workspace
+
+        python -m pytest -q services/experience-service/tests/integration
+
+    networks:
+      - experience-test-only
+
+networks:
+  experience-test-only:
+    internal: true

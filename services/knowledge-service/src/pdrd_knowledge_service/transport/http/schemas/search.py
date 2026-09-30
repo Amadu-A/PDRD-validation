@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     model_validator,
 )
 
@@ -94,9 +95,12 @@ class ExperienceSearchRequest(BaseModel):
 
     model_config = ConfigDict(
         frozen=True,
+        extra="forbid",
     )
 
     queries: list[str]
+
+    section_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class NormativeSourceResponse(BaseModel):
@@ -361,6 +365,12 @@ class ExperienceSourceResponse(BaseModel):
     before_context: str
 
     after_context: str
+    example_id: str | None = None
+    example_revision: int | None = None
+    tag: str | None = None
+    decision: str | None = None
+    learning_use: str | None = None
+    negative_target: str | None = None
 
 
 class ExperienceSearchItemResponse(BaseModel):

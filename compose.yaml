@@ -1,5 +1,5 @@
 # compose.yaml
-# Project-specific Docker stack PDRD.
+# Проектный Docker-стек PDRD и серверный Review на основном frontend.
 #
 # Shared: RabbitMQ, n8n, shared-vlm, shared-embedding.
 # Project-specific: PostgreSQL, Qdrant и application services.
@@ -28,6 +28,7 @@ x-api-gateway-environment: &api-gateway-environment
   API_GATEWAY_BROKER__VIRTUAL_HOST: ${PDRD_RABBITMQ_VHOST:-pdrd-validation}
 
 x-knowledge-service-environment: &knowledge-service-environment
+  KNOWLEDGE_SERVICE_EXPERIENCE__KEY: ${PDRD_EXPERIENCE_INDEX_KEY:-}
   KNOWLEDGE_SERVICE_DATABASE__HOST: postgres
   KNOWLEDGE_SERVICE_DATABASE__PORT: 5432
   KNOWLEDGE_SERVICE_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
@@ -42,6 +43,16 @@ x-knowledge-service-environment: &knowledge-service-environment
 
   KNOWLEDGE_SERVICE_EMBEDDING__BASE_URL: ${PDRD_SHARED_EMBEDDING_BASE_URL:-http://shared-embedding:8000/v1}
   KNOWLEDGE_SERVICE_MULTIMODAL_EMBEDDING__BASE_URL: ${PDRD_SHARED_EMBEDDING_BASE_URL:-http://shared-embedding:8000/v1}
+
+x-experience-environment: &experience-environment
+  EXPERIENCE_SERVICE_INDEX_KEY: ${PDRD_EXPERIENCE_INDEX_KEY:-}
+  EXPERIENCE_SERVICE_ENABLED: "true"
+  EXPERIENCE_SERVICE_DATABASE__HOST: postgres
+  EXPERIENCE_SERVICE_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
+  EXPERIENCE_SERVICE_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
+  EXPERIENCE_SERVICE_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+  EXPERIENCE_SERVICE_REVIEW_API_ENABLED: ${API_GATEWAY_REVIEW__ENABLED:-false}
+  EXPERIENCE_SERVICE_INTERNAL_KEY: ${API_GATEWAY_REVIEW__INTERNAL_KEY:-}
 
 services:
   postgres:
@@ -335,6 +346,7 @@ services:
     volumes:
       - normative_documents:/data/normative
       - technical_assignment_documents:/data/technical-assignments
+      - experience_index_quality:/data/experience-quality
 
     ports:
       - "${KNOWLEDGE_SERVICE_BIND_IP:-127.0.0.1}:${KNOWLEDGE_SERVICE_HOST_PORT:-8401}:8401"
@@ -608,6 +620,85 @@ services:
       - app-net
       - ai-shared
 
+  experience-migrate:
+    build:
+      context: ./services/experience-service
+      target: runtime
+    profiles: [review]
+    restart: "no"
+    env_file: *app-env-files
+    environment: *experience-environment
+    command: ["python", "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+    networks: [app-net]
+
+  experience-service:
+    build:
+      context: ./services/experience-service
+      target: runtime
+    profiles: [review]
+    restart: unless-stopped
+    env_file: *app-env-files
+    environment: *experience-environment
+    volumes:
+      - experience_crops:/data/experience/crops
+    depends_on:
+      experience-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    networks: [app-net]
+
+  review-frontend:
+    build:
+      context: ./frontend
+    profiles: [review]
+    restart: unless-stopped
+    environment:
+      PDRD_REVIEW_PROXY_KEY: ${API_GATEWAY_REVIEW__UI_KEY:-}
+    ports:
+      - "127.0.0.1:${REVIEW_FRONTEND_PORT:-8081}:80"
+    depends_on:
+      experience-service:
+        condition: service_healthy
+    logging: *default-logging
+    networks: [app-net]
+
+  experience-indexer:
+    build:
+      context: ./services/knowledge-service
+      target: runtime
+    profiles: [experience-index]
+    restart: unless-stopped
+    env_file: *app-env-files
+    environment:
+      <<: *knowledge-service-environment
+      KNOWLEDGE_SERVICE_EXPERIENCE__INDEX_ENABLED: "true"
+      KNOWLEDGE_SERVICE_EXPERIENCE__POLL_SECONDS: "30"
+    command: ["python", "-m", "pdrd_knowledge_service.experience_runtime", "watch"]
+    volumes:
+      - experience_index_quality:/data/experience-quality
+    depends_on:
+      experience-service:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json, time; from pathlib import Path; from pdrd_knowledge_service.core.settings import Settings; s=json.loads(Path('/tmp/experience-index-status.json').read_text()); assert time.time()-s['last_success'] < max(900, Settings().experience.poll_seconds*3)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 900s
+    logging: *default-logging
+    networks: [app-net, ai-shared]
+
   frontend:
     build:
       context: ./frontend
@@ -617,12 +708,18 @@ services:
     ports:
       - "${FRONTEND_PORT:-8080}:80"
 
+    environment:
+      # Серверный Review работает на основном фронте; ключ не передаётся браузеру.
+      PDRD_REVIEW_PROXY_KEY: ${API_GATEWAY_REVIEW__UI_KEY:-}
+
     logging: *default-logging
 
     networks:
       - app-net
 
 volumes:
+  experience_index_quality:
+  experience_crops:
   postgres_data:
   qdrant_data:
   analysis_artifacts:

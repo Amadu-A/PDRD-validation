@@ -13,6 +13,7 @@ from pdrd_document_service.application.use_cases.cad import (
 from pdrd_document_service.application.use_cases.combined import (
     ExtractCombinedDocument,
 )
+from pdrd_document_service.application.use_cases.crop_pdf import CropPdf
 from pdrd_document_service.application.use_cases.extract import (
     ExtractPdfDocument,
 )
@@ -41,6 +42,7 @@ from pdrd_document_service.infrastructure.image_composer import (
 from pdrd_document_service.infrastructure.pdf.annotator import (
     PyMuPdfAnnotationWriter,
 )
+from pdrd_document_service.infrastructure.pdf.crop import PyMuPdfCropRenderer
 from pdrd_document_service.infrastructure.pdf.pymupdf import (
     PyMuPdfReader,
 )
@@ -59,6 +61,7 @@ class ApplicationContainer:
     extract_pdf_project_context: ExtractPdfProjectContext | None = None
 
     build_annotated_pdf: BuildAnnotatedPdf | None = None
+    crop_pdf: CropPdf | None = None
 
 
 def build_container() -> ApplicationContainer:
@@ -137,4 +140,5 @@ def build_container() -> ApplicationContainer:
         extract_combined=extract_combined,
         extract_pdf_project_context=(extract_pdf_project_context),
         build_annotated_pdf=(build_annotated_pdf),
+        crop_pdf=CropPdf(PyMuPdfCropRenderer(), settings.pdf.max_upload_bytes),
     )

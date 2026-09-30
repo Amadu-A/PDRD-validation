@@ -250,6 +250,12 @@ class ExperienceSourcePayload(BaseModel):
 
     before_context: str = ""
     after_context: str = ""
+    example_id: str | None = None
+    example_revision: int | None = None
+    tag: str | None = None
+    decision: str | None = None
+    learning_use: str | None = None
+    negative_target: str | None = None
 
     def to_domain(
         self,
@@ -268,6 +274,12 @@ class ExperienceSourcePayload(BaseModel):
             after_page=self.after_page,
             before_context=self.before_context,
             after_context=self.after_context,
+            example_id=self.example_id,
+            example_revision=self.example_revision,
+            tag=self.tag,
+            decision=self.decision,
+            learning_use=self.learning_use,
+            negative_target=self.negative_target,
         )
 
 

@@ -12,3 +12,4 @@ ruff>=0.12,<1.0
 -e ./services/knowledge-service[test]
 -e ./services/analysis-service[test]
 -e ./services/multimodal-embedding-service[test]
+-e ./services/experience-service

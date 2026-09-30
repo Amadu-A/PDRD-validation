@@ -2,6 +2,8 @@
 
 """HTTP schemas внутреннего annotated PDF contract."""
 
+from typing import Literal
+
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -27,24 +29,26 @@ class PdfAnnotationBoundingBoxRequest(
 
     model_config = ConfigDict(
         frozen=True,
+        strict=True,
+        allow_inf_nan=False,
     )
 
-    x_min: int = Field(
+    x_min: float = Field(
         ge=0,
         le=1000,
     )
 
-    y_min: int = Field(
+    y_min: float = Field(
         ge=0,
         le=1000,
     )
 
-    x_max: int = Field(
+    x_max: float = Field(
         ge=0,
         le=1000,
     )
 
-    y_max: int = Field(
+    y_max: float = Field(
         ge=0,
         le=1000,
     )
@@ -107,6 +111,17 @@ class PdfFindingAnnotationRequest(
     regions: list[PdfAnnotationBoundingBoxRequest] = Field(
         default_factory=list,
     )
+    callout_box: PdfAnnotationBoundingBoxRequest | None = None
+    origin: Literal["vlm", "manual"] = "vlm"
+
+    @model_validator(mode="after")
+    def validate_manual(self):
+        """Gold обязан иметь область ошибки и область текста на одном листе."""
+        if self.origin == "manual" and (
+            len(self.regions) != 1 or self.callout_box is None
+        ):
+            raise ValueError("Ручное замечание требует две области.")
+        return self
 
     def to_domain(
         self,
@@ -119,6 +134,8 @@ class PdfFindingAnnotationRequest(
             title=self.title,
             content=self.content,
             regions=tuple(region.to_domain() for region in self.regions),
+            callout_box=self.callout_box.to_domain() if self.callout_box else None,
+            origin=self.origin,
         )
 
 
@@ -163,6 +180,7 @@ class PdfReportFindingRequest(
     )
 
     fields: list[PdfReportFieldRequest]
+    origin: Literal["vlm", "manual"] = "vlm"
 
     def to_domain(
         self,
@@ -171,6 +189,7 @@ class PdfReportFindingRequest(
         return PdfReportFinding(
             title=self.title,
             fields=tuple(field.to_domain() for field in self.fields),
+            origin=self.origin,
         )
 
 

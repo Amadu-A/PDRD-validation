@@ -1,5 +1,5 @@
 # ops/Dockerfile.quality
-# Python 3.12 environment для server-side lint, format и полного test suite.
+# Python 3.12 + Node.js для единых Python и frontend quality gates.
 
 FROM python:3.12.13-slim-bookworm
 
@@ -7,22 +7,23 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /workspace
 
 COPY pyproject.toml /workspace/pyproject.toml
 COPY requirements-dev.txt /workspace/requirements-dev.txt
 
-# requirements-dev.txt содержит editable dependencies вида
-# ./services/api-gateway[test], поэтому каталоги сервисов должны существовать
-# до запуска pip install.
+# Editable dependencies требуют исходные каталоги микросервисов.
 COPY services /workspace/services
 
 RUN pip install \
     --no-cache-dir \
     -r /workspace/requirements-dev.txt
 
-# Полный repository snapshot нужен architecture tests:
-# frontend, n8n, scripts, compose.yaml и другим repository-level проверкам.
+# Architecture checks изучают frontend, n8n, scripts и compose.
 COPY . /workspace
 
 CMD ["/bin/sh", "-c", "python -m ruff check . && python -m ruff format --check . && python -m pytest -q --import-mode=importlib"]

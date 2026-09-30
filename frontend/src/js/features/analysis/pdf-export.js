@@ -1,7 +1,8 @@
 // frontend/src/js/features/analysis/pdf-export.js
 
 /**
- * Добавляет lazy-download annotated PDF в самый низ результата анализа.
+ * Разделяет автоматический PDF и утверждённый PDF после Human Review.
+ * Итоговую кнопку подключает отдельный модуль серверного Review.
  */
 
 function createElement(
@@ -31,12 +32,7 @@ function createElement(
 
 
 /**
- * Добавляет ссылку скачивания только для completed анализа с PDF.
- *
- * @param {DocumentFragment|HTMLElement} parent Target container.
- * @param {object} options Export options.
- * @param {string|null} options.jobId Analysis job id.
- * @param {object} options.payload Completed analysis payload.
+ * Выводит исходный PDF и кнопку итогового PDF до подключения серверного Review.
  */
 export function appendAnnotatedPdfDownload(
   parent,
@@ -76,9 +72,8 @@ export function appendAnnotatedPdfDownload(
       "p",
       "analysis-export__description",
       (
-        "Скачать исходный PDF с интерактивными "
-        + "аннотациями на листах и полным "
-        + "текстовым отчётом в конце файла."
+        "Существующий автоматический PDF не учитывает Wise, Bad, Edited "
+        + "и ручные Gold-замечания. Он доступен только как исходная версия."
       ),
     ),
   );
@@ -86,7 +81,7 @@ export function appendAnnotatedPdfDownload(
   const link = createElement(
     "a",
     "analysis-export__download",
-    "Скачать PDF с аннотациями",
+    "Скачать PDF с аннотациями — автоматический, без решений пользователя",
   );
 
   link.href = (
@@ -96,9 +91,30 @@ export function appendAnnotatedPdfDownload(
   );
 
   link.download = "";
+  link.dataset.analysisPdfOriginal = "";
 
   section.append(
     link,
+  );
+
+  const finalButton = createElement(
+    "button",
+    "analysis-export__pending",
+    "Итоговый PDF после Human Review",
+  );
+
+  finalButton.type = "button";
+  finalButton.disabled = true;
+  finalButton.dataset.analysisPdfReviewed = "";
+
+  finalButton.title = (
+    "Сначала примите или отклоните все замечания. "
+    + "Итоговый PDF включает принятые замечания с проверенной областью на листах "
+    + "и в текстовом списке."
+  );
+
+  section.append(
+    finalButton,
   );
 
   parent.append(

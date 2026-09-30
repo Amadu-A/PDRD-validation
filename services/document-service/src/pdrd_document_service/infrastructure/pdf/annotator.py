@@ -14,6 +14,12 @@ from pdrd_document_service.application.ports.pdf_annotation import (
     PdfReportField,
     PdfTextReport,
 )
+from pdrd_document_service.infrastructure.pdf.review_style import (
+    annotation_palette,
+    pinned_card_style,
+    pinned_card_text,
+    pinned_font_size,
+)
 
 
 class _PdfReportWriter:
@@ -35,6 +41,7 @@ class _PdfReportWriter:
         self._font = font
         self._page: fitz.Page | None = None
         self._y = 0.0
+        self._highlight = False
 
     def append(
         self,
@@ -81,6 +88,7 @@ class _PdfReportWriter:
             )
 
         for finding in report.findings:
+            self._highlight = finding.origin == "manual"
             self._write(
                 finding.title,
                 font_size=11.0,
@@ -93,6 +101,7 @@ class _PdfReportWriter:
                 )
 
             self._y += 6.0
+        self._highlight = False
 
         if report.limitations:
             self._write(
@@ -161,6 +170,18 @@ class _PdfReportWriter:
 
             if line:
                 assert self._page is not None
+
+                if self._highlight:
+                    self._page.draw_rect(
+                        fitz.Rect(
+                            self._MARGIN - 3.0,
+                            self._y - font_size - 2.0,
+                            self._PAGE_WIDTH - self._MARGIN + 3.0,
+                            self._y + resolved_line_height - font_size - 2.0,
+                        ),
+                        color=None,
+                        fill=annotation_palette("manual").fill,
+                    )
 
                 self._page.insert_text(
                     (
@@ -413,6 +434,19 @@ class PyMuPdfAnnotationWriter:
                 ] = {}
 
                 for annotation in annotations:
+                    if annotation.callout_box is not None:
+                        page = self._annotation_page(
+                            document=document,
+                            original_page_count=original_page_count,
+                            page_number=annotation.page_number,
+                        )
+                        occupied_cards.setdefault(annotation.page_number, []).append(
+                            self._annotation_rect(
+                                page=page, bbox=annotation.callout_box
+                            )[0],
+                        )
+
+                for annotation in annotations:
                     page_cards = occupied_cards.setdefault(
                         annotation.page_number,
                         [],
@@ -656,6 +690,8 @@ class PyMuPdfAnnotationWriter:
             ) in region_pairs
         )
 
+        palette = annotation_palette(annotation.origin)
+
         for (
             _,
             annotation_rect,
@@ -675,7 +711,7 @@ class PyMuPdfAnnotationWriter:
             )
 
             rectangle_annotation.set_colors(
-                stroke=self._ANNOTATION_COLOR,
+                stroke=palette.stroke,
             )
 
             rectangle_annotation.update(
@@ -687,12 +723,16 @@ class PyMuPdfAnnotationWriter:
             page_rect=page.rect,
         )
 
-        card_rect = self._place_card(
-            page=page,
-            anchor=anchor,
-            occupied_cards=occupied_cards,
-            all_regions=all_regions,
-            text_regions=text_regions,
+        card_rect = (
+            self._annotation_rect(page=page, bbox=annotation.callout_box)[0]
+            if annotation.callout_box is not None
+            else self._place_card(
+                page=page,
+                anchor=anchor,
+                occupied_cards=occupied_cards,
+                all_regions=all_regions,
+                text_regions=text_regions,
+            )
         )
 
         for visual_region in visual_regions:
@@ -753,7 +793,7 @@ class PyMuPdfAnnotationWriter:
         )
 
         connector.set_colors(
-            stroke=self._ANNOTATION_COLOR,
+            stroke=annotation_palette(annotation.origin).stroke,
         )
 
         connector.update(
@@ -772,6 +812,7 @@ class PyMuPdfAnnotationWriter:
             page=page,
             rect=visual_card_rect,
         )
+        palette = annotation_palette(annotation.origin)
 
         border = page.add_rect_annot(
             card_rect,
@@ -788,7 +829,7 @@ class PyMuPdfAnnotationWriter:
         )
 
         border.set_colors(
-            stroke=self._ANNOTATION_COLOR,
+            stroke=palette.stroke,
         )
 
         border.update(
@@ -798,6 +839,10 @@ class PyMuPdfAnnotationWriter:
         font_size = self._card_font_size(
             page,
         )
+        if annotation.callout_box is not None:
+            font_size = pinned_font_size(
+                visual_card_rect.width, visual_card_rect.height, font_size
+            )
 
         visible_text = self._visible_card_text(
             annotation.title,
@@ -806,12 +851,19 @@ class PyMuPdfAnnotationWriter:
 
         card = page.add_freetext_annot(
             card_rect,
-            ("     " + visible_text),
+            pinned_card_text(visible_text)
+            if annotation.callout_box is not None
+            else ("     " + visible_text),
             fontsize=font_size,
             text_color=self._CARD_TEXT_COLOR,
-            fill_color=self._CARD_FILL_COLOR,
+            fill_color=palette.fill,
             border_width=0,
             opacity=0.90,
+            rotate=page.rotation if annotation.callout_box is not None else 0,
+            richtext=annotation.callout_box is not None,
+            style=pinned_card_style(font_size)
+            if annotation.callout_box is not None
+            else None,
         )
 
         # Не записываем full content в FreeText:
@@ -828,6 +880,15 @@ class PyMuPdfAnnotationWriter:
                 font_size * 1.65,
             ),
         )
+        if annotation.callout_box is not None:
+            badge_size = max(
+                1.0,
+                min(
+                    badge_size,
+                    visual_card_rect.width - 8.0,
+                    visual_card_rect.height - 8.0,
+                ),
+            )
 
         visual_badge_rect = fitz.Rect(
             visual_card_rect.x0 + 4.0,
@@ -851,10 +912,11 @@ class PyMuPdfAnnotationWriter:
                 font_size * 0.72,
             ),
             text_color=self._BADGE_TEXT_COLOR,
-            fill_color=self._BADGE_FILL_COLOR,
+            fill_color=palette.stroke,
             border_width=0,
             align=1,
             opacity=0.98,
+            rotate=page.rotation if annotation.callout_box is not None else 0,
         )
 
         badge.set_info(
@@ -865,7 +927,8 @@ class PyMuPdfAnnotationWriter:
         visual_info_point = fitz.Point(
             max(
                 visual_card_rect.x0 + 10.0,
-                visual_card_rect.x1 - 14.0,
+                visual_card_rect.x1
+                - (24.0 if annotation.callout_box is not None else 14.0),
             ),
             min(
                 page.rect.y1 - 10.0,
