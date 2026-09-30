@@ -9,7 +9,6 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${REPO_DIR}"
 
 SHARED_STARTUP_TIMEOUT_SECONDS="${SHARED_STARTUP_TIMEOUT_SECONDS:-240}"
-PDRD_STARTUP_TIMEOUT_SECONDS="${PDRD_STARTUP_TIMEOUT_SECONDS:-360}"
 PDRD_STARTUP_POLL_SECONDS="${PDRD_STARTUP_POLL_SECONDS:-5}"
 
 die() {
@@ -40,6 +39,19 @@ set -a
 # shellcheck disable=SC1091
 source ".env"
 set +a
+
+profile_enabled() {
+    local profile="$1"
+    [[ ",${COMPOSE_PROFILES:-}," == *,"${profile}",* ]]
+}
+
+if profile_enabled "experience-index"; then
+    profile_enabled "review" \
+        || die "COMPOSE_PROFILES=experience-index требует также review."
+    PDRD_STARTUP_TIMEOUT_SECONDS="${PDRD_STARTUP_TIMEOUT_SECONDS:-1200}"
+else
+    PDRD_STARTUP_TIMEOUT_SECONDS="${PDRD_STARTUP_TIMEOUT_SECONDS:-360}"
+fi
 
 validate_secret "PDRD_POSTGRES_PASSWORD"
 validate_secret "PDRD_RABBITMQ_PASSWORD"
@@ -227,6 +239,7 @@ docker compose run \
 echo
 echo "=== Application stack ==="
 
+# При профиле review Compose сначала выполнит experience-migrate через depends_on.
 docker compose up -d --remove-orphans
 
 echo
@@ -253,15 +266,26 @@ while true; do
         docker compose ps
 
         echo
+        log_services=(
+            api-gateway
+            api-gateway-worker
+            knowledge-service
+            knowledge-embedding-migrator
+            knowledge-indexer
+            technical-assignment-indexer
+            analysis-service
+        )
+
+        if profile_enabled "review"; then
+            log_services+=(experience-migrate experience-service review-frontend)
+        fi
+        if profile_enabled "experience-index"; then
+            log_services+=(experience-indexer)
+        fi
+
         docker compose logs \
             --tail=80 \
-            api-gateway \
-            api-gateway-worker \
-            knowledge-service \
-            knowledge-embedding-migrator \
-            knowledge-indexer \
-            technical-assignment-indexer \
-            analysis-service \
+            "${log_services[@]}" \
             || true
 
         die "PDRD stack не стал ready."

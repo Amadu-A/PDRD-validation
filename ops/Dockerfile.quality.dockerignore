@@ -9,6 +9,7 @@
 
 .venv/
 .venv-dev/
+.codex-test-temp/
 
 **/__pycache__/
 **/*.py[cod]

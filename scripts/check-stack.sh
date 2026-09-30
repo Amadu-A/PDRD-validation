@@ -26,6 +26,11 @@ bad() {
     fail=1
 }
 
+profile_enabled() {
+    local profile="$1"
+    [[ ",${COMPOSE_PROFILES:-}," == *,"${profile}",* ]]
+}
+
 check_http() {
     local name="$1"
     local url="$2"
@@ -172,6 +177,16 @@ check_service_state "technical-assignment-indexer"
 check_service_state "analysis-service"
 check_service_state "frontend"
 
+if profile_enabled "review"; then
+    check_completed_service "experience-migrate"
+    check_service_state "experience-service"
+    check_service_state "review-frontend"
+fi
+
+if profile_enabled "experience-index"; then
+    check_service_state "experience-indexer"
+fi
+
 echo
 echo "=== HTTP services ==="
 
@@ -198,6 +213,16 @@ check_http \
 check_http \
     "Analysis Service ready" \
     "http://127.0.0.1:${ANALYSIS_SERVICE_HOST_PORT:-8501}/health/ready"
+
+if profile_enabled "review"; then
+    check_http \
+        "Review frontend HTTP" \
+        "http://127.0.0.1:${REVIEW_FRONTEND_PORT:-8081}/"
+
+    check_http \
+        "Review frontend -> API Gateway proxy" \
+        "http://127.0.0.1:${REVIEW_FRONTEND_PORT:-8081}/api/v1/review/config"
+fi
 
 check_http \
     "Qdrant ready" \

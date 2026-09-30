@@ -93,3 +93,4 @@ def test_quality_context_ignores_runtime_data() -> None:
     ignore_patterns = read_ignore_patterns()
 
     assert "data/" in ignore_patterns
+    assert ".codex-test-temp/" in ignore_patterns

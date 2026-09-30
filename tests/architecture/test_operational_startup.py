@@ -67,7 +67,7 @@ def test_startup_knows_real_shared_repository_locations() -> None:
 
 
 def test_startup_runs_shared_bootstrap_and_database_migrations() -> None:
-    """One-command startup поднимает shared stack и применяет migrations."""
+    """One-command startup поднимает shared stack и применяет core migrations."""
     source = UP_SCRIPT.read_text(
         encoding="utf-8",
     )
@@ -86,6 +86,34 @@ def test_startup_runs_shared_bootstrap_and_database_migrations() -> None:
     assert "knowledge-service" in source
 
     assert "bash scripts/check-stack.sh" in source
+
+
+def test_optional_experience_profiles_use_the_one_command_startup() -> None:
+    """Review и индексатор подключаются только при явном выборе Compose profiles."""
+    startup = UP_SCRIPT.read_text(encoding="utf-8")
+    stack_check = CHECK_STACK_SCRIPT.read_text(encoding="utf-8")
+    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+
+    assert "experience-migrate" in compose
+    assert "service_completed_successfully" in compose
+    assert "docker compose up -d --remove-orphans" in startup
+    assert "--profile review" not in startup
+    assert "COMPOSE_PROFILES" in startup and "COMPOSE_PROFILES" in stack_check
+    assert 'profile_enabled "experience-index"' in startup
+    assert "PDRD_STARTUP_TIMEOUT_SECONDS:-1200" in startup
+    assert "COMPOSE_PROFILES=experience-index требует также review" in startup
+
+    review_checks = stack_check.split('if profile_enabled "review"; then', 1)[1].split(
+        "\nfi", 1
+    )[0]
+    assert 'check_completed_service "experience-migrate"' in review_checks
+    assert 'check_service_state "experience-service"' in review_checks
+    assert 'check_service_state "review-frontend"' in review_checks
+    index_checks = stack_check.split('if profile_enabled "experience-index"; then', 1)[
+        1
+    ].split("\nfi", 1)[0]
+    assert 'check_service_state "experience-indexer"' in index_checks
+    assert '"Review frontend -> API Gateway proxy"' in stack_check
 
 
 def test_startup_does_not_destroy_persistent_state() -> None:

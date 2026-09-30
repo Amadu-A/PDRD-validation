@@ -65,10 +65,19 @@ if (-not $pythonExecutable) {
 
 $previousPath = $env:PATH
 $previousPythonIoEncoding = $env:PYTHONIOENCODING
+$previousPythonPath = $env:PYTHONPATH
 Push-Location $repositoryRoot
 try {
     # Совпадает с UTF-8 OutputEncoding PowerShell и сохраняет русский вывод pytest.
     $env:PYTHONIOENCODING = "utf-8"
+    # Новый user-service ещё может отсутствовать в существующем локальном venv.
+    $userServiceSource = Join-Path $repositoryRoot "services\user-service\src"
+    if ([string]::IsNullOrEmpty($previousPythonPath)) {
+        $env:PYTHONPATH = $userServiceSource
+    }
+    else {
+        $env:PYTHONPATH = "$userServiceSource$([IO.Path]::PathSeparator)$previousPythonPath"
+    }
     $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
     if (-not $nodeCommand) {
         $nodeDirectory = Join-Path $env:ProgramFiles "nodejs"
@@ -150,5 +159,6 @@ try {
 finally {
     $env:PATH = $previousPath
     $env:PYTHONIOENCODING = $previousPythonIoEncoding
+    $env:PYTHONPATH = $previousPythonPath
     Pop-Location
 }
