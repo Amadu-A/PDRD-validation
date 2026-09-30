@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/check-stack.sh
 #
-# Проверка runtime-состояния полного PDRD stack.
+# Проверка runtime-состояния PDRD, включая уже запущенные optional services.
 
 set -uo pipefail
 
@@ -15,6 +15,9 @@ if [[ -f ".env" ]]; then
     set +a
 fi
 
+# shellcheck source=scripts/lib/stack-profiles.sh
+source "${REPO_DIR}/scripts/lib/stack-profiles.sh"
+
 fail=0
 
 ok() {
@@ -24,11 +27,6 @@ ok() {
 bad() {
     printf '[FAIL] %s\n' "$1"
     fail=1
-}
-
-profile_enabled() {
-    local profile="$1"
-    [[ ",${COMPOSE_PROFILES:-}," == *,"${profile}",* ]]
 }
 
 check_http() {
@@ -44,11 +42,17 @@ check_http() {
 
 check_service_state() {
     local service="$1"
+    local profile="${2:-}"
     local container_id
     local state
+    local -a compose_args=(compose)
+
+    if [[ -n "${profile}" ]]; then
+        compose_args+=(--profile "${profile}")
+    fi
 
     container_id="$(
-        docker compose ps \
+        docker "${compose_args[@]}" ps \
             --all \
             --quiet \
             "${service}" \
@@ -81,12 +85,18 @@ check_service_state() {
 
 check_completed_service() {
     local service="$1"
+    local profile="${2:-}"
     local container_id
     local state
     local exit_code
+    local -a compose_args=(compose)
+
+    if [[ -n "${profile}" ]]; then
+        compose_args+=(--profile "${profile}")
+    fi
 
     container_id="$(
-        docker compose ps \
+        docker "${compose_args[@]}" ps \
             --all \
             --quiet \
             "${service}" \
@@ -139,6 +149,35 @@ else
 fi
 
 echo
+echo "=== Optional profiles ==="
+
+review_active=0
+identity_active=0
+experience_index_active=0
+
+if optional_profile_active "review" \
+    "experience-migrate" "experience-service" "review-frontend"; then
+    review_active=1
+    ok "review: selected or containers present"
+else
+    echo "[SKIP] review: profile not selected and no containers"
+fi
+
+if optional_profile_active "identity" "user-migrate" "user-service"; then
+    identity_active=1
+    ok "identity: selected or containers present"
+else
+    echo "[SKIP] identity: profile not selected and no containers"
+fi
+
+if optional_profile_active "experience-index" "experience-indexer"; then
+    experience_index_active=1
+    ok "experience-index: selected or containers present"
+else
+    echo "[SKIP] experience-index: profile not selected and no containers"
+fi
+
+echo
 echo "=== Shared network ==="
 
 if docker network inspect \
@@ -177,19 +216,19 @@ check_service_state "technical-assignment-indexer"
 check_service_state "analysis-service"
 check_service_state "frontend"
 
-if profile_enabled "review"; then
-    check_completed_service "experience-migrate"
-    check_service_state "experience-service"
-    check_service_state "review-frontend"
+if (( review_active )); then
+    check_completed_service "experience-migrate" "review"
+    check_service_state "experience-service" "review"
+    check_service_state "review-frontend" "review"
 fi
 
-if profile_enabled "identity"; then
-    check_completed_service "user-migrate"
-    check_service_state "user-service"
+if (( identity_active )); then
+    check_completed_service "user-migrate" "identity"
+    check_service_state "user-service" "identity"
 fi
 
-if profile_enabled "experience-index"; then
-    check_service_state "experience-indexer"
+if (( experience_index_active )); then
+    check_service_state "experience-indexer" "experience-index"
 fi
 
 echo
@@ -219,7 +258,19 @@ check_http \
     "Analysis Service ready" \
     "http://127.0.0.1:${ANALYSIS_SERVICE_HOST_PORT:-8501}/health/ready"
 
-if profile_enabled "review"; then
+if (( review_active )); then
+    if docker compose --profile review exec \
+        -T \
+        experience-service \
+        python3 \
+        -c 'import json, urllib.request; payload=json.load(urllib.request.urlopen("http://127.0.0.1:8000/health/ready", timeout=5)); assert payload.get("status") == "ready"' \
+        >/dev/null 2>&1; then
+
+        ok "Experience Service ready (internal)"
+    else
+        bad "Experience Service ready (internal)"
+    fi
+
     check_http \
         "Review frontend HTTP" \
         "http://127.0.0.1:${REVIEW_FRONTEND_PORT:-8081}/"
@@ -229,8 +280,8 @@ if profile_enabled "review"; then
         "http://127.0.0.1:${REVIEW_FRONTEND_PORT:-8081}/api/v1/review/config"
 fi
 
-if profile_enabled "identity"; then
-    if docker compose exec \
+if (( identity_active )); then
+    if docker compose --profile identity exec \
         -T \
         user-service \
         python3 \

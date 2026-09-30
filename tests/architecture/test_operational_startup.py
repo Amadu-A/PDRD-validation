@@ -18,6 +18,8 @@ UP_SCRIPT = ROOT / "scripts" / "up.sh"
 
 CHECK_STACK_SCRIPT = ROOT / "scripts" / "check-stack.sh"
 
+STACK_PROFILES_HELPER = ROOT / "scripts" / "lib" / "stack-profiles.sh"
+
 EMBEDDING_MIGRATION_SCRIPT = ROOT / "scripts" / "migrate-embedding-indexes.sh"
 
 USER_TEST_COMPOSE = ROOT / "ops" / "compose.user-test.yaml"
@@ -102,22 +104,24 @@ def test_optional_experience_profiles_use_the_one_command_startup() -> None:
     assert "service_completed_successfully" in compose
     assert "docker compose up -d --remove-orphans" in startup
     assert "--profile review" not in startup
-    assert "COMPOSE_PROFILES" in startup and "COMPOSE_PROFILES" in stack_check
+    helper = STACK_PROFILES_HELPER.read_text(encoding="utf-8")
+    assert "COMPOSE_PROFILES" in startup and "COMPOSE_PROFILES" in helper
     assert 'profile_enabled "experience-index"' in startup
     assert "PDRD_STARTUP_TIMEOUT_SECONDS:-1200" in startup
     assert "COMPOSE_PROFILES=experience-index требует также review" in startup
 
-    review_checks = stack_check.split('if profile_enabled "review"; then', 1)[1].split(
+    review_checks = stack_check.split("if (( review_active )); then", 1)[1].split(
         "\nfi", 1
     )[0]
-    assert 'check_completed_service "experience-migrate"' in review_checks
-    assert 'check_service_state "experience-service"' in review_checks
-    assert 'check_service_state "review-frontend"' in review_checks
-    index_checks = stack_check.split('if profile_enabled "experience-index"; then', 1)[
+    assert 'check_completed_service "experience-migrate" "review"' in review_checks
+    assert 'check_service_state "experience-service" "review"' in review_checks
+    assert 'check_service_state "review-frontend" "review"' in review_checks
+    index_checks = stack_check.split("if (( experience_index_active )); then", 1)[
         1
     ].split("\nfi", 1)[0]
-    assert 'check_service_state "experience-indexer"' in index_checks
+    assert 'check_service_state "experience-indexer" "experience-index"' in index_checks
     assert '"Review frontend -> API Gateway proxy"' in stack_check
+    assert 'ok "Experience Service ready (internal)"' in stack_check
 
 
 def test_identity_profile_runs_private_user_service_after_its_migrations() -> None:
@@ -169,13 +173,30 @@ def test_identity_profile_is_checked_by_one_command_scripts() -> None:
     assert "${#USER_SERVICE_INTERNAL_KEY} < 32" in startup
     assert "log_services+=(user-migrate user-service)" in startup
     assert "--profile identity" not in startup
-    identity_checks = stack_check.split('if profile_enabled "identity"; then', 1)[
-        1
-    ].split("\nfi", 1)[0]
-    assert 'check_completed_service "user-migrate"' in identity_checks
-    assert 'check_service_state "user-service"' in identity_checks
+    identity_checks = stack_check.split("if (( identity_active )); then", 1)[1].split(
+        "\nfi", 1
+    )[0]
+    assert 'check_completed_service "user-migrate" "identity"' in identity_checks
+    assert 'check_service_state "user-service" "identity"' in identity_checks
     assert "User Service ready (internal)" in stack_check
-    assert "docker compose exec" in stack_check
+    assert "docker compose --profile identity exec" in stack_check
+
+
+def test_stack_check_reports_running_optional_services_without_profile_flag() -> None:
+    """Проверка замечает уже запущенные Review и Identity контейнеры."""
+    stack_check = CHECK_STACK_SCRIPT.read_text(encoding="utf-8")
+    helper = STACK_PROFILES_HELPER.read_text(encoding="utf-8")
+
+    assert 'source "${REPO_DIR}/scripts/lib/stack-profiles.sh"' in stack_check
+    assert 'optional_profile_active "review"' in stack_check
+    assert 'optional_profile_active "identity"' in stack_check
+    assert 'optional_profile_active "experience-index"' in stack_check
+    assert "docker compose --profile review exec" in stack_check
+    assert "docker compose --profile identity exec" in stack_check
+    assert "docker compose --profile" in helper
+    assert "ps \\" in helper
+    assert "--all --quiet" in helper
+    assert "[SKIP] identity" in stack_check
 
 
 def test_user_database_runner_is_isolated_from_project_state() -> None:
@@ -326,6 +347,7 @@ def test_operational_shell_scripts_have_real_shebang() -> None:
     for path in (
         UP_SCRIPT,
         CHECK_STACK_SCRIPT,
+        STACK_PROFILES_HELPER,
         EMBEDDING_MIGRATION_SCRIPT,
     ):
         first_line = path.read_text(
