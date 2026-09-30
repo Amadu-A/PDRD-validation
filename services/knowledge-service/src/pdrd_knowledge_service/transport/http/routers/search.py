@@ -14,6 +14,7 @@ from fastapi import (
 from pdrd_knowledge_service.application.ports.embedding import (
     EmbeddingProviderError,
 )
+from pdrd_knowledge_service.application.ports.experience_feed import ExperienceFeedError
 from pdrd_knowledge_service.application.ports.multimodal_embedding import (
     MultimodalEmbeddingProviderError,
 )
@@ -442,6 +443,7 @@ async def search_experience(
     try:
         results = await container.search_experience.execute(
             request.queries,
+            **({"section_id": request.section_id} if request.section_id else {}),
         )
 
     except ValueError as error:
@@ -454,6 +456,7 @@ async def search_experience(
 
     except (
         EmbeddingProviderError,
+        ExperienceFeedError,
         VectorStoreError,
     ) as error:
         raise HTTPException(
@@ -481,6 +484,12 @@ async def search_experience(
                         after_page=source.after_page,
                         before_context=source.before_context,
                         after_context=source.after_context,
+                        example_id=source.example_id,
+                        example_revision=source.example_revision,
+                        tag=source.tag,
+                        decision=source.decision,
+                        learning_use=source.learning_use,
+                        negative_target=source.negative_target,
                     )
                     for source in result.sources
                 ],

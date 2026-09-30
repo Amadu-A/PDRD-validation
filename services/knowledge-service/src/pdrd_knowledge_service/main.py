@@ -1,6 +1,10 @@
 # services/knowledge-service/src/pdrd_knowledge_service/main.py
 
-"""FastAPI entry point Knowledge Service."""
+"""HTTP-точка входа Knowledge: внедрение сценариев, маршруты и наблюдаемость E.
+
+Инфраструктуру создаёт composition root; HTTP не управляет каталогом Experience
+или shared-моделями. Рабочий E допускается конфигурацией и отчётом качества.
+"""
 
 from fastapi import FastAPI
 
@@ -8,6 +12,7 @@ from pdrd_knowledge_service.core.container import (
     ApplicationContainer,
     build_container,
 )
+from pdrd_knowledge_service.core.observability import configure_experience_logging
 from pdrd_knowledge_service.transport.http.routers.health import (
     router as health_router,
 )
@@ -34,8 +39,9 @@ from pdrd_knowledge_service.transport.http.routers.technical_assignments import 
 def create_app(
     container: ApplicationContainer | None = None,
 ) -> FastAPI:
-    """Создаёт configured FastAPI application."""
+    """Создаёт HTTP-приложение с внедрёнными сценариями и стабильными timing-логгерами."""
     application_container = container if container is not None else build_container()
+    configure_experience_logging()
 
     settings = application_container.settings
 

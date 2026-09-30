@@ -2,6 +2,7 @@
 
 """Конфигурация микросервиса API Gateway."""
 
+import re
 from functools import lru_cache
 from typing import Literal
 
@@ -426,6 +427,41 @@ class AnalysisServiceSettings(BaseModel):
     )
 
 
+class ReviewSettings(BaseModel):
+    """Закрытый frontend-канал и внутреннее соединение с Experience.
+
+    Два разных ключа задаются только сервером, браузер их не получает.
+    Режим не заменяет авторизацию и выключен по умолчанию.
+    """
+
+    enabled: bool = False
+    controlled_access: bool = False
+    actor: str = ""
+    ui_key: SecretStr = SecretStr("")
+    internal_key: SecretStr = SecretStr("")
+    base_url: str = "http://experience-service:8000"
+
+    @model_validator(mode="after")
+    def check_controlled_access(self) -> "ReviewSettings":
+        """Запрещает включение записи без явного закрытого режима и контекста."""
+        if self.enabled and (
+            not self.controlled_access
+            or not re.fullmatch(r"[A-Za-z0-9:@._-]{1,128}", self.actor)
+            or not re.fullmatch(
+                r"[A-Za-z0-9_-]{32,256}", self.ui_key.get_secret_value()
+            )
+            or not re.fullmatch(
+                r"[A-Za-z0-9_-]{32,256}", self.internal_key.get_secret_value()
+            )
+            or self.ui_key == self.internal_key
+        ):
+            raise ValueError(
+                "Review требует закрытый режим, серверный идентификатор инженера "
+                "и два разных ключа из букв, цифр, _ или -, длиной 32..256."
+            )
+        return self
+
+
 class Settings(BaseSettings):
     """Runtime settings API Gateway."""
 
@@ -503,6 +539,17 @@ class Settings(BaseSettings):
     analysis_service: AnalysisServiceSettings = Field(
         default_factory=AnalysisServiceSettings,
     )
+
+    review: ReviewSettings = Field(default_factory=ReviewSettings)
+
+    @model_validator(mode="after")
+    def check_review_environment(self) -> "Settings":
+        """Не позволяет использовать временный контекст вместо production-авторизации."""
+        if self.environment == "prod" and self.review.enabled:
+            raise ValueError(
+                "Закрытый режим Review не заменяет авторизацию production."
+            )
+        return self
 
 
 @lru_cache

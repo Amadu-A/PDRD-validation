@@ -51,9 +51,11 @@ RUN useradd \
     && mkdir -p \
         /data/normative \
         /data/technical-assignments \
+        /data/experience-quality \
     && chown -R app:app \
         /data/normative \
-        /data/technical-assignments
+        /data/technical-assignments \
+        /data/experience-quality
 
 ENV HOME=/home/app
 

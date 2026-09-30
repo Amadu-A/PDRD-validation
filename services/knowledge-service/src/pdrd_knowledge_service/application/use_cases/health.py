@@ -28,7 +28,14 @@ class CheckReadiness:
     vector_store: VectorStore
 
     normative_collection: str
-    experience_collection: str
+    experience_collection: str | None
+
+    async def _experience_ready(self) -> bool:
+        """Рабочие версии проверяются при поиске; общий API не требует legacy-коллекции."""
+        return (
+            self.experience_collection is None
+            or await self.vector_store.collection_exists(self.experience_collection)
+        )
 
     async def execute(
         self,
@@ -60,9 +67,7 @@ class CheckReadiness:
             self.vector_store.collection_exists(
                 self.normative_collection,
             ),
-            self.vector_store.collection_exists(
-                self.experience_collection,
-            ),
+            self._experience_ready(),
         )
 
         return ReadinessReport(

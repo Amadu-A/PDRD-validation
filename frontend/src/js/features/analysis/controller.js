@@ -482,6 +482,7 @@ export function createAnalysisController({
 
       resultView.showReport(
         report,
+        { jobId },
       );
 
     } catch (error) {

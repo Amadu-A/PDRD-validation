@@ -2,6 +2,7 @@
 
 """Domain-модели и правила обработки PDF."""
 
+import math
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -28,10 +29,10 @@ class InvalidPageSelectionError(ValueError):
 class PdfNormalizedBoundingBox:
     """BBox PDF-объекта в нормализованных координатах 0..1000."""
 
-    x_min: int
-    y_min: int
-    x_max: int
-    y_max: int
+    x_min: float
+    y_min: float
+    x_max: float
+    y_max: float
 
     def __post_init__(
         self,
@@ -44,7 +45,14 @@ class PdfNormalizedBoundingBox:
             self.y_max,
         )
 
-        if any(coordinate < 0 or coordinate > 1000 for coordinate in coordinates):
+        if any(
+            isinstance(coordinate, bool)
+            or not isinstance(coordinate, (int, float))
+            or not math.isfinite(coordinate)
+            or coordinate < 0
+            or coordinate > 1000
+            for coordinate in coordinates
+        ):
             raise ValueError(
                 "PDF bbox coordinates должны находиться в диапазоне 0..1000.",
             )

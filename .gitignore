@@ -2,6 +2,7 @@
 # Локальные, временные и генерируемые файлы проекта, которые не должны попадать в Git.
 
 .env
+.env.review-*
 
 .idea/
 .vscode/
@@ -16,6 +17,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.codex-test-temp/
+
 
 .coverage
 coverage.xml

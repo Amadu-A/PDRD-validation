@@ -11,6 +11,7 @@ from pdrd_api_gateway.core.container import (
     ApplicationContainer,
     build_container,
 )
+from pdrd_api_gateway.core.observability import configure_review_logging
 from pdrd_api_gateway.transport.http.routers.analyses import (
     router as analyses_router,
 )
@@ -26,6 +27,15 @@ from pdrd_api_gateway.transport.http.routers.analysis_pdf_exports import (
 from pdrd_api_gateway.transport.http.routers.analysis_progress import (
     router as analysis_progress_router,
 )
+from pdrd_api_gateway.transport.http.routers.experience import (
+    router as experience_router,
+)
+from pdrd_api_gateway.transport.http.routers.experience_quality import (
+    router as experience_quality_router,
+)
+from pdrd_api_gateway.transport.http.routers.experience_versions import (
+    router as experience_versions_router,
+)
 from pdrd_api_gateway.transport.http.routers.health import (
     router as health_router,
 )
@@ -34,6 +44,10 @@ from pdrd_api_gateway.transport.http.routers.normative_catalog import (
 )
 from pdrd_api_gateway.transport.http.routers.project_context_preflight import (
     router as project_context_preflight_router,
+)
+from pdrd_api_gateway.transport.http.routers.review import router as review_router
+from pdrd_api_gateway.transport.http.routers.review_source import (
+    router as review_source_router,
 )
 from pdrd_api_gateway.transport.http.routers.technical_assignments import (
     router as technical_assignments_router,
@@ -50,6 +64,8 @@ def create_app(
     application_container = container if container is not None else build_container()
 
     settings = application_container.settings
+    if settings.review.enabled:
+        configure_review_logging()
 
     @asynccontextmanager
     async def lifespan(
@@ -84,6 +100,12 @@ def create_app(
     application.include_router(
         health_router,
     )
+
+    application.include_router(review_router)
+    application.include_router(experience_router)
+    application.include_router(experience_versions_router)
+    application.include_router(experience_quality_router)
+    application.include_router(review_source_router)
 
     application.include_router(
         analyses_router,

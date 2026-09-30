@@ -12,6 +12,8 @@
  * Текст и source data вставляются только через textContent.
  */
 
+import { registerVisualizationReview, reviewCalloutBox } from "./visualization-review.js";
+
 const CALLOUT_MARGIN_PX = 10;
 const CALLOUT_GAP_PX = 14;
 const CARD_OVERLAP_WEIGHT = 12;
@@ -587,17 +589,13 @@ function appendDetailField(
     ),
   );
 
-  field.append(
-    createElement(
-      "span",
-      "analysis-result__annotation-detail-value",
-      value,
-    ),
-  );
+  const valueNode = createElement("span", "analysis-result__annotation-detail-value", value);
+  field.append(valueNode);
 
   parent.append(
     field,
   );
+  return valueNode;
 }
 
 
@@ -659,7 +657,7 @@ function createFindingDetailControl(
     ),
   );
 
-  appendDetailField(
+  const reviewText = appendDetailField(
     tooltip,
     "Замечание",
     (
@@ -669,6 +667,7 @@ function createFindingDetailControl(
       || "Текст замечания не передан."
     ),
   );
+  reviewText.dataset.reviewTooltipText = "";
 
   appendDetailField(
     tooltip,
@@ -676,11 +675,12 @@ function createFindingDetailControl(
     finding.evidence,
   );
 
-  appendDetailField(
+  const reviewBasis = appendDetailField(
     tooltip,
     "Нормативное основание",
-    finding.basis,
+    finding.basis || "Не указано.",
   );
+  reviewBasis.dataset.reviewTooltipBasis = "";
 
   appendDetailField(
     tooltip,
@@ -1498,6 +1498,7 @@ function layoutOverlayAnnotations(
   imagePane,
   items,
 ) {
+  items = items.filter((item) => !item.callout.classList.contains("is-hidden"));
   const paneWidth = Math.max(
     imagePane.clientWidth,
     1,
@@ -1510,7 +1511,9 @@ function layoutOverlayAnnotations(
 
   const allRegions = items.flatMap(
     (item) => (
-      item.bboxEntries.map(
+      item.bboxEntries
+        .filter(({ node }) => !node.classList.contains("is-hidden"))
+        .map(
         ({
           box,
         }) => (
@@ -1525,12 +1528,30 @@ function layoutOverlayAnnotations(
   );
 
   const occupiedCards = [];
+  for (const item of items) {
+    const box = reviewCalloutBox(item.callout);
+    if (box) {
+      const rect = normalizedBoxToPixels(
+        { xMin: box.x_min, yMin: box.y_min, xMax: box.x_max, yMax: box.y_max },
+        paneWidth,
+        paneHeight,
+      );
+      item.callout.style.left = `${box.x_min / 10}%`;
+      item.callout.style.top = `${box.y_min / 10}%`;
+      item.callout.style.width = `${(box.x_max - box.x_min) / 10}%`;
+      item.callout.style.height = `${(box.y_max - box.y_min) / 10}%`;
+      item.callout.style.visibility = "visible";
+      occupiedCards.push(rect);
+    }
+  }
 
-  const orderedItems = items
+  const orderedItems = items.filter((item) => !reviewCalloutBox(item.callout))
     .map(
       (item) => {
         const regionRects = (
-          item.bboxEntries.map(
+          item.bboxEntries
+            .filter(({ node }) => !node.classList.contains("is-hidden"))
+            .map(
             ({
               box,
             }) => (
@@ -2216,6 +2237,7 @@ function appendPageVisualization(
   });
 
   const items = [];
+  const reviewRecords = [];
 
   groups.forEach((group) => {
       const isGrouped = group.members.length > 1;
@@ -2248,6 +2270,13 @@ function appendPageVisualization(
         });
         bboxEntries.push(...memberBoxes);
         connectorEntries.push(...memberConnectors);
+        const reviewItem = isGrouped ? groupControl.rows[memberIndex] : callout;
+        reviewItem.dataset.reviewPage = String(pageNumber);
+        reviewRecords.push({
+          findingId: String(member.finding.finding_id ?? "").trim(),
+          pageNumber, item: reviewItem, callout,
+          bboxEntries: memberBoxes, connectorEntries: memberConnectors,
+        });
         if (isGrouped) {
           bindFindingInteractions({
             callout: groupControl.rows[memberIndex],
@@ -2357,6 +2386,10 @@ function appendPageVisualization(
       redraw,
     );
   };
+
+  registerVisualizationReview(section, {
+    imagePane, image, records: reviewRecords, redraw: scheduleRedraw,
+  });
 
   annotationOverlay.addEventListener("toggle", scheduleRedraw, true);
 

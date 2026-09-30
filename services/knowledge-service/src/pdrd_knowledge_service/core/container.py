@@ -12,6 +12,9 @@ from pdrd_knowledge_service.application.normative_catalog_defaults import (
 from pdrd_knowledge_service.application.ports.persistence import (
     NormativeCatalogUnitOfWorkFactory,
 )
+from pdrd_knowledge_service.application.use_cases.applied_experience import (
+    SearchAppliedExperience,
+)
 from pdrd_knowledge_service.application.use_cases.experience import (
     SearchExperience,
 )
@@ -67,9 +70,13 @@ from pdrd_knowledge_service.application.use_cases.technical_assignments import (
     GetTechnicalAssignmentContent,
     RegisterTechnicalAssignment,
 )
+from pdrd_knowledge_service.application.use_cases.trusted_experience import (
+    SearchTrustedExperience,
+)
 from pdrd_knowledge_service.application.use_cases.user_packages import (
     SearchUserPackages,
 )
+from pdrd_knowledge_service.core.experience import build_experience_container
 from pdrd_knowledge_service.core.settings import (
     Settings,
     get_settings,
@@ -117,7 +124,9 @@ class ApplicationContainer:
 
     search_user_packages: SearchUserPackages
 
-    search_experience: SearchExperience
+    search_experience: (
+        SearchExperience | SearchTrustedExperience | SearchAppliedExperience
+    )
 
     check_readiness: CheckReadiness
 
@@ -346,14 +355,7 @@ def build_container() -> ApplicationContainer:
         managed_search=search_normative,
     )
 
-    search_experience = SearchExperience(
-        embedding_provider=embedding_provider,
-        vector_store=vector_store,
-        collection=(settings.qdrant.experience_collection),
-        embedding_model=(settings.embedding_model),
-        top_k=(settings.search.experience_top_k),
-        enabled=(settings.search.experience_enabled),
-    )
+    search_experience = build_experience_container(settings).search
 
     check_readiness = CheckReadiness(
         database_probe=DatabaseReadinessProbe(
@@ -363,7 +365,11 @@ def build_container() -> ApplicationContainer:
         embedding_provider=embedding_provider,
         vector_store=vector_store,
         normative_collection=(settings.qdrant.normative_collection),
-        experience_collection=(settings.qdrant.experience_collection),
+        experience_collection=(
+            None
+            if settings.search.experience_enabled
+            else settings.qdrant.experience_collection
+        ),
     )
 
     get_technical_assignment = GetTechnicalAssignment(

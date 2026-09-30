@@ -269,6 +269,12 @@ class ExperienceSource:
 
     before_context: str
     after_context: str
+    example_id: str | None = None
+    example_revision: int | None = None
+    tag: str | None = None
+    decision: str | None = None
+    learning_use: str | None = None
+    negative_target: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

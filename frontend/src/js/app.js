@@ -25,6 +25,10 @@ import {
 } from "./features/analysis/form.js";
 
 import {
+  mountExperienceNavigation,
+} from "./features/experience/navigation.js";
+
+import {
   createNormativeCatalog,
 } from "./features/normative/catalog.js";
 
@@ -35,6 +39,11 @@ import {
 import {
   createUserPackageCatalog,
 } from "./features/normative/user_packages.js";
+
+import {
+  createReviewPersistence,
+} from "./features/review/persistence.js";
+import { bindReportRestoration } from "./features/analysis/restore.js";
 
 import {
   createTechnicalAssignmentFilePicker,
@@ -52,6 +61,8 @@ const submitButton = requireElement(
 const normativeRoot = requireElement(
   "[data-normative-sidebar]",
 );
+
+mountExperienceNavigation(requireElement(".page__content"));
 
 
 const technicalAssignmentFilePicker = (
@@ -133,10 +144,16 @@ const modal = createModal({
 });
 
 
+const reviewController = createReviewPersistence();
+
 const resultView = createResultView(
   requireElement(
     "[data-analysis-result]",
   ),
+  {
+    onReportRendered: reviewController.mount,
+    onReportCleared: reviewController.clear,
+  },
 );
 
 
@@ -227,9 +244,6 @@ const analysisController = createAnalysisController({
 
 analysisForm.bind();
 
-analysisFormElement.addEventListener(
-  "submit",
-  analysisController.submit,
-);
+bindReportRestoration({ resultView, formElement: analysisFormElement, submit: analysisController.submit, canSubmit: () => !reviewController.hasPending() });
 
 void normativeCatalog.start();
