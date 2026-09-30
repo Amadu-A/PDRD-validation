@@ -257,6 +257,19 @@ docker compose up \
     --force-recreate \
     frontend
 
+# Nginx разрешает адрес Gateway при старте. После его пересоздания обновляем
+# также отдельно поднятый Review frontend, даже если review не указан в .env.
+review_frontend_container="$(
+    docker compose --profile review ps --all --quiet review-frontend
+)"
+if profile_enabled "review" || [[ -n "${review_frontend_container}" ]]; then
+    docker compose --profile review up \
+        -d \
+        --no-deps \
+        --force-recreate \
+        review-frontend
+fi
+
 echo
 echo "=== Stack readiness ==="
 

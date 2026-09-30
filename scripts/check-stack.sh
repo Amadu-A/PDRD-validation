@@ -32,11 +32,13 @@ bad() {
 check_http() {
     local name="$1"
     local url="$2"
+    local status
 
-    if curl -fsS "${url}" >/dev/null 2>&1; then
+    if status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "${url}" 2>/dev/null)" \
+        && [[ "${status}" == 2?? ]]; then
         ok "${name}"
     else
-        bad "${name}"
+        bad "${name}: HTTP ${status:-000}"
     fi
 }
 
@@ -132,6 +134,25 @@ check_completed_service() {
     fi
 }
 
+check_migrations_current() {
+    local service="$1"
+    local profile="$2"
+    local name="$3"
+
+    # Одноразовый migrator может удаляться через `run --rm`. Проверяем схему БД,
+    # а не существование его контейнера после успешного развёртывания.
+    if docker compose --profile "${profile}" exec \
+        -T \
+        "${service}" \
+        python -m alembic -c alembic.ini current --check-heads \
+        >/dev/null 2>&1; then
+
+        ok "${name}: migrations current"
+    else
+        bad "${name}: migrations not at head"
+    fi
+}
+
 echo "=== Docker ==="
 
 if docker info >/dev/null 2>&1; then
@@ -217,14 +238,14 @@ check_service_state "analysis-service"
 check_service_state "frontend"
 
 if (( review_active )); then
-    check_completed_service "experience-migrate" "review"
     check_service_state "experience-service" "review"
+    check_migrations_current "experience-service" "review" "Experience Service"
     check_service_state "review-frontend" "review"
 fi
 
 if (( identity_active )); then
-    check_completed_service "user-migrate" "identity"
     check_service_state "user-service" "identity"
+    check_migrations_current "user-service" "identity" "User Service"
 fi
 
 if (( experience_index_active )); then

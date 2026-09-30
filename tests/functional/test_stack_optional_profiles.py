@@ -63,14 +63,23 @@ def test_optional_profile_detects_existing_container_and_configured_profile() ->
         printf 'optional profiles: OK\n'
     """
 
-    result = subprocess.run(
-        [_bash_executable(), "-c", shell],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=90,
-    )
+    # Git Bash на Windows иногда падает внутри MSYS до исполнения скрипта.
+    # Повторяем только эту ошибку запуска; сбой проверяемой функции не маскируем.
+    for _ in range(3):
+        result = subprocess.run(
+            [_bash_executable(), "-c", shell],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=90,
+        )
+        if not (
+            os.name == "nt"
+            and result.returncode != 0
+            and "fatal error - add_item" in result.stderr
+        ):
+            break
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "optional profiles: OK"

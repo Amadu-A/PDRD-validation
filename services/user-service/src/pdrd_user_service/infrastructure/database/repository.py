@@ -148,6 +148,9 @@ class SqlAlchemyUserRepository:
                         authorization_version=user.authorization_version,
                     )
                 )
+                # Без ORM-связи SQLAlchemy может вставить identity раньше accounts.
+                # Первая запись должна получить FK-цель в той же транзакции.
+                await self._session.flush()
                 self._session.add(
                     ExternalIdentityModel(
                         provider_id=identity.provider_id,
@@ -296,6 +299,8 @@ class SqlAlchemyUserRepository:
         async with self._session.begin_nested():
             await self._bump_version(updated_user, expected_authorization_version)
             self._session.add(_assignment_to_model(assignment))
+            # Событие ссылается на назначение; порядок нужен даже без ORM-связи.
+            await self._session.flush()
             self._session.add(
                 RoleAssignmentEventModel(
                     event_id=uuid4(),
@@ -397,6 +402,8 @@ class SqlAlchemyUserRepository:
                     updated_user, expected_authorization_version, bootstrap=True
                 )
                 self._session.add(_assignment_to_model(assignment))
+                # Bootstrap и аудит содержат FK на новое назначение.
+                await self._session.flush()
                 self._session.add(
                     AdminBootstrapModel(
                         singleton_id=1,
