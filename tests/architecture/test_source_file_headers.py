@@ -16,6 +16,7 @@ SERVICE_SOURCE_DIRECTORIES = (
     REPOSITORY_ROOT / "services" / "document-service" / "src",
     REPOSITORY_ROOT / "services" / "knowledge-service" / "src",
     REPOSITORY_ROOT / "services" / "analysis-service" / "src",
+    REPOSITORY_ROOT / "services" / "user-service" / "src",
 )
 
 

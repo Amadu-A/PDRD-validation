@@ -30,6 +30,10 @@ BACKEND_PACKAGES = (
         "analysis-service",
         "pdrd_analysis_service",
     ),
+    (
+        "user-service",
+        "pdrd_user_service",
+    ),
 )
 
 FRAMEWORK_IMPORTS = (
