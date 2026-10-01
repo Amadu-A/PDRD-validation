@@ -11,8 +11,11 @@ version = "0.1.0"
 description = "Корпоративная аутентификация и сессии PDRD."
 requires-python = ">=3.12"
 dependencies = [
+    "alembic==1.19.1",
+    "asyncpg==0.31.0",
     "ldap3==2.9.1",
     "pydantic-settings==2.15.0",
+    "SQLAlchemy==2.0.52",
 ]
 
 [project.optional-dependencies]
@@ -28,3 +31,6 @@ where = ["src"]
 minversion = "8.0"
 addopts = ["-ra", "--strict-config", "--strict-markers"]
 testpaths = ["tests"]
+markers = [
+    "database: isolated PostgreSQL integration tests requiring an explicit test URL",
+]

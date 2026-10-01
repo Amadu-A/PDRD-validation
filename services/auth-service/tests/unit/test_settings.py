@@ -5,8 +5,13 @@
 from pathlib import Path
 
 import pytest
-from pdrd_auth_service.core.settings import ActiveDirectorySettings, Settings
-from pydantic import ValidationError
+from pdrd_auth_service.core.settings import (
+    ActiveDirectorySettings,
+    DatabaseSettings,
+    SessionSettings,
+    Settings,
+)
+from pydantic import SecretStr, ValidationError
 
 
 def test_disabled_auth_does_not_need_certificate() -> None:
@@ -58,11 +63,24 @@ def test_valid_configuration_keeps_confirmed_ad_values(tmp_path: Path) -> None:
         _env_file=None,
         enabled=True,
         ad=ActiveDirectorySettings(ca_bundle_path=str(ca_bundle)),
+        database=DatabaseSettings(password=SecretStr("test-only")),
     )
 
     assert settings.ad.controller_host == "WIN-1L5FI1SGC9J.itcneoterm.local"
     assert settings.ad.domain == "itcneoterm.local"
     assert settings.ad.base_dn == "DC=itcneoterm,DC=local"
+
+
+def test_enabled_auth_requires_database_password(tmp_path: Path) -> None:
+    """Рабочий процесс не выдаёт сессию без собственного хранилища."""
+    ca_bundle = tmp_path / "ca.pem"
+    ca_bundle.write_text("offline fixture", encoding="utf-8")
+    with pytest.raises(ValidationError, match="Пароль PostgreSQL"):
+        Settings(
+            _env_file=None,
+            enabled=True,
+            ad=ActiveDirectorySettings(ca_bundle_path=str(ca_bundle)),
+        )
 
 
 def test_private_env_and_process_override_catalog(
@@ -82,3 +100,13 @@ def test_private_env_and_process_override_catalog(
     monkeypatch.setenv("AUTH_SERVICE_AD__PORT", "2636")
     settings = Settings(_env_file=(example, private))
     assert settings.ad.port == 2636
+
+
+def test_session_timeouts_are_bounded_and_consistent() -> None:
+    """Настройка не допускает простоя длиннее абсолютного срока."""
+    assert SessionSettings().idle_timeout_seconds == 7200
+    assert SessionSettings().absolute_timeout_seconds == 28800
+    with pytest.raises(ValidationError, match="Срок простоя"):
+        SessionSettings(idle_timeout_seconds=9000, absolute_timeout_seconds=3600)
+    with pytest.raises(ValidationError):
+        SessionSettings(absolute_timeout_seconds=86401)

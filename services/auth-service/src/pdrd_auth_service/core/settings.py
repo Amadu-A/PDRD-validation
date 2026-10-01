@@ -1,6 +1,6 @@
 # services/auth-service/src/pdrd_auth_service/core/settings.py
 
-"""Настройки корпоративной аутентификации с обязательной проверкой TLS.
+"""Настройки корпоративной аутентификации и серверных сессий.
 
 Общие параметры читаются из .env.example, затем переопределяются закрытым .env
 и переменными процесса. До доставки доверенного сертификата AD сервис выключен.
@@ -11,7 +11,7 @@ from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +29,34 @@ class ActiveDirectorySettings(BaseModel):
     receive_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
 
 
+class DatabaseSettings(BaseModel):
+    """Подключение только к собственной схеме сессий auth в PostgreSQL."""
+
+    host: str = Field(default="postgres", min_length=1)
+    port: int = Field(default=5432, ge=1, le=65535)
+    name: str = Field(default="pdrd", min_length=1)
+    user: str = Field(default="pdrd", min_length=1)
+    password: SecretStr = SecretStr("change-me")
+    pool_size: int = Field(default=5, ge=1, le=50)
+    max_overflow: int = Field(default=10, ge=0, le=100)
+    pool_timeout_seconds: float = Field(default=10, gt=0, le=120)
+    connect_timeout_seconds: float = Field(default=5, gt=0, le=60)
+
+
+class SessionSettings(BaseModel):
+    """Сроки короткой сессии; 30-дневный remember-grant будет отдельным."""
+
+    idle_timeout_seconds: int = Field(default=7200, ge=60, le=86400)
+    absolute_timeout_seconds: int = Field(default=28800, ge=60, le=86400)
+
+    @model_validator(mode="after")
+    def require_consistent_timeouts(self) -> "SessionSettings":
+        """Срок простоя не может превышать абсолютный предел."""
+        if self.idle_timeout_seconds > self.absolute_timeout_seconds:
+            raise ValueError("Срок простоя не может превышать срок сессии")
+        return self
+
+
 class Settings(BaseSettings):
     """Не допускает включения Auth Service без доверенного CA и DNS-имени."""
 
@@ -44,6 +72,8 @@ class Settings(BaseSettings):
     environment: Literal["local", "dev", "test", "stage", "prod"] = "local"
     enabled: bool = False
     ad: ActiveDirectorySettings = Field(default_factory=ActiveDirectorySettings)
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    sessions: SessionSettings = Field(default_factory=SessionSettings)
 
     @model_validator(mode="after")
     def require_trusted_ldaps(self) -> "Settings":
@@ -85,6 +115,9 @@ class Settings(BaseSettings):
             raise ValueError(
                 "AUTH_SERVICE_AD__CA_BUNDLE_PATH должен быть читаемым файлом"
             ) from exc
+
+        if self.database.password.get_secret_value() in {"", "change-me"}:
+            raise ValueError("Пароль PostgreSQL Auth Service не задан")
 
         return self
 

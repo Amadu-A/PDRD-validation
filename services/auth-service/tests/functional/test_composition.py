@@ -6,9 +6,14 @@ from pathlib import Path
 
 import pytest
 from pdrd_auth_service.core import container
-from pdrd_auth_service.core.settings import ActiveDirectorySettings, Settings
+from pdrd_auth_service.core.settings import (
+    ActiveDirectorySettings,
+    DatabaseSettings,
+    Settings,
+)
 from pdrd_auth_service.domain.identity import CorporateIdentity
 from pdrd_auth_service.infrastructure.ldaps import LdapsConnectionConfig
+from pydantic import SecretStr
 
 
 def test_disabled_auth_cannot_build_corporate_login() -> None:
@@ -54,10 +59,12 @@ async def test_enabled_auth_passes_verified_settings_to_adapter(
             connect_timeout_seconds=3,
             receive_timeout_seconds=7,
         ),
+        database=DatabaseSettings(password=SecretStr("test-only")),
     )
 
     login = container.build_corporate_login(settings)
     identity = await login.execute(login="i.mein", password="test-secret")
+    policy = container.build_session_policy(settings)
 
     assert identity.provider_id == "active_directory"
     assert len(captured) == 1
@@ -67,3 +74,5 @@ async def test_enabled_auth_passes_verified_settings_to_adapter(
     assert captured[0].connect_timeout_seconds == 3
     assert captured[0].receive_timeout_seconds == 7
     assert not hasattr(captured[0], "password")
+    assert policy.idle_timeout.total_seconds() == 7200
+    assert policy.absolute_timeout.total_seconds() == 28800
