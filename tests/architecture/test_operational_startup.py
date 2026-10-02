@@ -30,6 +30,16 @@ def test_one_command_startup_script_exists() -> None:
     assert UP_SCRIPT.is_file()
 
 
+def test_operational_scripts_load_baseline_before_private_overrides() -> None:
+    """Команды запуска используют общий baseline и затем sparse private override."""
+    for path in (UP_SCRIPT, CHECK_STACK_SCRIPT, EMBEDDING_MIGRATION_SCRIPT):
+        source = path.read_text(encoding="utf-8")
+        baseline = source.index('source ".env.example"')
+        private_override = source.index('source ".env"')
+
+        assert baseline < private_override
+
+
 def test_embedding_cutover_script_exists() -> None:
     """Repository содержит controlled embedding migration entrypoint."""
     assert EMBEDDING_MIGRATION_SCRIPT.is_file()

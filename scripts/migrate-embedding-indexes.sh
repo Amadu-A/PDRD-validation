@@ -16,11 +16,17 @@ die() {
     exit 1
 }
 
+if [[ ! -f ".env.example" ]]; then
+    die "Файл ${REPO_DIR}/.env.example не найден."
+fi
+
 if [[ ! -f ".env" ]]; then
     die "Файл ${REPO_DIR}/.env не найден."
 fi
 
 set -a
+# shellcheck disable=SC1091
+source ".env.example"
 # shellcheck disable=SC1091
 source ".env"
 set +a

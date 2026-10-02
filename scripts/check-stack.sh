@@ -9,12 +9,16 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${REPO_DIR}"
 AUTH_SERVICE_AD_CA_HOST_PATH="${REPO_DIR}/ops/certificates/ad-ca.pem"
 
+set -a
+if [[ -f ".env.example" ]]; then
+    # shellcheck disable=SC1091
+    source ".env.example"
+fi
 if [[ -f ".env" ]]; then
-    set -a
     # shellcheck disable=SC1091
     source ".env"
-    set +a
 fi
+set +a
 
 # shellcheck source=scripts/lib/stack-profiles.sh
 source "${REPO_DIR}/scripts/lib/stack-profiles.sh"

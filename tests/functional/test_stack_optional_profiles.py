@@ -92,6 +92,7 @@ def _run_startup_preflight(
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     shutil.copy2(ROOT / "scripts" / "up.sh", scripts / "up.sh")
+    shutil.copy2(ROOT / ".env.example", tmp_path / ".env.example")
     (tmp_path / ".env").write_text(environment, encoding="utf-8")
 
     return subprocess.run(

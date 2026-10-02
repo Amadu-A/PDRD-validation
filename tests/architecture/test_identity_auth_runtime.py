@@ -11,6 +11,7 @@ COMPOSE = ROOT / "compose.yaml"
 ENV_EXAMPLE = ROOT / ".env.example"
 UP_SCRIPT = ROOT / "scripts" / "up.sh"
 CHECK_SCRIPT = ROOT / "scripts" / "check-stack.sh"
+AUTH_RUNTIME_SCRIPT = ROOT / "scripts" / "check_auth_runtime.py"
 
 
 def test_auth_profile_stays_private_and_waits_for_identity() -> None:
@@ -195,3 +196,13 @@ def test_admin_package_participates_in_complete_quality() -> None:
     requirements = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
     assert '"services/admin-service/tests"' in pyproject
     assert "-e ./services/admin-service[test]" in requirements
+
+
+def test_real_auth_check_keeps_password_out_of_cli_and_remote_http() -> None:
+    """Runtime-приёмка скрыто читает пароль и запрещает удалённый plain HTTP."""
+    source = AUTH_RUNTIME_SCRIPT.read_text(encoding="utf-8")
+
+    assert "getpass.getpass" in source
+    assert "HTTP transport разрешён только через loopback сервера" in source
+    assert "--expect-admin" in source
+    assert "--password" not in source
