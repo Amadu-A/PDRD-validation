@@ -37,13 +37,13 @@ import {
 } from "./features/normative/prompt.js";
 
 import {
-  createUserPackageCatalog,
-} from "./features/normative/user_packages.js";
-
-import {
   createReviewPersistence,
 } from "./features/review/persistence.js";
 import { bindReportRestoration } from "./features/analysis/restore.js";
+import { bindMainIdentity } from "./features/auth/main-page.js";
+import { currentSession } from "./features/auth/session.js";
+import { hasPermission } from "./features/auth/access.js";
+import { mountAuthorizedReview, reviewCapabilities } from "./features/review/access.js";
 
 import {
   createTechnicalAssignmentFilePicker,
@@ -61,6 +61,7 @@ const submitButton = requireElement(
 const normativeRoot = requireElement(
   "[data-normative-sidebar]",
 );
+
 
 mountExperienceNavigation(requireElement(".page__content"));
 
@@ -82,37 +83,25 @@ const promptEditor = createNormativePromptEditor(
 );
 
 
-const userPackageCatalog = createUserPackageCatalog(
-  normativeRoot,
-);
-
-userPackageCatalog.start();
-
-
 const normativeCatalog = createNormativeCatalog(
   normativeRoot,
   {
     onSectionChange: async (
       sectionId,
     ) => {
-      await Promise.all(
-        [
-          promptEditor.setSection(
-            sectionId,
-          ),
-
-          userPackageCatalog.setSection(
-            sectionId,
-          ),
-
-          technicalAssignmentFilePicker.setSection(
-            sectionId,
-          ),
-        ],
-      );
+      const session = currentSession();
+      await Promise.all([
+        hasPermission(session, "system_prompt.manage")
+          ? promptEditor.setSection(sectionId) : Promise.resolve(),
+        technicalAssignmentFilePicker.setSection(sectionId),
+      ]);
     },
   },
 );
+
+bindMainIdentity({
+  root: document.body, normativeCatalog, promptEditor,
+});
 
 
 const modal = createModal({
@@ -144,14 +133,14 @@ const modal = createModal({
 });
 
 
-const reviewController = createReviewPersistence();
+const reviewController = createReviewPersistence({ getCapabilities: reviewCapabilities });
 
 const resultView = createResultView(
   requireElement(
     "[data-analysis-result]",
   ),
   {
-    onReportRendered: reviewController.mount,
+    onReportRendered: (root, options) => mountAuthorizedReview(reviewController, root, options),
     onReportCleared: reviewController.clear,
   },
 );
@@ -166,30 +155,13 @@ function getNormativeSelection() {
     return null;
   }
 
-  const packageSelection = (
-    userPackageCatalog.getSelection()
-  );
-
-  const packageDocumentIds = (
-    packageSelection
-    && (
-      packageSelection.sectionId
-      === selection.sectionId
-    )
-      ? packageSelection.documentIds
-      : []
-  );
-
-  const prompt = promptEditor.getOverride(
-    selection.sectionId,
-  );
+  const prompt = hasPermission(currentSession(), "system_prompt.manage")
+    ? promptEditor.getOverride(selection.sectionId) : {};
 
   return {
     ...selection,
 
-    userPackageDocumentIds: (
-      packageDocumentIds
-    ),
+    userPackageDocumentIds: [],
 
     ...prompt,
   };

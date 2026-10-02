@@ -6,6 +6,13 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from pdrd_user_service.application.use_cases.external_accounts import ExternalAccounts
+from pdrd_user_service.application.use_cases.list_users import AdminUserListing
+from pdrd_user_service.application.use_cases.organization_memberships import (
+    OrganizationMemberships,
+)
+from pdrd_user_service.application.use_cases.replace_role import ReplaceWorkerRole
+from pdrd_user_service.application.use_cases.review_scope import ReviewScopeAccess
 from pdrd_user_service.application.use_cases.users import UserDirectory
 from pdrd_user_service.core.settings import Settings, get_settings
 from pdrd_user_service.infrastructure.database.engine import (
@@ -43,6 +50,11 @@ class ApplicationContainer:
     readiness: ReadinessProbe
     directory: UserDirectory | None
     shutdown_callback: ShutdownCallback
+    external_accounts: ExternalAccounts | None = None
+    user_listing: AdminUserListing | None = None
+    role_replacement: ReplaceWorkerRole | None = None
+    organization_memberships: OrganizationMemberships | None = None
+    review_scope_access: ReviewScopeAccess | None = None
 
     async def close(self) -> None:
         """Освобождает созданный пул соединений."""
@@ -63,6 +75,11 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
             readiness=DisabledReadinessProbe(),
             directory=None,
             shutdown_callback=close_disabled,
+            external_accounts=None,
+            user_listing=None,
+            role_replacement=None,
+            organization_memberships=None,
+            review_scope_access=None,
         )
 
     engine = build_async_engine(actual_settings.database)
@@ -72,12 +89,21 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
         """Закрывает пул подключения User Service."""
         await engine.dispose()
 
+    def unit_of_work() -> SqlAlchemyUnitOfWork:
+        """Создаёт отдельную транзакцию для каждого сценария каталога."""
+        return SqlAlchemyUnitOfWork(session_factory)
+
     return ApplicationContainer(
         settings=actual_settings,
         readiness=DatabaseReadinessProbe(
             engine,
             timeout_seconds=actual_settings.database.health_timeout_seconds,
         ),
-        directory=UserDirectory(lambda: SqlAlchemyUnitOfWork(session_factory)),
+        directory=UserDirectory(unit_of_work),
         shutdown_callback=close_database,
+        external_accounts=ExternalAccounts(unit_of_work),
+        user_listing=AdminUserListing(unit_of_work),
+        role_replacement=ReplaceWorkerRole(unit_of_work),
+        organization_memberships=OrganizationMemberships(unit_of_work),
+        review_scope_access=ReviewScopeAccess(unit_of_work),
     )

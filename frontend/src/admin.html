@@ -1,0 +1,86 @@
+<!-- frontend/src/admin.html -->
+<!-- Административный каркас: действия проходят только через admin-service. -->
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Администрирование · PDRD</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script type="module" src="/js/features/admin/page.js" defer></script>
+</head>
+<body class="page">
+  <header class="site-header" data-site-header>
+    <a class="site-header__brand" href="/" aria-label="PDRD — анализ документов"><span class="site-header__mark" aria-hidden="true">P</span><span>PDRD <small>Validation</small></span></a>
+    <nav class="site-header__nav" aria-label="Основная навигация"><a href="/">Анализ</a><a href="/account.html" data-account-link hidden>Личный кабинет</a><a href="/admin.html" data-admin-link aria-current="page" hidden>Админка</a></nav>
+    <div class="site-header__actions"><span class="site-header__identity" data-header-identity hidden></span><button type="button" data-open-login>Войти</button><button type="button" class="site-header__primary" data-open-register>Регистрация</button><button type="button" data-header-logout hidden>Выйти</button></div>
+  </header>
+  <div class="portal-shell">
+    <aside class="portal-nav" aria-label="Навигация админки">
+      <a class="portal-nav__brand" href="#overview"><span class="portal-nav__mark">P</span><span>PDRD<small>Администрирование</small></span></a>
+      <p class="portal-nav__heading">Разделы</p>
+      <nav aria-label="Разделы админки"><ul class="portal-nav__list">
+        <li><a href="#overview" data-admin-section-link="overview" aria-current="location">Обзор</a></li>
+        <li><a href="#users" data-admin-section-link="users">Пользователи</a></li>
+        <li><a href="#roles" data-admin-section-link="roles">Роли и группы</a></li>
+        <li><a href="#documents" data-admin-section-link="documents">Документы</a></li>
+        <li><a href="#review" data-admin-section-link="review">Review</a></li>
+        <li><a href="#experience" data-admin-section-link="experience">Experience</a></li>
+        <li><a href="#reports" data-admin-section-link="reports">Отчёты</a></li>
+        <li><a href="#tables" data-admin-section-link="tables">Таблицы</a></li>
+        <li><a href="#audit" data-admin-section-link="audit">Аудит</a></li>
+        <li><a href="#settings" data-admin-section-link="settings">Настройки</a></li>
+      </ul></nav>
+      <p class="portal-nav__footer">Каждое изменение проходит серверную проверку и аудит.</p>
+    </aside>
+    <main class="portal-main">
+      <div class="portal-main__top"><span>PDRD / Администрирование</span><a href="/account.html">Мой кабинет ↗</a></div>
+      <p class="portal-main__eyebrow">Управление платформой</p>
+      <h1 class="portal-main__title">PDRD Administration</h1>
+      <p class="portal-main__intro">Пользователи, роли и рабочие разделы в едином интерфейсе.</p>
+      <p class="portal-status" data-admin-status role="status" aria-live="polite">Проверяем права администратора…</p>
+      <div data-admin-content hidden>
+        <section class="account-card" id="overview" data-admin-section="overview">
+          <p class="account-card__overline">Обзор</p><h2 class="account-card__title">Пользователи и доступ</h2>
+          <p class="account-card__description" data-admin-overview>Загружаем данные…</p>
+          <a class="admin-link" href="#users">Открыть пользователей →</a>
+        </section>
+        <section class="account-card" id="users" data-admin-section="users" hidden>
+          <p class="account-card__overline">Управление</p><h2 class="account-card__title">Пользователи</h2>
+          <label class="admin-search">Поиск на текущей странице<input type="search" data-admin-search placeholder="Имя, логин или email"></label>
+          <div class="admin-users" data-admin-users></div>
+          <div class="admin-pagination"><button type="button" data-admin-prev disabled>← Назад</button><span data-admin-page-label></span><button type="button" data-admin-next disabled>Далее →</button></div>
+          <p class="portal-status" data-admin-users-status role="status" aria-live="polite"></p>
+        </section>
+        <section class="account-card" id="roles" data-admin-section="roles" hidden>
+          <p class="account-card__overline">Доступ</p><h2 class="account-card__title">Роли и группы</h2>
+          <p class="account-card__description">Роли PDRD назначаются локально. Группы Active Directory не используются для назначения ролей до согласования с IT.</p>
+          <ul class="admin-role-list"><li><strong>Проектировщик</strong> — анализ и Gold; пользовательские пакеты временно недоступны.</li><li><strong>Руководитель</strong> — Review и нормативная база в своей области.</li><li><strong>Администратор</strong> — предусмотренные административные операции.</li></ul>
+          <a class="admin-link" href="#users">Изменить роль пользователя →</a>
+          <div class="admin-directory" data-admin-directory>
+            <h3>Организации и отделы</h3>
+            <p>Создайте область, затем выберите её в карточке будущего руководителя.</p>
+            <form data-create-organization>
+              <label>Новая организация<input name="name" maxlength="255" required></label>
+              <button type="submit">Создать организацию</button>
+            </form>
+            <label>Организация<select data-directory-organization></select></label>
+            <form data-create-department>
+              <label>Новый отдел<input name="name" maxlength="255" required></label>
+              <button type="submit">Создать отдел</button>
+            </form>
+            <ul data-directory-departments></ul>
+            <p data-directory-status role="status" aria-live="polite"></p>
+          </div>
+        </section>
+        <section class="account-card" id="documents" data-admin-section="documents" hidden><h2 class="account-card__title">Документы</h2><p class="account-card__description">Управление нормативными документами открывается в рабочем интерфейсе с проверкой прав сервером.</p><a class="admin-link" href="/">Перейти к документам →</a></section>
+        <section class="account-card" id="review" data-admin-section="review" hidden><h2 class="account-card__title">Review</h2><p class="account-card__description">Решения по замечаниям принимаются в контексте конкретного анализа.</p><a class="admin-link" href="/">Перейти к анализу →</a></section>
+        <section class="account-card" id="experience" data-admin-section="experience" hidden><h2 class="account-card__title">Experience</h2><p class="account-card__description">Проверенные версии и данные Experience управляются через отдельный интерфейс.</p><a class="admin-link" href="/experience.html">Открыть Experience →</a></section>
+        <section class="account-card" id="reports" data-admin-section="reports" hidden><h2 class="account-card__title">Отчёты</h2><p class="account-card__description">Серверный API отчётов ещё не подключён.</p></section>
+        <section class="account-card" id="tables" data-admin-section="tables" hidden><h2 class="account-card__title">Таблицы</h2><p class="account-card__description">Административный API таблиц ещё не подключён.</p></section>
+        <section class="account-card" id="audit" data-admin-section="audit" hidden><h2 class="account-card__title">Аудит</h2><p class="account-card__description">Серверный журнал аудита будет доступен после подключения API.</p></section>
+        <section class="account-card" id="settings" data-admin-section="settings" hidden><h2 class="account-card__title">Настройки</h2><p class="account-card__description">Здесь появятся только предусмотренные административные операции; прямого редактирования таблиц нет.</p></section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,7 @@
+/* frontend/src/css/blocks/analysis-share.css */
+/* Ссылка на гостевой результат остаётся видимой после завершения анализа. */
+
+.analysis-share { margin-top: 18px; padding: 16px; border: 1px solid #bfd2ed; border-radius: 10px; background: #f4f8ff; }
+.analysis-share h3 { margin: 0 0 7px; font-size: 16px; }
+.analysis-share p { margin: 0 0 11px; color: #42536c; font-size: 13px; line-height: 1.5; }
+.analysis-share a { color: #2457a7; font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }

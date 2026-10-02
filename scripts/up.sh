@@ -62,6 +62,59 @@ if profile_enabled "identity"; then
     fi
 fi
 
+if profile_enabled "review"; then
+    if [[ "${API_GATEWAY_REVIEW__ENABLED:-false}" != "true" || "${API_GATEWAY_REVIEW__CONTROLLED_ACCESS:-false}" != "true" ]]; then
+        die "Профиль review требует включённый закрытый канал Gateway."
+    fi
+    validate_secret "API_GATEWAY_REVIEW__ACTOR"
+    validate_secret "API_GATEWAY_REVIEW__UI_KEY"
+    validate_secret "API_GATEWAY_REVIEW__INTERNAL_KEY"
+    if [[ "${API_GATEWAY_REVIEW__UI_KEY}" == "${API_GATEWAY_REVIEW__INTERNAL_KEY}" ]]; then
+        die "Служебные ключи Review должны различаться."
+    fi
+fi
+
+if profile_enabled "auth"; then
+    profile_enabled "identity" \
+        || die "COMPOSE_PROFILES=auth требует также identity."
+
+    validate_secret "AUTH_SERVICE_HTTP__PUBLIC_ORIGIN"
+    validate_secret "AUTH_SERVICE_EMAIL__PUBLIC_BASE_URL"
+    if [[ "${AUTH_SERVICE_HTTP__PUBLIC_ORIGIN}" != https://* ]]; then
+        die "AUTH_SERVICE_HTTP__PUBLIC_ORIGIN должен начинаться с https://."
+    fi
+    if [[ "${AUTH_SERVICE_EMAIL__PUBLIC_BASE_URL%/}" != "${AUTH_SERVICE_HTTP__PUBLIC_ORIGIN%/}" ]]; then
+        die "Адрес ссылки подтверждения должен совпадать с публичным origin."
+    fi
+
+    validate_secret "AUTH_SERVICE_HTTP__INTERNAL_KEY"
+    validate_secret "AUTH_SERVICE_HTTP__CSRF_KEY"
+    validate_secret "PDRD_FRONTEND_PROXY_KEY"
+    validate_secret "PDRD_TECHNICAL_ASSIGNMENT_ACCESS_KEY"
+    if (( ${#AUTH_SERVICE_HTTP__INTERNAL_KEY} < 32 )); then
+        die "AUTH_SERVICE_HTTP__INTERNAL_KEY должен содержать не менее 32 символов."
+    fi
+    if (( ${#AUTH_SERVICE_HTTP__CSRF_KEY} < 32 )); then
+        die "AUTH_SERVICE_HTTP__CSRF_KEY должен содержать не менее 32 символов."
+    fi
+    if (( ${#PDRD_FRONTEND_PROXY_KEY} < 32 )); then
+        die "PDRD_FRONTEND_PROXY_KEY должен содержать не менее 32 символов."
+    fi
+    if (( ${#PDRD_TECHNICAL_ASSIGNMENT_ACCESS_KEY} < 32 )); then
+        die "PDRD_TECHNICAL_ASSIGNMENT_ACCESS_KEY должен содержать не менее 32 символов."
+    fi
+
+    validate_secret "AUTH_SERVICE_EMAIL__SMTP_USER"
+    validate_secret "AUTH_SERVICE_EMAIL__SMTP_PASSWORD"
+    validate_secret "AUTH_SERVICE_EMAIL__FROM_EMAIL"
+    if [[ "${API_GATEWAY_IDENTITY_PROXY__ENABLED:-false}" != "true" ]]; then
+        die "Для профиля auth задайте API_GATEWAY_IDENTITY_PROXY__ENABLED=true."
+    fi
+    if [[ "${API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED:-false}" != "true" ]]; then
+        die "Для профиля auth задайте API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED=true."
+    fi
+fi
+
 PDRD_RABBITMQ_USER="${PDRD_RABBITMQ_USER:-pdrd_validation}"
 PDRD_RABBITMQ_VHOST="${PDRD_RABBITMQ_VHOST:-pdrd-validation}"
 
@@ -300,6 +353,9 @@ while true; do
         fi
         if profile_enabled "identity"; then
             log_services+=(user-migrate user-service)
+        fi
+        if profile_enabled "auth"; then
+            log_services+=(auth-migrate auth-service admin-service)
         fi
         if profile_enabled "experience-index"; then
             log_services+=(experience-indexer)

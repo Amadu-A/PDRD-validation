@@ -30,11 +30,15 @@ class CreateAnalysisJob:
         *,
         document_id: UUID,
         normative_snapshot: NormativeAnalysisSnapshot | None = None,
+        owner_user_id: UUID | None = None,
+        guest_access: bool = False,
     ) -> AnalysisJob:
         """Создаёт задание и сообщение для дальнейшей публикации."""
         job = AnalysisJob.create(
             document_id=document_id,
             normative_snapshot=normative_snapshot,
+            owner_user_id=owner_user_id,
+            guest_access=guest_access,
         )
 
         message = OutboxMessage.analysis_requested(

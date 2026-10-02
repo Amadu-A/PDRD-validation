@@ -55,6 +55,11 @@ class AnalysisAcceptedResponse(BaseModel):
 
     status_url: str
 
+    # Случайный гостевой ключ выдаётся один раз; для входящего пользователя None.
+    access_token: str | None = None
+
+    access_expires_at: datetime | None = None
+
     normative_section_id: UUID | None
 
     normative_document_ids: list[UUID]

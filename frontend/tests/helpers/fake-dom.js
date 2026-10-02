@@ -40,6 +40,12 @@ export class FakeElement {
     }
   }
 
+  replaceChildren(...nodes) {
+    for (const child of this.children) child.parent = null;
+    this.children = [];
+    this.append(...nodes);
+  }
+
   prepend(...nodes) {
     for (const node of [...nodes].reverse()) {
       node.remove();
@@ -72,6 +78,7 @@ export class FakeElement {
   close() { this.open = false; }
   setAttribute(name, value) { this.attributes.set(name, value); }
   getAttribute(name) { return this.attributes.get(name); }
+  removeAttribute(name) { this.attributes.delete(name); }
   getBoundingClientRect() { return this.rectangle; }
   setPointerCapture(id) { this.captures.add(id); }
   hasPointerCapture(id) { return this.captures.has(id); }

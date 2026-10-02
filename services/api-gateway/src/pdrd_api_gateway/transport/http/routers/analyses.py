@@ -15,6 +15,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     UploadFile,
     status,
 )
@@ -62,6 +63,9 @@ from pdrd_api_gateway.domain.normative_snapshot import (
 )
 from pdrd_api_gateway.domain.technical_assignment import (
     InvalidTechnicalAssignmentSnapshotError,
+)
+from pdrd_api_gateway.domain.technical_assignment_access import (
+    TechnicalAssignmentCapability,
 )
 from pdrd_api_gateway.transport.http.dependencies import (
     get_container,
@@ -291,6 +295,7 @@ def build_technical_assignment_response(
     response_model=AnalysisAcceptedResponse,
 )
 async def create_analysis(
+    request: Request,
     container: Annotated[
         ApplicationContainer,
         Depends(
@@ -353,8 +358,48 @@ async def create_analysis(
         UUID | None,
         Form(),
     ] = None,
+    technical_assignment_access_token: Annotated[
+        str | None,
+        Form(),
+    ] = None,
 ) -> AnalysisAcceptedResponse:
     """Принимает документы и создаёт asynchronous analysis job."""
+    authorizer = request.app.state.identity_authorizer
+    owner_user_id = None
+    if authorizer is not None:
+        owner_user_id = getattr(request.state, "identity_user_id", None)
+        if owner_user_id is not None and not isinstance(owner_user_id, UUID):
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Не удалось проверить владельца анализа.",
+            )
+        if request.cookies.get("pdrd_session") and owner_user_id is None:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED, "Требуется повторный вход."
+            )
+        if user_package_document_ids is not None:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Пользовательские пакеты временно недоступны до привязки к владельцу.",
+            )
+        if technical_assignment_id is not None:
+            capability = TechnicalAssignmentCapability(
+                container.settings.identity_proxy.technical_assignment_access_key.get_secret_value()
+            )
+            if not capability.verify(
+                technical_assignment_id, technical_assignment_access_token
+            ):
+                raise HTTPException(
+                    status.HTTP_404_NOT_FOUND,
+                    "Подготовленное техническое задание не найдено.",
+                    headers={"Cache-Control": "no-store"},
+                )
+        elif technical_assignment_access_token is not None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Ключ ТЗ передан без подготовленного технического задания.",
+            )
+
     max_upload_bytes = container.settings.storage.max_upload_bytes
 
     (
@@ -389,6 +434,11 @@ async def create_analysis(
         user_package_document_ids,
     )
 
+    if authorizer is not None and normative_prompt_override_enabled:
+        denial = await authorizer.require(request, ("system_prompt.manage",))
+        if denial is not None:
+            return denial
+
     use_case = require_submit_analysis(
         container,
     )
@@ -411,6 +461,10 @@ async def create_analysis(
         "normative_prompt_override_enabled": (normative_prompt_override_enabled),
         "normative_prompt_override": (normative_prompt_override),
     }
+
+    if authorizer is not None:
+        execute_kwargs["owner_user_id"] = owner_user_id
+        execute_kwargs["guest_access"] = owner_user_id is None
 
     if technical_assignment_content is not None:
         execute_kwargs["technical_assignment_content"] = technical_assignment_content
@@ -485,7 +539,9 @@ async def create_analysis(
         job_id=job.id,
         document_id=job.document_id,
         status=job.status,
-        status_url=(f"/api/v1/analyses/{job.id}"),
+        status_url=f"/api/v1/analyses/{job.id}",
+        access_token=job.guest_access_token,
+        access_expires_at=job.guest_access_expires_at,
         normative_section_id=(snapshot.section_id if snapshot is not None else None),
         normative_document_ids=(
             list(

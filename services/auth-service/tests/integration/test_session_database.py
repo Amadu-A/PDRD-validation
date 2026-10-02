@@ -27,7 +27,7 @@ pytestmark = pytest.mark.database
 TEST_HOST = "auth-test-postgres"
 TEST_NAME = "pdrd_auth_test"
 TEST_USER = "auth_test"
-EXPECTED_REVISION = "20260930_auth_0001"
+EXPECTED_REVISION = "20261001_auth_0002"
 
 
 def validate_isolated_database_url(raw_url: str) -> URL:
@@ -100,7 +100,7 @@ class FakeUsers:
 
 @pytest.mark.asyncio
 async def test_schema_is_owned_by_auth_service(engine: AsyncEngine) -> None:
-    """Миграция создаёт только auth.sessions и свою таблицу версий."""
+    """Миграции создают только собственные таблицы схемы auth."""
     async with engine.connect() as connection:
         rows = await connection.execute(
             text(
@@ -110,6 +110,8 @@ async def test_schema_is_owned_by_auth_service(engine: AsyncEngine) -> None:
         )
         assert set(rows.all()) == {
             ("auth", "alembic_version_auth"),
+            ("auth", "external_credentials"),
+            ("auth", "rate_limits"),
             ("auth", "sessions"),
         }
 

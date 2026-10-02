@@ -120,6 +120,10 @@ class UserDirectory:
             for part in (provider_id, namespace, subject)
         ):
             raise ValueError("Устойчивая идентичность должна быть полной")
+        if kind is UserKind.EXTERNAL and provider_id.strip().casefold() == "email":
+            raise ValueError(
+                "Email-профиль создаётся через регистрацию с подтверждением"
+            )
         try:
             async with self._unit_of_work() as work:
                 existing = await work.users.find_identity(

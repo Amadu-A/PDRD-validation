@@ -90,6 +90,7 @@ from pdrd_api_gateway.infrastructure.experience import (
     ControlledExperienceContext,
     HttpExperienceService,
 )
+from pdrd_api_gateway.infrastructure.identity_proxy import IdentityProxy
 from pdrd_api_gateway.infrastructure.knowledge.normative_catalog import (
     HttpNormativeCatalogReader,
 )
@@ -181,6 +182,8 @@ class ApplicationContainer:
     ) = None
 
     project_context_preflight: ProjectContextPreflightCoordinator | None = None
+
+    identity_proxy: IdentityProxy | None = None
 
     async def close(
         self,
@@ -375,7 +378,10 @@ def build_container() -> ApplicationContainer:
         manage_experience = ManageExperience(
             contexts=ControlledExperienceContext(settings.review.actor.strip()),
             access=ControlledExperienceAccess(
-                settings.review.actor.strip(), manage_review.access
+                ""
+                if settings.identity_proxy.authorization_enabled
+                else settings.review.actor.strip(),
+                manage_review.access,
             ),
             service=HttpExperienceService(
                 base_url=settings.review.base_url,
@@ -414,4 +420,9 @@ def build_container() -> ApplicationContainer:
         technical_assignment_content_reader=(technical_assignment_content_reader),
         technical_assignment_index_coordinator=(technical_assignment_index_coordinator),
         project_context_preflight=(project_context_preflight),
+        identity_proxy=(
+            IdentityProxy(settings.identity_proxy)
+            if settings.identity_proxy.enabled
+            else None
+        ),
     )

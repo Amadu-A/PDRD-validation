@@ -42,6 +42,26 @@ check_http() {
     fi
 }
 
+check_http_status() {
+    local name="$1"
+    local url="$2"
+    local expected
+    local status
+    shift 2
+
+    if ! status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "${url}" 2>/dev/null)"; then
+        bad "${name}: HTTP ${status:-000}"
+        return
+    fi
+    for expected in "$@"; do
+        if [[ "${status}" == "${expected}" ]]; then
+            ok "${name}: HTTP ${status}"
+            return
+        fi
+    done
+    bad "${name}: HTTP ${status:-000}"
+}
+
 check_service_state() {
     local service="$1"
     local profile="${2:-}"
@@ -174,6 +194,7 @@ echo "=== Optional profiles ==="
 
 review_active=0
 identity_active=0
+auth_active=0
 experience_index_active=0
 
 if optional_profile_active "review" \
@@ -189,6 +210,34 @@ if optional_profile_active "identity" "user-migrate" "user-service"; then
     ok "identity: selected or containers present"
 else
     echo "[SKIP] identity: profile not selected and no containers"
+fi
+
+if optional_profile_active "auth" "auth-migrate" "auth-service" "admin-service"; then
+    auth_active=1
+    ok "auth: selected or containers present"
+else
+    echo "[SKIP] auth: profile not selected and no containers"
+fi
+
+if (( auth_active && ! identity_active )); then
+    bad "auth requires identity user-service"
+fi
+
+if (( auth_active )); then
+    if [[ "${API_GATEWAY_IDENTITY_PROXY__ENABLED:-false}" != "true" ]]; then
+        bad "auth requires API Gateway identity proxy"
+    fi
+    if [[ "${API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED:-false}" != "true" ]]; then
+        bad "auth requires API Gateway authorization"
+    fi
+    frontend_proxy_key="${PDRD_FRONTEND_PROXY_KEY:-}"
+    if (( ${#frontend_proxy_key} < 32 )); then
+        bad "auth requires PDRD_FRONTEND_PROXY_KEY (at least 32 characters)"
+    fi
+    technical_assignment_access_key="${PDRD_TECHNICAL_ASSIGNMENT_ACCESS_KEY:-}"
+    if (( ${#technical_assignment_access_key} < 32 )); then
+        bad "auth requires PDRD_TECHNICAL_ASSIGNMENT_ACCESS_KEY (at least 32 characters)"
+    fi
 fi
 
 if optional_profile_active "experience-index" "experience-indexer"; then
@@ -241,11 +290,20 @@ if (( review_active )); then
     check_service_state "experience-service" "review"
     check_migrations_current "experience-service" "review" "Experience Service"
     check_service_state "review-frontend" "review"
+    if [[ "${API_GATEWAY_REVIEW__ENABLED:-false}" != "true" || "${API_GATEWAY_REVIEW__CONTROLLED_ACCESS:-false}" != "true" ]]; then
+        bad "review requires enabled controlled Gateway channel"
+    fi
 fi
 
 if (( identity_active )); then
     check_service_state "user-service" "identity"
     check_migrations_current "user-service" "identity" "User Service"
+fi
+
+if (( auth_active )); then
+    check_service_state "auth-service" "auth"
+    check_migrations_current "auth-service" "auth" "Auth Service"
+    check_service_state "admin-service" "auth"
 fi
 
 if (( experience_index_active )); then
@@ -296,9 +354,16 @@ if (( review_active )); then
         "Review frontend HTTP" \
         "http://127.0.0.1:${REVIEW_FRONTEND_PORT:-8081}/"
 
-    check_http \
-        "Review frontend -> API Gateway proxy" \
-        "http://127.0.0.1:${REVIEW_FRONTEND_PORT:-8081}/api/v1/review/config"
+    if (( auth_active )); then
+        check_http_status \
+            "Review frontend -> API Gateway proxy requires login" \
+            "http://127.0.0.1:${REVIEW_FRONTEND_PORT:-8081}/api/v1/review/config" \
+            "401"
+    else
+        check_http \
+            "Review frontend -> API Gateway proxy" \
+            "http://127.0.0.1:${REVIEW_FRONTEND_PORT:-8081}/api/v1/review/config"
+    fi
 fi
 
 if (( identity_active )); then
@@ -313,6 +378,42 @@ if (( identity_active )); then
     else
         bad "User Service ready (internal)"
     fi
+fi
+
+if (( auth_active )); then
+    if docker compose --profile auth exec \
+        -T \
+        auth-service \
+        python3 \
+        -c 'import json, urllib.request; payload=json.load(urllib.request.urlopen("http://127.0.0.1:8000/health/ready", timeout=5)); assert payload.get("status") == "ready"' \
+        >/dev/null 2>&1; then
+
+        ok "Auth Service ready (internal)"
+    else
+        bad "Auth Service ready (internal)"
+    fi
+
+    if docker compose --profile auth exec \
+        -T \
+        admin-service \
+        python3 \
+        -c 'import json, urllib.request; payload=json.load(urllib.request.urlopen("http://127.0.0.1:8000/health/ready", timeout=5)); assert payload.get("status") == "ready"' \
+        >/dev/null 2>&1; then
+
+        ok "Admin Service ready (internal)"
+    else
+        bad "Admin Service ready (internal)"
+    fi
+
+    check_http_status \
+        "Frontend -> Auth session proxy" \
+        "http://127.0.0.1:${FRONTEND_PORT:-8080}/api/v1/auth/session" \
+        "200" "401"
+
+    check_http_status \
+        "Frontend -> Admin proxy requires login" \
+        "http://127.0.0.1:${FRONTEND_PORT:-8080}/api/v1/admin/users" \
+        "401"
 fi
 
 check_http \

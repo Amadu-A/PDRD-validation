@@ -17,6 +17,8 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
+from pdrd_api_gateway.core.identity_proxy_settings import IdentityProxySettings
+
 EnvironmentName = Literal[
     "local",
     "dev",
@@ -542,10 +544,16 @@ class Settings(BaseSettings):
 
     review: ReviewSettings = Field(default_factory=ReviewSettings)
 
+    identity_proxy: IdentityProxySettings = Field(default_factory=IdentityProxySettings)
+
     @model_validator(mode="after")
     def check_review_environment(self) -> "Settings":
         """Не позволяет использовать временный контекст вместо production-авторизации."""
-        if self.environment == "prod" and self.review.enabled:
+        if (
+            self.environment == "prod"
+            and self.review.enabled
+            and not self.identity_proxy.authorization_enabled
+        ):
             raise ValueError(
                 "Закрытый режим Review не заменяет авторизацию production."
             )

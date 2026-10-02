@@ -3,7 +3,7 @@
 """Экспорт утверждённого Review с проверкой источника и повторной проверкой перед выдачей."""
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PurePath
 from uuid import UUID
 
@@ -71,10 +71,12 @@ class GetReviewedPdf:
 
     @log_execution_time(operation="reviewed_pdf_export")
     async def execute(
-        self, *, job_id: UUID, expected_revision: int
+        self, *, job_id: UUID, expected_revision: int, actor: str | None = None
     ) -> AnalysisAnnotatedPdfDocument:
         """Повторная проверка обязательна также при попадании в кеш."""
         context = self.contexts.resolve(job_id=job_id, operation="export")
+        if actor is not None:
+            context = replace(context, actor=actor)
         if context.job_id != job_id or context.operation != "export":
             raise ReviewRequestError(
                 403, "Серверный контекст не соответствует экспорту."

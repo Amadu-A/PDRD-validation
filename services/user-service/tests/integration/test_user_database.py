@@ -2,6 +2,7 @@
 
 """Изолированные интеграционные проверки PostgreSQL User Service."""
 
+import asyncio
 import os
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -15,6 +16,8 @@ from pdrd_user_service.application.ports.repository import (
     BootstrapAlreadyPerformed,
     IdentityConflict,
 )
+from pdrd_user_service.application.use_cases.external_accounts import ExternalAccounts
+from pdrd_user_service.application.use_cases.review_scope import ReviewScopeAccess
 from pdrd_user_service.core.settings import DatabaseSettings, Settings
 from pdrd_user_service.domain.access import AccessTier, Role
 from pdrd_user_service.domain.identity import (
@@ -276,6 +279,206 @@ async def test_stable_identity_is_unique_but_same_email_is_not(
 
 
 @pytest.mark.asyncio
+async def test_external_registration_and_verification_persist_status_and_version(
+    test_engine: AsyncEngine,
+) -> None:
+    """PostgreSQL фиксирует ожидание и однократное повышение версии прав."""
+    user_id, subject = uuid4(), uuid4()
+    factory = build_session_factory(test_engine)
+    accounts = ExternalAccounts(
+        lambda: SqlAlchemyUnitOfWork(factory), new_id=lambda: user_id
+    )
+    try:
+        pending = await accounts.register(
+            subject=subject,
+            display_name="Внешний клиент",
+            email="client@example.test",
+        )
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            assert await work.users.get_user(user_id) == pending
+            assert (
+                await work.users.find_identity("email", "pdrd", str(subject)) == pending
+            )
+        active = await accounts.verify_email(user_id=user_id, subject=subject)
+        repeated = await accounts.verify_email(user_id=user_id, subject=subject)
+        assert repeated == active
+        assert active.status is UserStatus.ACTIVE
+        assert active.authorization_version == pending.authorization_version + 1
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            assert await work.users.get_user(user_id) == active
+    finally:
+        await remove_test_users(test_engine, user_id)
+
+
+@pytest.mark.asyncio
+async def test_admin_user_repository_paginates_in_stable_order(
+    test_engine: AsyncEngine,
+) -> None:
+    """PostgreSQL применяет сортировку и offset после отдельного подсчёта."""
+    first = replace(
+        external_user(user_id=uuid4(), email="first@example.test"),
+        created_at=datetime(2050, 1, 1, 0, 0, tzinfo=UTC),
+    )
+    second = replace(
+        external_user(user_id=uuid4(), email="second@example.test"),
+        created_at=datetime(2050, 1, 1, 0, 1, tzinfo=UTC),
+    )
+    factory = build_session_factory(test_engine)
+    try:
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            for user in (first, second):
+                await work.users.create_user(
+                    user,
+                    ExternalIdentity(
+                        "test", "pagination", str(user.user_id), user.user_id
+                    ),
+                )
+            await work.commit()
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            first_page, total = await work.users.list_users(limit=1, offset=0)
+            second_page, repeated_total = await work.users.list_users(limit=1, offset=1)
+        assert total == repeated_total
+        assert total >= 2
+        assert first_page == (second,)
+        assert second_page == (first,)
+    finally:
+        await remove_test_users(test_engine, first.user_id, second.user_id)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_external_registration_keeps_one_stable_identity(
+    test_engine: AsyncEngine,
+) -> None:
+    """Двенадцать одновременных регистраций создают только один профиль."""
+    subject = uuid4()
+    candidate_ids = tuple(uuid4() for _ in range(12))
+    factory = build_session_factory(test_engine)
+
+    async def register_once(user_id: UUID) -> UserAccount:
+        """Открывает собственную транзакцию для каждого запроса."""
+        accounts = ExternalAccounts(
+            lambda: SqlAlchemyUnitOfWork(factory), new_id=lambda: user_id
+        )
+        return await accounts.register(
+            subject=subject,
+            display_name="Параллельный клиент",
+            email="parallel@example.test",
+        )
+
+    try:
+        results = await asyncio.gather(
+            *(register_once(user_id) for user_id in candidate_ids)
+        )
+        assert len({item.user_id for item in results}) == 1
+        assert all(item.status is UserStatus.PENDING_VERIFICATION for item in results)
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            assert (
+                await work.users.find_identity("email", "pdrd", str(subject))
+                == results[0]
+            )
+        async with test_engine.connect() as connection:
+            stored = (
+                await connection.execute(
+                    select(UserModel.user_id).where(
+                        UserModel.user_id.in_(candidate_ids)
+                    )
+                )
+            ).all()
+        assert stored == [(results[0].user_id,)]
+    finally:
+        await remove_test_users(test_engine, *candidate_ids)
+
+
+@pytest.mark.asyncio
+async def test_atomic_role_replacement_updates_audit_once(
+    test_engine: AsyncEngine,
+) -> None:
+    """PostgreSQL отзывает старую роль, выдаёт новую и повышает версию один раз."""
+    actor, target = corporate_member(user_id=uuid4()), corporate_member(user_id=uuid4())
+    old_id, new_id = uuid4(), uuid4()
+    now = datetime.now(UTC)
+    old = RoleAssignment(
+        old_id,
+        target.user_id,
+        Role.DESIGNER,
+        RoleSource.LOCAL,
+        RoleScope(ScopeKind.OWN),
+        now,
+    )
+    new = RoleAssignment(
+        new_id,
+        target.user_id,
+        Role.DESIGNER,
+        RoleSource.LOCAL,
+        RoleScope(ScopeKind.OWN),
+        now + timedelta(seconds=1),
+    )
+    factory = build_session_factory(test_engine)
+    try:
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            for user in (actor, target):
+                await work.users.create_user(
+                    user,
+                    ExternalIdentity(
+                        "ad", "test.local", str(user.user_id), user.user_id
+                    ),
+                )
+            await work.commit()
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            await work.users.add_role_assignment(
+                replace(target, authorization_version=2), old, 1, actor.user_id
+            )
+            await work.commit()
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            await work.users.replace_worker_roles(
+                replace(target, authorization_version=3),
+                (old_id,),
+                new,
+                now + timedelta(seconds=1),
+                2,
+                actor.user_id,
+            )
+            await work.commit()
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            updated = await work.users.get_user(target.user_id)
+            assignments = await work.users.list_assignments(target.user_id)
+        assert updated is not None and updated.authorization_version == 3
+        assert assignments[0].assignment_id == old_id
+        assert assignments[0].revoked_at == now + timedelta(seconds=1)
+        assert assignments[1].assignment_id == new_id
+        assert assignments[1].revoked_at is None
+        async with factory() as database:
+            events = (
+                await database.scalars(
+                    select(RoleAssignmentEventModel).where(
+                        RoleAssignmentEventModel.assignment_id.in_((old_id, new_id))
+                    )
+                )
+            ).all()
+        assert {(item.assignment_id, item.action) for item in events} == {
+            (old_id, "assign"),
+            (old_id, "revoke"),
+            (new_id, "assign"),
+        }
+        assert {
+            item.authorization_version for item in events if item.action == "revoke"
+        } == {3}
+        with pytest.raises(AuthorizationConflict):
+            async with SqlAlchemyUnitOfWork(factory) as work:
+                await work.users.replace_worker_roles(
+                    replace(target, authorization_version=3),
+                    (new_id,),
+                    None,
+                    now + timedelta(seconds=2),
+                    2,
+                    actor.user_id,
+                )
+                await work.commit()
+    finally:
+        await remove_test_users(test_engine, actor.user_id, target.user_id)
+
+
+@pytest.mark.asyncio
 async def test_multiple_departments_and_disabled_tenant_remove_effective_membership(
     test_engine: AsyncEngine,
 ) -> None:
@@ -356,6 +559,94 @@ async def test_multiple_departments_and_disabled_tenant_remove_effective_members
                 organization.organization_id,
                 other_organization.organization_id,
             ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_department_membership_cas_controls_cross_user_review_scope(
+    test_engine: AsyncEngine,
+) -> None:
+    """PostgreSQL сохраняет CAS членства, а проверка Review учитывает его отзыв."""
+    actor, owner = corporate_member(user_id=uuid4()), corporate_member(user_id=uuid4())
+    organization = Organization(uuid4(), "Организация для Review")
+    department = Department(uuid4(), organization.organization_id, "Отдел Review")
+    now = datetime.now(UTC)
+    head = RoleAssignment(
+        assignment_id=uuid4(),
+        user_id=actor.user_id,
+        role=Role.DEPARTMENT_HEAD,
+        source=RoleSource.LOCAL,
+        scope=RoleScope(
+            ScopeKind.DEPARTMENT, organization.organization_id, department.department_id
+        ),
+        created_at=now - timedelta(seconds=1),
+    )
+    factory = build_session_factory(test_engine)
+    access = ReviewScopeAccess(lambda: SqlAlchemyUnitOfWork(factory), clock=lambda: now)
+    try:
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            for user in (actor, owner):
+                await work.users.create_user(
+                    user,
+                    ExternalIdentity(
+                        "ad", "review.test", user.user_id.hex, user.user_id
+                    ),
+                )
+            await work.users.create_organization(organization)
+            await work.users.create_department(department)
+            await work.users.create_membership(
+                Membership(
+                    actor.user_id,
+                    organization.organization_id,
+                    department.department_id,
+                )
+            )
+            await work.users.add_role_assignment(
+                replace(actor, authorization_version=2), head, 1, actor.user_id
+            )
+            await work.commit()
+
+        assert not await access.can_read(
+            actor_user_id=actor.user_id, owner_user_id=owner.user_id
+        )
+        active = Membership(
+            owner.user_id, organization.organization_id, department.department_id
+        )
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            await work.users.set_department_membership(
+                replace(owner, authorization_version=2),
+                active,
+                expected_authorization_version=1,
+            )
+            await work.commit()
+        assert await access.can_read(
+            actor_user_id=actor.user_id, owner_user_id=owner.user_id
+        )
+
+        with pytest.raises(AuthorizationConflict):
+            async with SqlAlchemyUnitOfWork(factory) as work:
+                await work.users.set_department_membership(
+                    replace(owner, authorization_version=2),
+                    replace(active, active=False),
+                    expected_authorization_version=1,
+                )
+                await work.commit()
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            await work.users.set_department_membership(
+                replace(owner, authorization_version=3),
+                replace(active, active=False),
+                expected_authorization_version=2,
+            )
+            await work.commit()
+        assert not await access.can_read(
+            actor_user_id=actor.user_id, owner_user_id=owner.user_id
+        )
+    finally:
+        await remove_test_users(
+            test_engine,
+            actor.user_id,
+            owner.user_id,
+            organization_ids=(organization.organization_id,),
         )
 
 

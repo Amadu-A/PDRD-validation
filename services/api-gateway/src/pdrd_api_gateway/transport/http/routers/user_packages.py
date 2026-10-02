@@ -11,6 +11,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     Response,
     UploadFile,
     status,
@@ -42,9 +43,20 @@ from pdrd_api_gateway.transport.http.schemas.normative_catalog import (
     UpdateNormativeCategoryRequest,
 )
 
+
+def require_user_package_owner_model(request: Request) -> None:
+    """Закрывает чужие UUID до хранения владельца пакета в Knowledge Service."""
+    if request.app.state.identity_authorizer is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Пользовательские пакеты временно недоступны до привязки к владельцу.",
+        )
+
+
 router = APIRouter(
     prefix="/api/v1/normative",
     tags=["user-packages"],
+    dependencies=[Depends(require_user_package_owner_model)],
 )
 
 ContainerDependency = Annotated[

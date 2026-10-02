@@ -1,0 +1,27 @@
+/* frontend/src/css/blocks/admin.css */
+/* Отдельные компактные таблицы и редактор ролей админки. */
+
+.admin-link { display: inline-block; margin-top: 16px; color: #2457a7; font-size: 14px; font-weight: 700; text-decoration: none; }
+.admin-search { display: grid; gap: 8px; margin: 22px 0 17px; color: #5c687b; font-size: 12px; font-weight: 700; }
+.admin-search input { width: 100%; min-height: 42px; padding: 9px 12px; border: 1px solid #bac8db; border-radius: 8px; background: #fff; }
+.admin-users { display: grid; gap: 9px; }
+.admin-user { padding: 15px; border: 1px solid #dce3ed; border-radius: 10px; background: #fff; }
+.admin-user__heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 14px; }
+.admin-user__status { padding: 5px 8px; border-radius: 999px; background: #eaf7ef; color: #176846; font-size: 11px; font-weight: 700; }
+.admin-user__meta { margin: 6px 0 12px; color: #5c687b; font-size: 12px; overflow-wrap: anywhere; }
+.admin-user__open { padding: 7px 10px; border: 1px solid #bfd2ed; border-radius: 8px; background: #fff; color: #2457a7; font-size: 12px; cursor: pointer; }
+.admin-user__open:disabled { cursor: wait; opacity: .6; }
+.admin-user__details { margin-top: 12px; }
+.admin-pagination { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 17px; color: #5c687b; font-size: 12px; }
+.admin-pagination button { min-height: 36px; padding: 7px 11px; border: 1px solid #bfd2ed; border-radius: 8px; background: #fff; color: #2457a7; cursor: pointer; }
+.admin-pagination button:disabled { cursor: default; opacity: .45; }
+.admin-role-form { display: flex; align-items: end; flex-wrap: wrap; gap: 9px; padding-top: 11px; border-top: 1px solid #e8edf3; }
+.admin-role-form label { display: grid; gap: 5px; color: #5c687b; font-size: 12px; }
+.admin-role-form select, .admin-role-form input { min-height: 37px; padding: 7px 9px; border: 1px solid #bac8db; border-radius: 8px; background: #fff; color: #18233a; }
+.admin-role-form__department { display: flex; flex-wrap: wrap; gap: 7px; }
+.admin-role-form__department[hidden] { display: none; }
+.admin-role-form button { min-height: 37px; padding: 8px 11px; border: 1px solid #2457a7; border-radius: 8px; background: #2457a7; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
+.admin-role-form button:disabled { cursor: wait; opacity: .6; }
+.admin-role-form__message { flex-basis: 100%; min-height: 16px; margin: 0; color: #2457a7; font-size: 12px; }
+.admin-role-list { display: grid; gap: 12px; margin: 18px 0; color: #42536c; font-size: 14px; }
+@media (max-width: 640px) { .admin-role-form, .admin-role-form__department { display: grid; width: 100%; } .admin-role-form select, .admin-role-form input { width: 100%; } }

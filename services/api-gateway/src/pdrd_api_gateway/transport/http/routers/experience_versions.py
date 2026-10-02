@@ -4,7 +4,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 
 from pdrd_api_gateway.transport.http.routers.experience import Container, invoke
 from pdrd_api_gateway.transport.http.schemas.experience_versions import (
@@ -16,29 +16,38 @@ router = APIRouter(prefix="/api/v1/experience-versions", tags=["experience-versi
 
 
 @router.get("")
-async def versions(container: Container) -> dict:
+async def versions(request: Request, container: Container) -> dict:
     """Просмотр никогда не меняет рабочую конфигурацию."""
-    return await invoke(container, operation="version_list")
+    return await invoke(container, request, operation="version_list")
 
 
 @router.post("")
-async def create(command: CreateVersion, container: Container) -> dict:
+async def create(
+    command: CreateVersion, request: Request, container: Container
+) -> dict:
     """Выбор сохраняется как долговечное задание; HTTP не ждёт embedding."""
     return await invoke(
-        container, operation="version_create", command=command.model_dump(mode="json")
+        container,
+        request,
+        operation="version_create",
+        command=command.model_dump(mode="json"),
     )
 
 
 @router.get("/{version_id}")
-async def version(version_id: UUID, container: Container) -> dict:
+async def version(version_id: UUID, request: Request, container: Container) -> dict:
     """Состав используется для подсветки и выбора отсутствующих примеров."""
-    return await invoke(container, operation="version_read", example_id=version_id)
+    return await invoke(
+        container, request, operation="version_read", example_id=version_id
+    )
 
 
 @router.get("/{version_id}/dataset")
-async def dataset(version_id: UUID, container: Container) -> Response:
+async def dataset(version_id: UUID, request: Request, container: Container) -> Response:
     """Gateway проверяет задания всех frozen members до получения архива."""
-    content = await invoke(container, operation="version_export", example_id=version_id)
+    content = await invoke(
+        container, request, operation="version_export", example_id=version_id
+    )
     return Response(
         content,
         media_type="application/zip",
@@ -51,11 +60,12 @@ async def dataset(version_id: UUID, container: Container) -> Response:
 
 @router.patch("/{version_id}")
 async def rename(
-    version_id: UUID, command: ChangeVersion, container: Container
+    version_id: UUID, command: ChangeVersion, request: Request, container: Container
 ) -> dict:
     """Переименование не перемещает данные между коллекциями."""
     return await invoke(
         container,
+        request,
         operation="version_rename",
         example_id=version_id,
         command=command.model_dump(),
@@ -64,11 +74,12 @@ async def rename(
 
 @router.post("/{version_id}/delete")
 async def delete(
-    version_id: UUID, command: ChangeVersion, container: Container
+    version_id: UUID, command: ChangeVersion, request: Request, container: Container
 ) -> dict:
     """Удалённая версия исключается из селекторов с сохранением аудита."""
     return await invoke(
         container,
+        request,
         operation="version_delete",
         example_id=version_id,
         command=command.model_dump(),
@@ -76,10 +87,13 @@ async def delete(
 
 
 @router.post("/{version_id}/apply")
-async def apply(version_id: UUID, command: ChangeVersion, container: Container) -> dict:
+async def apply(
+    version_id: UUID, command: ChangeVersion, request: Request, container: Container
+) -> dict:
     """Применение требует готового артефакта и одобренного качества."""
     return await invoke(
         container,
+        request,
         operation="version_apply",
         example_id=version_id,
         command=command.model_dump(),

@@ -33,11 +33,14 @@ class ManageExperience:
         query: dict | None = None,
         command: dict | None = None,
         index: int | None = None,
+        actor: str | None = None,
     ) -> dict | bytes:
         """При объектной операции получает задание из неизменяемого источника записи."""
         context = self.contexts.resolve(
             operation=operation, job_id=job_id, example_id=example_id
         )
+        if actor is not None:
+            context = replace(context, actor=actor)
         if (
             context.operation != operation
             or context.job_id != job_id

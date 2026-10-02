@@ -80,6 +80,8 @@ class SubmitAnalysis:
         technical_assignment_file_name: str | None = None,
         technical_assignment_id: UUID | None = None,
         technical_assignment_analysis_document_id: UUID | None = None,
+        owner_user_id: UUID | None = None,
+        guest_access: bool = False,
     ) -> AnalysisJob:
         """Принимает документы и создаёт надёжное задание."""
         self._validate_file_content(
@@ -182,10 +184,14 @@ class SubmitAnalysis:
                     content=technical_assignment_content,
                 )
 
-            return await self.create_analysis_job.execute(
-                document_id=submission.document_id,
-                normative_snapshot=normative_snapshot,
-            )
+            create_kwargs = {
+                "document_id": submission.document_id,
+                "normative_snapshot": normative_snapshot,
+            }
+            if owner_user_id is not None or guest_access:
+                create_kwargs["owner_user_id"] = owner_user_id
+                create_kwargs["guest_access"] = guest_access
+            return await self.create_analysis_job.execute(**create_kwargs)
 
         except BaseException:
             await self.artifact_store.delete_request(

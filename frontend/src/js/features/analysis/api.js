@@ -10,7 +10,18 @@ import {
 
 
 import { fetchJson } from "../../api.js";
+import { guestAccessHeaders } from "./guest-access.js";
 export { ApiError } from "../../api.js";
+
+/** Каждый запрос к конкретному заданию передаёт его отдельное временное право. */
+function jobRequest(jobId, suffix = "", options = {}) {
+  return fetchJson(
+    `${ANALYSES_ENDPOINT}/${encodeURIComponent(jobId)}${suffix}`,
+    { ...options, cache: "no-store", headers: {
+      ...guestAccessHeaders(jobId), ...options.headers,
+    } },
+  );
+}
 
 export async function submitProjectContextPreflight(
   formData,
@@ -41,30 +52,21 @@ export async function submitAnalysis(
 export async function cancelAnalysis(
   jobId,
 ) {
-  return fetchJson(
-    `${ANALYSES_ENDPOINT}/${jobId}/cancel`,
-    {
-      method: "POST",
-    },
-  );
+  return jobRequest(jobId, "/cancel", { method: "POST" });
 }
 
 
 export async function getAnalysisProgress(
   jobId,
 ) {
-  return fetchJson(
-    `${ANALYSES_ENDPOINT}/${jobId}/progress`,
-  );
+  return jobRequest(jobId, "/progress");
 }
 
 
 export async function getAnalysisStatus(
   jobId,
 ) {
-  const statusPayload = await fetchJson(
-    `${ANALYSES_ENDPOINT}/${jobId}`,
-  );
+  const statusPayload = await jobRequest(jobId);
 
   let progress = null;
 
@@ -90,16 +92,12 @@ export async function getAnalysisStatus(
 export async function getAnalysisResult(
   jobId,
 ) {
-  return fetchJson(
-    `${ANALYSES_ENDPOINT}/${jobId}/result`,
-  );
+  return jobRequest(jobId, "/result");
 }
 
 
 export async function getAnalysisVisualization(
   jobId,
 ) {
-  return fetchJson(
-    `${ANALYSES_ENDPOINT}/${jobId}/visualization`,
-  );
+  return jobRequest(jobId, "/visualization");
 }

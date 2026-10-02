@@ -237,3 +237,5 @@
   padding-bottom: var(--space-4);
   overflow-wrap: anywhere;
 }
+/* Пока области объектов Experience не проверяются, каталог открыт только администратору. */
+.experience-page[data-access-denied="true"] > :not(.experience-page__navigation):not(.experience-page__notice) { display: none; }

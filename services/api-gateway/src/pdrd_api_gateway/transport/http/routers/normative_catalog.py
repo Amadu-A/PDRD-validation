@@ -11,6 +11,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     Response,
     UploadFile,
     status,
@@ -59,6 +60,18 @@ ContainerDependency = Annotated[
 ]
 
 _UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+def _visible_section(
+    section: NormativeSectionResponse, request: Request
+) -> NormativeSectionResponse:
+    """Оставляет системный промпт только администратору с серверным правом."""
+    if request.app.state.identity_authorizer is None:
+        return section
+    identity = getattr(request.state, "verified_identity", None)
+    if identity is not None and "system_prompt.manage" in identity.permissions:
+        return section
+    return section.model_copy(update={"system_prompt": ""})
 
 
 def _require_facade(
@@ -177,6 +190,7 @@ async def _read_upload(
     response_model=list[NormativeSectionResponse],
 )
 async def list_normative_sections(
+    http_request: Request,
     container: ContainerDependency,
 ) -> list[NormativeSectionResponse]:
     """Возвращает нормативные разделы."""
@@ -193,9 +207,7 @@ async def list_normative_sections(
         ) from error
 
     return [
-        NormativeSectionResponse.from_view(
-            section,
-        )
+        _visible_section(NormativeSectionResponse.from_view(section), http_request)
         for section in sections
     ]
 
@@ -207,6 +219,7 @@ async def list_normative_sections(
 )
 async def create_normative_section(
     request: CreateNormativeSectionRequest,
+    http_request: Request,
     container: ContainerDependency,
 ) -> NormativeSectionResponse:
     """Создаёт нормативный раздел."""
@@ -224,9 +237,7 @@ async def create_normative_section(
             error,
         ) from error
 
-    return NormativeSectionResponse.from_view(
-        section,
-    )
+    return _visible_section(NormativeSectionResponse.from_view(section), http_request)
 
 
 @router.get(
@@ -235,6 +246,7 @@ async def create_normative_section(
 )
 async def get_normative_section(
     section_id: UUID,
+    http_request: Request,
     container: ContainerDependency,
 ) -> NormativeSectionResponse:
     """Возвращает section с system prompt."""
@@ -252,9 +264,7 @@ async def get_normative_section(
             error,
         ) from error
 
-    return NormativeSectionResponse.from_view(
-        section,
-    )
+    return _visible_section(NormativeSectionResponse.from_view(section), http_request)
 
 
 @router.patch(
@@ -264,6 +274,7 @@ async def get_normative_section(
 async def update_normative_section(
     section_id: UUID,
     request: UpdateNormativeSectionRequest,
+    http_request: Request,
     container: ContainerDependency,
 ) -> NormativeSectionResponse:
     """Переименовывает section или сохраняет system prompt."""
@@ -284,9 +295,7 @@ async def update_normative_section(
             error,
         ) from error
 
-    return NormativeSectionResponse.from_view(
-        section,
-    )
+    return _visible_section(NormativeSectionResponse.from_view(section), http_request)
 
 
 @router.delete(

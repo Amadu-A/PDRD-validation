@@ -3,6 +3,7 @@
 """Integration-тесты API Gateway с настоящим PostgreSQL."""
 
 import os
+from datetime import UTC, datetime
 from functools import partial
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ from pdrd_api_gateway.application.use_cases.create_analysis_job import (
     CreateAnalysisJob,
 )
 from pdrd_api_gateway.core.settings import Settings
+from pdrd_api_gateway.domain.analysis_access import can_access_analysis_job
 from pdrd_api_gateway.domain.analysis_job import AnalysisJobStatus
 from pdrd_api_gateway.infrastructure.database.engine import (
     build_async_engine,
@@ -118,4 +120,47 @@ async def test_database_health_job_and_outbox() -> None:
 
                 await session.commit()
 
+        await engine.dispose()
+
+
+async def test_owner_and_guest_capability_survive_database_roundtrip() -> None:
+    """Проверяет в PostgreSQL владельца, хеш ключа и время истечения."""
+    settings = Settings(_env_file=None)
+    engine = build_async_engine(settings.database)
+    session_factory = build_session_factory(engine)
+    factory = partial(SqlAlchemyUnitOfWork, session_factory)
+    creator = CreateAnalysisJob(unit_of_work_factory=factory)
+    owner_id = uuid4()
+    jobs = []
+
+    try:
+        owned = await creator.execute(document_id=uuid4(), owner_user_id=owner_id)
+        guest = await creator.execute(document_id=uuid4(), guest_access=True)
+        jobs.extend((owned, guest))
+
+        async with factory() as work:
+            loaded_owner = await work.analysis_jobs.get(owned.id)
+            loaded_guest = await work.analysis_jobs.get(guest.id)
+
+        assert loaded_owner is not None and loaded_owner.owner_user_id == owner_id
+        assert loaded_guest is not None
+        assert loaded_guest.guest_access_token is None
+        assert loaded_guest.guest_access_token_hash == guest.guest_access_token_hash
+        assert loaded_guest.guest_access_expires_at is not None
+        assert guest.guest_access_token is not None
+        assert can_access_analysis_job(
+            loaded_guest,
+            actor_user_id=None,
+            guest_access_token=guest.guest_access_token,
+            now=datetime.now(UTC),
+        )
+    finally:
+        if jobs:
+            async with session_factory() as session:
+                await session.execute(
+                    delete(AnalysisJobModel).where(
+                        AnalysisJobModel.id.in_([job.id for job in jobs])
+                    )
+                )
+                await session.commit()
         await engine.dispose()

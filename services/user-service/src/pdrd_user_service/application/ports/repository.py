@@ -7,7 +7,13 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from pdrd_user_service.domain.identity import ExternalIdentity, Membership, UserAccount
+from pdrd_user_service.domain.identity import (
+    Department,
+    ExternalIdentity,
+    Membership,
+    Organization,
+    UserAccount,
+)
 from pdrd_user_service.domain.role_assignments import RoleAssignment
 
 
@@ -38,12 +44,70 @@ class UserRepository(Protocol):
         """Ищет профиль только по устойчивому составному ключу."""
         ...
 
+    async def list_users(
+        self, *, limit: int, offset: int
+    ) -> tuple[tuple[UserAccount, ...], int]:
+        """Возвращает страницу профилей и их общее число."""
+        ...
+
     async def create_user(self, user: UserAccount, identity: ExternalIdentity) -> None:
-        """Атомарно создаёт профиль и проверенную идентичность."""
+        """Атомарно создаёт профиль и устойчивую идентичность."""
+        ...
+
+    async def activate_external(
+        self, updated_user: UserAccount, expected_authorization_version: int
+    ) -> None:
+        """Активирует ожидающий внешний профиль и повышает версию прав."""
         ...
 
     async def list_memberships(self, user_id: UUID) -> tuple[Membership, ...]:
         """Возвращает членства для вычисления области полномочий."""
+        ...
+
+    async def get_organization(self, organization_id: UUID) -> Organization | None:
+        """Читает организацию для проверки административной операции."""
+        ...
+
+    async def list_organizations(
+        self, *, limit: int, offset: int
+    ) -> tuple[tuple[Organization, ...], int]:
+        """Возвращает ограниченную страницу организаций."""
+        ...
+
+    async def create_organization(self, organization: Organization) -> None:
+        """Создаёт организацию в текущей транзакции."""
+        ...
+
+    async def get_department(
+        self, organization_id: UUID, department_id: UUID
+    ) -> Department | None:
+        """Читает отдел только внутри указанной организации."""
+        ...
+
+    async def list_departments(
+        self, organization_id: UUID, *, limit: int, offset: int
+    ) -> tuple[tuple[Department, ...], int]:
+        """Возвращает ограниченную страницу отделов организации."""
+        ...
+
+    async def create_department(self, department: Department) -> None:
+        """Создаёт отдел с проверенным родителем."""
+        ...
+
+    async def get_department_membership(
+        self, user_id: UUID, organization_id: UUID, department_id: UUID
+    ) -> Membership | None:
+        """Читает точное членство для изменения статуса."""
+        ...
+
+    async def set_department_membership(
+        self,
+        updated_user: UserAccount,
+        membership: Membership,
+        *,
+        expected_authorization_version: int,
+    ) -> None:
+        """Атомарно меняет членство и версию полномочий."""
         ...
 
     async def list_assignments(
@@ -71,6 +135,18 @@ class UserRepository(Protocol):
         actor_user_id: UUID,
     ) -> None:
         """Отзывает назначение и меняет версию полномочий атомарно."""
+        ...
+
+    async def replace_worker_roles(
+        self,
+        updated_user: UserAccount,
+        previous_assignment_ids: tuple[UUID, ...],
+        new_assignment: RoleAssignment | None,
+        revoked_at: datetime,
+        expected_authorization_version: int,
+        actor_user_id: UUID,
+    ) -> None:
+        """Одной транзакцией меняет рабочие роли, версию прав и аудит."""
         ...
 
     async def bootstrap_admin(

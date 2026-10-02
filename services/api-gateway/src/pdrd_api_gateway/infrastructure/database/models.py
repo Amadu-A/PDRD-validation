@@ -69,6 +69,12 @@ class AnalysisJobModel(Base):
             ),
             name="ck_analysis_jobs_normative_snapshot_object",
         ),
+        CheckConstraint(
+            "(guest_access_token_hash IS NULL AND guest_access_expires_at IS NULL) "
+            "OR (guest_access_token_hash IS NOT NULL "
+            "AND guest_access_expires_at IS NOT NULL AND owner_user_id IS NULL)",
+            name="ck_analysis_jobs_guest_access_pair",
+        ),
         Index(
             "ix_analysis_jobs_status",
             "status",
@@ -77,6 +83,7 @@ class AnalysisJobModel(Base):
             "ix_analysis_jobs_created_at",
             "created_at",
         ),
+        Index("ix_analysis_jobs_owner_user_id", "owner_user_id"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -90,6 +97,21 @@ class AnalysisJobModel(Base):
         Uuid(
             as_uuid=True,
         ),
+        nullable=True,
+    )
+
+    owner_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+    )
+
+    guest_access_token_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+
+    guest_access_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
     )
 

@@ -1,0 +1,14 @@
+/* frontend/src/css/blocks/admin-directory.css */
+/* Справочник организаций и отделов в разделе ролей админки. */
+
+.admin-directory { display: grid; gap: 14px; margin-top: 24px; padding-top: 20px; border-top: 1px solid #dce3ed; }
+.admin-directory h3, .admin-directory p { margin: 0; }
+.admin-directory h3 { font-size: 16px; }
+.admin-directory p, .admin-directory li { color: #5c687b; font-size: 13px; }
+.admin-directory form { display: flex; align-items: end; flex-wrap: wrap; gap: 9px; }
+.admin-directory label { display: grid; gap: 5px; color: #42536c; font-size: 12px; font-weight: 700; }
+.admin-directory input, .admin-directory select { min-width: 240px; min-height: 39px; padding: 8px 10px; border: 1px solid #bac8db; border-radius: 8px; background: #fff; }
+.admin-directory button { min-height: 39px; padding: 8px 12px; border: 1px solid #2457a7; border-radius: 8px; background: #2457a7; color: #fff; cursor: pointer; }
+.admin-directory button:disabled { cursor: wait; opacity: .55; }
+.admin-directory ul { display: grid; gap: 5px; margin: 0; padding-left: 20px; }
+.admin-directory [data-directory-status] { min-height: 17px; color: #2457a7; }

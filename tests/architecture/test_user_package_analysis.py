@@ -88,24 +88,19 @@ def test_package_checkboxes_are_visible_and_selectable() -> None:
 
 
 def test_app_merges_package_selection_into_analysis_form() -> None:
-    """Selection package controller относится к тому же section."""
+    """До привязки владельца приложение не отправляет выбранные чужие пакеты."""
     content = APP_JS.read_text(
         encoding="utf-8",
     )
-
-    required = (
-        "createUserPackageCatalog",
-        "userPackageCatalog.setSection(",
-        "userPackageCatalog.getSelection()",
-        "userPackageDocumentIds",
-        "packageSelection.sectionId",
-        "selection.sectionId",
+    access = (APP_JS.parent / "features" / "auth" / "main-access.js").read_text(
+        encoding="utf-8"
     )
 
-    missing = [marker for marker in required if marker not in content]
-
-    assert not missing, "\n".join(
-        missing,
+    assert "userPackageDocumentIds: []" in content
+    assert "createUserPackageCatalog" not in content
+    assert (
+        'packages.querySelector("[data-user-packages-accordion]").inert = true'
+        in access
     )
 
 

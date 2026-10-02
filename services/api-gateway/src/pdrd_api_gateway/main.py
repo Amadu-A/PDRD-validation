@@ -2,16 +2,29 @@
 
 """Точка входа FastAPI-приложения API Gateway."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 
 from pdrd_api_gateway.core.container import (
     ApplicationContainer,
     build_container,
 )
 from pdrd_api_gateway.core.observability import configure_review_logging
+from pdrd_api_gateway.infrastructure.analysis_scope import (
+    HttpUserAnalysisScopeChecker,
+)
+from pdrd_api_gateway.transport.http.analysis_access import (
+    enforce_analysis_job_access,
+)
+from pdrd_api_gateway.transport.http.identity_authorization import (
+    IdentityAuthorizer,
+    enforce_identity_authorization,
+)
+from pdrd_api_gateway.transport.http.routers.admin_proxy import (
+    router as admin_proxy_router,
+)
 from pdrd_api_gateway.transport.http.routers.analyses import (
     router as analyses_router,
 )
@@ -26,6 +39,9 @@ from pdrd_api_gateway.transport.http.routers.analysis_pdf_exports import (
 )
 from pdrd_api_gateway.transport.http.routers.analysis_progress import (
     router as analysis_progress_router,
+)
+from pdrd_api_gateway.transport.http.routers.auth_proxy import (
+    router as auth_proxy_router,
 )
 from pdrd_api_gateway.transport.http.routers.experience import (
     router as experience_router,
@@ -96,6 +112,53 @@ def create_app(
     )
 
     application.state.container = application_container
+    authorizer = (
+        IdentityAuthorizer(settings.identity_proxy)
+        if settings.identity_proxy.authorization_enabled
+        else None
+    )
+    scope_checker = (
+        HttpUserAnalysisScopeChecker(
+            settings.identity_proxy.user_service_url,
+            settings.identity_proxy.user_service_internal_key.get_secret_value(),
+            timeout_seconds=settings.identity_proxy.timeout_seconds,
+        )
+        if authorizer is not None
+        else None
+    )
+    application.state.identity_authorizer = authorizer
+
+    @application.middleware("http")
+    async def protect_identity_actions(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """Запрещает закрытые операции до обращения к хранилищам и брокеру."""
+        if authorizer is not None:
+            denial = await enforce_identity_authorization(request, authorizer)
+            if denial is not None:
+                denial.headers["Cache-Control"] = "no-store"
+                return denial
+            path = request.url.path
+            if (
+                path.startswith("/api/v1/analyses")
+                or path.startswith("/api/v1/experience/capture/")
+                or path.startswith("/api/v1/normative/sections")
+            ):
+                denial = await authorizer.authenticate_if_present(request)
+                if denial is None:
+                    denial = await enforce_analysis_job_access(
+                        request,
+                        application_container.get_analysis_job,
+                        request.state.identity_user_id,
+                        scope_checker=scope_checker,
+                    )
+                if denial is not None:
+                    denial.headers["Cache-Control"] = "no-store"
+                    return denial
+        response = await call_next(request)
+        if authorizer is not None and request.url.path.startswith("/api/v1/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     application.include_router(
         health_router,
@@ -142,6 +205,10 @@ def create_app(
     application.include_router(
         technical_assignments_router,
     )
+
+    if settings.identity_proxy.enabled:
+        application.include_router(auth_proxy_router)
+        application.include_router(admin_proxy_router)
 
     return application
 

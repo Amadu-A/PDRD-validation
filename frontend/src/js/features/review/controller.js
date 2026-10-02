@@ -87,7 +87,12 @@ function createEditor(onSave) {
 }
 
 /** Связывает существующую визуализацию с ручным review и текстовым отчётом. */
-export function createReviewController({ onChange = () => {} } = {}) {
+export function createReviewController({
+  onChange = () => {},
+  capabilities = { canCreateGold: true, canDecide: true },
+} = {}) {
+  const canCreateGold = capabilities.canCreateGold !== false;
+  const canDecide = capabilities.canDecide !== false;
   let locked = false;
   let persistent = false;
   let syncMessage = "";
@@ -134,7 +139,7 @@ export function createReviewController({ onChange = () => {} } = {}) {
   }
 
   const manual = createManualAnnotationController({
-    isEnabled: () => !locked,
+    isEnabled: () => !locked && canCreateGold,
     onInteractionStart: () => automatic.cancelActive(),
     onCreate(note) {
       const entry = state.register(note.findingId, note.text, {
@@ -146,6 +151,7 @@ export function createReviewController({ onChange = () => {} } = {}) {
     },
 
     onUpdate(findingId, text, normativeSection) {
+      if (!canCreateGold) throw new Error("Недостаточно прав для Gold-замечания.");
       if (locked) throw new Error("Дождитесь восстановления Review.");
       const entry = state.edit(
         findingId,
@@ -193,7 +199,7 @@ export function createReviewController({ onChange = () => {} } = {}) {
   });
 
   const automatic = createAutomaticReview({
-    isEnabled: () => !locked,
+    isEnabled: () => !locked && canDecide,
     onGeometry(findingIds) {
       for (const findingId of findingIds) {
         state.invalidate(findingId);
@@ -279,7 +285,11 @@ export function createReviewController({ onChange = () => {} } = {}) {
         "aria-pressed",
         String(entry.edited),
       );
-      for (const key of ["accept", "reject", "edit"]) view.controls[key].disabled = locked;
+      for (const key of ["accept", "reject"]) {
+        view.controls[key].disabled = locked || !canDecide;
+      }
+      view.controls.edit.disabled = locked || !(entry.origin === REVIEW_ORIGINS.MANUAL
+        ? canCreateGold : canDecide);
     }
 
     manualList.sync(entry);
@@ -295,7 +305,7 @@ export function createReviewController({ onChange = () => {} } = {}) {
 
   /** Решение и его Undo сохраняют текст, источник, области и независимый тег. */
   function decide(findingId, decision, pageNumber) {
-    if (locked) return;
+    if (locked || !canDecide) return;
     const previous = state.get(findingId).decision;
     if (previous === decision) return;
     manual.cancelActive();
@@ -334,6 +344,10 @@ export function createReviewController({ onChange = () => {} } = {}) {
         }
       },
     });
+
+    controls.accept.hidden = !canDecide;
+    controls.reject.hidden = !canDecide;
+    controls.edit.hidden = note ? !canCreateGold : !canDecide;
 
     item.prepend(controls.element);
 
@@ -485,11 +499,13 @@ export function createReviewController({ onChange = () => {} } = {}) {
     syncMessage = message;
     if (locked) { manual.cancelActive(); automatic.cancelActive(); }
     for (const rows of views.values()) for (const view of rows) {
-      for (const key of ["accept", "reject", "edit"]) view.controls[key].disabled = locked;
+      for (const key of ["accept", "reject"]) view.controls[key].disabled = locked || !canDecide;
+      view.controls.edit.disabled = locked || !(view.item.dataset.reviewOrigin === REVIEW_ORIGINS.MANUAL
+        ? canCreateGold : canDecide);
     }
     for (const button of reportRoot?.querySelectorAll("[data-review-page-add], [data-review-page-undo]") ?? []) {
       if (button.dataset.reviewPageUndo !== undefined) continue;
-      button.disabled = locked;
+      button.disabled = locked || !canCreateGold;
     }
     updatePreview();
   }

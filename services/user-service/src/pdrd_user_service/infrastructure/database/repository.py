@@ -36,7 +36,7 @@ from pdrd_user_service.infrastructure.database.models import (
     RoleAssignmentModel,
     UserModel,
 )
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -128,6 +128,21 @@ class SqlAlchemyUserRepository:
         )
         return _user_from_model(row) if row is not None else None
 
+    async def list_users(
+        self, *, limit: int, offset: int
+    ) -> tuple[tuple[UserAccount, ...], int]:
+        """Читает страницу в устойчивом порядке вместе с числом профилей."""
+        total = await self._session.scalar(select(func.count()).select_from(UserModel))
+        rows = (
+            await self._session.scalars(
+                select(UserModel)
+                .order_by(UserModel.created_at.desc(), UserModel.user_id.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        ).all()
+        return tuple(_user_from_model(row) for row in rows), int(total or 0)
+
     async def create_user(self, user: UserAccount, identity: ExternalIdentity) -> None:
         """Создаёт профиль и ключ входа в одной транзакции без сиротских строк."""
         if identity.user_id != user.user_id:
@@ -163,6 +178,62 @@ class SqlAlchemyUserRepository:
         except IntegrityError as error:
             raise IdentityConflict("Профиль или идентичность уже существуют") from error
 
+    async def activate_external(
+        self, updated_user: UserAccount, expected_authorization_version: int
+    ) -> None:
+        """Атомарно переводит подтверждённый внешний профиль в активный."""
+        if (
+            updated_user.kind is not UserKind.EXTERNAL
+            or updated_user.status is not UserStatus.ACTIVE
+            or updated_user.authorization_version != expected_authorization_version + 1
+        ):
+            raise ValueError("Некорректный переход состояния внешнего профиля")
+        changed = await self._session.scalar(
+            update(UserModel)
+            .where(
+                UserModel.user_id == updated_user.user_id,
+                UserModel.kind == UserKind.EXTERNAL.value,
+                UserModel.status == UserStatus.PENDING_VERIFICATION.value,
+                UserModel.authorization_version == expected_authorization_version,
+            )
+            .values(
+                status=UserStatus.ACTIVE.value,
+                authorization_version=updated_user.authorization_version,
+            )
+            .returning(UserModel.user_id)
+        )
+        if changed is None:
+            raise AuthorizationConflict("Состояние профиля изменилось до подтверждения")
+
+    async def get_organization(self, organization_id: UUID) -> Organization | None:
+        """Находит организацию независимо от её активности."""
+        row = await self._session.get(OrganizationModel, organization_id)
+        if row is None:
+            return None
+        return Organization(row.organization_id, row.name, row.active)
+
+    async def list_organizations(
+        self, *, limit: int, offset: int
+    ) -> tuple[tuple[Organization, ...], int]:
+        """Читает страницу организаций в устойчивом порядке."""
+        total = await self._session.scalar(
+            select(func.count()).select_from(OrganizationModel)
+        )
+        rows = (
+            await self._session.scalars(
+                select(OrganizationModel)
+                .order_by(OrganizationModel.name, OrganizationModel.organization_id)
+                .limit(limit)
+                .offset(offset)
+            )
+        ).all()
+        return (
+            tuple(
+                Organization(row.organization_id, row.name, row.active) for row in rows
+            ),
+            int(total or 0),
+        )
+
     async def create_organization(self, organization: Organization) -> None:
         """Сохраняет границу организации в этой транзакции."""
         self._session.add(
@@ -173,6 +244,46 @@ class SqlAlchemyUserRepository:
             )
         )
         await self._session.flush()
+
+    async def get_department(
+        self, organization_id: UUID, department_id: UUID
+    ) -> Department | None:
+        """Не позволяет выбрать отдел чужой организации."""
+        row = await self._session.scalar(
+            select(DepartmentModel).where(
+                DepartmentModel.organization_id == organization_id,
+                DepartmentModel.department_id == department_id,
+            )
+        )
+        if row is None:
+            return None
+        return Department(row.department_id, row.organization_id, row.name, row.active)
+
+    async def list_departments(
+        self, organization_id: UUID, *, limit: int, offset: int
+    ) -> tuple[tuple[Department, ...], int]:
+        """Читает отделы только указанной организации."""
+        total = await self._session.scalar(
+            select(func.count())
+            .select_from(DepartmentModel)
+            .where(DepartmentModel.organization_id == organization_id)
+        )
+        rows = (
+            await self._session.scalars(
+                select(DepartmentModel)
+                .where(DepartmentModel.organization_id == organization_id)
+                .order_by(DepartmentModel.name, DepartmentModel.department_id)
+                .limit(limit)
+                .offset(offset)
+            )
+        ).all()
+        return (
+            tuple(
+                Department(row.department_id, row.organization_id, row.name, row.active)
+                for row in rows
+            ),
+            int(total or 0),
+        )
 
     async def create_department(self, department: Department) -> None:
         """Сохраняет отдел с FK на его организацию."""
@@ -197,6 +308,62 @@ class SqlAlchemyUserRepository:
                 active=membership.active,
             )
         )
+        await self._session.flush()
+
+    async def get_department_membership(
+        self, user_id: UUID, organization_id: UUID, department_id: UUID
+    ) -> Membership | None:
+        """Находит сохранённое членство без маскирования активности справочника."""
+        row = await self._session.scalar(
+            select(MembershipModel)
+            .where(
+                MembershipModel.user_id == user_id,
+                MembershipModel.organization_id == organization_id,
+                MembershipModel.department_id == department_id,
+            )
+            .with_for_update()
+        )
+        if row is None:
+            return None
+        return Membership(
+            row.user_id, row.organization_id, row.department_id, row.active
+        )
+
+    async def set_department_membership(
+        self,
+        updated_user: UserAccount,
+        membership: Membership,
+        *,
+        expected_authorization_version: int,
+    ) -> None:
+        """Фиксирует изменение членства вместе с CAS версии прав."""
+        if (
+            membership.user_id != updated_user.user_id
+            or membership.department_id is None
+        ):
+            raise ValueError("Требуется членство в отделе целевого пользователя")
+        await self._bump_version(updated_user, expected_authorization_version)
+        existing = await self._session.scalar(
+            select(MembershipModel)
+            .where(
+                MembershipModel.user_id == membership.user_id,
+                MembershipModel.organization_id == membership.organization_id,
+                MembershipModel.department_id == membership.department_id,
+            )
+            .with_for_update()
+        )
+        if existing is None:
+            self._session.add(
+                MembershipModel(
+                    membership_id=uuid4(),
+                    user_id=membership.user_id,
+                    organization_id=membership.organization_id,
+                    department_id=membership.department_id,
+                    active=membership.active,
+                )
+            )
+        else:
+            existing.active = membership.active
         await self._session.flush()
 
     async def list_memberships(self, user_id: UUID) -> tuple[Membership, ...]:
@@ -425,3 +592,73 @@ class SqlAlchemyUserRepository:
                 await self._session.flush()
         except IntegrityError as error:
             raise BootstrapAlreadyPerformed("Bootstrap уже выполнен") from error
+
+    async def replace_worker_roles(
+        self,
+        updated_user: UserAccount,
+        previous_assignment_ids: tuple[UUID, ...],
+        new_assignment: RoleAssignment | None,
+        revoked_at: datetime,
+        expected_authorization_version: int,
+        actor_user_id: UUID,
+    ) -> None:
+        """Одной транзакцией обновляет версию, роли и события аудита."""
+        if not isinstance(actor_user_id, UUID):
+            raise TypeError("actor_user_id должен быть UUID")
+        if new_assignment is not None and (
+            new_assignment.user_id != updated_user.user_id
+            or new_assignment.role not in {Role.DESIGNER, Role.DEPARTMENT_HEAD}
+            or new_assignment.source is not RoleSource.LOCAL
+        ):
+            raise ValueError("Недопустимое новое назначение")
+        if len(previous_assignment_ids) != len(set(previous_assignment_ids)):
+            raise ValueError("Повторяющиеся назначения для отзыва")
+        async with self._session.begin_nested():
+            await self._bump_version(updated_user, expected_authorization_version)
+            if previous_assignment_ids:
+                revoked = (
+                    await self._session.scalars(
+                        update(RoleAssignmentModel)
+                        .where(
+                            RoleAssignmentModel.user_id == updated_user.user_id,
+                            RoleAssignmentModel.assignment_id.in_(
+                                previous_assignment_ids
+                            ),
+                            RoleAssignmentModel.role.in_(
+                                (Role.DESIGNER.value, Role.DEPARTMENT_HEAD.value)
+                            ),
+                            RoleAssignmentModel.source == RoleSource.LOCAL.value,
+                            RoleAssignmentModel.revoked_at.is_(None),
+                        )
+                        .values(revoked_at=revoked_at)
+                        .returning(RoleAssignmentModel.assignment_id)
+                    )
+                ).all()
+                if set(revoked) != set(previous_assignment_ids):
+                    raise AuthorizationConflict("Назначения изменились до замены")
+            if new_assignment is not None:
+                self._session.add(_assignment_to_model(new_assignment))
+                await self._session.flush()
+            for assignment_id in previous_assignment_ids:
+                self._session.add(
+                    RoleAssignmentEventModel(
+                        event_id=uuid4(),
+                        assignment_id=assignment_id,
+                        actor_user_id=actor_user_id,
+                        action="revoke",
+                        occurred_at=revoked_at,
+                        authorization_version=updated_user.authorization_version,
+                    )
+                )
+            if new_assignment is not None:
+                self._session.add(
+                    RoleAssignmentEventModel(
+                        event_id=uuid4(),
+                        assignment_id=new_assignment.assignment_id,
+                        actor_user_id=actor_user_id,
+                        action="assign",
+                        occurred_at=revoked_at,
+                        authorization_version=updated_user.authorization_version,
+                    )
+                )
+            await self._session.flush()

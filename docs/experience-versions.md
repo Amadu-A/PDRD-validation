@@ -219,12 +219,13 @@ online через штатный Alembic; offline SQL допускает тол�
 Downgrade 0005 возвращает прежний ключ; downgrade 0004 удаляет реестр/происхождение.
 Для обычного обновления откат миграций не нужен.
 
-Windows — общие проверки, коммит и push в `origin`; отдельный приватный remote
-`neoterm` отправляется следующей командой:
+Windows — общие проверки и просмотр diff. Коммит и push инженер выполняет
+отдельно после проверки выбранных файлов:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\ops\check-quality.ps1 -CommitMessage "fix: validate Experience applied versions and workflows" -Push
-git push neoterm feature/experience-base
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ops\check-quality.ps1
+git diff --check
+git status --short
 ```
 
 Linux — получить ветку из настроенного приватного upstream и обновить сервисы:

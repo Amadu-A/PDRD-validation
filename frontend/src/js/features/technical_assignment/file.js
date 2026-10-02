@@ -7,6 +7,11 @@
 import {
   requireElementWithin,
 } from "../../dom.js";
+import {
+  forgetTechnicalAssignmentAccess,
+  rememberPreparedTechnicalAssignment,
+  technicalAssignmentAccessHeaders,
+} from "./access.js";
 
 
 const TECHNICAL_ASSIGNMENT_ACCEPT = (
@@ -194,6 +199,7 @@ export function createTechnicalAssignmentFilePicker(
 
 
   function clearPreparedIdentity() {
+    forgetTechnicalAssignmentAccess(input.dataset.technicalAssignmentId);
     delete input.dataset.technicalAssignmentId;
 
     delete input.dataset.analysisDocumentId;
@@ -201,12 +207,14 @@ export function createTechnicalAssignmentFilePicker(
     delete input.dataset.preparedSectionId;
 
     delete input.dataset.indexStatus;
+    delete input.dataset.technicalAssignmentAccessRequired;
   }
 
 
   function setPreparedIdentity(
     payload,
   ) {
+    const access = rememberPreparedTechnicalAssignment(payload);
     input.dataset.technicalAssignmentId = (
       payload.technical_assignment_id
     );
@@ -218,6 +226,7 @@ export function createTechnicalAssignmentFilePicker(
     input.dataset.preparedSectionId = (
       payload.section_id
     );
+    if (access) input.dataset.technicalAssignmentAccessRequired = "true";
   }
 
 
@@ -426,6 +435,7 @@ export function createTechnicalAssignmentFilePicker(
           + `${encodeURIComponent(technicalAssignmentId)}`
           + "/status"
         ),
+        { headers: technicalAssignmentAccessHeaders(technicalAssignmentId), cache: "no-store" },
       );
 
       if (

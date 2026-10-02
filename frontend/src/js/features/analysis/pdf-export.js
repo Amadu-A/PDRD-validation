@@ -4,6 +4,7 @@
  * Разделяет автоматический PDF и утверждённый PDF после Human Review.
  * Итоговую кнопку подключает отдельный модуль серверного Review.
  */
+import { downloadAutomaticPdf } from "./automatic-pdf-download.js";
 
 function createElement(
   tagName,
@@ -93,8 +94,28 @@ export function appendAnnotatedPdfDownload(
   link.download = "";
   link.dataset.analysisPdfOriginal = "";
 
+  const downloadStatus = createElement("p", "analysis-export__download-status");
+  downloadStatus.setAttribute("role", "status");
+  link.addEventListener("click", async (event) => {
+    event.preventDefault();
+    if (link.dataset.busy) return;
+    link.dataset.busy = "true";
+    link.setAttribute("aria-disabled", "true");
+    downloadStatus.textContent = "Готовим PDF для скачивания…";
+    try {
+      await downloadAutomaticPdf(jobId);
+      downloadStatus.textContent = "PDF скачан.";
+    } catch (error) {
+      downloadStatus.textContent = error.detail ?? error.message ?? "Не удалось скачать PDF.";
+    } finally {
+      delete link.dataset.busy;
+      link.removeAttribute("aria-disabled");
+    }
+  });
+
   section.append(
     link,
+    downloadStatus,
   );
 
   const finalButton = createElement(

@@ -42,9 +42,9 @@ def test_frontend_exposes_analysis_cancel_api() -> None:
 
     assert "export async function cancelAnalysis(" in source
 
-    assert "${ANALYSES_ENDPOINT}/${jobId}/cancel" in source
-
-    assert 'method: "POST"' in source
+    assert "${ANALYSES_ENDPOINT}/${encodeURIComponent(jobId)}${suffix}" in source
+    assert "guestAccessHeaders(jobId)" in source
+    assert 'jobRequest(jobId, "/cancel", { method: "POST" })' in source
 
 
 def test_cancelled_polling_is_terminal_but_not_error() -> None:

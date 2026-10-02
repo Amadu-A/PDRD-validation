@@ -1,10 +1,13 @@
 // frontend/src/js/features/analysis/restore.js
 
-/** Восстановление завершённого отчёта по job_id URL без повторного запуска VLM. */
+/** Восстановление задания по ссылке или URL без повторного запуска VLM. */
 
 import { getAnalysisResult, getAnalysisVisualization } from "./api.js";
+import { consumeGuestAccessFromUrl } from "./guest-access.js";
+import { waitForAnalysis } from "./polling.js";
 import { renderAnalysisReport } from "./report.js";
 import { appendAnnotatedPdfDownload } from "./pdf-export.js";
+import { appendGuestShareLink } from "./share-link.js";
 
 /** Отменяет восстановление старого отчёта, если пользователь начал новое задание. */
 export function bindReportRestoration({ resultView, formElement, submit, canSubmit = () => true }) {
@@ -20,17 +23,29 @@ export function bindReportRestoration({ resultView, formElement, submit, canSubm
   void restoreAnalysisReport(resultView, { isCurrent: () => current });
 }
 
-/** Загружает только явный идентификатор; пользовательские данные не кэшируются в браузере. */
+/** Извлекает временный ключ, ждёт незавершённое задание и загружает его результат. */
 export async function restoreAnalysisReport(resultView, { isCurrent = () => true } = {}) {
-  const jobId = new URL(window.location.href).searchParams.get("job_id");
+  const jobId = consumeGuestAccessFromUrl(window.location, window.history);
   if (!jobId || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(jobId)) return;
   resultView.show(`Восстанавливаем отчёт задания ${jobId}…`);
   try {
+    const finalStatus = await waitForAnalysis(jobId, {
+      onProgress: ({ payload }) => {
+        if (isCurrent()) resultView.show(`Задание ${jobId}: ${payload.status}. Ожидаем результат…`);
+      },
+    });
+    if (!isCurrent()) return;
+    if (finalStatus.status === "cancelled") {
+      resultView.show("Анализ этого задания был отменён.");
+      return;
+    }
     const payload = await getAnalysisResult(jobId);
-    const visualization = await getAnalysisVisualization(jobId);
+    const visualization = ["pdf_only", "pdf_cad"].includes(payload.source_mode)
+      ? await getAnalysisVisualization(jobId) : null;
     if (!isCurrent()) return;
     const report = renderAnalysisReport(payload, { jobId, visualization });
     appendAnnotatedPdfDownload(report, { jobId, payload });
+    appendGuestShareLink(report, jobId);
     resultView.showReport(report, { jobId });
   } catch (error) {
     if (isCurrent()) resultView.showError(error);

@@ -71,6 +71,7 @@ testpaths = [
     "services/experience-service/tests",
     "services/user-service/tests",
     "services/auth-service/tests",
+    "services/admin-service/tests",
 ]
 
 markers = [

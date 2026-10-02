@@ -49,6 +49,9 @@ class SqlAlchemyAnalysisJobRepository:
             AnalysisJobModel(
                 id=job.id,
                 document_id=job.document_id,
+                owner_user_id=job.owner_user_id,
+                guest_access_token_hash=job.guest_access_token_hash,
+                guest_access_expires_at=job.guest_access_expires_at,
                 normative_snapshot=(
                     job.normative_snapshot.as_payload()
                     if job.normative_snapshot is not None
@@ -258,6 +261,9 @@ class SqlAlchemyAnalysisJobRepository:
         return AnalysisJob(
             id=model.id,
             document_id=model.document_id,
+            owner_user_id=model.owner_user_id,
+            guest_access_token_hash=model.guest_access_token_hash,
+            guest_access_expires_at=model.guest_access_expires_at,
             normative_snapshot=snapshot,
             status=AnalysisJobStatus(
                 model.status,

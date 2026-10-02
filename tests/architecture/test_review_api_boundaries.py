@@ -53,7 +53,7 @@ def test_server_deployment_does_not_publish_experience_or_identity_to_browser() 
     assert '"127.0.0.1:${REVIEW_FRONTEND_PORT:-8081}:80"' in private_ui
     normal_ui = compose.split("\n  frontend:\n", 1)[1].split("\nvolumes:", 1)[0]
     assert "PDRD_REVIEW_PROXY_KEY: ${API_GATEWAY_REVIEW__UI_KEY:-}" in normal_ui
-    assert '"${FRONTEND_PORT:-8080}:80"' in normal_ui
+    assert '"${FRONTEND_BIND_IP:-127.0.0.1}:${FRONTEND_PORT:-8080}:80"' in normal_ui
     nginx = (ROOT / "frontend/nginx.conf").read_text(encoding="utf-8")
     assert 'proxy_set_header X-PDRD-Review-Key "${PDRD_REVIEW_PROXY_KEY}"' in nginx
     for source in (ROOT / "frontend/src/js").rglob("*.js"):

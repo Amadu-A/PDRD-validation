@@ -197,7 +197,7 @@ async def test_provision_is_idempotent_only_by_stable_identity() -> None:
         lambda: MemoryUnitOfWork(store), clock=lambda: AT, new_id=lambda: next(ids)
     )
     first = await directory.provision(
-        provider_id="email",
+        provider_id="oidc",
         namespace="pdrd",
         subject="account-1",
         kind=UserKind.EXTERNAL,
@@ -205,7 +205,7 @@ async def test_provision_is_idempotent_only_by_stable_identity() -> None:
         email="one@example.org",
     )
     repeated = await directory.provision(
-        provider_id="email",
+        provider_id="oidc",
         namespace="pdrd",
         subject="account-1",
         kind=UserKind.EXTERNAL,
@@ -213,7 +213,7 @@ async def test_provision_is_idempotent_only_by_stable_identity() -> None:
         email="other@example.org",
     )
     second = await directory.provision(
-        provider_id="email",
+        provider_id="oidc",
         namespace="pdrd",
         subject="account-2",
         kind=UserKind.EXTERNAL,
@@ -227,7 +227,7 @@ async def test_provision_is_idempotent_only_by_stable_identity() -> None:
 
     with pytest.raises(IdentityConflict, match="Тип учётной записи"):
         await directory.provision(
-            provider_id="email",
+            provider_id="oidc",
             namespace="pdrd",
             subject="account-1",
             kind=UserKind.CORPORATE,

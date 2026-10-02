@@ -211,13 +211,13 @@ Compose использует отдельный volume `experience_crops`:
 переиспользуются при повторе. Сборщик таких файлов пока не реализован;
 volume не очищается скриптом развёртывания.
 
-Windows: общий quality gate, затем коммит и push при успешном результате.
-`-Push` использует все настроенные push-адреса `origin`: публичный
-`Amadu-A/PDRD-validation` и приватный `neo-term-it/PDRD-validation`.
-Настройки Git скрипт не переписывает.
+Windows: общий quality gate и просмотр diff. Коммит и push выполняет инженер
+отдельными командами после проверки результата; скрипт Git не изменяет.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\ops\check-quality.ps1 -CommitMessage "fix: connect main frontend to server Review and automatic Experience capture" -Push
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ops\check-quality.ps1
+git diff --check
+git status --short
 ```
 
 Linux после синхронизации ветки:

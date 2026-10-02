@@ -7,6 +7,10 @@
 import {
   EXPLANATORY_NOTE_ENABLED,
 } from "../../config.js";
+import { sectionSelectionError } from "../normative/section-selection.js";
+import {
+  appendTechnicalAssignmentPayload, technicalAssignmentAccessError,
+} from "../technical_assignment/form-payload.js";
 
 
 const TECHNICAL_ASSIGNMENT_FILE_PATTERN = (
@@ -534,6 +538,14 @@ export function createAnalysisForm({
       };
     }
 
+    const accessError = technicalAssignmentAccessError(technicalAssignmentInput);
+    if (accessError) {
+      return {
+        valid: false,
+        message: accessError,
+      };
+    }
+
     return {
       valid: true,
 
@@ -550,6 +562,14 @@ export function createAnalysisForm({
     noteStartPageInput.setCustomValidity("");
 
     noteEndPageInput.setCustomValidity("");
+
+    const sectionError = sectionSelectionError(getNormativeSelection());
+    if (sectionError) {
+      return {
+        valid: false,
+        message: sectionError,
+      };
+    }
 
     if (mode === "empty") {
       return {
@@ -652,34 +672,6 @@ export function createAnalysisForm({
   }
 
 
-  function appendTechnicalAssignment(
-    body,
-  ) {
-    const technicalAssignment = (
-      technicalAssignmentInput.files[0]
-    );
-
-    if (!technicalAssignment) {
-      return;
-    }
-
-    body.append(
-      "technical_assignment",
-      technicalAssignment,
-    );
-
-    body.append(
-      "technical_assignment_id",
-      technicalAssignmentInput.dataset.technicalAssignmentId,
-    );
-
-    body.append(
-      "technical_assignment_analysis_document_id",
-      technicalAssignmentInput.dataset.analysisDocumentId,
-    );
-  }
-
-
   function toFormData() {
     const body = new FormData();
 
@@ -701,9 +693,7 @@ export function createAnalysisForm({
       );
     }
 
-    appendTechnicalAssignment(
-      body,
-    );
+    appendTechnicalAssignmentPayload(body, technicalAssignmentInput);
 
     if (
       !pagesInput.disabled

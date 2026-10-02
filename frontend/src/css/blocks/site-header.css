@@ -1,0 +1,68 @@
+/* frontend/src/css/blocks/site-header.css */
+/* Общая верхняя навигация анализа и входа в PDRD. */
+
+.site-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px 32px;
+  min-height: 74px;
+  padding: 12px max(16px, calc((100vw - var(--page-max-width)) / 2));
+  border-bottom: 1px solid #dce3ed;
+  background: #fff;
+  box-shadow: 0 3px 18px rgb(24 35 58 / 4%);
+}
+
+.site-header__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #172b47;
+  font-size: 17px;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.site-header__brand small { color: #60718b; font-size: 12px; font-weight: 500; }
+.site-header__mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #9bd0f4;
+  color: #172b47;
+}
+.site-header__nav { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.site-header__nav a {
+  padding: 9px 12px;
+  border-radius: 8px;
+  color: #42536c;
+  font-size: 14px;
+  text-decoration: none;
+}
+.site-header__nav a:hover, .site-header__nav a[aria-current="page"] {
+  background: #eaf1fc;
+  color: #2457a7;
+}
+.site-header__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.site-header__identity { max-width: 220px; overflow: hidden; color: #42536c; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.site-header__actions button {
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 1px solid #bfd2ed;
+  border-radius: 8px;
+  background: #fff;
+  color: #2457a7;
+  cursor: pointer;
+}
+.site-header__actions button:hover { background: #eaf1fc; }
+.site-header__actions .site-header__primary { border-color: #2457a7; background: #2457a7; color: #fff; }
+.site-header__actions .site-header__primary:hover { background: #183f80; }
+@media (max-width: 700px) {
+  .site-header { gap: 8px 14px; }
+  .site-header__nav { order: 3; width: 100%; }
+  .site-header__actions { flex-wrap: nowrap; }
+  .site-header__identity { display: none; }
+}

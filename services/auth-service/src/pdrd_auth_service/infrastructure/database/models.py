@@ -48,3 +48,51 @@ class SessionModel(Base):
         DateTime(timezone=True), nullable=False
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ExternalCredentialModel(Base):
+    """Собственная таблица внешних паролей и хешей одноразовых кодов."""
+
+    __tablename__ = "external_credentials"
+    __table_args__ = (
+        CheckConstraint(
+            "verification_token_hash IS NULL OR length(verification_token_hash) = 64",
+            name="ck_external_credentials_token_hash_length",
+        ),
+        CheckConstraint(
+            "(verification_token_hash IS NULL) = (verification_expires_at IS NULL)",
+            name="ck_external_credentials_verification_pair",
+        ),
+        {"schema": "auth"},
+    )
+
+    subject: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), unique=True, nullable=True
+    )
+    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    verification_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    verification_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+
+class RateLimitModel(Base):
+    """Общий для процессов счётчик попыток без открытого IP или логина."""
+
+    __tablename__ = "rate_limits"
+    __table_args__ = (
+        CheckConstraint("attempts >= 1", name="ck_rate_limits_attempts"),
+        {"schema": "auth"},
+    )
+
+    key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    window_started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)

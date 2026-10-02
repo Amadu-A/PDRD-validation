@@ -31,6 +31,8 @@ import {
   uploadDocument,
 } from "./api.js";
 
+import { retainSectionSelection } from "./section-selection.js";
+
 
 const DOCUMENT_DRAG_TYPE = (
   "application/x-pdrd-normative-document"
@@ -498,6 +500,12 @@ export function createNormativeCatalog(
 
   function renderSectionSelect() {
     sectionSelect.replaceChildren();
+
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Выберите раздел";
+    placeholder.selected = !state.sectionId;
+    sectionSelect.append(placeholder);
 
     for (const section of state.sections) {
       const option = document.createElement(
@@ -1479,36 +1487,11 @@ export function createNormativeCatalog(
   ) {
     state.sections = await listSections();
 
-    const availableIds = new Set(
-      state.sections.map(
-        (section) => section.section_id,
-      ),
+    state.sectionId = retainSectionSelection(
+      state.sections,
+      state.sectionId,
+      preferredSectionId,
     );
-
-    if (
-      preferredSectionId
-      && availableIds.has(
-        preferredSectionId,
-      )
-    ) {
-      state.sectionId = preferredSectionId;
-
-    } else if (
-      state.sectionId
-      && availableIds.has(
-        state.sectionId,
-      )
-    ) {
-      // Сохраняем текущий section.
-
-    } else {
-      state.sectionId = (
-        state.sections[
-          0
-        ]?.section_id
-        || null
-      );
-    }
 
     renderSectionSelect();
 
@@ -2018,7 +2001,9 @@ export function createNormativeCatalog(
       setStatus(
         state.sectionId
           ? "Нормативный каталог готов."
-          : "Нормативные разделы пока не созданы.",
+          : state.sections.length
+            ? "Выберите раздел проектной документации."
+            : "Нормативные разделы пока не созданы.",
       );
 
     } catch (error) {

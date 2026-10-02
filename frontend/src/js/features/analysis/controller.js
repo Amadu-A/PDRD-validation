@@ -31,6 +31,8 @@ import {
 import {
   renderAnalysisReport,
 } from "./report.js";
+import { rememberAcceptedAnalysis, temporaryAnalysisLink } from "./guest-access.js";
+import { appendGuestShareLink } from "./share-link.js";
 
 
 /**
@@ -388,10 +390,19 @@ export function createAnalysisController({
         );
       }
 
+      const guestAccess = rememberAcceptedAnalysis(accepted);
+      const url = new URL(window.location.href);
+      url.searchParams.set("job_id", jobId);
+      window.history.replaceState(null, "", url);
+
       activeJobId = jobId;
 
       modal.setJobId(
         jobId,
+        {
+          shareUrl: guestAccess ? temporaryAnalysisLink(jobId) : null,
+          expiresAt: guestAccess?.expiresAt ?? null,
+        },
       );
 
       resultView.show(
@@ -479,6 +490,7 @@ export function createAnalysisController({
           payload,
         },
       );
+      appendGuestShareLink(report, jobId);
 
       resultView.showReport(
         report,
