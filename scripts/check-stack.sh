@@ -7,6 +7,7 @@ set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${REPO_DIR}"
+AUTH_SERVICE_AD_CA_HOST_PATH="${REPO_DIR}/ops/certificates/ad-ca.pem"
 
 if [[ -f ".env" ]]; then
     set -a
@@ -224,6 +225,19 @@ if (( auth_active && ! identity_active )); then
 fi
 
 if (( auth_active )); then
+    auth_browser_origin="${AUTH_SERVICE_HTTP__PUBLIC_ORIGIN:-}"
+    auth_email_origin="${AUTH_SERVICE_EMAIL__PUBLIC_BASE_URL:-}"
+    if [[ "${AUTH_SERVICE_HTTP__PUBLIC_ORIGIN:-}" == https://* ]]; then
+        ok "auth browser origin uses HTTPS"
+    else
+        bad "auth requires AUTH_SERVICE_HTTP__PUBLIC_ORIGIN with HTTPS"
+    fi
+    if [[ -n "${auth_browser_origin}" \
+        && "${auth_email_origin%/}" == "${auth_browser_origin%/}" ]]; then
+        ok "auth and email origins match"
+    else
+        bad "auth requires matching AUTH_SERVICE_EMAIL__PUBLIC_BASE_URL"
+    fi
     if [[ "${API_GATEWAY_IDENTITY_PROXY__ENABLED:-false}" != "true" ]]; then
         bad "auth requires API Gateway identity proxy"
     fi
@@ -237,6 +251,15 @@ if (( auth_active )); then
     technical_assignment_access_key="${PDRD_TECHNICAL_ASSIGNMENT_ACCESS_KEY:-}"
     if (( ${#technical_assignment_access_key} < 32 )); then
         bad "auth requires PDRD_TECHNICAL_ASSIGNMENT_ACCESS_KEY (at least 32 characters)"
+    fi
+    if [[ "${AUTH_SERVICE_ENABLED:-false}" == "true" ]]; then
+        if [[ -r "${AUTH_SERVICE_AD_CA_HOST_PATH}" && -s "${AUTH_SERVICE_AD_CA_HOST_PATH}" ]]; then
+            ok "corporate AD CA bundle is mounted from ops/certificates/ad-ca.pem"
+        else
+            bad "corporate AD requires readable ops/certificates/ad-ca.pem"
+        fi
+    else
+        echo "[SKIP] corporate AD: AUTH_SERVICE_ENABLED is false"
     fi
 fi
 

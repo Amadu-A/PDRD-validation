@@ -708,6 +708,7 @@ services:
       <<: *auth-service-database-environment
       AUTH_SERVICE_ENVIRONMENT: stage
       AUTH_SERVICE_ENABLED: ${AUTH_SERVICE_ENABLED:-false}
+      AUTH_SERVICE_AD__CA_BUNDLE_PATH: /run/pdrd-auth-certificates/ad-ca.pem
       AUTH_SERVICE_HTTP__ENABLED: "true"
       AUTH_SERVICE_HTTP__PUBLIC_ORIGIN: ${AUTH_SERVICE_HTTP__PUBLIC_ORIGIN:-}
       AUTH_SERVICE_HTTP__COOKIE_SECURE: "true"
@@ -722,6 +723,8 @@ services:
         condition: service_completed_successfully
       user-service:
         condition: service_healthy
+    volumes:
+      - ./ops/certificates:/run/pdrd-auth-certificates:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
       interval: 10s

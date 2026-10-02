@@ -19,6 +19,10 @@ __pycache__/
 .mypy_cache/
 .codex-test-temp/
 
+# Сертификаты конкретного окружения доставляются на сервер отдельно.
+ops/certificates/*
+!ops/certificates/README.md
+
 
 .coverage
 coverage.xml

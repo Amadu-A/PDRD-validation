@@ -10,6 +10,7 @@ cd "${REPO_DIR}"
 
 SHARED_STARTUP_TIMEOUT_SECONDS="${SHARED_STARTUP_TIMEOUT_SECONDS:-240}"
 PDRD_STARTUP_POLL_SECONDS="${PDRD_STARTUP_POLL_SECONDS:-5}"
+AUTH_SERVICE_AD_CA_HOST_PATH="${REPO_DIR}/ops/certificates/ad-ca.pem"
 
 die() {
     printf 'ERROR: %s\n' "$1" >&2
@@ -112,6 +113,12 @@ if profile_enabled "auth"; then
     fi
     if [[ "${API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED:-false}" != "true" ]]; then
         die "Для профиля auth задайте API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED=true."
+    fi
+
+    if [[ "${AUTH_SERVICE_ENABLED:-false}" == "true" ]]; then
+        if [[ ! -r "${AUTH_SERVICE_AD_CA_HOST_PATH}" || ! -s "${AUTH_SERVICE_AD_CA_HOST_PATH}" ]]; then
+            die "Для AUTH_SERVICE_ENABLED=true нужен непустой читаемый ops/certificates/ad-ca.pem."
+        fi
     fi
 fi
 

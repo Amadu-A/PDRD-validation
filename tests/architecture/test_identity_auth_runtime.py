@@ -51,11 +51,15 @@ def test_auth_configuration_keeps_ad_disabled_and_uses_existing_project_secrets(
 ):
     """HTTP/email работают отдельно от AD, а ключи и пароль БД берутся из .env."""
     services = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
-    auth = services["auth-service"]["environment"]
+    auth_service = services["auth-service"]
+    auth = auth_service["environment"]
     admin = services["admin-service"]["environment"]
     gateway = services["api-gateway"]["environment"]
 
     assert auth["AUTH_SERVICE_ENABLED"] == "${AUTH_SERVICE_ENABLED:-false}"
+    assert auth["AUTH_SERVICE_AD__CA_BUNDLE_PATH"] == (
+        "/run/pdrd-auth-certificates/ad-ca.pem"
+    )
     assert auth["AUTH_SERVICE_HTTP__ENABLED"] == "true"
     assert auth["AUTH_SERVICE_EMAIL__ENABLED"] == "true"
     assert auth["AUTH_SERVICE_HTTP__COOKIE_SECURE"] == "true"
@@ -95,6 +99,9 @@ def test_auth_configuration_keeps_ad_disabled_and_uses_existing_project_secrets(
     assert services["review-frontend"]["environment"]["PDRD_FRONTEND_PROXY_KEY"] == (
         "${PDRD_FRONTEND_PROXY_KEY:-}"
     )
+    assert auth_service["volumes"] == [
+        "./ops/certificates:/run/pdrd-auth-certificates:ro"
+    ]
 
 
 def test_private_datastores_bind_only_to_server_loopback_by_default() -> None:
@@ -120,6 +127,11 @@ def test_example_describes_https_email_and_secret_overrides() -> None:
             name, value = line.split("=", 1)
             values[name] = value
 
+    assert values["COMPOSE_PROFILES"] == ""
+    assert values["AUTH_SERVICE_ENABLED"] == "false"
+    assert values["AUTH_SERVICE_AD__CA_BUNDLE_PATH"] == (
+        "/run/pdrd-auth-certificates/ad-ca.pem"
+    )
     assert values["AUTH_SERVICE_HTTP__PUBLIC_ORIGIN"] == ""
     assert values["AUTH_SERVICE_HTTP__INTERNAL_KEY"] == ""
     assert values["AUTH_SERVICE_HTTP__CSRF_KEY"] == ""
@@ -132,6 +144,7 @@ def test_example_describes_https_email_and_secret_overrides() -> None:
     assert values["AUTH_SERVICE_EMAIL__SMTP_PASSWORD"] == ""
     assert values["AUTH_SERVICE_EMAIL__PUBLIC_BASE_URL"] == ""
     assert values["ADMIN_SERVICE_AUTH_SERVICE_INTERNAL_KEY"] == ""
+    assert values["KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_ENABLED"] == "false"
 
 
 def test_startup_validates_auth_profile_and_checks_internal_health() -> None:
@@ -147,6 +160,8 @@ def test_startup_validates_auth_profile_and_checks_internal_health() -> None:
     assert 'validate_secret "PDRD_TECHNICAL_ASSIGNMENT_ACCESS_KEY"' in startup
     assert 'validate_secret "AUTH_SERVICE_EMAIL__SMTP_PASSWORD"' in startup
     assert '"${AUTH_SERVICE_HTTP__PUBLIC_ORIGIN}" != https://*' in startup
+    assert "ops/certificates/ad-ca.pem" in startup
+    assert "AUTH_SERVICE_ENABLED:-false" in startup
     assert "API_GATEWAY_IDENTITY_PROXY__ENABLED=true" in startup
     assert "API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED=true" in startup
     assert "log_services+=(auth-migrate auth-service admin-service)" in startup
@@ -157,6 +172,9 @@ def test_startup_validates_auth_profile_and_checks_internal_health() -> None:
     assert 'check_migrations_current "auth-service" "auth" "Auth Service"' in check
     assert 'bad "auth requires API Gateway identity proxy"' in check
     assert 'bad "auth requires API Gateway authorization"' in check
+    assert 'bad "auth requires AUTH_SERVICE_HTTP__PUBLIC_ORIGIN with HTTPS"' in check
+    assert 'bad "auth requires matching AUTH_SERVICE_EMAIL__PUBLIC_BASE_URL"' in check
+    assert "corporate AD requires readable ops/certificates/ad-ca.pem" in check
     assert (
         'bad "auth requires PDRD_FRONTEND_PROXY_KEY (at least 32 characters)"' in check
     )

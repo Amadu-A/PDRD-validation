@@ -20,6 +20,7 @@ data/
 frontend/
 n8n/
 scripts/
+ops/certificates/
 
 # Legacy-сервис не требуется quality image нового backend.
 services/pdf-service/

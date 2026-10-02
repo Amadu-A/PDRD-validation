@@ -2,8 +2,8 @@
 
 """Собирает прикладной сценарий входа из настроек и LDAPS-адаптера.
 
-Пока отсутствует публичный HTTP-вход, эта фабрика не запускает процесс и не
-подключается к AD. Отключённый сервис не выдаёт готовый сценарий проверки.
+Импорт модуля не подключается к AD. Фабрика создаёт корпоративный сценарий
+только после явного включения LDAPS и проверки его конфигурации.
 """
 
 from datetime import timedelta
@@ -23,7 +23,7 @@ from pdrd_auth_service.infrastructure.ldaps import (
 def build_corporate_login(settings: Settings) -> VerifyCorporateLogin:
     """Создаёт проверку корпоративного входа только с активным доверенным TLS."""
     if not settings.enabled:
-        raise RuntimeError("Auth Service выключен")
+        raise RuntimeError("Корпоративный вход выключен")
     ad = settings.ad
     config = LdapsConnectionConfig(
         host=ad.controller_host,

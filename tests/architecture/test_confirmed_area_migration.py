@@ -7,6 +7,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from pdrd_experience_service.infrastructure.database import (
+    artifact_models,
+    catalog_models,
+)
 from pdrd_experience_service.infrastructure.database.models import (
     AreaConfirmationEventModel,
     Base,
@@ -21,6 +25,8 @@ SERVICE = ROOT / "services/experience-service"
 
 def test_new_tables_have_independent_version_and_composite_event_key() -> None:
     """События не могут заменить предшествующую версию другого замечания."""
+    assert artifact_models.ArtifactVersionModel.__table__.metadata is Base.metadata
+    assert catalog_models.CatalogExampleModel.__table__.metadata is Base.metadata
     assert {
         "experience.review_sessions",
         "experience.review_events",
