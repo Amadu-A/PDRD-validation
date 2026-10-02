@@ -99,7 +99,7 @@ def create_app(runtime: AuthRuntime | None = None) -> FastAPI:
         """Не отмечает отключённую HTTP-границу готовой к входу."""
         if actual is None:
             return JSONResponse(status_code=503, content={"status": "disabled"})
-        return JSONResponse(content={"status": "ok"})
+        return JSONResponse(content={"status": "ready"})
 
     app.include_router(browser_router)
     app.include_router(user_router)

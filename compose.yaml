@@ -186,7 +186,10 @@ services:
 
     env_file: *app-env-files
 
-    environment: *api-gateway-environment
+    environment:
+      <<: *api-gateway-environment
+      API_GATEWAY_IDENTITY_PROXY__ENABLED: "false"
+      API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED: "false"
 
     command:
       [
@@ -214,7 +217,10 @@ services:
 
     env_file: *app-env-files
 
-    environment: *api-gateway-environment
+    environment:
+      <<: *api-gateway-environment
+      API_GATEWAY_IDENTITY_PROXY__ENABLED: "false"
+      API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED: "false"
 
     command:
       [
@@ -269,6 +275,8 @@ services:
     environment:
       <<: *api-gateway-environment
       API_GATEWAY_ENVIRONMENT: test
+      API_GATEWAY_IDENTITY_PROXY__ENABLED: "false"
+      API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED: "false"
       PDRD_RUN_DATABASE_TESTS: "1"
       PDRD_RUN_BROKER_TESTS: "1"
 

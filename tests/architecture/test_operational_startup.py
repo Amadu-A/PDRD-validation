@@ -201,6 +201,23 @@ def test_identity_profile_is_checked_by_one_command_scripts() -> None:
     assert "docker compose --profile identity exec" in stack_check
 
 
+def test_background_gateway_processes_disable_browser_identity_proxy() -> None:
+    """Worker/outbox не получают browser identity boundary и его служебные секреты."""
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    services = compose["services"]
+
+    for service_name in (
+        "api-gateway-outbox",
+        "api-gateway-worker",
+        "api-gateway-tests",
+    ):
+        environment = services[service_name]["environment"]
+        assert environment["API_GATEWAY_IDENTITY_PROXY__ENABLED"] == "false"
+        assert (
+            environment["API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED"] == "false"
+        )
+
+
 def test_stack_check_reports_running_optional_services_without_profile_flag() -> None:
     """Проверка замечает уже запущенные Review и Identity контейнеры."""
     stack_check = CHECK_STACK_SCRIPT.read_text(encoding="utf-8")

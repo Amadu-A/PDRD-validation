@@ -1,3 +1,5 @@
+# services/auth-service/tests/functional/test_browser_http.py
+
 """Проверяет публичный HTTP-контракт без подключения к AD, SMTP или рабочей БД."""
 
 from datetime import UTC, datetime, timedelta
@@ -149,6 +151,19 @@ def fake_runtime() -> SimpleNamespace:
         sessions=FakeSessions(session),
         limiter=FakeLimiter(),
     )
+
+
+@pytest.mark.asyncio
+async def test_health_ready_reports_ready_for_enabled_runtime() -> None:
+    """Включённый Auth Service публикует единый readiness contract."""
+    runtime = fake_runtime()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(runtime)), base_url=ORIGIN
+    ) as client:
+        response = await client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
 
 
 @pytest.mark.asyncio
