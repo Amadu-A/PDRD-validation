@@ -20,6 +20,8 @@ CHECK_STACK_SCRIPT = ROOT / "scripts" / "check-stack.sh"
 
 STACK_PROFILES_HELPER = ROOT / "scripts" / "lib" / "stack-profiles.sh"
 
+SHARED_INFRASTRUCTURE_HELPER = ROOT / "scripts" / "lib" / "shared-infrastructure.sh"
+
 EMBEDDING_MIGRATION_SCRIPT = ROOT / "scripts" / "migrate-embedding-indexes.sh"
 
 USER_TEST_COMPOSE = ROOT / "ops" / "compose.user-test.yaml"
@@ -365,6 +367,7 @@ def test_operational_shell_scripts_have_real_shebang() -> None:
         UP_SCRIPT,
         CHECK_STACK_SCRIPT,
         STACK_PROFILES_HELPER,
+        SHARED_INFRASTRUCTURE_HELPER,
         EMBEDDING_MIGRATION_SCRIPT,
     ):
         first_line = path.read_text(
@@ -388,3 +391,17 @@ def test_operational_shell_scripts_avoid_invalid_multiline_if_subshells() -> Non
         assert "\n    if (\n" not in source
 
         assert "\n        if (\n" not in source
+
+
+def test_shared_compose_boundary_is_separate_and_checks_contamination_first() -> None:
+    """Общий namespace изолируется до запуска и при обращении к RabbitMQ."""
+    source = UP_SCRIPT.read_text(encoding="utf-8")
+    assert 'source "${REPO_DIR}/scripts/lib/shared-infrastructure.sh"' in source
+    assert source.count("isolate_shared_compose_environment") == 2
+    guard = source.index("require_separate_shared_namespace")
+    startup = source.index("bash scripts/bootstrap.sh")
+    assert guard < startup
+    helper = SHARED_INFRASTRUCTURE_HELPER.read_text(encoding="utf-8")
+    assert "docker ps --all --quiet" in helper
+    assert "docker rm" not in helper
+    assert "docker volume rm" not in helper

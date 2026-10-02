@@ -92,6 +92,7 @@ def _run_startup_preflight(
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     shutil.copy2(ROOT / "scripts" / "up.sh", scripts / "up.sh")
+    shutil.copytree(ROOT / "scripts" / "lib", scripts / "lib")
     shutil.copy2(ROOT / ".env.example", tmp_path / ".env.example")
     (tmp_path / ".env").write_text(environment, encoding="utf-8")
 
@@ -166,3 +167,110 @@ def test_corporate_auth_preflight_requires_deployed_ca(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "нужен непустой читаемый ops/certificates/ad-ca.pem" in result.stderr
+
+
+@pytest.mark.parametrize("contaminated_namespace", [False, True])
+def test_startup_separates_shared_compose_and_preserves_project_configuration(
+    tmp_path: Path, contaminated_namespace: bool
+) -> None:
+    """Настоящий up.sh отделяет shared Compose и блокирует ошибочные дубликаты."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    shutil.copy2(ROOT / "scripts" / "up.sh", scripts / "up.sh")
+    shutil.copytree(ROOT / "scripts" / "lib", scripts / "lib")
+    shutil.copy2(ROOT / ".env.example", tmp_path / ".env.example")
+    shared = tmp_path / "shared-fixture"
+    (shared / "scripts").mkdir(parents=True)
+    (shared / ".shared-fixture").touch()
+    (shared / "compose.yaml").write_text("name: shared-fixture\n", encoding="utf-8")
+    (shared / ".env").write_text(
+        "COMPOSE_PROJECT_NAME=shared-fixture\nCOMPOSE_PROFILES=ai-vlm\n",
+        encoding="utf-8",
+    )
+    for name in ("bootstrap", "check"):
+        (shared / "scripts" / f"{name}.sh").write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
+            'for variable in "${!COMPOSE_@}"; do exit 42; done\n'
+            '[[ "${DOCKER_CONTEXT}" == fixture-context ]]\n'
+            "source .env\n"
+            '[[ "${COMPOSE_PROJECT_NAME}" == shared-fixture ]]\n'
+            '[[ "${COMPOSE_PROFILES}" == ai-vlm ]]\n'
+            f"printf '{name}\\n' >> ../trace.log\n",
+            encoding="utf-8",
+        )
+    (tmp_path / ".env").write_text(
+        _auth_preflight_environment(
+            SHARED_INFRA_DIR="shared-fixture",
+            COMPOSE_FILE="pdrd-compose.yaml",
+            COMPOSE_ENV_FILES=".env",
+            COMPOSE_PATH_SEPARATOR=":",
+            COMPOSE_DISABLE_ENV_FILE="1",
+            COMPOSE_IGNORE_ORPHANS="true",
+            DOCKER_CONTEXT="fixture-context",
+            MOCK_CONTAMINATED_NAMESPACE="1" if contaminated_namespace else "0",
+        ),
+        encoding="utf-8",
+    )
+    shell = r"""
+        docker() {
+            if [[ -f .shared-fixture ]]; then
+                for variable in "${!COMPOSE_@}"; do
+                    printf 'shared inherited %s\n' "$variable" >&2
+                    return 42
+                done
+                [[ "${DOCKER_CONTEXT}" == fixture-context ]] || return 43
+                case "$*" in
+                    "compose up "*) printf 'shared-up\n' >> ../trace.log ;;
+                    "compose exec -T rabbitmq rabbitmqctl "*)
+                        printf 'shared-rabbitmq\n' >> ../trace.log
+                        case "${6:-}" in
+                            list_vhosts) printf 'pdrd-validation\n' ;;
+                            list_users) printf 'pdrd_validation\n' ;;
+                        esac
+                        ;;
+                    *) return 44 ;;
+                esac
+                return 0
+            fi
+            [[ "${COMPOSE_PROJECT_NAME}" == pdrd-validation-ai ]] || return 45
+            [[ "${COMPOSE_PROFILES}" == identity,auth ]] || return 46
+            [[ "${COMPOSE_FILE}" == pdrd-compose.yaml ]] || return 47
+            [[ "${COMPOSE_ENV_FILES}" == .env ]] || return 48
+            [[ "${COMPOSE_PATH_SEPARATOR}" == : ]] || return 49
+            [[ "${COMPOSE_DISABLE_ENV_FILE}" == 1 ]] || return 50
+            [[ "${COMPOSE_IGNORE_ORPHANS}" == true ]] || return 51
+            [[ "${DOCKER_CONTEXT}" == fixture-context ]] || return 52
+            if [[ "${1:-}" == ps ]]; then
+                if [[ "$*" == *"service=rabbitmq"* && "$MOCK_CONTAMINATED_NAMESPACE" == 1 ]]; then
+                    printf 'wrong-shared-container\n'
+                fi
+                return 0
+            fi
+            [[ "$*" == 'compose config --quiet' ]] || return 53
+            printf 'pdrd-compose\n' >> trace.log
+            # Останавливаемся до build/migrations/up: реальный Docker не вызывается.
+            return 73
+        }
+        export -f docker
+        bash scripts/up.sh
+    """
+    result = subprocess.run(
+        [_bash_executable(), "-c", shell],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=90,
+    )
+
+    if contaminated_namespace:
+        assert result.returncode == 1, result.stderr
+        assert "shared-сервис rabbitmq" in result.stderr
+        assert not (tmp_path / "trace.log").exists()
+    else:
+        assert result.returncode == 73, result.stderr
+        trace = (tmp_path / "trace.log").read_text(encoding="utf-8").splitlines()
+        assert trace[:3] == ["bootstrap", "shared-up", "check"]
+        assert trace.count("shared-rabbitmq") >= 4
+        assert trace[-1] == "pdrd-compose"

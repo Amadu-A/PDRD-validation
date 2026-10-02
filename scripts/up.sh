@@ -47,6 +47,9 @@ source ".env.example"
 source ".env"
 set +a
 
+# shellcheck source=scripts/lib/shared-infrastructure.sh
+source "${REPO_DIR}/scripts/lib/shared-infrastructure.sh"
+
 profile_enabled() {
     local profile="$1"
     [[ ",${COMPOSE_PROFILES:-}," == *,"${profile}",* ]]
@@ -170,10 +173,13 @@ fi
 echo "PDRD repository: ${REPO_DIR}"
 echo "Shared infrastructure: ${SHARED_INFRA_DIR}"
 
+require_separate_shared_namespace "${COMPOSE_PROJECT_NAME:-pdrd-validation-ai}"
+
 echo
 echo "=== Shared infrastructure ==="
 
 (
+    isolate_shared_compose_environment
     cd "${SHARED_INFRA_DIR}"
 
     bash scripts/bootstrap.sh
@@ -188,6 +194,7 @@ echo "=== Shared infrastructure ==="
 
 rabbitmqctl_shared() {
     (
+        isolate_shared_compose_environment
         cd "${SHARED_INFRA_DIR}"
 
         docker compose exec \
