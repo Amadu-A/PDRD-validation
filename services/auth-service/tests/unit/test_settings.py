@@ -71,6 +71,17 @@ def test_valid_configuration_keeps_confirmed_ad_values(tmp_path: Path) -> None:
     assert settings.ad.base_dn == "DC=itcneoterm,DC=local"
 
 
+def test_ad_receive_timeout_is_integer() -> None:
+    """ldap3 получает целое число секунд для POSIX SO_RCVTIMEO."""
+    settings = ActiveDirectorySettings()
+
+    assert settings.receive_timeout_seconds == 10
+    assert isinstance(settings.receive_timeout_seconds, int)
+
+    with pytest.raises(ValidationError):
+        ActiveDirectorySettings(receive_timeout_seconds=10.5)
+
+
 def test_enabled_auth_requires_database_password(tmp_path: Path) -> None:
     """Рабочий процесс не выдаёт сессию без собственного хранилища."""
     ca_bundle = tmp_path / "ca.pem"

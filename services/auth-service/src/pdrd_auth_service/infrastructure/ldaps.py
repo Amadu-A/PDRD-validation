@@ -44,10 +44,10 @@ class LdapsConnectionConfig:
     domain: str
     ca_bundle_path: Path
     connect_timeout_seconds: float = 5.0
-    receive_timeout_seconds: float = 5.0
+    receive_timeout_seconds: int = 10
 
     def __post_init__(self) -> None:
-        """Отклоняет соединение без DNS-имени и доверенного CA-сертификата."""
+        """Отклоняет соединение без DNS-имени, CA и корректных таймаутов."""
         if (
             not isinstance(self.host, str)
             or not self.host
@@ -73,8 +73,16 @@ class LdapsConnectionConfig:
             or not self.ca_bundle_path.is_file()
         ):
             raise ValueError("Требуется существующий файл доверенного CA")
-        if self.connect_timeout_seconds <= 0 or self.receive_timeout_seconds <= 0:
-            raise ValueError("Таймаут LDAPS должен быть положительным")
+        if self.connect_timeout_seconds <= 0:
+            raise ValueError("Таймаут подключения LDAPS должен быть положительным")
+        if (
+            isinstance(self.receive_timeout_seconds, bool)
+            or not isinstance(self.receive_timeout_seconds, int)
+            or self.receive_timeout_seconds <= 0
+        ):
+            raise ValueError(
+                "Таймаут чтения LDAPS должен быть положительным целым числом секунд"
+            )
 
 
 def _load_ldap3() -> ModuleType:

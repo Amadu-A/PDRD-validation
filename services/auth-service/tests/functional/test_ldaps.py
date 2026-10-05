@@ -141,6 +141,10 @@ def test_valid_bind_returns_guid_identity_and_enforces_tls(
     assert fake_ldap.connection_kwargs["auto_referrals"] is False
     assert fake_ldap.connection_kwargs["auto_bind"] is False
     assert fake_ldap.connection_kwargs["read_only"] is True
+    assert (
+        fake_ldap.connection_kwargs["receive_timeout"] == config.receive_timeout_seconds
+    )
+    assert isinstance(fake_ldap.connection_kwargs["receive_timeout"], int)
     assert connection.search_filter == (
         "(&(objectCategory=person)(objectClass=user)(sAMAccountName=i.mein))"
     )
@@ -315,6 +319,22 @@ def test_noncredential_bind_error_is_directory_error(harness: tuple[Any, ...]) -
         asyncio.run(verifier.verify("i.mein", "example-test-password"))
 
     assert connection.unbound is True
+
+
+def test_receive_timeout_must_be_integer(tmp_path: Path) -> None:
+    """Защищает ldap3 POSIX socket timeout от float, ломающего struct.pack."""
+    ca_bundle = tmp_path / "ca.pem"
+    ca_bundle.write_text("offline fixture", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="целым числом"):
+        LdapsConnectionConfig(
+            host="WIN-1L5FI1SGC9J.itcneoterm.local",
+            port=636,
+            base_dn="DC=itcneoterm,DC=local",
+            domain="itcneoterm.local",
+            ca_bundle_path=ca_bundle,
+            receive_timeout_seconds=10.0,
+        )
 
 
 def test_filter_escaping_handles_metacharacters() -> None:

@@ -28,7 +28,7 @@ class ActiveDirectorySettings(BaseModel):
     base_dn: str = Field(default="DC=itcneoterm,DC=local", min_length=1)
     ca_bundle_path: str = ""
     connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
-    receive_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    receive_timeout_seconds: int = Field(default=10, ge=1, le=120)
 
 
 class DatabaseSettings(BaseModel):
