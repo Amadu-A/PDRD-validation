@@ -11,6 +11,7 @@ import importlib
 import ipaddress
 import ssl
 import unicodedata
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -96,7 +97,7 @@ def _escape_filter_value(value: str) -> str:
     return "".join(escaped.get(char, char) for char in value)
 
 
-def _one_value(attributes: dict[str, object], name: str) -> object | None:
+def _one_value(attributes: Mapping[str, object], name: str) -> object | None:
     """Достаёт одно значение AD-атрибута и отвергает неоднозначные списки."""
     value = attributes.get(name)
     if isinstance(value, list | tuple):
@@ -106,7 +107,7 @@ def _one_value(attributes: dict[str, object], name: str) -> object | None:
     return value
 
 
-def _required_text(attributes: dict[str, object], name: str) -> str:
+def _required_text(attributes: Mapping[str, object], name: str) -> str:
     """Проверяет обязательный текстовый атрибут найденного пользователя."""
     value = _one_value(attributes, name)
     if not isinstance(value, str) or not value.strip():
@@ -120,7 +121,7 @@ def _identity_from_entry(
     """Преобразует objectGUID из Windows-байтов в стабильный UUID PDRD."""
     attributes = entry.get("attributes")
     raw_attributes = entry.get("raw_attributes")
-    if not isinstance(attributes, dict) or not isinstance(raw_attributes, dict):
+    if not isinstance(attributes, Mapping) or not isinstance(raw_attributes, Mapping):
         raise CorporateDirectoryUnavailable("Каталог AD вернул неполный профиль")
 
     raw_guid = _one_value(raw_attributes, "objectGUID")

@@ -4,6 +4,7 @@
 
 import asyncio
 import ssl
+from collections import UserDict
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -152,6 +153,34 @@ def test_valid_bind_returns_guid_identity_and_enforces_tls(
     assert connection.search_kwargs["size_limit"] == 2
     assert connection.unbound is True
     assert not hasattr(identity, "password")
+
+
+def test_mapping_attributes_from_ldap_client_are_accepted(
+    harness: tuple[Any, ...],
+) -> None:
+    """LDAP Mapping-объекты не должны ошибочно считаться неполным профилем."""
+    verifier, connection, _, _ = harness
+    connection.response = [
+        {
+            "type": "searchResEntry",
+            "attributes": UserDict(
+                {
+                    "objectGUID": str(_GUID),
+                    "userAccountControl": 512,
+                    "sAMAccountName": "i.mein",
+                    "displayName": "Иван Мейн",
+                    "mail": "ivan@example.org",
+                }
+            ),
+            "raw_attributes": UserDict({"objectGUID": [_GUID.bytes_le]}),
+        }
+    ]
+
+    identity = asyncio.run(verifier.verify("i.mein", "example-test-password"))
+
+    assert identity.subject == str(_GUID)
+    assert identity.login == "i.mein"
+    assert identity.display_name == "Иван Мейн"
 
 
 def test_invalid_bind_rejects_login_and_closes_connection(
