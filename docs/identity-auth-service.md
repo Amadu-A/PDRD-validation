@@ -172,3 +172,20 @@ docker compose -p pdrd-user-service-test -f ops/compose.user-test.yaml down
 docker compose -p pdrd-auth-service-test -f ops/compose.auth-test.yaml up --build --abort-on-container-exit --exit-code-from auth-test-runner
 docker compose -p pdrd-auth-service-test -f ops/compose.auth-test.yaml down
 ```
+
+
+## Ошибка проверки готовности frontend
+
+Если контейнеры готовы, а frontend возвращает `HTTP 000`, сверяют
+`FRONTEND_BIND_IP` и `FRONTEND_PORT` с опубликованным адресом контейнера.
+Публикация на `192.168.55.3:8080` не означает, что порт слушает
+`127.0.0.1:8080`. `check-stack.sh` учитывает выбранный адрес;
+`0.0.0.0` и `::` проверяются через соответствующий loopback.
+При ошибке выводится проверяемый URL.
+
+`scripts/up.sh` собирает образы один раз, затем повторяет проверку готовности
+до таймаута. После исправления адреса достаточно выполнить
+`bash scripts/check-stack.sh` без повторной сборки.
+Если auth/user готовы и миграции применены, первый администратор создаётся
+через `bash scripts/create-superuser.sh` независимо от общей проверки.
+Вход из браузера проверяется после подготовки HTTPS.

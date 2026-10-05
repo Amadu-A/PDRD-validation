@@ -1,6 +1,6 @@
 # tests/functional/test_stack_optional_profiles.py
 
-"""Проверяет выбор необязательных контейнеров без обращения к Docker daemon."""
+"""Проверяет профили и адрес frontend без обращения к Docker daemon."""
 
 import os
 import shutil
@@ -274,3 +274,103 @@ def test_startup_separates_shared_compose_and_preserves_project_configuration(
         assert trace[:3] == ["bootstrap", "shared-up", "check"]
         assert trace.count("shared-rabbitmq") >= 4
         assert trace[-1] == "pdrd-compose"
+
+
+@pytest.mark.parametrize(
+    ("bind_ip", "probe_host"),
+    [
+        ("192.168.55.3", "192.168.55.3"),
+        ("127.0.0.1", "127.0.0.1"),
+        ("0.0.0.0", "127.0.0.1"),
+        ("::", "[::1]"),
+        ("[::]", "[::1]"),
+        ("::1", "[::1]"),
+        ("[2001:db8::1]", "[2001:db8::1]"),
+        ("2001:db8::1", "[2001:db8::1]"),
+    ],
+)
+def test_stack_check_uses_configured_frontend_bind(
+    tmp_path: Path, bind_ip: str, probe_host: str
+) -> None:
+    """Все четыре маршрута frontend проверяются на выбранном адресе и порту."""
+    result, urls = _run_stack_check(tmp_path, bind_ip, probe_host)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "STACK CHECK PASSED" in result.stdout
+    base = f"http://{probe_host}:9080"
+    assert {url for url in urls if ":9080/" in url} == {
+        f"{base}/",
+        f"{base}/api/v1/normative/sections",
+        f"{base}/api/v1/auth/session",
+        f"{base}/api/v1/admin/users",
+    }
+
+
+def test_stack_check_keeps_real_frontend_failure(tmp_path: Path) -> None:
+    """Готовый контейнер не скрывает реальную ошибку соединения с frontend."""
+    result, _ = _run_stack_check(
+        tmp_path, "192.168.55.3", "192.168.55.3", available=False
+    )
+    assert result.returncode == 1
+    assert "STACK CHECK FAILED" in result.stdout
+    assert "Frontend HTTP: HTTP 000 (http://192.168.55.3:9080/)" in result.stdout
+
+
+def _run_stack_check(
+    tmp_path: Path, bind_ip: str, probe_host: str, *, available: bool = True
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Исполняет check-stack.sh с изолированными подменами Docker и curl."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    shutil.copy2(ROOT / "scripts" / "check-stack.sh", scripts / "check-stack.sh")
+    shutil.copytree(ROOT / "scripts" / "lib", scripts / "lib")
+    shutil.copy2(ROOT / ".env.example", tmp_path / ".env.example")
+    (tmp_path / ".env").write_text(
+        _auth_preflight_environment(
+            FRONTEND_BIND_IP=bind_ip,
+            FRONTEND_PORT="9080",
+            MOCK_FRONTEND_URL=f"http://{probe_host}:9080",
+            MOCK_FRONTEND_AVAILABLE="1" if available else "0",
+        ),
+        encoding="utf-8",
+    )
+    shell = r"""
+        docker() {
+            case "$*" in
+                *".State.ExitCode"*) printf '0\n' ;;
+                *".State.Health"*) printf 'healthy\n' ;;
+                *".State.Status"*) printf 'exited\n' ;;
+                "compose --profile review ps --all --quiet "*) ;;
+                "compose --profile experience-index ps --all --quiet "*) ;;
+                *"ps --all --quiet "*) printf 'fixture-container\n' ;;
+                *) return 0 ;;
+            esac
+        }
+        curl() {
+            local url="${@: -1}"
+            printf '%s\n' "$url" >> trace.log
+            if [[ "$url" == *":9080/"* ]]; then
+                if [[ "$MOCK_FRONTEND_AVAILABLE" != 1
+                    || "$url" != "$MOCK_FRONTEND_URL/"* ]]; then
+                    printf '000'
+                    return 7
+                fi
+            fi
+            case "$url" in
+                */api/v1/admin/users) printf '401' ;;
+                *) printf '200' ;;
+            esac
+        }
+        export -f docker curl
+        bash scripts/check-stack.sh
+    """
+    result = subprocess.run(
+        [_bash_executable(), "-c", shell],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=90,
+    )
+    trace = (tmp_path / "trace.log").read_text(encoding="utf-8").splitlines()
+    return result, trace

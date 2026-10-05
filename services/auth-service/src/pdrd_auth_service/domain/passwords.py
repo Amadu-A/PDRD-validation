@@ -17,7 +17,7 @@ _DUMMY_SALT = b"pdrd-dummy-salt!"
 
 def validate_password(password: str) -> None:
     """Ограничивает размер ввода до выделения памяти для scrypt."""
-    if not isinstance(password, str) or not 12 <= len(password) <= 1024:
+    if not isinstance(password, str) or not 10 <= len(password) <= 1024:
         raise ValueError("Пароль должен содержать от 12 до 1024 символов")
     if len(password.encode("utf-8")) > 4096:
         raise ValueError("Пароль слишком длинный")

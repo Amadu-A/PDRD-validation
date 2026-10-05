@@ -23,6 +23,19 @@ set +a
 # shellcheck source=scripts/lib/stack-profiles.sh
 source "${REPO_DIR}/scripts/lib/stack-profiles.sh"
 
+# Проверяем выбранный bind frontend; wildcard заменяется адресом loopback.
+frontend_probe_host="${FRONTEND_BIND_IP:-127.0.0.1}"
+case "${frontend_probe_host}" in
+    0.0.0.0) frontend_probe_host="127.0.0.1" ;;
+    ::|\[::\]) frontend_probe_host="[::1]" ;;
+    *:*)
+        if [[ "${frontend_probe_host}" != \[*\] ]]; then
+            frontend_probe_host="[${frontend_probe_host}]"
+        fi
+        ;;
+esac
+frontend_probe_url="http://${frontend_probe_host}:${FRONTEND_PORT:-8080}"
+
 fail=0
 
 ok() {
@@ -43,7 +56,7 @@ check_http() {
         && [[ "${status}" == 2?? ]]; then
         ok "${name}"
     else
-        bad "${name}: HTTP ${status:-000}"
+        bad "${name}: HTTP ${status:-000} (${url})"
     fi
 }
 
@@ -55,7 +68,7 @@ check_http_status() {
     shift 2
 
     if ! status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "${url}" 2>/dev/null)"; then
-        bad "${name}: HTTP ${status:-000}"
+        bad "${name}: HTTP ${status:-000} (${url})"
         return
     fi
     for expected in "$@"; do
@@ -64,7 +77,7 @@ check_http_status() {
             return
         fi
     done
-    bad "${name}: HTTP ${status:-000}"
+    bad "${name}: HTTP ${status:-000} (${url})"
 }
 
 check_service_state() {
@@ -342,11 +355,11 @@ echo "=== HTTP services ==="
 
 check_http \
     "Frontend HTTP" \
-    "http://127.0.0.1:${FRONTEND_PORT:-8080}/"
+    "${frontend_probe_url}/"
 
 check_http \
     "Frontend -> API Gateway proxy" \
-    "http://127.0.0.1:${FRONTEND_PORT:-8080}/api/v1/normative/sections"
+    "${frontend_probe_url}/api/v1/normative/sections"
 
 check_http \
     "API Gateway ready" \
@@ -434,12 +447,12 @@ if (( auth_active )); then
 
     check_http_status \
         "Frontend -> Auth session proxy" \
-        "http://127.0.0.1:${FRONTEND_PORT:-8080}/api/v1/auth/session" \
+        "${frontend_probe_url}/api/v1/auth/session" \
         "200" "401"
 
     check_http_status \
         "Frontend -> Admin proxy requires login" \
-        "http://127.0.0.1:${FRONTEND_PORT:-8080}/api/v1/admin/users" \
+        "${frontend_probe_url}/api/v1/admin/users" \
         "401"
 fi
 
