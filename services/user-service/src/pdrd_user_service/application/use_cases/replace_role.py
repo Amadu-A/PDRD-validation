@@ -1,6 +1,6 @@
 # services/user-service/src/pdrd_user_service/application/use_cases/replace_role.py
 
-"""Атомарная замена рабочей роли с проверкой администратора и версии прав."""
+"""Атомарная замена прикладной роли с проверкой администратора и версии прав."""
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -12,7 +12,8 @@ from pdrd_user_service.application.ports.repository import (
     UnitOfWorkFactory,
 )
 from pdrd_user_service.application.use_cases.users import AdminRequired, UserNotFound
-from pdrd_user_service.domain.access import Role
+from pdrd_user_service.core.observability import log_execution_time
+from pdrd_user_service.domain.access import AccessTier, Role
 from pdrd_user_service.domain.identity import Membership, UserAccount
 from pdrd_user_service.domain.role_assignments import (
     RoleAssignment,
@@ -22,7 +23,7 @@ from pdrd_user_service.domain.role_assignments import (
     effective_roles,
 )
 
-WORKER_ROLES = frozenset({Role.DESIGNER, Role.DEPARTMENT_HEAD})
+MANAGED_ROLES = frozenset(Role)
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +36,7 @@ class RoleReplacement:
 
 
 class ReplaceWorkerRole:
-    """Сохраняет ровно одну рабочую роль либо снимает все рабочие роли."""
+    """Администратор заменяет прикладную роль, включая platform_admin, с аудитом."""
 
     def __init__(
         self,
@@ -73,6 +74,7 @@ class ReplaceWorkerRole:
             self._assert_admin_still_active(actor, actor_assignments)
             return self._result(target, assignments, memberships, now)
 
+    @log_execution_time(operation="identity_role_replace")
     async def replace(
         self,
         *,
@@ -95,7 +97,7 @@ class ReplaceWorkerRole:
             raise ValueError("При снятии роли область должна отсутствовать")
         if role is not None and scope is None:
             raise ValueError("Для назначения роли требуется область")
-        if role is not None and role not in WORKER_ROLES:
+        if role is not None and role not in MANAGED_ROLES:
             raise ValueError("Эта роль назначается отдельной защищённой процедурой")
         async with self._unit_of_work() as work:
             actor = await work.users.get_user(actor_user_id, for_update=True)
@@ -118,21 +120,17 @@ class ReplaceWorkerRole:
             )
             now = self._clock()
             if any(
-                item.is_active_at(now)
-                and (
-                    item.role is Role.PLATFORM_ADMIN
-                    or item.source is RoleSource.AD_GROUP
-                )
+                item.is_active_at(now) and (item.source is RoleSource.AD_GROUP)
                 for item in existing
             ):
-                raise ValueError(
-                    "Управляемая извне или административная роль не меняется"
-                )
+                raise ValueError("Назначение из AD не меняется локально")
+            if actor_user_id == target_user_id and role is not Role.PLATFORM_ADMIN:
+                raise ValueError("Нельзя снять собственные административные права")
             previous = tuple(
                 item
                 for item in existing
                 if item.source is RoleSource.LOCAL
-                and item.role in WORKER_ROLES
+                and item.role in MANAGED_ROLES
                 and item.is_active_at(now)
             )
             memberships = await work.users.list_memberships(target_user_id)
@@ -161,11 +159,23 @@ class ReplaceWorkerRole:
                     replace(item, revoked_at=now) if item in previous else item
                     for item in existing
                 )
-                assign_role(
-                    target, new_assignment, replacement_history, memberships, now
-                )
+                if role is Role.PLATFORM_ADMIN:
+                    if target.status.value != "active":
+                        raise ValueError(
+                            "Назначать роль можно только активному участнику"
+                        )
+                else:
+                    assign_role(
+                        replace(target, tier=AccessTier.MEMBER),
+                        new_assignment,
+                        replacement_history,
+                        memberships,
+                        now,
+                    )
             updated = replace(
-                target, authorization_version=target.authorization_version + 1
+                target,
+                authorization_version=target.authorization_version + 1,
+                tier=AccessTier.MEMBER if role is not None else target.tier,
             )
             await work.users.replace_worker_roles(
                 updated_user=updated,

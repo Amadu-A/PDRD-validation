@@ -128,6 +128,27 @@ class SqlAlchemyUserRepository:
         )
         return _user_from_model(row) if row is not None else None
 
+    async def find_by_login(self, login: str) -> UserAccount | None:
+        """Локальный логин имеет приоритет; неоднозначный каталог закрывает вход."""
+        rows = (
+            await self._session.scalars(
+                select(UserModel)
+                .where(
+                    or_(
+                        func.lower(UserModel.login) == login,
+                        func.lower(UserModel.email) == login,
+                    )
+                )
+                .order_by((UserModel.kind == UserKind.LOCAL.value).desc())
+                .limit(2)
+            )
+        ).all()
+        if len(rows) > 1 and (
+            rows[0].kind != UserKind.LOCAL.value or rows[1].kind == UserKind.LOCAL.value
+        ):
+            raise IdentityConflict("Логин относится к нескольким профилям")
+        return _user_from_model(rows[0]) if rows else None
+
     async def list_users(
         self, *, limit: int, offset: int
     ) -> tuple[tuple[UserAccount, ...], int]:
@@ -439,7 +460,7 @@ class SqlAlchemyUserRepository:
         )
         if bootstrap:
             statement = statement.where(
-                UserModel.kind == UserKind.CORPORATE.value,
+                UserModel.kind.in_((UserKind.CORPORATE.value, UserKind.LOCAL.value)),
                 UserModel.status == UserStatus.ACTIVE.value,
                 UserModel.tier == AccessTier.MEMBER.value,
             )
@@ -531,7 +552,7 @@ class SqlAlchemyUserRepository:
     ) -> None:
         """Единожды назначает первого администратора с DB singleton guard."""
         if (
-            updated_user.kind is not UserKind.CORPORATE
+            updated_user.kind not in {UserKind.CORPORATE, UserKind.LOCAL}
             or updated_user.status is not UserStatus.ACTIVE
             or updated_user.tier is not AccessTier.MEMBER
             or assignment.user_id != updated_user.user_id
@@ -541,7 +562,9 @@ class SqlAlchemyUserRepository:
             or assignment.revoked_at is not None
             or assignment.expires_at is not None
         ):
-            raise ValueError("Первым администратором может стать активный сотрудник")
+            raise ValueError(
+                "Первым администратором может стать активный сотрудник или локальный аккаунт"
+            )
         try:
             async with self._session.begin_nested():
                 existing = await self._session.scalar(
@@ -607,7 +630,7 @@ class SqlAlchemyUserRepository:
             raise TypeError("actor_user_id должен быть UUID")
         if new_assignment is not None and (
             new_assignment.user_id != updated_user.user_id
-            or new_assignment.role not in {Role.DESIGNER, Role.DEPARTMENT_HEAD}
+            or new_assignment.role not in set(Role)
             or new_assignment.source is not RoleSource.LOCAL
         ):
             raise ValueError("Недопустимое новое назначение")
@@ -615,6 +638,11 @@ class SqlAlchemyUserRepository:
             raise ValueError("Повторяющиеся назначения для отзыва")
         async with self._session.begin_nested():
             await self._bump_version(updated_user, expected_authorization_version)
+            await self._session.execute(
+                update(UserModel)
+                .where(UserModel.user_id == updated_user.user_id)
+                .values(tier=updated_user.tier.value)
+            )
             if previous_assignment_ids:
                 revoked = (
                     await self._session.scalars(
@@ -625,7 +653,7 @@ class SqlAlchemyUserRepository:
                                 previous_assignment_ids
                             ),
                             RoleAssignmentModel.role.in_(
-                                (Role.DESIGNER.value, Role.DEPARTMENT_HEAD.value)
+                                tuple(role.value for role in Role)
                             ),
                             RoleAssignmentModel.source == RoleSource.LOCAL.value,
                             RoleAssignmentModel.revoked_at.is_(None),

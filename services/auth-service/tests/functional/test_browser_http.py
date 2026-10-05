@@ -333,3 +333,41 @@ async def test_dependency_failure_rejects_session_without_leaking_details(
     assert response.headers["cache-control"] == "no-store"
     assert response.json() == {"detail": "Сервис временно недоступен"}
     assert "secret" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_https_origin_rejects_temporary_http_address_before_login() -> None:
+    """Временный HTTP Origin не достигает проверки пароля; HTTPS сохраняет защиту."""
+    origin = "https://pdrd.itcneoterm.local"
+    runtime = fake_runtime()
+    runtime.settings.http.public_origin = origin
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(runtime)), base_url=origin
+    ) as client:
+        payload = {"login": "admin", "password": "test-local-password"}
+        wrong = await client.post(
+            "/api/v1/auth/login",
+            headers={"Origin": "http://192.168.55.3:8080"},
+            json=payload,
+        )
+        assert wrong.status_code == 403
+        assert runtime.limiter.attempts == []
+        accepted = await client.post(
+            "/api/v1/auth/login", headers={"Origin": origin}, json=payload
+        )
+        assert accepted.status_code == 200
+        cookie = accepted.headers["set-cookie"].lower()
+        assert "httponly" in cookie and "secure" in cookie
+        session = await client.get("/api/v1/auth/session")
+        assert session.json()["authenticated"] is True
+        assert (
+            await client.post("/api/v1/auth/logout", headers={"Origin": origin})
+        ).status_code == 403
+        response = await client.post(
+            "/api/v1/auth/logout",
+            headers={
+                "Origin": origin,
+                "X-CSRF-Token": session.json()["csrf_token"],
+            },
+        )
+        assert response.status_code == 200

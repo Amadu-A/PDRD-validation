@@ -67,3 +67,45 @@ test("подтверждение email отправляет код только 
     globalThis.fetch = previousFetch;
   }
 });
+
+
+test("страница HTTP не отправляет пароль входа или регистрации", async () => {
+  const previousLocation = globalThis.location;
+  const previousFetch = globalThis.fetch;
+  let requests = 0;
+  globalThis.location = { protocol: "http:" };
+  globalThis.fetch = async () => {
+    requests += 1;
+    throw new Error("Пароль не должен уходить в сеть");
+  };
+  try {
+    await assert.rejects(login("i.mein", "secret-password"), /только по HTTPS/);
+    await assert.rejects(register("Иван", "ivan@example.test", "secret-password"), /только по HTTPS/);
+    assert.equal(requests, 0);
+  } finally {
+    if (previousLocation === undefined) delete globalThis.location;
+    else globalThis.location = previousLocation;
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("страница HTTPS отправляет вход обычным защищённым маршрутом", async () => {
+  const previousLocation = globalThis.location;
+  const previousFetch = globalThis.fetch;
+  globalThis.location = { protocol: "https:" };
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response("{}", { status: 200 });
+  };
+  try {
+    await login("admin", "test-password");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "/api/v1/auth/login");
+    assert.equal(calls[0].options.credentials, "same-origin");
+  } finally {
+    if (previousLocation === undefined) delete globalThis.location;
+    else globalThis.location = previousLocation;
+    globalThis.fetch = previousFetch;
+  }
+});

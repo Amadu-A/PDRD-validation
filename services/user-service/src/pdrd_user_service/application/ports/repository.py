@@ -44,6 +44,10 @@ class UserRepository(Protocol):
         """Ищет профиль только по устойчивому составному ключу."""
         ...
 
+    async def find_by_login(self, login: str) -> UserAccount | None:
+        """Ищет источник входа; stable key остаётся ключом привязки профиля."""
+        ...
+
     async def list_users(
         self, *, limit: int, offset: int
     ) -> tuple[tuple[UserAccount, ...], int]:

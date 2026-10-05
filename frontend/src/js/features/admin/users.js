@@ -10,7 +10,7 @@ const statusLabels = {
   pending_verification: "Ожидает подтверждения email",
 };
 
-/** Из ответа сервиса выбирает рабочую роль и отмечает защищённые назначения. */
+/** Выбирает текущую роль, включая администратора, и отмечает назначения из AD. */
 export function roleEditorState(roles, assignments) {
   const worker = assignments.find((entry) =>
     entry.role === "designer" || entry.role === "department_head");
@@ -18,7 +18,7 @@ export function roleEditorState(roles, assignments) {
   return {
     currentRole: administrator ? "platform_admin" : worker?.role ?? "",
     scope: worker?.scope ?? null,
-    roleLocked: administrator || assignments.some((entry) => entry.source === "ad_group"),
+    roleLocked: assignments.some((entry) => entry.source === "ad_group"),
   };
 }
 

@@ -28,13 +28,19 @@ class UserModel(Base):
 
     __tablename__ = "accounts"
     __table_args__ = (
-        CheckConstraint("kind IN ('corporate', 'external')", name="ck_accounts_kind"),
+        CheckConstraint(
+            "kind IN ('corporate', 'external', 'local')", name="ck_accounts_kind"
+        ),
         CheckConstraint(
             "tier IN ('registered_free', 'member')", name="ck_accounts_tier"
         ),
         CheckConstraint(
             "status IN ('pending_verification', 'active', 'blocked')",
             name="ck_accounts_status",
+        ),
+        CheckConstraint(
+            "kind <> 'local' OR (login IS NOT NULL AND status <> 'pending_verification')",
+            name="ck_accounts_local_login",
         ),
         CheckConstraint("length(btrim(display_name)) > 0", name="ck_accounts_name"),
         CheckConstraint(

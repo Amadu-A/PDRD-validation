@@ -11,8 +11,11 @@
 Первая рабочая модель использует локальные роли `designer`, `department_head`
 и `platform_admin`. `role_source=ad_group` оставлен для будущего сопоставления
 с подтверждёнными группами AD, но сейчас не выдаёт прав. `platform_admin`
-назначается только защищённой однократной bootstrap-командой. Административный
-HTTP-маршрут не может выдать эту роль.
+первому локальному суперпользователю назначается серверной командой
+`bash scripts/create-superuser.sh`. Затем действующий администратор может
+назначить эту роль другим пользователям через админку. Подтверждённый внешний
+аккаунт получает уровень `member` вместе с назначением роли. Изменение
+записывается с аудитом и CAS; администратор не может снять собственные права.
 
 Назначение роли руководителя требует действующего членства в организации и
 отделе. Изменение членства и роли использует ожидаемую
@@ -47,11 +50,15 @@ HTTP-маршрут не может выдать эту роль.
 временную БД. После Windows quality gate её запускают на Linux:
 
 ```bash
-docker compose -f ops/compose.user-test.yaml up \
+docker compose -p pdrd-user-service-test -f ops/compose.user-test.yaml up \
   --build --abort-on-container-exit --exit-code-from user-test-runner
-docker compose -f ops/compose.user-test.yaml down
+docker compose -p pdrd-user-service-test -f ops/compose.user-test.yaml down
 ```
 
-Для первого администратора после подтверждённого корпоративного входа на
-сервере выполняется `python -m pdrd_user_service.bootstrap_admin --user-id
-<UUID>`. Команда одноразовая и не опубликована через HTTP.
+Локальный суперпользователь создаётся командой `bash scripts/create-superuser.sh`.
+Профиль, идентичность `(local, pdrd, subject)`, роль и singleton guard записываются
+в одной транзакции. Auth Service хранит отдельный scrypt-хеш локального пароля.
+Bootstrap повторяется только для той же идентичности после прерванного создания;
+новый subject не обходит одноразовый guard. Закрытые маршруты
+`POST /internal/v1/users/lookup-login` и `POST /internal/v1/users/local-superuser`
+требуют сервисный ключ, не принимают пароль/роль и не публикуются Gateway.

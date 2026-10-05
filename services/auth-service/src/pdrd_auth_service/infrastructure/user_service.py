@@ -138,6 +138,53 @@ class UserServiceClient:
             permissions=permissions.permissions,
         )
 
+    async def find_by_login(self, login: str) -> ProfileSnapshot | None:
+        """Читает источник входа до передачи пароля выбранному провайдеру."""
+        response = await self._request(
+            "POST", "/internal/v1/users/lookup-login", json={"login": login}
+        )
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            raise UserServiceUnavailable("Источник входа недоступен")
+        try:
+            profile = UserProfile.model_validate(response.json())
+        except (ValueError, TypeError):
+            raise UserServiceUnavailable("Некорректный ответ каталога") from None
+        return ProfileSnapshot(
+            user_id=profile.user_id,
+            kind=profile.kind,
+            tier=profile.tier,
+            status=profile.status,
+            display_name=profile.display_name,
+            login=profile.login,
+            email=profile.email,
+            authorization_version=profile.authorization_version,
+        )
+
+    async def provision_local_superuser(self, *, subject: UUID, username: str) -> UUID:
+        """Создаёт профиль первого локального администратора без передачи пароля."""
+        response = await self._request(
+            "POST",
+            "/internal/v1/users/local-superuser",
+            json={"subject": str(subject), "username": username},
+        )
+        if response.status_code == 409:
+            raise ValueError("Первый администратор уже создан")
+        if response.status_code != 200:
+            raise UserServiceUnavailable("Создание суперпользователя недоступно")
+        try:
+            profile = UserProfile.model_validate(response.json())
+        except (ValueError, TypeError):
+            raise UserServiceUnavailable("Некорректный ответ каталога") from None
+        if (
+            profile.kind != "local"
+            or profile.login != username
+            or profile.status != "active"
+        ):
+            raise UserServiceUnavailable("Профиль суперпользователя не подтверждён")
+        return profile.user_id
+
     async def provision_corporate(self, identity: CorporateIdentity) -> UUID:
         """Идемпотентно создаёт профиль после успешного LDAPS bind."""
         response = await self._request(

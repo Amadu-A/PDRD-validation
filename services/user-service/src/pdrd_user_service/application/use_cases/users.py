@@ -97,6 +97,13 @@ class UserDirectory:
         async with self._unit_of_work() as work:
             return await work.users.find_identity(provider_id, namespace, subject)
 
+    async def find_by_login(self, login: str) -> UserAccount | None:
+        """Выбирает сохранённый источник входа без проверки либо хранения пароля."""
+        if not isinstance(login, str) or not login.strip() or len(login) > 320:
+            raise ValueError("Некорректный логин")
+        async with self._unit_of_work() as work:
+            return await work.users.find_by_login(login.strip().lower())
+
     async def provision(
         self,
         *,
@@ -120,6 +127,8 @@ class UserDirectory:
             for part in (provider_id, namespace, subject)
         ):
             raise ValueError("Устойчивая идентичность должна быть полной")
+        if kind is UserKind.LOCAL:
+            raise ValueError("Локальный профиль создаётся серверной командой")
         if kind is UserKind.EXTERNAL and provider_id.strip().casefold() == "email":
             raise ValueError(
                 "Email-профиль создаётся через регистрацию с подтверждением"

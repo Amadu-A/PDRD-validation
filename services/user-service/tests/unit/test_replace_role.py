@@ -225,14 +225,6 @@ async def test_cas_and_admin_role_are_enforced_before_mutation() -> None:
             scope=None,
             authorization_version=2,
         )
-    with pytest.raises(ValueError, match="защищённой"):
-        await application.replace(
-            actor_user_id=ADMIN_ID,
-            target_user_id=TARGET_ID,
-            role=Role.PLATFORM_ADMIN,
-            scope=RoleScope(ScopeKind.PLATFORM),
-            authorization_version=1,
-        )
     with pytest.raises(AdminRequired):
         await application.replace(
             actor_user_id=TARGET_ID,
@@ -258,3 +250,47 @@ async def test_role_detail_requires_admin_and_exposes_current_version() -> None:
     )
     with pytest.raises(AdminRequired):
         await service(users).inspect(actor_user_id=ADMIN_ID, target_user_id=TARGET_ID)
+
+
+@pytest.mark.asyncio
+async def test_admin_can_promote_other_user_but_cannot_demote_self() -> None:
+    """Выдача админских прав повышает версию; собственные права защищены."""
+    users = Users()
+    result = await service(users).replace(
+        actor_user_id=ADMIN_ID,
+        target_user_id=TARGET_ID,
+        role=Role.PLATFORM_ADMIN,
+        scope=RoleScope(ScopeKind.PLATFORM),
+        authorization_version=1,
+    )
+    assert result.roles == (Role.PLATFORM_ADMIN,)
+    assert result.user.authorization_version == 2
+    with pytest.raises(ValueError, match="собственные"):
+        await service(users).replace(
+            actor_user_id=ADMIN_ID,
+            target_user_id=ADMIN_ID,
+            role=None,
+            scope=None,
+            authorization_version=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_admin_can_promote_verified_external_user() -> None:
+    """Подтверждённый внешний аккаунт получает member и роль одной операцией."""
+    users = Users()
+    users.accounts[TARGET_ID] = replace(
+        users.accounts[TARGET_ID],
+        kind=UserKind.EXTERNAL,
+        tier=AccessTier.REGISTERED_FREE,
+        email="client@example.test",
+    )
+    result = await service(users).replace(
+        actor_user_id=ADMIN_ID,
+        target_user_id=TARGET_ID,
+        role=Role.PLATFORM_ADMIN,
+        scope=RoleScope(ScopeKind.PLATFORM),
+        authorization_version=1,
+    )
+    assert result.user.tier is AccessTier.MEMBER
+    assert result.roles == (Role.PLATFORM_ADMIN,)

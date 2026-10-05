@@ -82,6 +82,27 @@ class ExternalCredentialModel(Base):
     )
 
 
+class LocalCredentialModel(Base):
+    """Хеш локального пароля; незавершённый bootstrap не допускает вход."""
+
+    __tablename__ = "local_credentials"
+    __table_args__ = (
+        CheckConstraint(
+            "username = lower(username) AND length(username) BETWEEN 1 AND 64",
+            name="ck_local_credentials_username",
+        ),
+        {"schema": "auth"},
+    )
+
+    subject: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    user_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), unique=True)
+
+
 class RateLimitModel(Base):
     """Общий для процессов счётчик попыток без открытого IP или логина."""
 

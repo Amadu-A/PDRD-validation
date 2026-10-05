@@ -15,6 +15,9 @@ from pdrd_user_service.transport.http.routers.external_accounts import (
     router as external_accounts_router,
 )
 from pdrd_user_service.transport.http.routers.health import router as health_router
+from pdrd_user_service.transport.http.routers.local_accounts import (
+    router as local_accounts_router,
+)
 from pdrd_user_service.transport.http.routers.organization_memberships import (
     router as organization_memberships_router,
 )
@@ -62,6 +65,7 @@ def create_app(container: ApplicationContainer | None = None) -> FastAPI:
     app.state.container = actual
     app.include_router(health_router)
     if actual.settings.enabled and actual.settings.internal_key.get_secret_value():
+        app.include_router(local_accounts_router)
         app.include_router(users_router)
         app.include_router(external_accounts_router)
         app.include_router(admin_users_router)

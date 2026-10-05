@@ -159,6 +159,7 @@ def test_invalid_pagination_and_role_payload_rejected() -> None:
             json={
                 "role": "platform_admin",
                 "scope": {"kind": "platform"},
+                "source": "local",
                 "authorization_version": 1,
             },
         )
@@ -202,3 +203,23 @@ def test_role_card_and_atomic_patch_follow_csrf_and_version_contract() -> None:
         assert result.json()["roles"] == ["department_head"]
         assert users.calls[1][1][0] == ACTOR_ID
         assert users.calls[1][1][2].authorization_version == 7
+
+
+def test_platform_admin_assignment_preserves_actor_and_csrf() -> None:
+    """Назначение администратора проходит тот же защищённый API и версию."""
+    app, _, users = make_app()
+    with TestClient(app) as client:
+        client.cookies.set("pdrd_session", "browser-secret")
+        payload = {
+            "role": "platform_admin",
+            "scope": {"kind": "platform"},
+            "authorization_version": 3,
+        }
+        path = f"/api/v1/admin/users/{TARGET_ID}/role"
+        assert client.patch(path, json=payload).status_code == 403
+        response = client.patch(path, json=payload, headers={"X-CSRF-Token": CSRF})
+        assert response.status_code == 200
+    action, (actor, target, command) = users.calls[0]
+    assert (action, actor, target) == ("replace", ACTOR_ID, TARGET_ID)
+    assert command.role == "platform_admin"
+    assert command.authorization_version == 3

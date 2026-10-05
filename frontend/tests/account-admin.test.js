@@ -57,7 +57,7 @@ test("поиск пользователей не вставляет HTML и ищ
   assert.deepEqual(filterUsers(users, "неизвестный"), []);
 });
 
-test("админка не предлагает менять bootstrap и AD назначения даже при второй рабочей роли", () => {
+test("админка разрешает менять локального администратора и блокирует AD назначения", () => {
   const worker = { role: "designer", source: "local", scope: { kind: "own" } };
   const admin = { role: "platform_admin", source: "local", scope: { kind: "platform" } };
   const external = { role: "department_head", source: "ad_group",
@@ -65,7 +65,7 @@ test("админка не предлагает менять bootstrap и AD на
   assert.deepEqual(roleEditorState(["designer"], [worker]), {
     currentRole: "designer", scope: worker.scope, roleLocked: false,
   });
-  assert.equal(roleEditorState(["designer", "platform_admin"], [worker, admin]).roleLocked, true);
+  assert.equal(roleEditorState(["designer", "platform_admin"], [worker, admin]).roleLocked, false);
   assert.equal(roleEditorState(["department_head"], [external]).roleLocked, true);
 });
 

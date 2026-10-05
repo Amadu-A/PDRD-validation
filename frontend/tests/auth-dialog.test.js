@@ -41,6 +41,7 @@ test("неверный пароль не ломает модальное окн�
   await handler({ preventDefault() {} });
 
   assert.equal(message.textContent, "Неверные учётные данные");
+  assert.match(hint.textContent, /Регистрация/);
   assert.equal(password.value, "");
   assert.equal(submit.disabled, false);
 });

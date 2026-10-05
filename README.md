@@ -1,6 +1,6 @@
 <!-- README.md -->
 
-# PDRD Validation — Drawing Validation AI
+# PDRD Validation — проверка чертежей с помощью ИИ
 
 PDRD Validation — локальный сервис проверки проектной и рабочей документации по нормативной базе, техническому заданию, пользовательским пакетам документов, контексту проекта и Базе Опыта.
 
@@ -1015,7 +1015,7 @@ flowchart TD
 
 Project Context помогает понять проект, но не становится N/T/U evidence.
 
-# Managed catalog
+# Управляемый каталог
 
 ## Lifecycle N/U документа
 
@@ -1079,7 +1079,7 @@ Frontend позволяет:
 - выбирать все READY package docs;
 - очищать selection.
 
-# Public API
+# Публичный API
 
 ## Analysis
 
@@ -1169,7 +1169,7 @@ GET /api/v1/normative/technical-assignments/{technical_assignment_id}/content
 
 Browser не обращается к internal Knowledge/Experience API напрямую. Закрытый Review API доступен через Gateway на приватном frontend; Reviewed PDF доступен только для текущей утверждённой редакции. Постоянный каталог Experience, crop, CRUD и экспорт примеров реализованы через закрытый Gateway API. Примеры с отозванным подтверждением или изменённым Review сохраняются для аудита, но становятся неактуальными и исключаются из пригодного для обучения набора.
 
-# n8n workflows
+# Рабочие процессы n8n
 
 Repository:
 
@@ -1350,7 +1350,7 @@ Shared network `ai-shared` должна предоставлять RabbitMQ, n8n
 
 Безопасный штатный deploy следует выполнять штатным проектным скриптом после проверки текущей ветки/контейнеров и Compose: `bash scripts/up.sh`. Не перезапускайте shared stack и не удаляйте volume ради разработки Experience.
 
-Experience подключён к Compose только профилем `review`. Сначала общие и изолированные SQL-тесты, затем настройка серверного канала и явная миграция по [docs/review-api.md](docs/review-api.md). Основной frontend 8080 использует серверный Review и каталог Experience. Рабочий адрес — `http://192.168.55.3:8080/`; SSH-туннель не требуется. Ключи остаются между контейнерами; полноценная пользовательская авторизация пока не реализована.
+Experience подключён к Compose только профилем `review`. Сначала общие и изолированные SQL-тесты, затем настройка серверного канала и явная миграция по [docs/review-api.md](docs/review-api.md). Основной frontend 8080 использует серверный Review и каталог Experience. Рабочий адрес — `http://192.168.55.3:8080/`; SSH-туннель не требуется. Ключи остаются между контейнерами. Пользовательская авторизация, AD и локальный суперпользователь включаются профилями `identity,auth`: см. [docs/identity-auth-service.md](docs/identity-auth-service.md).
 
 Для подключения ручной индексации после синхронизации ветки:
 `bash ops/deploy-experience-index.sh </dev/null`. Скрипт повторяет общий и SQL gate,

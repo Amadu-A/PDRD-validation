@@ -26,7 +26,7 @@ class UserResponse(StrictModel):
     """Возвращает профиль из user-service без секретов аутентификации."""
 
     user_id: UUID
-    kind: Literal["corporate", "external"]
+    kind: Literal["corporate", "external", "local"]
     tier: Literal["registered_free", "member"]
     status: Literal["pending_verification", "active", "blocked"]
     display_name: str
@@ -70,7 +70,7 @@ class RoleScopeRequest(StrictModel):
 class ReplaceRoleRequest(StrictModel):
     """Атомарно заменяет рабочую роль по ожидаемой версии полномочий."""
 
-    role: Literal["designer", "department_head"] | None
+    role: Literal["designer", "department_head", "platform_admin"] | None
     scope: RoleScopeRequest | None
     authorization_version: int = Field(ge=1)
 

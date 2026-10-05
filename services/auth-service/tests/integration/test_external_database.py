@@ -129,3 +129,41 @@ async def test_rate_limiter_keeps_limit_under_parallel_load() -> None:
         assert sum(results) == 5
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_local_credentials_unique_username_and_immutable_profile() -> None:
+    """PostgreSQL не создаёт дубли локального логина и не меняет связанный UUID."""
+    from pdrd_auth_service.domain.local_credential import LocalCredential
+    from pdrd_auth_service.infrastructure.database.local_credentials import (
+        SqlAlchemyLocalCredentialStore,
+    )
+    from pdrd_auth_service.infrastructure.database.models import LocalCredentialModel
+
+    raw_url = os.environ.get("AUTH_SERVICE_TEST_DATABASE_URL")
+    if os.environ.get("PDRD_RUN_DATABASE_TESTS") != "1" or not raw_url:
+        pytest.skip("Требуется изолированный PostgreSQL Auth Service")
+    engine = create_async_engine(isolated_url(raw_url))
+    store = SqlAlchemyLocalCredentialStore(build_session_factory(engine))
+    subject, user_id = uuid4(), uuid4()
+    username = f"test-{subject.hex}"
+    try:
+        credential = LocalCredential(
+            subject, username, "scrypt$test-only", datetime.now(UTC)
+        )
+        assert await store.create(credential)
+        assert not await store.create(credential)
+        assert (await store.get_by_username(username)).user_id is None
+        await store.attach_user(subject, user_id)
+        await store.attach_user(subject, user_id)
+        with pytest.raises(ValueError):
+            await store.attach_user(subject, uuid4())
+        assert (await store.get_by_username(username)).user_id == user_id
+    finally:
+        async with engine.begin() as connection:
+            await connection.execute(
+                delete(LocalCredentialModel).where(
+                    LocalCredentialModel.subject == subject
+                )
+            )
+        await engine.dispose()

@@ -3,7 +3,7 @@
 `auth-service` проверяет учётные данные и создаёт непрозрачные серверные сессии.
 `user-service` хранит профиль и права, `admin-service` выполняет административные
 сценарии через API. Пароль корпоративной записи AD не записывается ни в один
-сервис PDRD. Хеш пароля внешнего пользователя хранится только в схеме `auth`.
+сервис PDRD. Хеши локальных и email-паролей хранятся только в схеме `auth`.
 
 ## Корпоративный вход
 
@@ -68,24 +68,49 @@ CSRF. Закрытый `/internal/v1/auth/introspect` доступен толь�
 доступ, а неверная cookie не превращается в гостя.
 
 Профиль Compose `auth` запускается вместе с `identity` и включает миграцию,
-`auth-service` и `admin-service`. `scripts/up.sh` проверяет HTTPS origin,
+`auth-service` и `admin-service`. `scripts/up.sh` проверяет согласованный публичный origin,
 ключи и SMTP-реквизиты из закрытого `.env`; `scripts/check-stack.sh` проверяет
 контейнеры, миграции и HTTP readiness. Несекретные значения читаются из
 `.env.example`, секреты переопределяются в `.env`. Для Yandex SMTP используются
 `AUTH_SERVICE_EMAIL__SMTP_HOST=smtp.yandex.ru`, порт 465 и SSL; в `.env`
 нужно задать `AUTH_SERVICE_EMAIL__SMTP_USER`,
 `AUTH_SERVICE_EMAIL__SMTP_PASSWORD`, `AUTH_SERVICE_EMAIL__FROM_EMAIL` и
-`AUTH_SERVICE_EMAIL__PUBLIC_BASE_URL` с тем же HTTPS origin.
-HTTP-порт frontend по умолчанию привязан к `127.0.0.1`; браузерный вход должен
-проходить через внутренний HTTPS reverse proxy с тем же origin, например
-`https://pdrd.itcneoterm.local`. Доступ из интернета для этого не требуется.
-Прямой `http://192.168.55.3:8080` можно использовать только для гостевого
-контура без передачи паролей и session cookie.
+`AUTH_SERVICE_EMAIL__PUBLIC_BASE_URL` с тем же публичным origin.
+HTTP-порт frontend по умолчанию привязан к `127.0.0.1`. Рабочие окружения
+stage/prod требуют HTTPS и Secure cookie; точный Origin и CSRF обязательны.
+Браузерный клиент блокирует вход и регистрацию на HTTP до отправки пароля.
+Временный адрес `http://192.168.55.3:8080` не предназначен для входа.
+Предложение настройки HTTPS через Nginx существующего frontend описано в
+[схеме локального HTTPS](identity-https.md).
 
-Для первого администратора используется однократная серверная bootstrap-команда
-после создания подтверждённого корпоративного профиля. Она не является
-публичным HTTP-маршрутом. Настоящий AD-вход и доставка писем требуют отдельной
-проверки на Linux после настройки сети, CA и SMTP.
+## Локальный суперпользователь и выбор источника входа
+
+Первый администратор создаётся серверной командой без AD, email и UUID:
+
+```bash
+bash scripts/create-superuser.sh
+```
+
+Команда вызывает Python внутри auth-service с TTY, запрашивает имя
+(`admin` по умолчанию), скрытый пароль и подтверждение. Пароль должен содержать
+12–1024 символа. Профиль `kind=local`, уровень `member`, роль `platform_admin`
+и одноразовый guard сохраняются атомарно в users. Пароль хешируется scrypt
+в auth.local_credentials; каталог пользователей не получает пароль или хеш.
+
+Сервис сначала находит профиль в user-service. Локальный источник проверяет
+свой пароль, email-источник — подтверждённую внешнюю учётную запись, корпоративный
+источник — каждый раз проверяет AD. Неверный локальный пароль не переключает
+вход на AD. Первый успешный вход AD идемпотентно создаёт профиль по
+`(provider_id, namespace, objectGUID)`; повторный вход возвращает прежний UUID.
+Пароль AD и его хеш не сохраняются. Неизвестный короткий логин проверяется в AD;
+неизвестный email проверяется контуром email-регистрации. Сообщение при отказе
+предлагает проверить данные либо зарегистрироваться, не раскрывая наличие аккаунта.
+
+При сбое между созданием профиля и завершением привязки локального пароля
+команду можно повторить с прежним именем и паролем: используется тот же subject.
+Незавершённая запись не допускает вход. После успешного bootstrap другие
+администраторы и рабочие роли назначаются действующим администратором в админке,
+с аудитом и CAS. Снятие собственных административных прав запрещено.
 
 ## Изоляция общей инфраструктуры при запуске
 
@@ -100,7 +125,7 @@ Compose читает собственные project name, profiles и env-фай
 восстановления сначала проверяют service/project labels, путь Compose и mounts;
 широкие `down`, `prune` и удаление volumes для этого не используются.
 
-## Runtime-приёмка корпоративного входа
+## Проверка корпоративного входа на сервере
 
 Системное доверие Linux не заменяет CA bundle контейнера. Перед включением AD
 публичный сертификат CA устанавливается в игнорируемый Git файл:
@@ -111,43 +136,39 @@ install -m 0644 \
     ops/certificates/ad-ca.pem
 ```
 
-После настройки `COMPOSE_PROFILES=identity,auth`, HTTPS origin, служебных ключей,
-SMTP и `AUTH_SERVICE_ENABLED=true` стек запускается общей командой:
+После настройки профилей, служебных ключей, SMTP и CA нужно согласовать адрес
+браузера с Auth/Gateway/email. Скрипт атомарно меняет только связанные параметры
+закрытого .env, не выводит его содержимое и сохраняет остальные строки:
 
 ```bash
+python3 scripts/configure_auth_origin.py https://pdrd.itcneoterm.local
 bash scripts/up.sh
+bash scripts/create-superuser.sh
 ```
 
-Первый реальный вход проверяется без пароля в истории команд и логах. Скрипт
-запрашивает его скрыто, проверяет Login, Secure/HttpOnly cookie, session,
-профиль, доступность HTML-страниц, запрет Admin API и logout. JavaScript и
-переходы интерфейса принимаются отдельно в браузере:
+`scripts/up.sh` применяет обе новые миграции и пересоздаёт сервисы с новым
+окружением. Затем браузер открывается по точно указанному адресу. При смене
+cookie-политики выполните новый вход.
+
+Проверка локального суперпользователя и полного маршрута frontend/Gateway/Auth:
 
 ```bash
-python3 scripts/check_auth_runtime.py \
-    --public-origin https://pdrd.itcneoterm.local \
-    --login i.mein
+python3 scripts/check_auth_runtime.py --transport-url https://pdrd.itcneoterm.local --public-origin https://pdrd.itcneoterm.local --login admin --expect-admin
 ```
 
-Команда выводит несекретный `user_id`. Первый администратор назначается один раз:
+Корпоративный вход проверяется аналогично с `--login i.mein`. До назначения
+ему admin-роли параметр `--expect-admin` не указывается. Пароль запрашивается
+скрыто. Transport проверки остаётся `http://127.0.0.1:8080` на сервере;
+удалённый HTTP transport скрипт не разрешает.
+
+Для HTTPS origin передайте его configure_auth_origin.py без HTTP-флага;
+скрипт одновременно возвращает Secure cookie и отключает LAN HTTP.
+
+Изолированные интеграционные проверки миграций и транзакций:
 
 ```bash
-docker compose --profile identity exec -T user-service \
-    python -m pdrd_user_service.bootstrap_admin --user-id <USER_ID>
+docker compose -p pdrd-user-service-test -f ops/compose.user-test.yaml up --build --abort-on-container-exit --exit-code-from user-test-runner
+docker compose -p pdrd-user-service-test -f ops/compose.user-test.yaml down
+docker compose -p pdrd-auth-service-test -f ops/compose.auth-test.yaml up --build --abort-on-container-exit --exit-code-from auth-test-runner
+docker compose -p pdrd-auth-service-test -f ops/compose.auth-test.yaml down
 ```
-
-После bootstrap выполняется новый вход и проверка Admin API:
-
-```bash
-python3 scripts/check_auth_runtime.py \
-    --public-origin https://pdrd.itcneoterm.local \
-    --login i.mein \
-    --expect-admin
-```
-
-Локальный transport скрипта по умолчанию — `http://127.0.0.1:8080`; HTTP-запрос
-идёт только через loopback сервера по frontend/Gateway/Auth маршруту, затем
-пароль передаётся контроллеру только по LDAPS. Это позволяет
-принять backend до настройки клиентского DNS. Вход из браузера, визуальная
-проверка `/account.html` и `/admin.html` выполняются только через фактический
-HTTPS origin с доверенным браузером сертификатом.

@@ -18,7 +18,7 @@ export function bindAuthDialog(dialog) {
     registerForm.hidden = kind !== "register";
     title.textContent = kind === "login" ? "Вход" : "Регистрация";
     hint.textContent = kind === "login"
-      ? "Сотрудники входят с корпоративным логином. Внешние пользователи — с email."
+      ? "Введите локальное имя пользователя, корпоративный логин или email."
       : "После регистрации откройте письмо и подтвердите email.";
     message.textContent = "";
     for (const tab of tabs) tab.setAttribute(
@@ -52,6 +52,9 @@ export function bindAuthDialog(dialog) {
       dialog.close();
     } catch (error) {
       message.textContent = error.detail ?? "Не удалось войти. Попробуйте позже.";
+      if (error.status === 401) {
+        hint.textContent = "Проверьте логин и пароль. Если у вас нет учётной записи, выберите «Регистрация».";
+      }
       fields.namedItem("password").value = "";
     } finally {
       submit.disabled = false;

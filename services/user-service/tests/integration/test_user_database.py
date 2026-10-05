@@ -62,7 +62,7 @@ pytestmark = pytest.mark.database
 TEST_HOST = "user-test-postgres"
 TEST_NAME = "pdrd_user_test"
 TEST_USER = "user_test"
-EXPECTED_REVISION = "20260930_0001"
+EXPECTED_REVISION = "20261005_0002"
 
 
 def validate_isolated_database_url(raw_url: str) -> URL:
@@ -772,3 +772,66 @@ async def test_role_version_and_one_time_admin_guard_are_atomic(
         }
     finally:
         await remove_test_users(test_engine, user.user_id, other.user_id)
+
+
+@pytest.mark.asyncio
+async def test_local_superuser_bootstrap_lookup_and_admin_promotion(
+    test_engine: AsyncEngine,
+) -> None:
+    """Реальная БД проверяет guard, отсутствие дублей, выдачу админства и аудит."""
+    from pdrd_user_service.application.use_cases.local_superuser import LocalSuperusers
+    from pdrd_user_service.application.use_cases.replace_role import ReplaceWorkerRole
+
+    factory = build_session_factory(test_engine)
+
+    def unit_of_work():
+        """Создаёт независимую транзакцию тестовой БД."""
+        return SqlAlchemyUnitOfWork(factory)
+
+    superusers = LocalSuperusers(unit_of_work)
+    subject = uuid4()
+    admin = await superusers.create(subject=subject, username=f"admin-{subject.hex}")
+    target = external_user(user_id=uuid4(), email=f"{uuid4()}@example.test")
+    try:
+        assert (
+            await superusers.create(subject=subject, username=admin.login)
+        ).user_id == admin.user_id
+        with pytest.raises(BootstrapAlreadyPerformed):
+            await superusers.create(subject=uuid4(), username="another-admin")
+        async with unit_of_work() as work:
+            assert (
+                await work.users.find_by_login(admin.login.upper().lower())
+            ).user_id == admin.user_id
+            await work.users.create_user(
+                target, ExternalIdentity("email", "pdrd", str(uuid4()), target.user_id)
+            )
+            await work.commit()
+        promoted = await ReplaceWorkerRole(unit_of_work).replace(
+            actor_user_id=admin.user_id,
+            target_user_id=target.user_id,
+            role=Role.PLATFORM_ADMIN,
+            scope=RoleScope(ScopeKind.PLATFORM),
+            authorization_version=1,
+        )
+        assert promoted.roles == (Role.PLATFORM_ADMIN,)
+        async with unit_of_work() as work:
+            saved = await work.users.get_user(target.user_id)
+        assert saved.tier is AccessTier.MEMBER and saved.authorization_version == 2
+        async with factory() as database:
+            event = await database.scalar(
+                select(RoleAssignmentEventModel).where(
+                    RoleAssignmentEventModel.assignment_id
+                    == promoted.assignments[0].assignment_id
+                )
+            )
+            assert event.actor_user_id == admin.user_id and event.action == "assign"
+        with pytest.raises(AuthorizationConflict):
+            await ReplaceWorkerRole(unit_of_work).replace(
+                actor_user_id=admin.user_id,
+                target_user_id=target.user_id,
+                role=None,
+                scope=None,
+                authorization_version=1,
+            )
+    finally:
+        await remove_test_users(test_engine, admin.user_id, target.user_id)

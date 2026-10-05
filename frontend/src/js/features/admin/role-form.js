@@ -1,6 +1,6 @@
 // frontend/src/js/features/admin/role-form.js
 
-/** Выбор рабочей роли и отдела из проверенного справочника admin-service. */
+/** Выбор роли пользователя и отдела из проверенного справочника admin-service. */
 import { listMemberships } from "./api.js";
 import { allDepartments, allOrganizations } from "./directory.js";
 import { saveRoleWithMembership } from "./role-assignment.js";
@@ -9,10 +9,11 @@ const roles = [
   ["", "Без рабочей роли"],
   ["designer", "Проектировщик"],
   ["department_head", "Руководитель отдела"],
-  ["platform_admin", "Администратор (bootstrap на сервере)"],
+  ["platform_admin", "Администратор платформы"],
 ];
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
+/** Проверяет область выбранной роли и обязательные идентификаторы отдела. */
 export function roleScope(role, organizationId = "", departmentId = "") {
   if (role === "designer") return { kind: "own" };
   if (role === "platform_admin") return { kind: "platform" };
@@ -42,6 +43,7 @@ function fillSelect(select, placeholder, items, valueKey, preferred = "") {
   select.value = items.some((item) => item[valueKey] === preferred) ? preferred : "";
 }
 
+/** Создаёт форму назначения роли с проверками статуса и версии полномочий. */
 export function createRoleForm(user, onChanged) {
   const form = document.createElement("form");
   form.className = "admin-role-form";
@@ -51,7 +53,6 @@ export function createRoleForm(user, onChanged) {
   select.name = "role";
   for (const [value, label] of roles) {
     const entry = option(value, label);
-    entry.disabled = value === "platform_admin" && !user.roles?.includes("platform_admin");
     select.append(entry);
   }
   select.value = user.currentRole ?? user.roles?.[0] ?? "";
@@ -93,15 +94,13 @@ export function createRoleForm(user, onChanged) {
   function updateControls() {
     const head = select.value === "department_head";
     departmentFields.hidden = !head;
-    button.disabled = Boolean(user.roleLocked) || user.tier !== "member"
-      || staleVersion || select.value === "platform_admin"
+    button.disabled = Boolean(user.roleLocked) || (user.status && user.status !== "active")
+      || staleVersion
       || (head && (directoryState !== "ready" || !organization.value || !department.value));
     if (user.roleLocked) {
-      message.textContent = "Роль администратора или назначение из AD меняется только защищённой процедурой.";
-    } else if (user.tier !== "member") {
-      message.textContent = "Рабочие роли доступны только участникам организации.";
-    } else if (select.value === "platform_admin") {
-      message.textContent = "Назначение администратора доступно только защищённой bootstrap-командой.";
+      message.textContent = "Назначение из AD меняется в источнике.";
+    } else if (user.status && user.status !== "active") {
+      message.textContent = "Роли доступны только активным пользователям.";
     } else if (head && directoryState === "loading") {
       message.textContent = "Загружаем организации и отделы…";
     } else if (head && directoryState === "error") {
@@ -171,7 +170,7 @@ export function createRoleForm(user, onChanged) {
   reload.addEventListener("click", () => { void loadDirectory(); });
   form.append(selectLabel, departmentFields, button, message);
   updateControls();
-  if (select.value === "department_head" && !user.roleLocked && user.tier === "member") {
+  if (select.value === "department_head" && !user.roleLocked && (!user.status || user.status === "active")) {
     void loadDirectory();
   }
 
@@ -191,8 +190,8 @@ export function createRoleForm(user, onChanged) {
       staleVersion = Boolean(error.partial || error.status === 409);
       message.textContent = error.detail ?? error.message ?? "Не удалось изменить роль.";
     } finally {
-      button.disabled = staleVersion || Boolean(user.roleLocked) || user.tier !== "member"
-        || select.value === "platform_admin" || (select.value === "department_head"
+      button.disabled = staleVersion || Boolean(user.roleLocked) || (user.status && user.status !== "active")
+        || (select.value === "department_head"
           && (directoryState !== "ready" || !organization.value || !department.value));
     }
   });

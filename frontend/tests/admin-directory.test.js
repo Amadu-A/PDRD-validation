@@ -182,3 +182,30 @@ test("админка создаёт организацию и отдел чер�
     setCsrfToken("");
   }
 });
+
+test("администратор назначает platform_admin активному внешнему пользователю", async () => {
+  const previousDocument = globalThis.document;
+  const previousFetch = globalThis.fetch;
+  globalThis.document = { createElement: (tag) => new FakeElement(tag) };
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response("{}", { status: 200 });
+  };
+  try {
+    const form = createRoleForm({ user_id: USER, authorization_version: 1,
+      tier: "registered_free", status: "active", currentRole: "", roles: [] }, async () => {});
+    const select = form.children[0].children[0];
+    select.value = "platform_admin";
+    select.dispatch("change");
+    assert.equal(Boolean(form.children[2].disabled), false);
+    await form.listeners.get("submit")[0]({ preventDefault() {} });
+    assert.equal(calls.length, 1);
+    assert.deepEqual(JSON.parse(calls[0].options.body), {
+      role: "platform_admin", scope: { kind: "platform" }, authorization_version: 1,
+    });
+  } finally {
+    globalThis.document = previousDocument;
+    globalThis.fetch = previousFetch;
+  }
+});

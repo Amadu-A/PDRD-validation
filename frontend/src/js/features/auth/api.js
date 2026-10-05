@@ -1,7 +1,7 @@
 // frontend/src/js/features/auth/api.js
 
 /** Публичный браузерный контракт auth-service через тот же API Gateway. */
-import { fetchJson } from "../../api.js";
+import { ApiError, fetchJson } from "../../api.js";
 
 const ROOT = "/api/v1/auth";
 let csrfToken = "";
@@ -19,7 +19,14 @@ export function authenticatedRequest(path, method = "GET", body) {
   });
 }
 
+/** Не отправляет пароль со страницы без HTTPS; проверка сервера остаётся обязательной. */
 function request(path, method = "GET", body) {
+  if (body?.password !== undefined && globalThis.location
+      && globalThis.location.protocol !== "https:") {
+    return Promise.reject(new ApiError(
+      403, "Вход и регистрация доступны только по HTTPS. Откройте защищённый адрес PDRD.",
+    ));
+  }
   return authenticatedRequest(`${ROOT}${path}`, method, body);
 }
 

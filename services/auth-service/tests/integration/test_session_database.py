@@ -27,7 +27,7 @@ pytestmark = pytest.mark.database
 TEST_HOST = "auth-test-postgres"
 TEST_NAME = "pdrd_auth_test"
 TEST_USER = "auth_test"
-EXPECTED_REVISION = "20261001_auth_0002"
+EXPECTED_REVISION = "20261005_auth_0003"
 
 
 def validate_isolated_database_url(raw_url: str) -> URL:
@@ -111,6 +111,7 @@ async def test_schema_is_owned_by_auth_service(engine: AsyncEngine) -> None:
         assert set(rows.all()) == {
             ("auth", "alembic_version_auth"),
             ("auth", "external_credentials"),
+            ("auth", "local_credentials"),
             ("auth", "rate_limits"),
             ("auth", "sessions"),
         }

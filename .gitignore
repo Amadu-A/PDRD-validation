@@ -3,6 +3,7 @@
 
 .env
 .env.review-*
+.env.origin-*
 
 .idea/
 .vscode/

@@ -15,10 +15,11 @@ from pdrd_user_service.domain.access import AccessTier
 
 
 class UserKind(StrEnum):
-    """Различает корпоративный и внешний аккаунт без выбора способа входа."""
+    """Различает корпоративный, внешний и локальный аккаунты."""
 
     CORPORATE = "corporate"
     EXTERNAL = "external"
+    LOCAL = "local"
 
 
 class UserStatus(StrEnum):
@@ -89,6 +90,10 @@ class UserAccount:
             _require_aware_datetime(self.last_login_at, "last_login_at")
             if self.last_login_at < self.created_at:
                 raise ValueError("last_login_at не может быть раньше created_at")
+        if self.kind is UserKind.LOCAL and (
+            self.login is None or self.status is UserStatus.PENDING_VERIFICATION
+        ):
+            raise ValueError("Локальному аккаунту нужен login без email-подтверждения")
         if self.tier is AccessTier.GUEST:
             raise ValueError("Гость не хранится как пользователь")
         if (

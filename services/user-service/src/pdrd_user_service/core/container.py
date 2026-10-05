@@ -8,12 +8,14 @@ from typing import Protocol
 
 from pdrd_user_service.application.use_cases.external_accounts import ExternalAccounts
 from pdrd_user_service.application.use_cases.list_users import AdminUserListing
+from pdrd_user_service.application.use_cases.local_superuser import LocalSuperusers
 from pdrd_user_service.application.use_cases.organization_memberships import (
     OrganizationMemberships,
 )
 from pdrd_user_service.application.use_cases.replace_role import ReplaceWorkerRole
 from pdrd_user_service.application.use_cases.review_scope import ReviewScopeAccess
 from pdrd_user_service.application.use_cases.users import UserDirectory
+from pdrd_user_service.core.observability import configure_identity_logging
 from pdrd_user_service.core.settings import Settings, get_settings
 from pdrd_user_service.infrastructure.database.engine import (
     build_async_engine,
@@ -55,6 +57,7 @@ class ApplicationContainer:
     role_replacement: ReplaceWorkerRole | None = None
     organization_memberships: OrganizationMemberships | None = None
     review_scope_access: ReviewScopeAccess | None = None
+    local_superusers: LocalSuperusers | None = None
 
     async def close(self) -> None:
         """Освобождает созданный пул соединений."""
@@ -82,6 +85,7 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
             review_scope_access=None,
         )
 
+    configure_identity_logging()
     engine = build_async_engine(actual_settings.database)
     session_factory = build_session_factory(engine)
 
@@ -106,4 +110,5 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
         role_replacement=ReplaceWorkerRole(unit_of_work),
         organization_memberships=OrganizationMemberships(unit_of_work),
         review_scope_access=ReviewScopeAccess(unit_of_work),
+        local_superusers=LocalSuperusers(unit_of_work),
     )
