@@ -23,14 +23,13 @@ test("гость и бесплатный пользователь не полу�
   assert.ok(partitionCapabilities(guest).locked.includes("Администрирование PDRD"));
 });
 
-test("проектировщик видит Gold, но не утверждение Review", () => {
+test("без назначения ревью у проектировщика недоступны Gold и утверждение", () => {
   const state = { authenticated: true, user: {
-    roles: ["designer"], permissions: ["analysis.run", "review.gold.create",
-      "user_documents.own.write"],
+    roles: ["designer"], permissions: ["analysis.run", "user_documents.own.write"],
   } };
   assert.equal(accessDescription(state), "Проектировщик");
   const result = partitionCapabilities(state);
-  assert.ok(result.allowed.includes("Создание Gold-замечаний"));
+  assert.ok(result.locked.includes("Создание Gold-замечаний"));
   assert.ok(result.locked.includes("Утверждение Human Review"));
   assert.ok(result.locked.includes("Собственные пользовательские документы (временно недоступны)"));
 });

@@ -19,6 +19,10 @@ from pdrd_admin_service.contracts.organization_models import (
     OrganizationPage,
     OrganizationResponse,
 )
+from pdrd_admin_service.contracts.review_access_models import (
+    ChangeReviewAccessRequest,
+    ReviewAccessChangeResponse,
+)
 from pdrd_admin_service.contracts.section_models import (
     CatalogSection,
     SectionAccessResponse,
@@ -52,6 +56,15 @@ class UserDirectory(Protocol):
         self, actor_user_id: UUID, target_user_id: UUID
     ) -> SectionAccessResponse:
         """Читает назначенные разделы с повторной проверкой администратора."""
+        ...
+
+    async def change_review_access(
+        self,
+        actor_user_id: UUID,
+        target_user_id: UUID,
+        command: ChangeReviewAccessRequest,
+    ) -> ReviewAccessChangeResponse:
+        """Передаёт назначение ревью доверенному владельцу профилей с CAS."""
         ...
 
     async def replace_role(

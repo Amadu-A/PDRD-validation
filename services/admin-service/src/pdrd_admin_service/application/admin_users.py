@@ -26,10 +26,15 @@ from pdrd_admin_service.contracts.models import (
     UserPage,
     UserResponse,
 )
+from pdrd_admin_service.contracts.review_access_models import (
+    ChangeReviewAccessRequest,
+    ReviewAccessChangeResponse,
+)
 from pdrd_admin_service.contracts.section_models import (
     CatalogSection,
     SectionAccessResponse,
 )
+from pdrd_admin_service.core.observability import log_execution_time
 
 __all__ = (
     "AdminUsers",
@@ -106,6 +111,21 @@ class AdminUsers:
                     "Выбранный раздел отсутствует в нормативном каталоге"
                 )
         return await self._users.replace_role(identity.user_id, target_user_id, command)
+
+    @log_execution_time(operation="admin_review_access_change")
+    async def change_review_access(
+        self,
+        token: str | None,
+        target_user_id: UUID,
+        command: ChangeReviewAccessRequest,
+        *,
+        csrf: str | None,
+    ) -> ReviewAccessChangeResponse:
+        """Проверяет живую сессию и CSRF перед отдельным назначением ревью."""
+        identity = await self._authorize(token, "users.roles.assign", csrf or "")
+        return await self._users.change_review_access(
+            identity.user_id, target_user_id, command
+        )
 
     async def list_sections(self, token: str | None) -> tuple[CatalogSection, ...]:
         """Показывает администратору исходный каталог разделов."""

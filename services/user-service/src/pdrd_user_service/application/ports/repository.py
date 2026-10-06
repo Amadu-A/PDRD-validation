@@ -132,6 +132,17 @@ class UserRepository(Protocol):
         """Возвращает историю назначений роли."""
         ...
 
+    async def replace_review_access(
+        self,
+        updated_user: UserAccount,
+        *,
+        expected_authorization_version: int,
+        actor_user_id: UUID,
+        created_at: datetime,
+    ) -> None:
+        """Атомарно сохраняет назначение ревью, новую версию прав и аудит."""
+        ...
+
     async def add_role_assignment(
         self,
         updated_user: UserAccount,

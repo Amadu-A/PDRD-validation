@@ -34,3 +34,9 @@
 .admin-role-form label.admin-role-form__section { display: flex; align-items: center; gap: 8px; }
 .admin-role-form__section input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; padding: 0; flex-shrink: 0; accent-color: #2457a7; }
 .admin-role-form__sections:disabled { opacity: .65; }
+
+/* Доступ к ревью назначается прямо в строке пользователя. */
+.admin-review-access { display: grid; gap: 4px; margin-left: auto; }
+.admin-review-access__label { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #18233a; }
+.admin-review-access__label input { width: 18px; height: 18px; accent-color: #2457a7; }
+.admin-review-access__message { max-width: 280px; font-size: 11px; color: #5c687b; }

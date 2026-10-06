@@ -14,6 +14,7 @@ from pdrd_admin_service.application.admin_users import (
     UpstreamUnavailable,
 )
 from pdrd_admin_service.contracts.models import (
+    AdminUserResponse,
     ReplaceRoleRequest,
     RoleDetailResponse,
     SessionIdentity,
@@ -74,7 +75,19 @@ class Users:
     ) -> UserPage:
         """Фиксирует, что актёр пришёл из auth, а не из клиента."""
         self.calls.append(("list", (actor_user_id, limit, offset)))
-        return UserPage(items=(user(),), total=1, limit=limit, offset=offset)
+        return UserPage(
+            items=(
+                AdminUserResponse(
+                    **user().model_dump(),
+                    review_access=False,
+                    review_access_automatic=False,
+                    review_access_editable=True,
+                ),
+            ),
+            total=1,
+            limit=limit,
+            offset=offset,
+        )
 
     async def get_roles(
         self, actor_user_id: UUID, target_user_id: UUID

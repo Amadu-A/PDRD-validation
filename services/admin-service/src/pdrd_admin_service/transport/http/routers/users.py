@@ -13,6 +13,10 @@ from pdrd_admin_service.contracts.models import (
     UserPage,
     UserResponse,
 )
+from pdrd_admin_service.contracts.review_access_models import (
+    ChangeReviewAccessRequest,
+    ReviewAccessChangeResponse,
+)
 from pdrd_admin_service.contracts.section_models import (
     CatalogSection,
     SectionAccessResponse,
@@ -77,3 +81,17 @@ async def replace_role(
 ) -> RoleDetailResponse:
     """Меняет одну рабочую роль с CAS и защитой от CSRF."""
     return await admin.replace_role(pdrd_session, user_id, command, csrf=csrf_token)
+
+
+@router.patch("/{user_id}/review-access", response_model=ReviewAccessChangeResponse)
+async def change_review_access(
+    user_id: UUID,
+    command: ChangeReviewAccessRequest,
+    admin: Admin,
+    pdrd_session: SessionCookie = None,
+    csrf_token: CsrfHeader = None,
+) -> ReviewAccessChangeResponse:
+    """Меняет доступ к ревью после проверки административной сессии и CSRF."""
+    return await admin.change_review_access(
+        pdrd_session, user_id, command, csrf=csrf_token
+    )

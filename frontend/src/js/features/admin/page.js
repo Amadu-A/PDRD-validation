@@ -28,7 +28,7 @@ async function reloadUsers(revision = accessRevision) {
   total = page.total;
   renderUsers(document, users, reloadUsers);
   document.querySelector("[data-admin-overview]").textContent =
-    `В каталоге пользователей: ${total}. Изменения ролей записываются через admin-service.`;
+    `В каталоге пользователей: ${total}. После изменения роли или доступа к ревью пользователю нужно войти снова.`;
   document.querySelector("[data-admin-prev]").disabled = offset === 0;
   document.querySelector("[data-admin-next]").disabled = offset + users.length >= total;
   document.querySelector("[data-admin-page-label]").textContent = total

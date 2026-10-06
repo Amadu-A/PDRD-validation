@@ -269,6 +269,7 @@ def access_subject_for(
         tier=user.tier,
         roles=roles,
         active=user.status is UserStatus.ACTIVE,
+        review_access_enabled=user.review_access_enabled,
     )
 
 

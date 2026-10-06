@@ -12,6 +12,7 @@ from pdrd_user_service.core.container import ApplicationContainer
 from pdrd_user_service.core.settings import DatabaseSettings, Settings
 from pdrd_user_service.domain.access import AccessTier
 from pdrd_user_service.domain.identity import UserAccount, UserKind, UserStatus
+from pdrd_user_service.domain.review_access import ReviewAccessState
 from pdrd_user_service.main import create_app
 
 KEY = "test-internal-key-which-remains-private"
@@ -49,7 +50,13 @@ class Listing:
             email="client@example.test",
             created_at=datetime(2026, 10, 1, 12, 0, tzinfo=UTC),
         )
-        return UserPage((user,), 23, values["limit"], values["offset"])
+        return UserPage(
+            (user,),
+            23,
+            values["limit"],
+            values["offset"],
+            (ReviewAccessState(False, False, False),),
+        )
 
 
 def client_and_listing() -> tuple[TestClient, Listing]:

@@ -3,6 +3,7 @@
 /** Список и фильтр реальных пользователей без сохранения данных в браузере. */
 import { createRoleForm } from "./role-form.js";
 import { getUserRoles } from "./api.js";
+import { createReviewAccessControl } from "./review-access.js";
 
 const statusLabels = {
   active: "Активен",
@@ -42,7 +43,7 @@ export function renderUsers(root, users, onChanged) {
     const status = document.createElement("span");
     status.className = "admin-user__status";
     status.textContent = statusLabels[user.status] ?? user.status;
-    heading.append(name, status);
+    heading.append(name, status, createReviewAccessControl(user, { onChanged }));
     const meta = document.createElement("p");
     meta.className = "admin-user__meta";
     meta.textContent = [user.login, user.email, user.tier].filter(Boolean).join(" · ");

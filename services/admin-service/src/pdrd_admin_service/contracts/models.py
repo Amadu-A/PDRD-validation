@@ -37,10 +37,18 @@ class UserResponse(StrictModel):
     authorization_version: int = Field(ge=1)
 
 
+class AdminUserResponse(UserResponse):
+    """Дополняет административную строку вычисленными правами ревью."""
+
+    review_access: bool
+    review_access_automatic: bool
+    review_access_editable: bool
+
+
 class UserPage(StrictModel):
     """Страница каталога с серверной пагинацией."""
 
-    items: tuple[UserResponse, ...]
+    items: tuple[AdminUserResponse, ...]
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=100)
     offset: int = Field(ge=0)

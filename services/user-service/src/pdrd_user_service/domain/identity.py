@@ -72,10 +72,13 @@ class UserAccount:
     email: str | None = None
     last_login_at: datetime | None = None
     authorization_version: int = 1
+    review_access_enabled: bool = False
 
     def __post_init__(self) -> None:
         """Проверяет профиль, способ регистрации и хронологию входов."""
         _require_uuid(self.user_id, "user_id")
+        if not isinstance(self.review_access_enabled, bool):
+            raise TypeError("review_access_enabled должен быть bool")
         if not isinstance(self.kind, UserKind):
             raise TypeError("kind должен быть UserKind")
         if not isinstance(self.tier, AccessTier):

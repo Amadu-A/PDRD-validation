@@ -48,10 +48,22 @@ class Users:
         self, actor_user_id: UUID, *, limit: int, offset: int
     ) -> object:
         """Возвращает страницу."""
-        from pdrd_admin_service.contracts.models import UserPage
+        from pdrd_admin_service.contracts.models import AdminUserResponse, UserPage
 
         self.calls.append(("list", actor_user_id))
-        return UserPage(items=(self.profile(),), total=1, limit=limit, offset=offset)
+        return UserPage(
+            items=(
+                AdminUserResponse(
+                    **self.profile().model_dump(),
+                    review_access=False,
+                    review_access_automatic=False,
+                    review_access_editable=True,
+                ),
+            ),
+            total=1,
+            limit=limit,
+            offset=offset,
+        )
 
     def profile(self) -> object:
         """Возвращает профиль без секрета."""
@@ -88,6 +100,21 @@ class Users:
         self.calls.append(("replace", (actor_user_id, target_user_id, command)))
         return RoleDetailResponse(
             user=self.profile(), roles=("department_head",), assignments=()
+        )
+
+    async def change_review_access(self, actor_user_id, target_user_id, command):
+        """Фиксирует актёра из сессии и отдельную строгую команду."""
+        from pdrd_admin_service.contracts.review_access_models import (
+            ReviewAccessChangeResponse,
+        )
+
+        self.calls.append(("review-access", (actor_user_id, target_user_id, command)))
+        profile = self.profile().model_copy(update={"authorization_version": 2})
+        return ReviewAccessChangeResponse(
+            user=profile,
+            review_access=command.enabled,
+            review_access_automatic=False,
+            review_access_editable=True,
         )
 
 
@@ -268,3 +295,56 @@ def test_section_catalog_and_multi_assignment_require_admin_csrf_and_known_ids()
         assert len(users.calls) == writes
         sessions.permissions = ()
         assert client.get("/api/v1/admin/users/section-catalog").status_code == 403
+
+
+def test_review_access_patch_requires_admin_csrf_and_ignores_spoofed_actor():
+    """Только администратор с CSRF меняет ревью; браузерный UUID актёра игнорируется."""
+    app, sessions, users = make_app()
+    path = f"/api/v1/admin/users/{TARGET_ID}/review-access"
+    payload = {"enabled": True, "authorization_version": 1}
+    with TestClient(app) as client:
+        assert client.patch(path, json=payload).status_code == 401
+        client.cookies.set("pdrd_session", "browser-secret")
+        assert client.patch(path, json=payload).status_code == 403
+        assert (
+            client.patch(
+                path, json=payload, headers={"X-CSRF-Token": "wrong"}
+            ).status_code
+            == 403
+        )
+        for field, value in (
+            ("enabled", "true"),
+            ("authorization_version", True),
+            ("role", "platform_admin"),
+        ):
+            assert (
+                client.patch(
+                    path, json={**payload, field: value}, headers={"X-CSRF-Token": CSRF}
+                ).status_code
+                == 422
+            )
+        response = client.patch(
+            path,
+            json=payload,
+            headers={"X-CSRF-Token": CSRF, "X-PDRD-Actor-Id": str(TARGET_ID)},
+        )
+        assert response.status_code == 200
+        assert response.json()["review_access"]
+        assert response.json()["user"]["authorization_version"] == 2
+        sessions.permissions = (
+            "review.gold.create",
+            "review.findings.decide",
+            "experience.capture",
+        )
+        assert (
+            client.patch(path, json=payload, headers={"X-CSRF-Token": CSRF}).status_code
+            == 403
+        )
+    assert len(users.calls) == 1
+    operation, (actor, target, command) = users.calls[0]
+    assert (operation, actor, target, command.enabled) == (
+        "review-access",
+        ACTOR_ID,
+        TARGET_ID,
+        True,
+    )

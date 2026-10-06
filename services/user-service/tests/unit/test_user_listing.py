@@ -57,6 +57,8 @@ class Users:
         self.actor: UserAccount | None = admin()
         self.roles: tuple[RoleAssignment, ...] = (assignment(),)
         self.reads = 0
+        self.target = replace(admin(), user_id=USER_ID)
+        self.target_roles = ()
 
     async def get_user(
         self, user_id: UUID, *, for_update: bool = False
@@ -69,8 +71,14 @@ class Users:
         self, user_id: UUID, *, for_update: bool = False
     ) -> tuple[RoleAssignment, ...]:
         """Возвращает сохранённую роль указанного пользователя."""
-        assert user_id == ADMIN_ID and for_update
-        return self.roles
+        if user_id == ADMIN_ID:
+            assert for_update
+            return self.roles
+        return self.target_roles
+
+    async def list_memberships(self, user_id: UUID) -> tuple:
+        """У тестовой страницы нет членства в отделах."""
+        return ()
 
     async def list_users(
         self, *, limit: int, offset: int
@@ -78,7 +86,7 @@ class Users:
         """Выдаёт страницу только после успешной проверки полномочий."""
         self.reads += 1
         assert (limit, offset) == (1, 1)
-        return (replace(admin(), user_id=USER_ID),), 2
+        return (self.target,), 2
 
 
 class Work:
@@ -135,3 +143,38 @@ async def test_page_bounds_are_checked_before_database_read() -> None:
         with pytest.raises(ValueError, match="страницы"):
             await listing.page(actor_user_id=ADMIN_ID, limit=limit, offset=offset)
     assert users.reads == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "role, enabled, allowed, automatic, editable",
+    [
+        (Role.DESIGNER, False, False, False, True),
+        (Role.DESIGNER, True, True, False, True),
+        (Role.DEPARTMENT_HEAD, False, True, True, False),
+        (Role.PLATFORM_ADMIN, False, True, True, False),
+    ],
+)
+async def test_user_listing_exposes_effective_review_state(
+    role, enabled, allowed, automatic, editable
+):
+    """Строка админки показывает действующее право, а не только ручной флаг."""
+    users = Users()
+    users.target = replace(users.target, review_access_enabled=enabled)
+    scope = {
+        Role.DESIGNER: ScopeKind.OWN,
+        Role.DEPARTMENT_HEAD: ScopeKind.SECTIONS,
+        Role.PLATFORM_ADMIN: ScopeKind.PLATFORM,
+    }[role]
+    users.target_roles = (
+        replace(assignment(), user_id=USER_ID, role=role, scope=RoleScope(scope)),
+    )
+    page = await AdminUserListing(lambda: Work(users), clock=lambda: AT).page(
+        actor_user_id=ADMIN_ID, limit=1, offset=1
+    )
+    state = page.review_access_states[0]
+    assert (
+        state.review_access,
+        state.review_access_automatic,
+        state.review_access_editable,
+    ) == (allowed, automatic, editable)

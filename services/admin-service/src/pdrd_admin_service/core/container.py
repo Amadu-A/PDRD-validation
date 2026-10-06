@@ -9,6 +9,7 @@ import httpx
 
 from pdrd_admin_service.application.admin_organizations import AdminOrganizations
 from pdrd_admin_service.application.admin_users import AdminUsers
+from pdrd_admin_service.core.observability import configure_admin_logging
 from pdrd_admin_service.core.settings import Settings, get_settings
 from pdrd_admin_service.infrastructure.clients import (
     AuthServiceClient,
@@ -35,6 +36,7 @@ class ApplicationContainer:
 def build_container(settings: Settings | None = None) -> ApplicationContainer:
     """Включает рабочие маршруты только после проверки ключей и адресов."""
     actual = settings or get_settings()
+    configure_admin_logging()
     if not actual.enabled:
 
         async def disabled() -> bool:

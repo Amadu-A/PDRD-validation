@@ -58,11 +58,11 @@ def test_verified_free_account_adds_profile_without_review_rights() -> None:
     assert has_operation_permission(free, Permission.USER_DOCUMENT_OWN_READ)
 
 
-def test_designer_can_create_gold_but_cannot_approve_or_capture() -> None:
-    """Проектировщик готовит Gold без решения за руководителя."""
+def test_designer_requires_explicit_review_access() -> None:
+    """Без назначения проектировщик анализирует документы, но не правит ревью."""
     designer = AccessSubject(AccessTier.MEMBER, frozenset({Role.DESIGNER}))
 
-    assert has_operation_permission(designer, Permission.REVIEW_GOLD_CREATE)
+    assert not has_operation_permission(designer, Permission.REVIEW_GOLD_CREATE)
     assert has_operation_permission(designer, Permission.USER_DOCUMENT_OWN_WRITE)
     assert not has_operation_permission(designer, Permission.USER_DOCUMENT_SCOPED_WRITE)
     assert not has_operation_permission(designer, Permission.REVIEW_FINDINGS_DECIDE)

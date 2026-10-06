@@ -7,10 +7,16 @@ import os
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
+from pdrd_auth_service.application.ports.sessions import UserAccessState
+from pdrd_auth_service.application.use_cases.sessions import (
+    SessionInvalid,
+    SessionService,
+)
 from pdrd_user_service.application.ports.repository import (
     AuthorizationConflict,
     BootstrapAlreadyPerformed,
@@ -18,10 +24,11 @@ from pdrd_user_service.application.ports.repository import (
 )
 from pdrd_user_service.application.use_cases.distribute_section import DistributeSection
 from pdrd_user_service.application.use_cases.external_accounts import ExternalAccounts
+from pdrd_user_service.application.use_cases.review_access import ReviewAccessManagement
 from pdrd_user_service.application.use_cases.review_scope import ReviewScopeAccess
 from pdrd_user_service.application.use_cases.users import UserDirectory
 from pdrd_user_service.core.settings import DatabaseSettings, Settings
-from pdrd_user_service.domain.access import AccessTier, Role
+from pdrd_user_service.domain.access import AccessTier, Permission, Role
 from pdrd_user_service.domain.identity import (
     Department,
     ExternalIdentity,
@@ -37,6 +44,7 @@ from pdrd_user_service.domain.role_assignments import (
     RoleSource,
     ScopeKind,
 )
+from pdrd_user_service.infrastructure.database.base import Base
 from pdrd_user_service.infrastructure.database.engine import build_session_factory
 from pdrd_user_service.infrastructure.database.health import (
     _default_migration_directory,
@@ -49,6 +57,7 @@ from pdrd_user_service.infrastructure.database.models import (
     CatalogSectionDistributionModel,
     DepartmentModel,
     OrganizationModel,
+    ReviewAccessEventModel,
     RoleAssignmentEventModel,
     RoleAssignmentModel,
     SectionAccessEventModel,
@@ -56,7 +65,7 @@ from pdrd_user_service.infrastructure.database.models import (
 )
 from pdrd_user_service.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from pydantic import SecretStr
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, inspect, select, text, update
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -66,7 +75,7 @@ pytestmark = pytest.mark.database
 TEST_HOST = "user-test-postgres"
 TEST_NAME = "pdrd_user_test"
 TEST_USER = "user_test"
-EXPECTED_REVISION = "20261006_0004"
+EXPECTED_REVISION = "20261006_0005"
 
 
 def validate_isolated_database_url(raw_url: str) -> URL:
@@ -234,6 +243,11 @@ async def remove_test_users(
         await connection.execute(
             delete(CatalogSectionDistributionModel).where(
                 CatalogSectionDistributionModel.actor_user_id.in_(user_ids)
+            )
+        )
+        await connection.execute(
+            delete(ReviewAccessEventModel).where(
+                ReviewAccessEventModel.user_id.in_(user_ids)
             )
         )
         await connection.execute(
@@ -1325,3 +1339,187 @@ async def test_first_login_snapshot_race_keeps_newly_distributed_section(
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         await remove_test_users(test_engine, head_id, target_id)
+
+
+async def create_review_test_users(factory, admin_id, target_id):
+    """Создаёт администратора и проектировщика с исходной версией прав 2."""
+    admin = corporate_member(user_id=admin_id)
+    assignment = RoleAssignment(
+        assignment_id=uuid4(),
+        user_id=admin_id,
+        role=Role.PLATFORM_ADMIN,
+        source=RoleSource.LOCAL,
+        scope=RoleScope(ScopeKind.PLATFORM),
+        created_at=datetime.now(UTC),
+    )
+    async with SqlAlchemyUnitOfWork(factory) as work:
+        await work.users.create_user(
+            admin, ExternalIdentity("test", "review-admin", admin_id.hex, admin_id)
+        )
+        await work.users.bootstrap_admin(
+            replace(admin, authorization_version=2), assignment, 1
+        )
+        await work.commit()
+    return await create_catalog_worker(factory, target_id, Role.DESIGNER)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_review_grant_and_revoke_keep_single_audit_and_live_permissions(
+    test_engine,
+):
+    """Конкурентная выдача выигрывает один CAS; отзыв убирает права и меняет версию сессий."""
+    admin_id, target_id = uuid4(), uuid4()
+    factory = build_session_factory(test_engine)
+    try:
+        await create_review_test_users(factory, admin_id, target_id)
+        management = ReviewAccessManagement(lambda: SqlAlchemyUnitOfWork(factory))
+        directory = UserDirectory(lambda: SqlAlchemyUnitOfWork(factory))
+        store, profiles = AsyncMock(), AsyncMock()
+        rows = {}
+        store.create.side_effect = lambda session: rows.setdefault(
+            session.token_hash, session
+        )
+        store.find_by_token_hash.side_effect = rows.get
+        store.renew_if_active.side_effect = lambda session, now, idle: session
+
+        async def live_state(user_id):
+            """Читает живую версию User Service для настоящего сценария Auth."""
+            async with SqlAlchemyUnitOfWork(factory) as work:
+                user = await work.users.get_user(user_id)
+            return UserAccessState(
+                user.user_id, user.status.value, user.authorization_version
+            )
+
+        profiles.get_state.side_effect = live_state
+        sessions = SessionService(store, profiles)
+        old_session = await sessions.issue(target_id)
+        await sessions.resolve(old_session.token)
+        before = await directory.permissions(target_id)
+        assert Permission.ANALYSIS_RUN in before.permissions
+        assert Permission.REVIEW_GOLD_CREATE not in before.permissions
+
+        async def grant():
+            """Пытается выдать доступ по одной и той же исходной версии."""
+            return await management.change(
+                actor_user_id=admin_id,
+                target_user_id=target_id,
+                enabled=True,
+                authorization_version=2,
+            )
+
+        results = await asyncio.gather(
+            *(grant() for _ in range(6)), return_exceptions=True
+        )
+        assert sum(not isinstance(item, Exception) for item in results) == 1
+        assert sum(isinstance(item, AuthorizationConflict) for item in results) == 5
+        with pytest.raises(SessionInvalid):
+            await sessions.resolve(old_session.token)
+        granted_session = await sessions.issue(target_id)
+        await sessions.resolve(granted_session.token)
+        granted = await directory.permissions(target_id)
+        assert granted.authorization_version == 3
+        assert {
+            Permission.REVIEW_GOLD_CREATE,
+            Permission.REVIEW_FINDINGS_DECIDE,
+            Permission.REVIEW_APPROVE,
+            Permission.REVIEWED_PDF_DOWNLOAD,
+            Permission.EXPERIENCE_CAPTURE,
+        } <= set(granted.permissions)
+        assert Permission.REVIEW_SCOPED_READ not in granted.permissions
+        repeated = await management.change(
+            actor_user_id=admin_id,
+            target_user_id=target_id,
+            enabled=True,
+            authorization_version=3,
+        )
+        assert repeated.user.authorization_version == 3
+        await management.change(
+            actor_user_id=admin_id,
+            target_user_id=target_id,
+            enabled=False,
+            authorization_version=3,
+        )
+        with pytest.raises(SessionInvalid):
+            await sessions.resolve(granted_session.token)
+        assert store.revoke_token_hash.await_count == 2
+        revoked = await directory.permissions(target_id)
+        assert revoked.authorization_version == 4
+        assert revoked.authorization_version != granted.authorization_version
+        assert Permission.REVIEW_GOLD_CREATE not in revoked.permissions
+        assert Permission.EXPERIENCE_CAPTURE not in revoked.permissions
+        assert Permission.ANALYSIS_RUN in revoked.permissions
+        async with test_engine.connect() as connection:
+            events = (
+                await connection.execute(
+                    select(
+                        ReviewAccessEventModel.actor_user_id,
+                        ReviewAccessEventModel.enabled,
+                        ReviewAccessEventModel.authorization_version,
+                    )
+                    .where(ReviewAccessEventModel.user_id == target_id)
+                    .order_by(ReviewAccessEventModel.authorization_version)
+                )
+            ).all()
+        assert events == [(admin_id, True, 3), (admin_id, False, 4)]
+    finally:
+        await remove_test_users(test_engine, admin_id, target_id)
+
+
+@pytest.mark.asyncio
+async def test_review_flag_version_and_audit_roll_back_together(test_engine):
+    """Откат и невалидный актёр не оставляют флаг или новую версию без аудита."""
+    target_id = uuid4()
+    factory = build_session_factory(test_engine)
+    try:
+        profile = await create_catalog_worker(factory, target_id, Role.DESIGNER)
+        updated = replace(profile, review_access_enabled=True, authorization_version=3)
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            await work.users.replace_review_access(
+                updated,
+                expected_authorization_version=2,
+                actor_user_id=target_id,
+                created_at=datetime.now(UTC),
+            )
+            # Без явного commit профиль, версия и аудит должны откатиться.
+        with pytest.raises(IntegrityError):
+            async with SqlAlchemyUnitOfWork(factory) as work:
+                await work.users.replace_review_access(
+                    updated,
+                    expected_authorization_version=2,
+                    actor_user_id=uuid4(),
+                    created_at=datetime.now(UTC),
+                )
+                await work.commit()
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            saved = await work.users.get_user(target_id)
+        assert saved.authorization_version == 2
+        assert saved.review_access_enabled is False
+        async with test_engine.connect() as connection:
+            assert (
+                await connection.execute(
+                    select(ReviewAccessEventModel.event_id).where(
+                        ReviewAccessEventModel.user_id == target_id
+                    )
+                )
+            ).all() == []
+    finally:
+        await remove_test_users(test_engine, target_id)
+
+
+@pytest.mark.asyncio
+async def test_user_migration_columns_match_orm_contract(test_engine):
+    """Каждая ORM-колонка должна существовать после миграций собственной схемы."""
+    async with test_engine.connect() as connection:
+
+        def verify_columns(sync_connection):
+            """Сравнивает БД только с метаданными users, без чужих сервисов."""
+            inspector = inspect(sync_connection)
+            for table in Base.metadata.sorted_tables:
+                assert table.schema == "users"
+                actual = {
+                    column["name"]
+                    for column in inspector.get_columns(table.name, schema="users")
+                }
+                assert actual == set(table.columns.keys()), table.name
+
+        await connection.run_sync(verify_columns)

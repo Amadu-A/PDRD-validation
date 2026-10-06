@@ -68,13 +68,14 @@ class Permission(StrEnum):
 class AccessSubject:
     """Хранит доверенный уровень аккаунта, роли и статус активности.
 
-    Роли заполняет только сервер после проверки сессии и user-service. Гость
+    Роли и ручное назначение ревью заполняет только сервер из user-service. Гость
     и бесплатный аккаунт не могут получить роли через этот контракт.
     """
 
     tier: AccessTier
     roles: frozenset[Role] = field(default_factory=frozenset)
     active: bool = True
+    review_access_enabled: bool = False
 
     def __post_init__(self) -> None:
         """Отвергает некорректный или изменяемый доверенный контекст."""
@@ -86,6 +87,8 @@ class AccessSubject:
             raise TypeError("roles должен содержать только Role")
         if not isinstance(self.active, bool):
             raise TypeError("active должен быть bool")
+        if not isinstance(self.review_access_enabled, bool):
+            raise TypeError("review_access_enabled должен быть bool")
         if self.tier is not AccessTier.MEMBER and self.roles:
             raise ValueError("Роли доступны только действующему участнику")
 
@@ -115,14 +118,24 @@ _DESIGNER_PERMISSIONS = frozenset(
     {
         Permission.USER_DOCUMENT_OWN_READ,
         Permission.USER_DOCUMENT_OWN_WRITE,
+    }
+)
+
+_REVIEW_OWN_PERMISSIONS = frozenset(
+    {
         Permission.REVIEW_OWN_READ,
         Permission.REVIEW_GOLD_CREATE,
+        Permission.REVIEW_FINDINGS_DECIDE,
+        Permission.REVIEW_APPROVE,
+        Permission.REVIEWED_PDF_DOWNLOAD,
+        Permission.EXPERIENCE_CAPTURE,
     }
 )
 
 _HEAD_PERMISSIONS = frozenset(
     {
         *_DESIGNER_PERMISSIONS,
+        *_REVIEW_OWN_PERMISSIONS,
         Permission.USER_DOCUMENT_SCOPED_READ,
         Permission.USER_DOCUMENT_SCOPED_WRITE,
         Permission.REVIEW_SCOPED_READ,
@@ -164,6 +177,8 @@ def effective_permissions(subject: AccessSubject) -> frozenset[Permission]:
 
     Заблокированный аккаунт не получает даже публичные операции в рамках
     текущей сессии. Участник без роли сохраняет только бесплатные операции.
+    Проектировщику ревью выдаётся отдельным назначением администратора;
+    руководителю и администратору — автоматически по живой роли.
     """
     if not isinstance(subject, AccessSubject):
         raise TypeError("subject должен быть AccessSubject")
@@ -174,6 +189,8 @@ def effective_permissions(subject: AccessSubject) -> frozenset[Permission]:
     if subject.tier is not AccessTier.GUEST:
         permissions.update(_PROFILE_PERMISSIONS)
     if subject.tier is AccessTier.MEMBER:
+        if subject.review_access_enabled and Role.DESIGNER in subject.roles:
+            permissions.update(_REVIEW_OWN_PERMISSIONS)
         for role in subject.roles:
             permissions.update(_ROLE_PERMISSIONS[role])
     return frozenset(permissions)

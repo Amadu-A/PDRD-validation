@@ -114,7 +114,7 @@ def test_local_designer_assignment_changes_permissions_and_version() -> None:
     assert assignments == (assignment,)
     assert effective_roles(updated_user, assignments, (), AT) == {Role.DESIGNER}
     subject = access_subject_for(updated_user, assignments, (), AT)
-    assert has_operation_permission(subject, Permission.REVIEW_GOLD_CREATE)
+    assert not has_operation_permission(subject, Permission.REVIEW_GOLD_CREATE)
     assert not has_operation_permission(subject, Permission.REVIEW_APPROVE)
 
 

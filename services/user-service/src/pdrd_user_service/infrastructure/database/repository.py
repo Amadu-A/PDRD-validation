@@ -34,6 +34,7 @@ from pdrd_user_service.infrastructure.database.models import (
     ExternalIdentityModel,
     MembershipModel,
     OrganizationModel,
+    ReviewAccessEventModel,
     RoleAssignmentEventModel,
     RoleAssignmentModel,
     SectionAccessEventModel,
@@ -59,6 +60,7 @@ def _user_from_model(row: UserModel) -> UserAccount:
         email=row.email,
         last_login_at=row.last_login_at,
         authorization_version=row.authorization_version,
+        review_access_enabled=row.review_access_enabled,
     )
 
 
@@ -187,6 +189,7 @@ class SqlAlchemyUserRepository:
                         created_at=user.created_at,
                         last_login_at=user.last_login_at,
                         authorization_version=user.authorization_version,
+                        review_access_enabled=user.review_access_enabled,
                     )
                 )
                 # Без ORM-связи SQLAlchemy может вставить identity раньше accounts.
@@ -551,6 +554,34 @@ class SqlAlchemyUserRepository:
         changed = await self._session.scalar(statement)
         if changed is None:
             raise AuthorizationConflict("Версия полномочий или профиль изменились")
+
+    async def replace_review_access(
+        self,
+        updated_user: UserAccount,
+        *,
+        expected_authorization_version: int,
+        actor_user_id: UUID,
+        created_at: datetime,
+    ) -> None:
+        """Одной транзакцией сохраняет флаг, CAS-версию и событие аудита."""
+        async with self._session.begin_nested():
+            await self._bump_version(updated_user, expected_authorization_version)
+            await self._session.execute(
+                update(UserModel)
+                .where(UserModel.user_id == updated_user.user_id)
+                .values(review_access_enabled=updated_user.review_access_enabled)
+            )
+            self._session.add(
+                ReviewAccessEventModel(
+                    event_id=uuid4(),
+                    user_id=updated_user.user_id,
+                    actor_user_id=actor_user_id,
+                    enabled=updated_user.review_access_enabled,
+                    authorization_version=updated_user.authorization_version,
+                    created_at=created_at,
+                )
+            )
+            await self._session.flush()
 
     async def add_role_assignment(
         self,

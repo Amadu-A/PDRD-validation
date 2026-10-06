@@ -30,6 +30,10 @@ from pdrd_admin_service.contracts.organization_models import (
     OrganizationPage,
     OrganizationResponse,
 )
+from pdrd_admin_service.contracts.review_access_models import (
+    ChangeReviewAccessRequest,
+    ReviewAccessChangeResponse,
+)
 from pdrd_admin_service.contracts.section_models import (
     CatalogSection,
     SectionAccessResponse,
@@ -143,6 +147,21 @@ class UserServiceClient:
             actor_user_id=actor_user_id,
         )
         return _validated(SectionAccessResponse, response)
+
+    async def change_review_access(
+        self,
+        actor_user_id: UUID,
+        target_user_id: UUID,
+        command: ChangeReviewAccessRequest,
+    ) -> ReviewAccessChangeResponse:
+        """Передаёт служебный ключ и актёра из проверенной сессии."""
+        response = await self._request(
+            "PATCH",
+            f"/internal/v1/users/{target_user_id}/review-access",
+            actor_user_id=actor_user_id,
+            json=command.model_dump(mode="json"),
+        )
+        return _validated(ReviewAccessChangeResponse, response)
 
     async def replace_role(
         self, actor_user_id: UUID, target_user_id: UUID, command: ReplaceRoleRequest
