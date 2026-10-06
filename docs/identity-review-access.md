@@ -95,7 +95,7 @@ docker compose --profile identity --profile auth exec -T user-service python -m 
 BASH
 ```
 
-Ожидаемая ревизия User: `20261006_0005 (head)`. `up.sh` применяет миграции и
+Ожидаемая ревизия User: `20261006_0006 (head)`. `up.sh` применяет миграции и
 пересобирает активные профили; в `.env` должны оставаться `identity,auth,review`
 и другие используемые профили. Изменённые User, Admin и frontend обновляются
 вместе. При ошибке runner или пересборки не переходите к следующему шагу.

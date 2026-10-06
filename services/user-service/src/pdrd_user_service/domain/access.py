@@ -76,6 +76,7 @@ class AccessSubject:
     roles: frozenset[Role] = field(default_factory=frozenset)
     active: bool = True
     review_access_enabled: bool = False
+    normative_access_enabled: bool = False
 
     def __post_init__(self) -> None:
         """Отвергает некорректный или изменяемый доверенный контекст."""
@@ -87,6 +88,8 @@ class AccessSubject:
             raise TypeError("roles должен содержать только Role")
         if not isinstance(self.active, bool):
             raise TypeError("active должен быть bool")
+        if not isinstance(self.normative_access_enabled, bool):
+            raise TypeError("normative_access_enabled должен быть bool")
         if not isinstance(self.review_access_enabled, bool):
             raise TypeError("review_access_enabled должен быть bool")
         if self.tier is not AccessTier.MEMBER and self.roles:
@@ -189,6 +192,11 @@ def effective_permissions(subject: AccessSubject) -> frozenset[Permission]:
     if subject.tier is not AccessTier.GUEST:
         permissions.update(_PROFILE_PERMISSIONS)
     if subject.tier is AccessTier.MEMBER:
+        if subject.normative_access_enabled and subject.roles & {
+            Role.DESIGNER,
+            Role.DEPARTMENT_HEAD,
+        }:
+            permissions.add(Permission.NORMATIVE_DELETE)
         if subject.review_access_enabled and Role.DESIGNER in subject.roles:
             permissions.update(_REVIEW_OWN_PERMISSIONS)
         for role in subject.roles:

@@ -14,6 +14,7 @@ export function reviewEntries(review, manual) {
       finding_id: entry.findingId, origin: entry.origin,
       text: entry.text, normative_basis: entry.normativeSection,
       decision: entry.decision,
+      reason_category: entry.reasonCategory ?? null, comment: entry.comment ?? "",
       page_number: note?.page_number ?? location?.page_number,
       regions: note ? [note.issue_box] : (location?.proposed_issue_boxes ?? []),
       callout_box: note?.callout_box ?? location?.callout_box ?? null,
@@ -49,8 +50,13 @@ export function reviewCommands(previous, current) {
       if (earlier?.decision !== "pending" && earlier && !resetsDecision) {
         result.push({ action: "reset", ...identity });
       }
-    } else if (resetsDecision || row.decision !== earlier?.decision) {
-      result.push({ action: "decide", ...identity, decision: row.decision });
+    } else if (resetsDecision || row.decision !== earlier?.decision || (
+      row.decision === "rejected" && ((row.reason_category ?? null) !== (earlier?.reason_category ?? null)
+        || (row.comment ?? "") !== (earlier?.comment ?? ""))
+    )) {
+      result.push({ action: "decide", ...identity, decision: row.decision,
+        ...(row.decision === "rejected" ? { reason_category: row.reason_category, comment: row.comment ?? "" } : {}),
+      });
     }
   }
   return result;

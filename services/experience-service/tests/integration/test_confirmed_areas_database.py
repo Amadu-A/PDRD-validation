@@ -292,6 +292,7 @@ async def test_reject_never_confirms_new_or_changed_area(
             job_id=job,
             finding_id="vlm:1",
             decision=Decision.REJECTED,
+            reason_category="false_positive",
             actor="integration:2",
             expected_revision=current.revision,
         )

@@ -143,6 +143,17 @@ class UserRepository(Protocol):
         """Атомарно сохраняет назначение ревью, новую версию прав и аудит."""
         ...
 
+    async def replace_normative_access(
+        self,
+        updated_user: UserAccount,
+        *,
+        expected_authorization_version: int,
+        actor_user_id: UUID,
+        created_at: datetime,
+    ) -> None:
+        """Атомарно сохраняет назначение удаления нормативных объектов, новую версию прав и аудит."""
+        ...
+
     async def add_role_assignment(
         self,
         updated_user: UserAccount,

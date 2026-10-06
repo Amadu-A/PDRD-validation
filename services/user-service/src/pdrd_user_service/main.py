@@ -18,6 +18,9 @@ from pdrd_user_service.transport.http.routers.health import router as health_rou
 from pdrd_user_service.transport.http.routers.local_accounts import (
     router as local_accounts_router,
 )
+from pdrd_user_service.transport.http.routers.normative_access import (
+    router as normative_access_router,
+)
 from pdrd_user_service.transport.http.routers.organization_memberships import (
     router as organization_memberships_router,
 )
@@ -88,6 +91,7 @@ def create_app(container: ApplicationContainer | None = None) -> FastAPI:
         app.include_router(organization_memberships_router)
         app.include_router(review_scope_router)
         app.include_router(review_access_router)
+        app.include_router(normative_access_router)
     return app
 
 

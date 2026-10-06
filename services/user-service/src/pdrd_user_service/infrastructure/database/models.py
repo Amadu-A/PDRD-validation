@@ -87,6 +87,9 @@ class UserModel(Base):
         DateTime(timezone=True), nullable=False
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    normative_access_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     review_access_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
@@ -409,6 +412,35 @@ class ReviewAccessEventModel(Base):
     __tablename__ = "review_access_events"
     __table_args__ = (
         CheckConstraint("authorization_version >= 2", name="ck_review_access_version"),
+        {"schema": "users"},
+    )
+
+    event_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.accounts.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    actor_user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.accounts.user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    authorization_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class NormativeAccessEventModel(Base):
+    """Аудит выдачи и отзыва удаления нормативных объектов с актёром и версией полномочий."""
+
+    __tablename__ = "normative_access_events"
+    __table_args__ = (
+        CheckConstraint(
+            "authorization_version >= 2", name="ck_normative_access_version"
+        ),
         {"schema": "users"},
     )
 

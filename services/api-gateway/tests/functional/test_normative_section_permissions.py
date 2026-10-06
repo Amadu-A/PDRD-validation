@@ -3,6 +3,7 @@
 """Проверяет роли разделов и завершение выдачи доступа через настоящий HTTP Gateway."""
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import UUID
 
 import httpx
@@ -51,8 +52,17 @@ class Catalog:
         self.calls.append("delete")
         return SECTION
 
+    async def get_document(self, *, document_id):
+        """Возвращает раздел документа для проверки области до удаления."""
+        return SimpleNamespace(section_id=SECTION)
 
-def build_app(role, *, grant_status=200):
+    async def delete_document(self, *, document_id):
+        """Повторное удаление возвращает тот же UUID в контракте фасада."""
+        self.calls.append("delete-document")
+        return document_id
+
+
+def build_app(role, *, grant_status=200, allowed_sections=(SECTION,)):
     """Подключает реальные маршруты и проверку сессии к управляемому private HTTP."""
     catalog, grants = Catalog(), []
     permissions = {
@@ -60,6 +70,8 @@ def build_app(role, *, grant_status=200):
         "designer": [],
         "head": ["normative.write"],
         "admin": ["normative.write", "normative.delete", "admin.access"],
+        "head_granted": ["normative.write", "normative.delete"],
+        "designer_granted": ["normative.delete"],
     }[role]
 
     def private(request):
@@ -76,7 +88,7 @@ def build_app(role, *, grant_status=200):
                 json={
                     "user_id": str(ACTOR),
                     "all_sections": False,
-                    "section_ids": [str(SECTION)],
+                    "section_ids": [str(item) for item in allowed_sections],
                 },
             )
         assert request.url.path == "/internal/v1/users/section-catalog/grants"
@@ -131,12 +143,20 @@ def build_app(role, *, grant_status=200):
     return app, catalog, grants
 
 
-@pytest.mark.parametrize("role", ["guest", "designer", "head", "admin"])
+@pytest.mark.parametrize(
+    "role", ["guest", "designer", "head", "admin", "head_granted", "designer_granted"]
+)
 @pytest.mark.parametrize("operation", ["create", "rename", "delete"])
-def test_sections_allow_head_create_rename_and_only_admin_delete(role, operation):
+def test_sections_preserve_head_write_and_require_separate_delete_permission(
+    role, operation
+):
     """Фронтенд не может открыть запрещённую операцию прямым HTTP-запросом."""
     app, catalog, grants = build_app(role)
-    expected = role == "admin" or (role == "head" and operation != "delete")
+    expected = (
+        role in {"admin", "head_granted"}
+        or (role == "head" and operation != "delete")
+        or (role == "designer_granted" and operation == "delete")
+    )
     with TestClient(app) as client:
         if role != "guest":
             client.cookies.set("pdrd_session", "verified-session")
@@ -179,3 +199,36 @@ def test_created_section_reports_distribution_failure_with_section_id():
         assert response.json()["section_id"] == str(SECTION)
         assert isinstance(response.json()["detail"], str)
         assert catalog.calls == ["create"] and len(grants) == 1
+
+
+@pytest.mark.parametrize("role", ["head_granted", "designer_granted"])
+def test_explicit_deletion_still_requires_assigned_section(role):
+    """Галочка не открывает удаление разделов вне назначенной пользователю области."""
+    app, catalog, _ = build_app(role, allowed_sections=())
+    with TestClient(app) as client:
+        client.cookies.set("pdrd_session", "verified-session")
+        response = client.delete(
+            f"/api/v1/normative/sections/{SECTION}", headers={"Origin": ORIGIN}
+        )
+        assert response.status_code == 403
+    assert catalog.calls == []
+
+
+@pytest.mark.parametrize(
+    "role", ["designer", "head", "designer_granted", "head_granted", "admin"]
+)
+@pytest.mark.parametrize("assigned", [False, True])
+def test_document_deletion_requires_both_permission_and_section_scope(role, assigned):
+    """Назначенное удаление проверяется отдельно от создания и доступа к разделу."""
+    app, catalog, _ = build_app(role, allowed_sections=(SECTION,) if assigned else ())
+    allowed = role == "admin" or (
+        assigned and role in {"designer_granted", "head_granted"}
+    )
+    with TestClient(app) as client:
+        client.cookies.set("pdrd_session", "verified-session")
+        for _ in range(2):
+            response = client.delete(
+                f"/api/v1/normative/documents/{UUID(int=3)}", headers={"Origin": ORIGIN}
+            )
+            assert response.status_code == (200 if allowed else 403)
+    assert catalog.calls == (["delete-document"] * 2 if allowed else [])

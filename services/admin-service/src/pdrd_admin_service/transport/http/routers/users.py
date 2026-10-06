@@ -13,6 +13,10 @@ from pdrd_admin_service.contracts.models import (
     UserPage,
     UserResponse,
 )
+from pdrd_admin_service.contracts.normative_access_models import (
+    ChangeNormativeAccessRequest,
+    NormativeAccessChangeResponse,
+)
 from pdrd_admin_service.contracts.review_access_models import (
     ChangeReviewAccessRequest,
     ReviewAccessChangeResponse,
@@ -93,5 +97,21 @@ async def change_review_access(
 ) -> ReviewAccessChangeResponse:
     """Меняет доступ к ревью после проверки административной сессии и CSRF."""
     return await admin.change_review_access(
+        pdrd_session, user_id, command, csrf=csrf_token
+    )
+
+
+@router.patch(
+    "/{user_id}/normative-access", response_model=NormativeAccessChangeResponse
+)
+async def change_normative_access(
+    user_id: UUID,
+    command: ChangeNormativeAccessRequest,
+    admin: Admin,
+    pdrd_session: SessionCookie = None,
+    csrf_token: CsrfHeader = None,
+) -> NormativeAccessChangeResponse:
+    """Меняет доступ к удалению нормативных объектов после проверки административной сессии и CSRF."""
+    return await admin.change_normative_access(
         pdrd_session, user_id, command, csrf=csrf_token
     )

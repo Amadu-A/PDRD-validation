@@ -130,6 +130,9 @@ async def test_list_and_role_detail_send_actor_from_verified_session() -> None:
                             "review_access": False,
                             "review_access_automatic": False,
                             "review_access_editable": True,
+                            "normative_access": False,
+                            "normative_access_automatic": False,
+                            "normative_access_editable": True,
                         }
                     ],
                     "total": 1,
@@ -355,4 +358,45 @@ async def test_review_access_client_forwards_only_command_and_trusted_actor():
             ChangeReviewAccessRequest(enabled=True, authorization_version=3),
         )
     assert result.review_access
+    assert result.user.authorization_version == 4
+
+
+@pytest.mark.asyncio
+async def test_normative_access_client_forwards_only_command_and_trusted_actor():
+    """Назначение идёт через приватный HTTP API со служебным ключом и строгим ответом."""
+    import json
+
+    from pdrd_admin_service.contracts.normative_access_models import (
+        ChangeNormativeAccessRequest,
+    )
+
+    def respond(request):
+        """Проверяет контракт запроса к владельцу профилей."""
+        assert request.method == "PATCH"
+        assert request.url.path == f"/internal/v1/users/{TARGET_ID}/normative-access"
+        assert request.headers["authorization"] == f"Bearer {KEY}"
+        assert request.headers["x-pdrd-actor-id"] == str(ACTOR_ID)
+        assert json.loads(request.content) == {
+            "enabled": True,
+            "authorization_version": 3,
+        }
+        return httpx.Response(
+            200,
+            json={
+                "user": {**profile(), "authorization_version": 4},
+                "normative_access": True,
+                "normative_access_automatic": False,
+                "normative_access_editable": True,
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="http://user-service:8000"
+    ) as client:
+        result = await UserServiceClient(client, KEY).change_normative_access(
+            ACTOR_ID,
+            TARGET_ID,
+            ChangeNormativeAccessRequest(enabled=True, authorization_version=3),
+        )
+    assert result.normative_access
     assert result.user.authorization_version == 4

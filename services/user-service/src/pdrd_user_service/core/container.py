@@ -12,6 +12,9 @@ from pdrd_user_service.application.use_cases.distribute_section import Distribut
 from pdrd_user_service.application.use_cases.external_accounts import ExternalAccounts
 from pdrd_user_service.application.use_cases.list_users import AdminUserListing
 from pdrd_user_service.application.use_cases.local_superuser import LocalSuperusers
+from pdrd_user_service.application.use_cases.normative_access import (
+    NormativeAccessManagement,
+)
 from pdrd_user_service.application.use_cases.organization_memberships import (
     OrganizationMemberships,
 )
@@ -69,6 +72,7 @@ class ApplicationContainer:
     section_distribution: DistributeSection | None = None
     public_profiles: PublicProfiles | None = None
     review_access: ReviewAccessManagement | None = None
+    normative_access: NormativeAccessManagement | None = None
 
     async def close(self) -> None:
         """Освобождает созданный пул соединений."""
@@ -138,4 +142,5 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
         section_distribution=DistributeSection(unit_of_work, section_catalog),
         public_profiles=PublicProfiles(unit_of_work),
         review_access=ReviewAccessManagement(unit_of_work),
+        normative_access=NormativeAccessManagement(unit_of_work),
     )

@@ -11,6 +11,10 @@ from pdrd_admin_service.contracts.models import (
     SessionIdentity,
     UserPage,
 )
+from pdrd_admin_service.contracts.normative_access_models import (
+    ChangeNormativeAccessRequest,
+    NormativeAccessChangeResponse,
+)
 from pdrd_admin_service.contracts.organization_models import (
     DepartmentPage,
     DepartmentResponse,
@@ -65,6 +69,15 @@ class UserDirectory(Protocol):
         command: ChangeReviewAccessRequest,
     ) -> ReviewAccessChangeResponse:
         """Передаёт назначение ревью доверенному владельцу профилей с CAS."""
+        ...
+
+    async def change_normative_access(
+        self,
+        actor_user_id: UUID,
+        target_user_id: UUID,
+        command: ChangeNormativeAccessRequest,
+    ) -> NormativeAccessChangeResponse:
+        """Передаёт назначение удаление нормативных объектов доверенному владельцу профилей с CAS."""
         ...
 
     async def replace_role(

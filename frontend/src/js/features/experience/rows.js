@@ -1,6 +1,7 @@
 // frontend/src/js/features/experience/rows.js
 
 /** Безопасные строки каталога: миниатюры исходных VLM и принятых инженером областей. */
+import { REJECTION_REASONS } from "../review/rejection-reasons.js";
 import { DECISION_LABELS, experienceTagLabel } from "./labels.js";
 import { createTrashIcon } from "../../components/icons.js";
 
@@ -62,6 +63,10 @@ export function experienceRow(example, { api, onImage, onEdit, onHistory, onDele
   text.append(element("span", "experience-table__text", example.text),
     element("span", "experience-table__detail", example.normative_basis),
     element("span", "experience-table__detail", example.normative_reference));
+  if (example.source.reason_category) {
+    text.append(element("span", "experience-table__detail", `Причина: ${REJECTION_REASONS[example.source.reason_category] ?? example.source.reason_category}`));
+    if (example.source.comment) text.append(element("span", "experience-table__detail", `Комментарий: ${example.source.comment}`));
+  }
   const tag = element("td");
   tag.append(element("strong", "experience-table__tag", experienceTagLabel(example.tag, example.decision)),
     element("span", "experience-table__detail", DECISION_LABELS[example.decision]),

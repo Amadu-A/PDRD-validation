@@ -22,6 +22,10 @@ from pdrd_admin_service.contracts.models import (
     SessionIdentity,
     UserPage,
 )
+from pdrd_admin_service.contracts.normative_access_models import (
+    ChangeNormativeAccessRequest,
+    NormativeAccessChangeResponse,
+)
 from pdrd_admin_service.contracts.organization_models import (
     DepartmentPage,
     DepartmentResponse,
@@ -162,6 +166,21 @@ class UserServiceClient:
             json=command.model_dump(mode="json"),
         )
         return _validated(ReviewAccessChangeResponse, response)
+
+    async def change_normative_access(
+        self,
+        actor_user_id: UUID,
+        target_user_id: UUID,
+        command: ChangeNormativeAccessRequest,
+    ) -> NormativeAccessChangeResponse:
+        """Передаёт служебный ключ и актёра из проверенной сессии."""
+        response = await self._request(
+            "PATCH",
+            f"/internal/v1/users/{target_user_id}/normative-access",
+            actor_user_id=actor_user_id,
+            json=command.model_dump(mode="json"),
+        )
+        return _validated(NormativeAccessChangeResponse, response)
 
     async def replace_role(
         self, actor_user_id: UUID, target_user_id: UUID, command: ReplaceRoleRequest

@@ -131,6 +131,9 @@ async def prepare(browser, flow, *, reject_first=False):
             "action": "decide",
             "finding_id": "vlm:1",
             "decision": "rejected" if reject_first else "accepted",
+            "reason_category": "false_positive"
+            if ("rejected" if reject_first else "accepted") == "rejected"
+            else None,
         },
         {"action": "decide", "finding_id": "vlm:2", "decision": "accepted"},
         {
@@ -338,6 +341,7 @@ async def test_all_rejected_review_can_produce_pdf_with_empty_accepted_list(pdf_
                 action="decide",
                 finding_id=finding_id,
                 decision="rejected",
+                reason_category="false_positive",
             )
             assert response.status_code == 200
             revision = response.json()["revision"]

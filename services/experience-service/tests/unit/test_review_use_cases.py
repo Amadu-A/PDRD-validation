@@ -1,6 +1,6 @@
 # services/experience-service/tests/unit/test_review_use_cases.py
 
-"""Application tests use fake ports; no DB, HTTP or PDF runtime needed."""
+"""Сценарии приложения проверяются тестовыми портами без БД, HTTP и PDF."""
 
 from uuid import UUID, uuid4
 
@@ -26,17 +26,17 @@ DOC = UUID(int=2)
 
 
 class FakeAnalyses:
-    """Simulate server-owned completed job and its authoritative findings."""
+    """Имитирует завершённое серверное задание и доверенные замечания."""
 
     def __init__(self) -> None:
-        """Track source lookups."""
+        """Учитывает обращения к источнику."""
         self.calls = 0
 
     async def load(
         self,
         job_id: UUID,
     ) -> CompletedAnalysis:
-        """Return one verified source and visible page."""
+        """Возвращает один проверенный источник и доступную страницу."""
         self.calls += 1
 
         return CompletedAnalysis(
@@ -57,10 +57,10 @@ class FakeAnalyses:
 
 
 class FakeRepository:
-    """Enforce an in-memory atomic revision guard for use-case tests."""
+    """Имитирует атомарную проверку редакции в памяти."""
 
     def __init__(self) -> None:
-        """Keep isolated single-job state."""
+        """Хранит изолированное состояние одного задания."""
         self.session: ReviewSession | None = None
         self.updates = 0
 
@@ -68,14 +68,14 @@ class FakeRepository:
         self,
         job_id: UUID,
     ) -> ReviewSession | None:
-        """Return latest state."""
+        """Возвращает текущее состояние."""
         return self.session if self.session and self.session.job_id == job_id else None
 
     async def insert(
         self,
         session: ReviewSession,
     ) -> None:
-        """Reject second insert instead of overwriting first source snapshot."""
+        """Отклоняет повторную вставку, сохраняя первоначальный снимок."""
         if self.session is not None:
             raise ReviewConflictError("Concurrent insertion")
 
@@ -87,7 +87,7 @@ class FakeRepository:
         *,
         expected_revision: int,
     ) -> None:
-        """Compare-and-swap entire reviewed session and audit events."""
+        """Атомарно сравнивает редакцию и сохраняет ревью с аудитом."""
         if self.session is None or self.session.revision != expected_revision:
             raise ReviewConflictError("Concurrent revision")
 
@@ -97,7 +97,7 @@ class FakeRepository:
 
 @pytest.mark.asyncio
 async def test_open_uses_authoritative_source_once_and_cannot_overwrite() -> None:
-    """Reopening preserves previously reviewed decisions and original source."""
+    """Повторное открытие сохраняет принятые решения и первоначальный источник."""
     source = FakeAnalyses()
     repo = FakeRepository()
     opener = OpenReview(source, repo)
@@ -126,7 +126,7 @@ async def test_open_uses_authoritative_source_once_and_cannot_overwrite() -> Non
 
 @pytest.mark.asyncio
 async def test_full_review_commands_produce_approved_snapshot_for_pdf() -> None:
-    """Approved revision includes accepted Gold and edited VLM, not rejected rows."""
+    """Утверждённая редакция содержит принятые Gold и правки VLM."""
     repo = FakeRepository()
 
     await OpenReview(
@@ -181,6 +181,7 @@ async def test_full_review_commands_produce_approved_snapshot_for_pdf() -> None:
         job_id=JOB,
         finding_id="vlm:1",
         decision=Decision.REJECTED,
+        reason_category="false_positive",
         actor="authenticated:2",
         expected_revision=updated.revision,
     )
@@ -219,7 +220,7 @@ async def test_full_review_commands_produce_approved_snapshot_for_pdf() -> None:
 
 @pytest.mark.asyncio
 async def test_stale_client_revision_is_rejected_without_persistence() -> None:
-    """No lost updates when browser A and browser B edit one report."""
+    """Конкурентные правки одного отчёта не теряют обновления."""
     repo = FakeRepository()
 
     await OpenReview(
@@ -245,6 +246,7 @@ async def test_stale_client_revision_is_rejected_without_persistence() -> None:
             job_id=JOB,
             finding_id="vlm:1",
             decision=Decision.REJECTED,
+            reason_category="false_positive",
             actor="authenticated:2",
             expected_revision=0,
         )
@@ -254,7 +256,7 @@ async def test_stale_client_revision_is_rejected_without_persistence() -> None:
 
 @pytest.mark.asyncio
 async def test_no_implicit_session_creation_on_write() -> None:
-    """Only explicit source-verified open command initializes the session."""
+    """Ревью создаёт только явное открытие с проверенным источником."""
     with pytest.raises(LookupError):
         await ChangeReview(
             FakeRepository(),

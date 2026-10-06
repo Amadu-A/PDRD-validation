@@ -14,6 +14,9 @@ class AdminUserResponse(UserResponse):
     review_access: bool
     review_access_automatic: bool
     review_access_editable: bool
+    normative_access: bool
+    normative_access_automatic: bool
+    normative_access_editable: bool
 
 
 class UserPageResponse(StrictSchema):
@@ -30,11 +33,14 @@ class UserPageResponse(StrictSchema):
         return cls(
             items=tuple(
                 AdminUserResponse(
-                    **UserResponse.from_domain(user).model_dump(), **asdict(state)
+                    **UserResponse.from_domain(user).model_dump(),
+                    **asdict(state),
+                    **asdict(normative),
                 )
-                for user, state in zip(
+                for user, state, normative in zip(
                     page.items,
                     page.review_access_states,
+                    page.normative_access_states,
                     strict=True,
                 )
             ),

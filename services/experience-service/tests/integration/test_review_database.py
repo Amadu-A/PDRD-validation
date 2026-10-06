@@ -88,6 +88,8 @@ async def test_geometry_reset_and_audit_survive_repository_recreation(
             job_id=job_id,
             finding_id="vlm:test:1",
             decision=Decision.REJECTED,
+            reason_category="wrong_location",
+            comment="Неверно выбрана область резервного насоса.",
             actor="integration:user:1",
             expected_revision=1,
         )
@@ -103,6 +105,12 @@ async def test_geometry_reset_and_audit_survive_repository_recreation(
         assert restored.findings[0].proposed_regions[0].bbox == original_box
         assert restored.findings[0].issue_box is None
         assert restored.findings[0].decision is Decision.PENDING
+        assert restored.findings[0].reason_category is None
+        assert restored.findings[0].comment == ""
+        refused = restored.history[2].after
+        assert refused.reason_category == "wrong_location"
+        assert refused.comment == "Неверно выбрана область резервного насоса."
+        assert restored.history[3].before == refused
         assert [event.action.value for event in restored.history] == [
             "opened",
             "geometry",
@@ -426,6 +434,7 @@ async def test_two_concurrent_updates_have_one_winner(
         rejected = original.decide(
             finding_id="vlm:test:1",
             decision=Decision.REJECTED,
+            reason_category="false_positive",
             actor="integration:user:B",
             at=datetime.now(UTC),
             expected_revision=0,

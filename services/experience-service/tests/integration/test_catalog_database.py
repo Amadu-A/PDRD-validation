@@ -96,6 +96,7 @@ async def rejected_source(engine, *, scenario="original", sha=None, author=None)
     rejected = review.decide(
         finding_id="vlm:1",
         decision=Decision.REJECTED,
+        reason_category="false_positive",
         actor="integration:1",
         at=datetime.now(UTC),
         expected_revision=review.revision,

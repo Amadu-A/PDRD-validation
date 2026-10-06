@@ -44,6 +44,8 @@ async def test_acceptance_geometry_rejection_and_training_selection(
         revision = opened.json()["revision"]
         for action in actions:
             body = {"action": "decide", "decision": action}
+            if action == "rejected":
+                body["reason_category"] = "false_positive"
             if action == "geometry":
                 body = {"action": "geometry", "regions": [FIXED], "callout_box": None}
             elif action == "edit":

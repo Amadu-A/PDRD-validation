@@ -8,6 +8,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
+from pdrd_experience_service.domain.rejection_feedback import validate_feedback
 from pdrd_experience_service.domain.review import (
     Decision,
     Origin,
@@ -91,6 +92,21 @@ class ExperienceCandidate:
     proposed_regions: tuple[ProposedRegion, ...] = ()
     display_regions: tuple[Rectangle, ...] | None = None
     area_source: str = "engineer_confirmed"
+    reason_category: str | None = None
+    comment: str = ""
+
+    def __post_init__(self) -> None:
+        """Проверяет объяснение отказа, сохраняя совместимость со старым каталогом."""
+        try:
+            reason, comment = validate_feedback(
+                rejected=self.decision is Decision.REJECTED,
+                reason_category=self.reason_category,
+                comment=self.comment,
+            )
+        except ValueError as error:
+            raise ReviewError(str(error)) from error
+        object.__setattr__(self, "reason_category", reason)
+        object.__setattr__(self, "comment", comment)
 
 
 def _example_key(
@@ -230,6 +246,8 @@ def select_experience_candidates(
                 origin=finding.origin,
                 tag=tag,
                 decision=finding.decision,
+                reason_category=finding.reason_category,
+                comment=finding.comment,
                 learning_use=_learning_use(finding),
                 page_number=finding.page_number,
                 issue_regions=regions,

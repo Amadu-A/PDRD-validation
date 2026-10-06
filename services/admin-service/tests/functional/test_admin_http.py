@@ -58,6 +58,9 @@ class Users:
                     review_access=False,
                     review_access_automatic=False,
                     review_access_editable=True,
+                    normative_access=False,
+                    normative_access_automatic=False,
+                    normative_access_editable=True,
                 ),
             ),
             total=1,
@@ -115,6 +118,23 @@ class Users:
             review_access=command.enabled,
             review_access_automatic=False,
             review_access_editable=True,
+        )
+
+    async def change_normative_access(self, actor_user_id, target_user_id, command):
+        """Фиксирует актёра из сессии и отдельную строгую команду."""
+        from pdrd_admin_service.contracts.normative_access_models import (
+            NormativeAccessChangeResponse,
+        )
+
+        self.calls.append(
+            ("normative-access", (actor_user_id, target_user_id, command))
+        )
+        profile = self.profile().model_copy(update={"authorization_version": 2})
+        return NormativeAccessChangeResponse(
+            user=profile,
+            normative_access=command.enabled,
+            normative_access_automatic=False,
+            normative_access_editable=True,
         )
 
 
@@ -344,6 +364,59 @@ def test_review_access_patch_requires_admin_csrf_and_ignores_spoofed_actor():
     operation, (actor, target, command) = users.calls[0]
     assert (operation, actor, target, command.enabled) == (
         "review-access",
+        ACTOR_ID,
+        TARGET_ID,
+        True,
+    )
+
+
+def test_normative_access_patch_requires_admin_csrf_and_ignores_spoofed_actor():
+    """Только администратор с CSRF меняет доступ к удалению нормативов; браузерный UUID актёра игнорируется."""
+    app, sessions, users = make_app()
+    path = f"/api/v1/admin/users/{TARGET_ID}/normative-access"
+    payload = {"enabled": True, "authorization_version": 1}
+    with TestClient(app) as client:
+        assert client.patch(path, json=payload).status_code == 401
+        client.cookies.set("pdrd_session", "browser-secret")
+        assert client.patch(path, json=payload).status_code == 403
+        assert (
+            client.patch(
+                path, json=payload, headers={"X-CSRF-Token": "wrong"}
+            ).status_code
+            == 403
+        )
+        for field, value in (
+            ("enabled", "true"),
+            ("authorization_version", True),
+            ("role", "platform_admin"),
+        ):
+            assert (
+                client.patch(
+                    path, json={**payload, field: value}, headers={"X-CSRF-Token": CSRF}
+                ).status_code
+                == 422
+            )
+        response = client.patch(
+            path,
+            json=payload,
+            headers={"X-CSRF-Token": CSRF, "X-PDRD-Actor-Id": str(TARGET_ID)},
+        )
+        assert response.status_code == 200
+        assert response.json()["normative_access"]
+        assert response.json()["user"]["authorization_version"] == 2
+        sessions.permissions = (
+            "review.gold.create",
+            "review.findings.decide",
+            "experience.capture",
+        )
+        assert (
+            client.patch(path, json=payload, headers={"X-CSRF-Token": CSRF}).status_code
+            == 403
+        )
+    assert len(users.calls) == 1
+    operation, (actor, target, command) = users.calls[0]
+    assert (operation, actor, target, command.enabled) == (
+        "normative-access",
         ACTOR_ID,
         TARGET_ID,
         True,

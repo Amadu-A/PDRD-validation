@@ -24,6 +24,9 @@ from pdrd_user_service.application.ports.repository import (
 )
 from pdrd_user_service.application.use_cases.distribute_section import DistributeSection
 from pdrd_user_service.application.use_cases.external_accounts import ExternalAccounts
+from pdrd_user_service.application.use_cases.normative_access import (
+    NormativeAccessManagement,
+)
 from pdrd_user_service.application.use_cases.review_access import ReviewAccessManagement
 from pdrd_user_service.application.use_cases.review_scope import ReviewScopeAccess
 from pdrd_user_service.application.use_cases.users import UserDirectory
@@ -56,6 +59,7 @@ from pdrd_user_service.infrastructure.database.models import (
     AdminBootstrapModel,
     CatalogSectionDistributionModel,
     DepartmentModel,
+    NormativeAccessEventModel,
     OrganizationModel,
     ReviewAccessEventModel,
     RoleAssignmentEventModel,
@@ -75,7 +79,7 @@ pytestmark = pytest.mark.database
 TEST_HOST = "user-test-postgres"
 TEST_NAME = "pdrd_user_test"
 TEST_USER = "user_test"
-EXPECTED_REVISION = "20261006_0005"
+EXPECTED_REVISION = "20261006_0006"
 
 
 def validate_isolated_database_url(raw_url: str) -> URL:
@@ -243,6 +247,11 @@ async def remove_test_users(
         await connection.execute(
             delete(CatalogSectionDistributionModel).where(
                 CatalogSectionDistributionModel.actor_user_id.in_(user_ids)
+            )
+        )
+        await connection.execute(
+            delete(NormativeAccessEventModel).where(
+                NormativeAccessEventModel.user_id.in_(user_ids)
             )
         )
         await connection.execute(
@@ -1523,3 +1532,143 @@ async def test_user_migration_columns_match_orm_contract(test_engine):
                 assert actual == set(table.columns.keys()), table.name
 
         await connection.run_sync(verify_columns)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_normative_grant_and_revoke_keep_single_audit_and_live_permissions(
+    test_engine,
+):
+    """Конкурентная выдача выигрывает один CAS; отзыв убирает право удаления и меняет версию сессий."""
+    admin_id, target_id = uuid4(), uuid4()
+    factory = build_session_factory(test_engine)
+    try:
+        await create_review_test_users(factory, admin_id, target_id)
+        management = NormativeAccessManagement(lambda: SqlAlchemyUnitOfWork(factory))
+        directory = UserDirectory(lambda: SqlAlchemyUnitOfWork(factory))
+        store, profiles = AsyncMock(), AsyncMock()
+        rows = {}
+        store.create.side_effect = lambda session: rows.setdefault(
+            session.token_hash, session
+        )
+        store.find_by_token_hash.side_effect = rows.get
+        store.renew_if_active.side_effect = lambda session, now, idle: session
+
+        async def live_state(user_id):
+            """Читает живую версию User Service для настоящего сценария Auth."""
+            async with SqlAlchemyUnitOfWork(factory) as work:
+                user = await work.users.get_user(user_id)
+            return UserAccessState(
+                user.user_id, user.status.value, user.authorization_version
+            )
+
+        profiles.get_state.side_effect = live_state
+        sessions = SessionService(store, profiles)
+        old_session = await sessions.issue(target_id)
+        await sessions.resolve(old_session.token)
+        before = await directory.permissions(target_id)
+        assert Permission.ANALYSIS_RUN in before.permissions
+        assert Permission.NORMATIVE_DELETE not in before.permissions
+
+        async def grant():
+            """Пытается выдать доступ по одной и той же исходной версии."""
+            return await management.change(
+                actor_user_id=admin_id,
+                target_user_id=target_id,
+                enabled=True,
+                authorization_version=2,
+            )
+
+        results = await asyncio.gather(
+            *(grant() for _ in range(6)), return_exceptions=True
+        )
+        assert sum(not isinstance(item, Exception) for item in results) == 1
+        assert sum(isinstance(item, AuthorizationConflict) for item in results) == 5
+        with pytest.raises(SessionInvalid):
+            await sessions.resolve(old_session.token)
+        granted_session = await sessions.issue(target_id)
+        await sessions.resolve(granted_session.token)
+        granted = await directory.permissions(target_id)
+        assert granted.authorization_version == 3
+        assert Permission.NORMATIVE_DELETE in granted.permissions
+        assert Permission.NORMATIVE_WRITE not in granted.permissions
+        assert Permission.REVIEW_GOLD_CREATE not in granted.permissions
+        repeated = await management.change(
+            actor_user_id=admin_id,
+            target_user_id=target_id,
+            enabled=True,
+            authorization_version=3,
+        )
+        assert repeated.user.authorization_version == 3
+        await management.change(
+            actor_user_id=admin_id,
+            target_user_id=target_id,
+            enabled=False,
+            authorization_version=3,
+        )
+        with pytest.raises(SessionInvalid):
+            await sessions.resolve(granted_session.token)
+        assert store.revoke_token_hash.await_count == 2
+        revoked = await directory.permissions(target_id)
+        assert revoked.authorization_version == 4
+        assert revoked.authorization_version != granted.authorization_version
+        assert Permission.NORMATIVE_DELETE not in revoked.permissions
+        assert Permission.NORMATIVE_WRITE not in revoked.permissions
+        assert Permission.ANALYSIS_RUN in revoked.permissions
+        async with test_engine.connect() as connection:
+            events = (
+                await connection.execute(
+                    select(
+                        NormativeAccessEventModel.actor_user_id,
+                        NormativeAccessEventModel.enabled,
+                        NormativeAccessEventModel.authorization_version,
+                    )
+                    .where(NormativeAccessEventModel.user_id == target_id)
+                    .order_by(NormativeAccessEventModel.authorization_version)
+                )
+            ).all()
+        assert events == [(admin_id, True, 3), (admin_id, False, 4)]
+    finally:
+        await remove_test_users(test_engine, admin_id, target_id)
+
+
+@pytest.mark.asyncio
+async def test_normative_flag_version_and_audit_roll_back_together(test_engine):
+    """Откат и невалидный актёр не оставляют флаг или новую версию без аудита."""
+    target_id = uuid4()
+    factory = build_session_factory(test_engine)
+    try:
+        profile = await create_catalog_worker(factory, target_id, Role.DESIGNER)
+        updated = replace(
+            profile, normative_access_enabled=True, authorization_version=3
+        )
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            await work.users.replace_normative_access(
+                updated,
+                expected_authorization_version=2,
+                actor_user_id=target_id,
+                created_at=datetime.now(UTC),
+            )
+            # Без явного commit профиль, версия и аудит должны откатиться.
+        with pytest.raises(IntegrityError):
+            async with SqlAlchemyUnitOfWork(factory) as work:
+                await work.users.replace_normative_access(
+                    updated,
+                    expected_authorization_version=2,
+                    actor_user_id=uuid4(),
+                    created_at=datetime.now(UTC),
+                )
+                await work.commit()
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            saved = await work.users.get_user(target_id)
+        assert saved.authorization_version == 2
+        assert saved.normative_access_enabled is False
+        async with test_engine.connect() as connection:
+            assert (
+                await connection.execute(
+                    select(NormativeAccessEventModel.event_id).where(
+                        NormativeAccessEventModel.user_id == target_id
+                    )
+                )
+            ).all() == []
+    finally:
+        await remove_test_users(test_engine, target_id)

@@ -54,6 +54,7 @@ def approved():
             decision=Decision.REJECTED
             if row.finding_id == "vlm:3"
             else Decision.ACCEPTED,
+            reason_category="false_positive" if row.finding_id == "vlm:3" else None,
             actor="engineer:1",
             at=NOW,
             expected_revision=review.revision,

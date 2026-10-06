@@ -6,6 +6,7 @@
  * Сетевой адаптер подключается снаружи через onChange/hydrate.
  */
 
+import { createRejectionEditor } from "./rejection-editor.js";
 import { createReviewControls } from "./controls.js";
 import { createManualAnnotationController } from "./manual.js";
 import { createManualTextList } from "./manual-list.js";
@@ -102,6 +103,8 @@ export function createReviewController({
   let preview = null;
   let editor = null;
   let activeFindingId = null;
+  let rejectionEditor = null;
+  let activeRejection = null;
   let reportRoot = null;
   let manualRecords = createManualRecords();
   let emptyMessages = new Map();
@@ -180,7 +183,9 @@ export function createReviewController({
     onRemove(note) {
       if (persistent) {
         // Undo добавления остаётся аудируемым отклонением сохранённой Gold-записи.
-        const entry = state.decide(note.findingId, REVIEW_DECISIONS.REJECTED);
+        const entry = state.decide(note.findingId, REVIEW_DECISIONS.REJECTED, {
+          reasonCategory: "other", comment: "Пользователь отменил создание ручного замечания.",
+        });
         refresh(note.findingId);
         return entry;
       }
@@ -304,16 +309,21 @@ export function createReviewController({
   }
 
   /** Решение и его Undo сохраняют текст, источник, области и независимый тег. */
-  function decide(findingId, decision, pageNumber) {
+  function decide(findingId, decision, pageNumber, feedback = {}) {
     if (locked || !canDecide) return;
-    const previous = state.get(findingId).decision;
-    if (previous === decision) return;
+    const previous = state.get(findingId);
     manual.cancelActive();
     automatic.cancelActive();
-    state.decide(findingId, decision);
+    const changed = state.decide(findingId, decision, feedback);
+    if (changed.revision === previous.revision) return;
     refresh(findingId);
     manual.recordAction(pageNumber, "решение по замечанию", () => {
-      state.restoreDecision(findingId, previous);
+      if (previous.decision === REVIEW_DECISIONS.REJECTED && !previous.reasonCategory) {
+        activeRejection = { findingId, pageNumber };
+        rejectionEditor.open(previous);
+        return;
+      }
+      state.restoreDecision(findingId, previous.decision, previous);
       refresh(findingId);
     });
   }
@@ -328,7 +338,9 @@ export function createReviewController({
       },
 
       onReject() {
-        decide(findingId, REVIEW_DECISIONS.REJECTED, pageNumber);
+        if (locked || !canDecide) return;
+        activeRejection = { findingId, pageNumber };
+        rejectionEditor.open(state.get(findingId));
       },
 
       onEdit() {
@@ -369,6 +381,10 @@ export function createReviewController({
   function mount(root) {
     automatic.dispose();
     manual.dispose();
+    editor?.dialog.remove();
+    rejectionEditor?.dialog.remove();
+    rejectionEditor = null;
+    activeRejection = null;
     state = createReviewState();
     views = new Map();
     manualRecords = createManualRecords();
@@ -417,7 +433,14 @@ export function createReviewController({
       }
     });
 
-    root.append(editor.dialog);
+    rejectionEditor?.dialog.remove();
+    activeRejection = null;
+    rejectionEditor = createRejectionEditor((feedback) => {
+      if (locked || !canDecide || !activeRejection) throw new Error("Изменение Review сейчас недоступно.");
+      decide(activeRejection.findingId, REVIEW_DECISIONS.REJECTED, activeRejection.pageNumber, feedback);
+      activeRejection = null;
+    });
+    root.append(editor.dialog, rejectionEditor.dialog);
 
     const textItems = root.querySelectorAll(".analysis-result__finding[data-finding-id]");
     for (const item of [...textItems, ...items]) {
@@ -452,6 +475,7 @@ export function createReviewController({
 
     if (!views.size && !manualPages) {
       editor.dialog.remove();
+      rejectionEditor.dialog.remove();
       return;
     }
 
@@ -512,6 +536,6 @@ export function createReviewController({
 
   return {
     mount, getManualSnapshot, getReviewSnapshot, hydrate, setConnection,
-    dispose() { manual.dispose(); automatic.dispose(); editor?.dialog.remove(); },
+    dispose() { manual.dispose(); automatic.dispose(); editor?.dialog.remove(); rejectionEditor?.dialog.remove(); },
   };
 }

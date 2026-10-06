@@ -12,6 +12,10 @@ from pdrd_user_service.application.use_cases.users import AdminRequired
 from pdrd_user_service.core.observability import log_execution_time
 from pdrd_user_service.domain.access import Role
 from pdrd_user_service.domain.identity import UserAccount
+from pdrd_user_service.domain.normative_access import (
+    NormativeAccessState,
+    normative_access_state,
+)
 from pdrd_user_service.domain.review_access import (
     ReviewAccessState,
     review_access_state,
@@ -31,6 +35,7 @@ class UserPage:
     limit: int
     offset: int
     review_access_states: tuple[ReviewAccessState, ...]
+    normative_access_states: tuple[NormativeAccessState, ...]
 
 
 class AdminUserListing:
@@ -67,23 +72,22 @@ class AdminUserListing:
             ):
                 raise AdminRequired("Требуется действующая роль администратора")
             items, total = await work.users.list_users(limit=limit, offset=offset)
-            states = tuple(
-                [
-                    review_access_state(
-                        access_subject_for(
-                            user,
-                            await work.users.list_assignments(user.user_id),
-                            await work.users.list_memberships(user.user_id),
-                            self._clock(),
-                        )
-                    )
-                    for user in items
-                ]
-            )
+            states, normative_states = [], []
+            at = self._clock()
+            for user in items:
+                subject = access_subject_for(
+                    user,
+                    await work.users.list_assignments(user.user_id),
+                    await work.users.list_memberships(user.user_id),
+                    at,
+                )
+                states.append(review_access_state(subject))
+                normative_states.append(normative_access_state(subject))
             return UserPage(
                 items=items,
                 total=total,
                 limit=limit,
                 offset=offset,
-                review_access_states=states,
+                review_access_states=tuple(states),
+                normative_access_states=tuple(normative_states),
             )

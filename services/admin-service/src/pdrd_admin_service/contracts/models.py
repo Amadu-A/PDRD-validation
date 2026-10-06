@@ -43,6 +43,9 @@ class AdminUserResponse(UserResponse):
     review_access: bool
     review_access_automatic: bool
     review_access_editable: bool
+    normative_access: bool
+    normative_access_automatic: bool
+    normative_access_editable: bool
 
 
 class UserPage(StrictModel):
