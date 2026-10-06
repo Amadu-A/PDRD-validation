@@ -3,6 +3,7 @@
 """ORM-модели собственных профилей, идентичностей и назначений User Service."""
 
 from datetime import datetime
+from typing import ClassVar
 from uuid import UUID
 
 from pdrd_user_service.infrastructure.database.base import Base
@@ -220,11 +221,11 @@ class RoleAssignmentModel(Base):
             "source IN ('local', 'ad_group')", name="ck_role_assignments_source"
         ),
         CheckConstraint(
-            "scope_kind IN ('platform', 'organization', 'department', 'own')",
+            "scope_kind IN ('platform', 'organization', 'department', 'own', 'sections')",
             name="ck_role_assignments_scope_kind",
         ),
         CheckConstraint(
-            "(scope_kind IN ('platform', 'own') AND organization_id IS NULL "
+            "(scope_kind IN ('platform', 'own', 'sections') AND organization_id IS NULL "
             "AND department_id IS NULL) OR "
             "(scope_kind = 'organization' AND organization_id IS NOT NULL "
             "AND department_id IS NULL) OR "
@@ -244,7 +245,7 @@ class RoleAssignmentModel(Base):
             name="ck_role_assignments_admin_scope",
         ),
         CheckConstraint(
-            "role <> 'department_head' OR scope_kind = 'department'",
+            "role <> 'department_head' OR scope_kind IN ('department', 'sections')",
             name="ck_role_assignments_head_scope",
         ),
         CheckConstraint(
@@ -349,3 +350,35 @@ class RoleAssignmentEventModel(Base):
         DateTime(timezone=True), nullable=False
     )
     authorization_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class UserSectionModel(Base):
+    """Хранит назначение UUID раздела Knowledge без FK между сервисами."""
+
+    __tablename__ = "section_access"
+    __table_args__: ClassVar[dict[str, str]] = {"schema": "users"}
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.accounts.user_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    section_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+
+
+class SectionAccessEventModel(Base):
+    """Сохраняет атомарный аудит назначения набора разделов."""
+
+    __tablename__ = "section_access_events"
+    __table_args__: ClassVar[dict[str, str]] = {"schema": "users"}
+    event_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.accounts.user_id", ondelete="CASCADE")
+    )
+    actor_user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.accounts.user_id", ondelete="RESTRICT")
+    )
+    section_ids: Mapped[str] = mapped_column(String, nullable=False)
+    authorization_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )

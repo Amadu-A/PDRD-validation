@@ -241,6 +241,7 @@ export function createNormativeCatalog(
     readySeenBySection: new Map(),
 
     pollTimer: null,
+    generation: 0,
   };
 
 
@@ -1449,6 +1450,7 @@ export function createNormativeCatalog(
       return;
     }
 
+    const generation = state.generation;
     const [
       categories,
       documents,
@@ -1464,6 +1466,7 @@ export function createNormativeCatalog(
       ],
     );
 
+    if (generation !== state.generation) return;
     state.categories = categories;
 
     state.documents = documents;
@@ -1485,7 +1488,11 @@ export function createNormativeCatalog(
   async function reloadSections(
     preferredSectionId = null,
   ) {
-    state.sections = await listSections();
+    const generation = ++state.generation;
+    clearPolling();
+    const sections = await listSections();
+    if (generation !== state.generation) return;
+    state.sections = sections;
 
     state.sectionId = retainSectionSelection(
       state.sections,
@@ -1499,6 +1506,7 @@ export function createNormativeCatalog(
       state.sectionId,
     );
 
+    if (generation !== state.generation) return;
     await refreshSectionData(
       true,
     );
@@ -1713,6 +1721,10 @@ export function createNormativeCatalog(
     sectionSelect.addEventListener(
       "change",
       async () => {
+        state.generation += 1;
+        clearPolling();
+        state.categories = [];
+        state.documents = [];
         state.sectionId = (
           sectionSelect.value
           || null
@@ -2003,7 +2015,7 @@ export function createNormativeCatalog(
           ? "Нормативный каталог готов."
           : state.sections.length
             ? "Выберите раздел проектной документации."
-            : "Нормативные разделы пока не созданы.",
+            : "Нет доступных разделов. Обычный анализ доступен без раздела.",
       );
 
     } catch (error) {
@@ -2049,6 +2061,7 @@ export function createNormativeCatalog(
 
   return {
     getSelection,
+    reload: reloadSections,
     start,
   };
 }

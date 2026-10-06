@@ -19,11 +19,11 @@ export function getUserRoles(userId) {
   return authenticatedRequest(`${ROOT}/users/${encodeURIComponent(userId)}/roles`);
 }
 
-export function changeUserRole(userId, role, scope, authorizationVersion) {
+export function changeUserRole(userId, role, scope, authorizationVersion, sectionIds) {
   return authenticatedRequest(
     `${ROOT}/users/${encodeURIComponent(userId)}/role`,
     "PATCH",
-    { role, scope, authorization_version: authorizationVersion },
+    { role, scope, authorization_version: authorizationVersion, section_ids: sectionIds },
   );
 }
 
@@ -64,4 +64,15 @@ export function deactivateMembership(userId, organizationId, departmentId, autho
     `${ROOT}/users/${encodeURIComponent(userId)}/memberships/${encodeURIComponent(organizationId)}/${encodeURIComponent(departmentId)}`,
     "DELETE", { authorization_version: authorizationVersion },
   );
+}
+
+
+/** Читает тот же каталог разделов, который используется на главной странице. */
+export function listSectionCatalog() {
+  return authenticatedRequest(`${ROOT}/users/section-catalog`);
+}
+
+/** Читает актуальные назначения разделов и их CAS версию. */
+export function getUserSections(userId) {
+  return authenticatedRequest(`${ROOT}/users/${encodeURIComponent(userId)}/section-access`);
 }

@@ -153,6 +153,22 @@ class UserRepository(Protocol):
         """Одной транзакцией меняет рабочие роли, версию прав и аудит."""
         ...
 
+    async def list_sections(self, user_id: UUID) -> tuple[UUID, ...]:
+        """Читает UUID назначенных разделов."""
+        ...
+
+    async def replace_sections(
+        self,
+        user_id: UUID,
+        section_ids: tuple[UUID, ...],
+        *,
+        actor_user_id: UUID,
+        authorization_version: int,
+        created_at: datetime,
+    ) -> None:
+        """Сохраняет разделы и аудит вместе с изменением версии прав."""
+        ...
+
     async def bootstrap_admin(
         self,
         updated_user: UserAccount,

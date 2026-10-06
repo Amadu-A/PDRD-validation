@@ -54,23 +54,16 @@
         <section class="account-card" id="roles" data-admin-section="roles" hidden>
           <p class="account-card__overline">Доступ</p><h2 class="account-card__title">Роли и группы</h2>
           <p class="account-card__description">Роли PDRD назначаются локально. Группы Active Directory не используются для назначения ролей до согласования с IT.</p>
-          <ul class="admin-role-list"><li><strong>Проектировщик</strong> — анализ и Gold; пользовательские пакеты временно недоступны.</li><li><strong>Руководитель</strong> — Review и нормативная база в своей области.</li><li><strong>Администратор</strong> — предусмотренные административные операции.</li></ul>
+          <ul class="admin-role-list"><li><strong>Проектировщик</strong> — анализ и Gold; личные пользовательские пакеты в назначенных разделах.</li><li><strong>Руководитель</strong> — Review и нормативная база в своей области.</li><li><strong>Администратор</strong> — предусмотренные административные операции.</li></ul>
           <a class="admin-link" href="#users">Изменить роль пользователя →</a>
           <div class="admin-directory" data-admin-directory>
-            <h3>Организации и отделы</h3>
-            <p>Создайте область, затем выберите её в карточке будущего руководителя.</p>
-            <form data-create-organization>
-              <label>Новая организация<input name="name" maxlength="255" required></label>
-              <button type="submit">Создать организацию</button>
-            </form>
-            <label>Организация<select data-directory-organization></select></label>
-            <form data-create-department>
-              <label>Новый отдел<input name="name" maxlength="255" required></label>
-              <button type="submit">Создать отдел</button>
-            </form>
-            <ul data-directory-departments></ul>
-            <p data-directory-status role="status" aria-live="polite"></p>
-          </div>
+              <h3>Разделы документации</h3>
+              <p>Это каталог с главной страницы. Доступ к нескольким разделам назначается чекбоксами в карточке пользователя.</p>
+              <a class="admin-link" href="/">Управлять разделами на главной странице →</a>
+              <button type="button" data-directory-reload>Обновить разделы</button>
+              <ul data-directory-departments></ul>
+              <p data-directory-status role="status" aria-live="polite"></p>
+            </div>
         </section>
         <section class="account-card" id="documents" data-admin-section="documents" hidden><h2 class="account-card__title">Документы</h2><p class="account-card__description">Управление нормативными документами открывается в рабочем интерфейсе с проверкой прав сервером.</p><a class="admin-link" href="/">Перейти к документам →</a></section>
         <section class="account-card" id="review" data-admin-section="review" hidden><h2 class="account-card__title">Review</h2><p class="account-card__description">Решения по замечаниям принимаются в контексте конкретного анализа.</p><a class="admin-link" href="/">Перейти к анализу →</a></section>

@@ -35,7 +35,7 @@ class EmptyAnalysisFileError(ValueError):
 class NormativeSnapshotResolverNotConfiguredError(
     RuntimeError,
 ):
-    """Managed selection передан без configured resolver."""
+    """Выбор каталога передан без настроенного обработчика снимка."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +115,7 @@ class SubmitAnalysis:
         managed_selection_requested = (
             normative_section_id is not None
             or normative_document_ids is not None
-            or user_package_document_ids is not None
+            or bool(user_package_document_ids)
             or normative_prompt_override_enabled
             or technical_assignment_content is not None
         )
@@ -132,6 +132,11 @@ class SubmitAnalysis:
 
             normative_snapshot = await resolver.execute(
                 section_id=normative_section_id,
+                **(
+                    {"owner_user_id": owner_user_id}
+                    if owner_user_id is not None
+                    else {}
+                ),
                 document_ids=normative_document_ids,
                 user_package_document_ids=(user_package_document_ids),
                 prompt_override_enabled=(normative_prompt_override_enabled),

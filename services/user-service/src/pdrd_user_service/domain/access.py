@@ -54,6 +54,8 @@ class Permission(StrEnum):
     EXPERIENCE_CAPTURE = "experience.capture"
     EXPERIENCE_VERSION_CREATE = "experience.version.create"
     EXPERIENCE_VERSION_APPLY = "experience.version.apply"
+    WORKING_PROMPT_USE = "working_prompt.use"
+    SYSTEM_PROMPT_READ = "system_prompt.read"
     SYSTEM_PROMPT_MANAGE = "system_prompt.manage"
     ADMIN_ACCESS = "admin.access"
     USERS_ROLES_ASSIGN = "users.roles.assign"
@@ -102,6 +104,10 @@ _PROFILE_PERMISSIONS = frozenset(
     {
         Permission.PROFILE_READ,
         Permission.PROFILE_UPDATE,
+        Permission.USER_DOCUMENT_OWN_READ,
+        Permission.USER_DOCUMENT_OWN_WRITE,
+        Permission.WORKING_PROMPT_USE,
+        Permission.SYSTEM_PROMPT_READ,
     }
 )
 

@@ -13,11 +13,31 @@ from pdrd_admin_service.contracts.models import (
     UserPage,
     UserResponse,
 )
+from pdrd_admin_service.contracts.section_models import (
+    CatalogSection,
+    SectionAccessResponse,
+)
 from pdrd_admin_service.transport.http.dependencies import Admin
 
 router = APIRouter(prefix="/api/v1/admin/users", tags=["admin-users"])
 SessionCookie = Annotated[str | None, Cookie(alias="pdrd_session")]
 CsrfHeader = Annotated[str | None, Header(alias="X-CSRF-Token")]
+
+
+@router.get("/section-catalog", response_model=tuple[CatalogSection, ...])
+async def list_sections(
+    admin: Admin, pdrd_session: SessionCookie = None
+) -> tuple[CatalogSection, ...]:
+    """Публикует живой каталог разделов для административных чекбоксов."""
+    return await admin.list_sections(pdrd_session)
+
+
+@router.get("/{user_id}/section-access", response_model=SectionAccessResponse)
+async def get_sections(
+    user_id: UUID, admin: Admin, pdrd_session: SessionCookie = None
+) -> SectionAccessResponse:
+    """Читает назначенные разделы выбранного пользователя."""
+    return await admin.get_sections(pdrd_session, user_id)
 
 
 @router.get("", response_model=UserPage)

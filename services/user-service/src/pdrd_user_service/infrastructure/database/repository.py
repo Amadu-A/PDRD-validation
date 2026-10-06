@@ -2,6 +2,7 @@
 
 """Асинхронное хранение пользователей с транзакционной сменой прав."""
 
+import json
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -34,9 +35,11 @@ from pdrd_user_service.infrastructure.database.models import (
     OrganizationModel,
     RoleAssignmentEventModel,
     RoleAssignmentModel,
+    SectionAccessEventModel,
     UserModel,
+    UserSectionModel,
 )
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -690,3 +693,43 @@ class SqlAlchemyUserRepository:
                     )
                 )
             await self._session.flush()
+
+    async def list_sections(self, user_id: UUID) -> tuple[UUID, ...]:
+        """Читает назначенные разделы одним запросом в пределах транзакции."""
+        result = await self._session.scalars(
+            select(UserSectionModel.section_id)
+            .where(UserSectionModel.user_id == user_id)
+            .order_by(UserSectionModel.section_id)
+        )
+        return tuple(result.all())
+
+    async def replace_sections(
+        self,
+        user_id: UUID,
+        section_ids: tuple[UUID, ...],
+        *,
+        actor_user_id: UUID,
+        authorization_version: int,
+        created_at: datetime,
+    ) -> None:
+        """Заменяет набор и аудит в транзакции изменения роли и версии прав."""
+        await self._session.execute(
+            delete(UserSectionModel).where(UserSectionModel.user_id == user_id)
+        )
+        self._session.add_all(
+            [
+                UserSectionModel(user_id=user_id, section_id=section_id)
+                for section_id in section_ids
+            ]
+        )
+        self._session.add(
+            SectionAccessEventModel(
+                event_id=uuid4(),
+                user_id=user_id,
+                actor_user_id=actor_user_id,
+                section_ids=json.dumps([str(item) for item in section_ids]),
+                authorization_version=authorization_version,
+                created_at=created_at,
+            )
+        )
+        await self._session.flush()

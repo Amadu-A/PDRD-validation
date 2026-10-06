@@ -1,6 +1,6 @@
 # tests/architecture/test_user_package_analysis.py
 
-"""Architecture guards user-package selection и analysis snapshot."""
+"""Проверяет архитектурные границы выбора пакетов и снимка анализа."""
 
 from pathlib import Path
 
@@ -45,7 +45,7 @@ ORCHESTRATOR = (
 
 
 def test_frontend_uses_separate_user_package_api() -> None:
-    """Package CRUD не использует normative document routes."""
+    """Операции личных пакетов не используют нормативные маршруты документов."""
     content = API_JS.read_text(
         encoding="utf-8",
     )
@@ -88,7 +88,7 @@ def test_package_checkboxes_are_visible_and_selectable() -> None:
 
 
 def test_app_merges_package_selection_into_analysis_form() -> None:
-    """До привязки владельца приложение не отправляет выбранные чужие пакеты."""
+    """Приложение передаёт непустой выбор личных пакетов; сервер проверяет владельца."""
     content = APP_JS.read_text(
         encoding="utf-8",
     )
@@ -96,12 +96,11 @@ def test_app_merges_package_selection_into_analysis_form() -> None:
         encoding="utf-8"
     )
 
-    assert "userPackageDocumentIds: []" in content
-    assert "createUserPackageCatalog" not in content
-    assert (
-        'packages.querySelector("[data-user-packages-accordion]").inert = true'
-        in access
-    )
+    assert "userPackageDocumentIds: []" not in content
+    assert "createUserPackageCatalog" in content
+    assert "userPackageCatalog.getSelection()?.documentIds.length" in content
+    assert "inert = !canUsePackages" in access
+    assert '"user_documents.own.read"' in access
 
 
 def test_analysis_form_serializes_package_ids_separately() -> None:
@@ -118,7 +117,7 @@ def test_analysis_form_serializes_package_ids_separately() -> None:
 
 
 def test_snapshot_and_n8n_keep_package_ids_separate() -> None:
-    """Immutable snapshot и orchestration имеют отдельное package field."""
+    """Снимок и оркестрация сохраняют отдельное поле личных пакетов."""
     snapshot = SNAPSHOT.read_text(
         encoding="utf-8",
     )
@@ -132,3 +131,43 @@ def test_snapshot_and_n8n_keep_package_ids_separate() -> None:
     assert '"user_package_document_ids"' in orchestrator
 
     assert "snapshot.user_package_document_ids" in orchestrator
+
+
+def test_package_owner_and_section_grants_stay_in_their_services() -> None:
+    """Knowledge хранит владельца; User хранит гранты без FK в чужую схему."""
+    import ast
+
+    services = REPOSITORY_ROOT / "services"
+    user_models = (
+        services
+        / "user-service/src/pdrd_user_service/infrastructure/database/models.py"
+    )
+    knowledge_models = (
+        services
+        / "knowledge-service/src/pdrd_knowledge_service/infrastructure/database/models.py"
+    )
+    for path, classes, field in (
+        (
+            knowledge_models,
+            {"NormativeCategoryModel", "NormativeDocumentModel"},
+            "owner_user_id",
+        ),
+        (user_models, {"UserSectionModel"}, "section_id"),
+    ):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        nodes = [
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name in classes
+        ]
+        assert len(nodes) == len(classes)
+        for node in nodes:
+            declarations = [
+                item
+                for item in node.body
+                if isinstance(item, ast.AnnAssign)
+                and isinstance(item.target, ast.Name)
+                and item.target.id == field
+            ]
+            assert len(declarations) == 1
+            assert "ForeignKey" not in ast.unparse(declarations[0])

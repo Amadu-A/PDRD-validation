@@ -12,6 +12,7 @@ from pdrd_admin_service.application.admin_users import AdminUsers
 from pdrd_admin_service.core.settings import Settings, get_settings
 from pdrd_admin_service.infrastructure.clients import (
     AuthServiceClient,
+    KnowledgeSectionClient,
     UserServiceClient,
 )
 
@@ -58,7 +59,12 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
     user_client = UserServiceClient(
         user_http, actual.user_service_internal_key.get_secret_value()
     )
-    admin_users = AdminUsers(auth_client, user_client)
+    knowledge_http = httpx.AsyncClient(
+        base_url=actual.knowledge_service_url, timeout=timeout, trust_env=False
+    )
+    admin_users = AdminUsers(
+        auth_client, user_client, KnowledgeSectionClient(knowledge_http)
+    )
     admin_organizations = AdminOrganizations(auth_client, user_client)
 
     async def readiness() -> bool:
@@ -74,6 +80,7 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
         """Освобождает ресурсы обоих внутренних клиентов."""
         await auth_http.aclose()
         await user_http.aclose()
+        await knowledge_http.aclose()
 
     return ApplicationContainer(
         actual, admin_users, readiness, close, admin_organizations

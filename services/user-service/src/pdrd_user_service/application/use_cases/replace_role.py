@@ -19,6 +19,7 @@ from pdrd_user_service.domain.role_assignments import (
     RoleAssignment,
     RoleScope,
     RoleSource,
+    ScopeKind,
     assign_role,
     effective_roles,
 )
@@ -83,6 +84,7 @@ class ReplaceWorkerRole:
         role: Role | None,
         scope: RoleScope | None,
         authorization_version: int,
+        section_ids: tuple[UUID, ...] | None = None,
     ) -> RoleReplacement:
         """Проверяет CAS и записывает отзыв/назначение как один переход."""
         if not isinstance(actor_user_id, UUID) or not isinstance(target_user_id, UUID):
@@ -93,6 +95,20 @@ class ReplaceWorkerRole:
             or authorization_version < 1
         ):
             raise ValueError("Требуется корректная версия полномочий")
+        if section_ids is not None:
+            if len(section_ids) > 1000 or any(
+                not isinstance(item, UUID) for item in section_ids
+            ):
+                raise ValueError("Требуются UUID разделов каталога")
+            section_ids = tuple(dict.fromkeys(section_ids))
+        if (
+            role is Role.DEPARTMENT_HEAD
+            and scope is not None
+            and scope.kind is ScopeKind.SECTIONS
+            and section_ids is not None
+            and not section_ids
+        ):
+            raise ValueError("Для руководителя требуется хотя бы один раздел")
         if role is None and scope is not None:
             raise ValueError("При снятии роли область должна отсутствовать")
         if role is not None and scope is None:
@@ -115,6 +131,16 @@ class ReplaceWorkerRole:
                 raise UserNotFound(target_user_id)
             if target.authorization_version != authorization_version:
                 raise AuthorizationConflict("Версия прав изменена другим запросом")
+            if section_ids is not None and target.status.value != "active":
+                raise ValueError("Менять разделы можно только активному пользователю")
+            if (
+                role is Role.DEPARTMENT_HEAD
+                and scope is not None
+                and scope.kind is ScopeKind.SECTIONS
+                and section_ids is None
+                and not await work.users.list_sections(target_user_id)
+            ):
+                raise ValueError("Для руководителя требуется хотя бы один раздел")
             existing = await work.users.list_assignments(
                 target_user_id, for_update=True
             )
@@ -136,12 +162,13 @@ class ReplaceWorkerRole:
             memberships = await work.users.list_memberships(target_user_id)
             self._assert_admin_still_active(actor, actor_assignments)
             if (
-                len(previous) == 1
+                section_ids is None
+                and len(previous) == 1
                 and role == previous[0].role
                 and scope == previous[0].scope
             ):
                 return self._result(target, existing, memberships, now)
-            if not previous and role is None:
+            if section_ids is None and not previous and role is None:
                 return self._result(target, existing, memberships, now)
 
             new_assignment = None
@@ -185,6 +212,14 @@ class ReplaceWorkerRole:
                 expected_authorization_version=target.authorization_version,
                 actor_user_id=actor_user_id,
             )
+            if section_ids is not None:
+                await work.users.replace_sections(
+                    target_user_id,
+                    section_ids,
+                    actor_user_id=actor_user_id,
+                    authorization_version=updated.authorization_version,
+                    created_at=now,
+                )
             await work.commit()
             after = tuple(
                 replace(item, revoked_at=now) if item in previous else item

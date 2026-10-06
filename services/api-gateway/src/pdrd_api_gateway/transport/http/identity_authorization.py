@@ -18,6 +18,10 @@ from fastapi.responses import JSONResponse
 from pdrd_api_gateway.core.identity_proxy_settings import IdentityProxySettings
 
 
+class SectionAccessUnavailable(RuntimeError):
+    """User Service не подтвердил актуальный набор разделов."""
+
+
 @dataclass(frozen=True, slots=True)
 class VerifiedIdentity:
     """Доверенный ответ Auth Service для одного HTTP-запроса Gateway."""
@@ -178,6 +182,60 @@ class IdentityAuthorizer:
         request.state.verified_identity = identity
         request.state.identity_user_id = user_id
         return identity
+
+    async def allowed_sections(self, request: Request) -> frozenset[UUID] | None:
+        """Читает UUID назначений у User Service; None означает платформенный доступ."""
+        identity = getattr(request.state, "verified_identity", None)
+        if not isinstance(identity, VerifiedIdentity):
+            return None
+        if "admin.access" in identity.permissions:
+            return None
+        cached = getattr(request.state, "allowed_section_ids", None)
+        if cached is not None:
+            return cached
+        try:
+            async with self._client_factory() as client:
+                response = await client.get(
+                    f"{self._settings.user_service_url}/internal/v1/users/{identity.user_id}/section-access",
+                    headers={
+                        "Authorization": "Bearer "
+                        + self._settings.user_service_internal_key.get_secret_value(),
+                        "X-PDRD-Actor-Id": str(identity.user_id),
+                    },
+                )
+            response.raise_for_status()
+            payload = response.json()
+            if (
+                UUID(payload["user_id"]) != identity.user_id
+                or payload["all_sections"] is not False
+            ):
+                raise ValueError("Некорректная область")
+            if not isinstance(payload["section_ids"], list):
+                raise ValueError("Некорректный список")
+            result = frozenset(UUID(value) for value in payload["section_ids"])
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            raise SectionAccessUnavailable(
+                "Не удалось проверить доступ к разделам"
+            ) from error
+        request.state.allowed_section_ids = result
+        return result
+
+    async def require_section(
+        self, request: Request, section_id: UUID
+    ) -> JSONResponse | None:
+        """Не допускает обращение вошедшего пользователя к неназначенному разделу."""
+        try:
+            allowed = await self.allowed_sections(request)
+        except SectionAccessUnavailable:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Проверка доступа к разделам недоступна"},
+            )
+        if allowed is not None and section_id not in allowed:
+            return JSONResponse(
+                status_code=403, content={"detail": "Нет доступа к выбранному разделу"}
+            )
+        return None
 
     async def require(
         self, request: Request, permissions: tuple[str, ...]

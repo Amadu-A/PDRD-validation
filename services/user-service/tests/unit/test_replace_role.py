@@ -139,6 +139,17 @@ class Users:
             )
         )
 
+    async def list_sections(self, user_id: UUID) -> tuple[UUID, ...]:
+        """Возвращает назначенные разделы без обращения к чужому каталогу."""
+        return getattr(self, "sections", {}).get(user_id, ())
+
+    async def replace_sections(
+        self, user_id: UUID, section_ids: tuple[UUID, ...], **audit: object
+    ) -> None:
+        """Фиксирует назначения и аудит в общей транзакции замены роли."""
+        self.sections = {user_id: section_ids}
+        self.section_audit = audit
+
 
 class Work:
     """Предоставляет общей памяти интерфейс Unit of Work."""
@@ -294,3 +305,83 @@ async def test_admin_can_promote_verified_external_user() -> None:
     )
     assert result.user.tier is AccessTier.MEMBER
     assert result.roles == (Role.PLATFORM_ADMIN,)
+
+
+@pytest.mark.asyncio
+async def test_sections_change_with_same_role_and_one_cas_version() -> None:
+    """Изменение только разделов не теряется в прежней ветке сохранения одинаковой роли."""
+    users = Users()
+    result = await service(users).replace(
+        actor_user_id=ADMIN_ID,
+        target_user_id=TARGET_ID,
+        role=Role.DESIGNER,
+        scope=RoleScope(ScopeKind.OWN),
+        authorization_version=1,
+        section_ids=(ORG_ID, DEPT_ID, ORG_ID),
+    )
+    assert result.user.authorization_version == 2
+    assert users.sections[TARGET_ID] == (ORG_ID, DEPT_ID)
+    assert users.section_audit["actor_user_id"] == ADMIN_ID
+    assert users.section_audit["authorization_version"] == 2
+    with pytest.raises(AuthorizationConflict):
+        await service(users).replace(
+            actor_user_id=ADMIN_ID,
+            target_user_id=TARGET_ID,
+            role=Role.DESIGNER,
+            scope=RoleScope(ScopeKind.OWN),
+            authorization_version=1,
+            section_ids=(),
+        )
+    assert users.sections[TARGET_ID] == (ORG_ID, DEPT_ID)
+
+
+@pytest.mark.asyncio
+async def test_head_can_use_multiple_sections_without_department_membership() -> None:
+    """Новая область руководителя не требует отдельного справочника организаций и отделов."""
+    users = Users()
+    users.memberships = ()
+    result = await service(users).replace(
+        actor_user_id=ADMIN_ID,
+        target_user_id=TARGET_ID,
+        role=Role.DEPARTMENT_HEAD,
+        scope=RoleScope(ScopeKind.SECTIONS),
+        authorization_version=1,
+        section_ids=(ORG_ID, DEPT_ID),
+    )
+    assert result.roles == (Role.DEPARTMENT_HEAD,)
+    assert result.assignments[0].scope.kind is ScopeKind.SECTIONS
+
+
+@pytest.mark.asyncio
+async def test_section_snapshot_allows_self_and_admin_only() -> None:
+    """Назначения другого профиля не выдаются по произвольному служебному Actor ID."""
+    from pdrd_user_service.application.use_cases.section_access import UserSections
+
+    users = Users()
+    users.sections = {TARGET_ID: (ORG_ID, DEPT_ID)}
+    access = UserSections(lambda: Work(users))
+    own = await access.read(actor_user_id=TARGET_ID, target_user_id=TARGET_ID)
+    assert own.section_ids == (ORG_ID, DEPT_ID)
+    assert not own.all_sections
+    admin = await access.read(actor_user_id=ADMIN_ID, target_user_id=TARGET_ID)
+    assert admin.section_ids == own.section_ids
+    with pytest.raises(AdminRequired):
+        await access.read(actor_user_id=TARGET_ID, target_user_id=ADMIN_ID)
+
+
+async def test_inactive_user_cannot_receive_sections_without_a_role() -> None:
+    """Изменение только разделов не обходит проверку заблокированного профиля."""
+    users = Users()
+    users.accounts[TARGET_ID] = replace(
+        users.accounts[TARGET_ID], status=UserStatus.BLOCKED
+    )
+    with pytest.raises(ValueError, match="активному"):
+        await ReplaceWorkerRole(lambda: Work(users), clock=lambda: AT).replace(
+            actor_user_id=ADMIN_ID,
+            target_user_id=TARGET_ID,
+            role=None,
+            scope=None,
+            authorization_version=1,
+            section_ids=(ORG_ID,),
+        )
+    assert users.writes == 0

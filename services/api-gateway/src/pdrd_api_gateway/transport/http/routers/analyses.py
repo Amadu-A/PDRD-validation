@@ -272,7 +272,7 @@ def parse_user_package_document_ids(
 def build_technical_assignment_response(
     snapshot: NormativeAnalysisSnapshot | None,
 ) -> TechnicalAssignmentSnapshotResponse | None:
-    """Преобразует domain snapshot ТЗ в HTTP schema."""
+    """Преобразует доменный снимок ТЗ в HTTP-схему."""
     if snapshot is None or snapshot.technical_assignment is None:
         return None
 
@@ -364,6 +364,12 @@ async def create_analysis(
     ] = None,
 ) -> AnalysisAcceptedResponse:
     """Принимает документы и создаёт asynchronous analysis job."""
+    parsed_user_package_document_ids = (
+        parse_user_package_document_ids(
+            user_package_document_ids,
+        )
+        or None
+    )
     authorizer = request.app.state.identity_authorizer
     owner_user_id = None
     if authorizer is not None:
@@ -377,11 +383,10 @@ async def create_analysis(
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED, "Требуется повторный вход."
             )
-        if user_package_document_ids is not None:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "Пользовательские пакеты временно недоступны до привязки к владельцу.",
-            )
+        if parsed_user_package_document_ids:
+            denial = await authorizer.require(request, ("user_documents.own.read",))
+            if denial is not None:
+                return denial
         if technical_assignment_id is not None:
             capability = TechnicalAssignmentCapability(
                 container.settings.identity_proxy.technical_assignment_access_key.get_secret_value()
@@ -399,6 +404,11 @@ async def create_analysis(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "Ключ ТЗ передан без подготовленного технического задания.",
             )
+
+    if authorizer is not None and normative_section_id is not None:
+        denial = await authorizer.require_section(request, normative_section_id)
+        if denial is not None:
+            return denial
 
     max_upload_bytes = container.settings.storage.max_upload_bytes
 
@@ -430,12 +440,10 @@ async def create_analysis(
         normative_document_ids,
     )
 
-    parsed_user_package_document_ids = parse_user_package_document_ids(
-        user_package_document_ids,
-    )
-
     if authorizer is not None and normative_prompt_override_enabled:
-        denial = await authorizer.require(request, ("system_prompt.manage",))
+        denial = await authorizer.require(
+            request, ("working_prompt.use", "system_prompt.manage")
+        )
         if denial is not None:
             return denial
 

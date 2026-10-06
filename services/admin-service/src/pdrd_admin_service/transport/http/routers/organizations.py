@@ -9,7 +9,6 @@ from fastapi import APIRouter, Cookie, Header, Query
 
 from pdrd_admin_service.contracts.organization_models import (
     DepartmentPage,
-    DepartmentResponse,
     MembershipChangeResponse,
     MembershipResponse,
     MembershipVersionRequest,
@@ -63,24 +62,6 @@ async def list_departments(
     """Показывает страницу отделов выбранной организации."""
     return await organizations.list_departments(
         pdrd_session, organization_id, limit=limit, offset=offset
-    )
-
-
-@router.post(
-    "/organizations/{organization_id}/departments",
-    response_model=DepartmentResponse,
-    status_code=201,
-)
-async def create_department(
-    organization_id: UUID,
-    command: NameRequest,
-    organizations: Organizations,
-    pdrd_session: SessionCookie = None,
-    csrf_token: CsrfHeader = None,
-) -> DepartmentResponse:
-    """Создаёт отдел через владельца данных после сверки CSRF."""
-    return await organizations.create_department(
-        pdrd_session, organization_id, name=command.name, csrf=csrf_token
     )
 
 

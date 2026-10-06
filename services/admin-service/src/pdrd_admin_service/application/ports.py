@@ -19,6 +19,10 @@ from pdrd_admin_service.contracts.organization_models import (
     OrganizationPage,
     OrganizationResponse,
 )
+from pdrd_admin_service.contracts.section_models import (
+    CatalogSection,
+    SectionAccessResponse,
+)
 
 
 class SessionVerifier(Protocol):
@@ -42,6 +46,12 @@ class UserDirectory(Protocol):
         self, actor_user_id: UUID, target_user_id: UUID
     ) -> RoleDetailResponse:
         """Читает проверенные активные назначения выбранного пользователя."""
+        ...
+
+    async def get_sections(
+        self, actor_user_id: UUID, target_user_id: UUID
+    ) -> SectionAccessResponse:
+        """Читает назначенные разделы с повторной проверкой администратора."""
         ...
 
     async def replace_role(
@@ -95,4 +105,12 @@ class OrganizationDirectory(Protocol):
         authorization_version: int,
     ) -> MembershipChangeResponse:
         """Назначает или снимает членство по версии прав."""
+        ...
+
+
+class SectionCatalog(Protocol):
+    """Читает каталог только у Knowledge Service, без отдельного справочника отделов."""
+
+    async def list_sections(self) -> tuple[CatalogSection, ...]:
+        """Возвращает актуальные UUID и названия разделов главной страницы."""
         ...

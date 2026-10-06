@@ -1,6 +1,6 @@
 # services/api-gateway/tests/unit/test_user_package_catalog_management.py
 
-"""Unit tests Gateway adapter пользовательских пакетов."""
+"""Проверяет адаптер личных пакетов Gateway."""
 
 from uuid import UUID
 
@@ -36,7 +36,7 @@ UPDATED_AT = "2026-09-04T06:01:00Z"
 def build_manager(
     transport: httpx.AsyncBaseTransport,
 ) -> HttpUserPackageCatalogManager:
-    """Создаёт adapter с test transport."""
+    """Создаёт адаптер с тестовым транспортом."""
     return HttpUserPackageCatalogManager(
         settings=KnowledgeServiceSettings(
             base_url="http://knowledge.test:8401",
@@ -52,7 +52,7 @@ def category_payload(
     str,
     object,
 ]:
-    """Возвращает category payload."""
+    """Возвращает данные категории."""
     return {
         "category_id": str(
             CATEGORY_ID,
@@ -75,7 +75,7 @@ def document_payload(
     str,
     object,
 ]:
-    """Возвращает document payload."""
+    """Возвращает данные документа."""
     return {
         "document_id": str(
             DOCUMENT_ID,
@@ -101,7 +101,7 @@ def document_payload(
 
 @pytest.mark.asyncio
 async def test_lists_only_user_package_area() -> None:
-    """Adapter передаёт area=user_package в internal GET."""
+    """Адаптер передаёт area=user_package во внутреннем GET-запросе."""
 
     async def handler(
         request: httpx.Request,
@@ -143,11 +143,16 @@ async def test_lists_only_user_package_area() -> None:
 
 @pytest.mark.asyncio
 async def test_upload_forwards_user_package_area() -> None:
-    """Multipart upload содержит area=user_package."""
+    """Многокомпонентная загрузка содержит area=user_package."""
 
     async def handler(
         request: httpx.Request,
     ) -> httpx.Response:
+        if request.method == "GET":
+            assert (
+                request.url.path == f"/internal/v1/normative/categories/{CATEGORY_ID}"
+            )
+            return httpx.Response(200, json=category_payload())
         assert request.method == "POST"
 
         assert request.url.path == (
@@ -224,7 +229,7 @@ async def test_normative_document_is_hidden_from_package_api() -> None:
 
 @pytest.mark.asyncio
 async def test_returns_package_document_content() -> None:
-    """Adapter сначала проверяет area, затем возвращает PDF."""
+    """Адаптер проверяет область каталога перед выдачей PDF."""
 
     async def handler(
         request: httpx.Request,

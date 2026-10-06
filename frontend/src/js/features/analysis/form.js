@@ -7,7 +7,6 @@
 import {
   EXPLANATORY_NOTE_ENABLED,
 } from "../../config.js";
-import { sectionSelectionError } from "../normative/section-selection.js";
 import {
   appendTechnicalAssignmentPayload, technicalAssignmentAccessError,
 } from "../technical_assignment/form-payload.js";
@@ -563,14 +562,6 @@ export function createAnalysisForm({
 
     noteEndPageInput.setCustomValidity("");
 
-    const sectionError = sectionSelectionError(getNormativeSelection());
-    if (sectionError) {
-      return {
-        valid: false,
-        message: sectionError,
-      };
-    }
-
     if (mode === "empty") {
       return {
         valid: false,
@@ -644,13 +635,12 @@ export function createAnalysisForm({
       ),
     );
 
-    body.append(
-      "user_package_document_ids",
-      JSON.stringify(
-        selection.userPackageDocumentIds
-        ?? [],
-      ),
-    );
+    if (selection.userPackageDocumentIds?.length) {
+      body.append(
+        "user_package_document_ids",
+        JSON.stringify(selection.userPackageDocumentIds),
+      );
+    }
 
     body.append(
       "normative_prompt_override_enabled",

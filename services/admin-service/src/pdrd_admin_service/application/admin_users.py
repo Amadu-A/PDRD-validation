@@ -13,7 +13,11 @@ from pdrd_admin_service.application.errors import (
     TargetNotFound,
     UpstreamUnavailable,
 )
-from pdrd_admin_service.application.ports import SessionVerifier, UserDirectory
+from pdrd_admin_service.application.ports import (
+    SectionCatalog,
+    SessionVerifier,
+    UserDirectory,
+)
 from pdrd_admin_service.application.session_authorization import authorize_session
 from pdrd_admin_service.contracts.models import (
     ReplaceRoleRequest,
@@ -21,6 +25,10 @@ from pdrd_admin_service.contracts.models import (
     SessionIdentity,
     UserPage,
     UserResponse,
+)
+from pdrd_admin_service.contracts.section_models import (
+    CatalogSection,
+    SectionAccessResponse,
 )
 
 __all__ = (
@@ -38,10 +46,16 @@ __all__ = (
 class AdminUsers:
     """Сохраняет права в user-service и не открывает доступ к его таблицам."""
 
-    def __init__(self, sessions: SessionVerifier, users: UserDirectory) -> None:
+    def __init__(
+        self,
+        sessions: SessionVerifier,
+        users: UserDirectory,
+        sections: SectionCatalog | None = None,
+    ) -> None:
         """Принимает только порты доверенных сервисов."""
         self._sessions = sessions
         self._users = users
+        self._sections = sections
 
     async def _authorize(
         self, token: str | None, required_permission: str, csrf: str | None = None
@@ -81,4 +95,28 @@ class AdminUsers:
     ) -> RoleDetailResponse:
         """Атомарно меняет рабочую роль с CSRF и сравнением версии в БД."""
         identity = await self._authorize(token, "users.roles.assign", csrf or "")
+        if command.section_ids is not None:
+            if self._sections is None:
+                raise UpstreamUnavailable
+            existing = {
+                item.section_id for item in await self._sections.list_sections()
+            }
+            if not set(command.section_ids).issubset(existing):
+                raise InvalidRoleRequest(
+                    "Выбранный раздел отсутствует в нормативном каталоге"
+                )
         return await self._users.replace_role(identity.user_id, target_user_id, command)
+
+    async def list_sections(self, token: str | None) -> tuple[CatalogSection, ...]:
+        """Показывает администратору исходный каталог разделов."""
+        await self._authorize(token, "admin.access")
+        if self._sections is None:
+            raise UpstreamUnavailable
+        return await self._sections.list_sections()
+
+    async def get_sections(
+        self, token: str | None, target_user_id: UUID
+    ) -> SectionAccessResponse:
+        """Показывает назначения выбранного профиля после проверки сессии."""
+        identity = await self._authorize(token, "admin.access")
+        return await self._users.get_sections(identity.user_id, target_user_id)

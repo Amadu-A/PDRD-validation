@@ -1,4 +1,6 @@
-"""Проверяет защиту Analysis URL в настоящем FastAPI Gateway с fake Auth/User."""
+# services/api-gateway/tests/integration/test_analysis_access_endpoints.py
+
+"""Проверяет защиту Analysis URL в настоящем FastAPI Gateway с имитацией Auth/User."""
 
 import json
 from uuid import UUID, uuid4
@@ -6,6 +8,7 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from pdrd_api_gateway.application.use_cases.submit_analysis import SubmitAnalysis
 from pdrd_api_gateway.core.container import ApplicationContainer
 from pdrd_api_gateway.core.identity_proxy_settings import IdentityProxySettings
 from pdrd_api_gateway.core.settings import DatabaseSettings, Settings
@@ -17,7 +20,7 @@ from pydantic import SecretStr
 
 
 class Jobs:
-    """Возвращает конкретные durable job из памяти теста."""
+    """Возвращает конкретные устойчивую job из памяти теста."""
 
     def __init__(self, jobs: tuple[AnalysisJob, ...]) -> None:
         """Индексирует задания по UUID."""
@@ -172,9 +175,9 @@ def test_middleware_binds_guest_owner_and_department(
     assert foreign_review.status_code == 404
     assert owner_result.status_code == 200
     assert head_result.status_code == 200
-    assert blocked_packages.status_code == 403
+    assert blocked_packages.status_code == 503
     assert blocked_catalog.status_code == 403
-    assert blocked_package_submit.status_code == 403
+    assert blocked_package_submit.status_code == 401
     assert scope_calls == [
         {"actor_user_id": str(head_id), "owner_user_id": str(owner_id)}
     ]
@@ -183,3 +186,97 @@ def test_middleware_binds_guest_owner_and_department(
     assert submit.json()["status_url"] == f"/api/v1/analyses/{guest.id}"
     assert submit.json()["access_token"] == token
     assert submit.json()["access_expires_at"] is not None
+
+
+@pytest.mark.parametrize("signed_in", [False, True])
+@pytest.mark.parametrize("package_field", [None, "[]"])
+@pytest.mark.parametrize("file_kind", ["pdf", "cad"])
+def test_plain_analysis_without_section_or_packages(
+    monkeypatch: pytest.MonkeyPatch,
+    signed_in: bool,
+    package_field: str | None,
+    file_kind: str,
+) -> None:
+    """PDF/CAD проходит с гостем и сессией, включая старый пустой список пакетов."""
+    owner_id = uuid4()
+    calls = []
+
+    def auth_reply(request: httpx.Request) -> httpx.Response:
+        """Возвращает действующего пользователя без административных прав."""
+        return httpx.Response(200, json={"user_id": str(owner_id), "permissions": []})
+
+    class PlainSubmit:
+        """Проверяет параметры обычного анализа после настоящего middleware."""
+
+        async def execute(self, **options: object) -> AnalysisJob:
+            """Фиксирует владельца и отсутствие нормативного контекста."""
+            calls.append(options)
+            assert options["owner_user_id"] == (owner_id if signed_in else None)
+            assert options["guest_access"] is (not signed_in)
+            assert options["normative_section_id"] is None
+            assert not options["user_package_document_ids"]
+            return await SubmitAnalysis(Artifacts(), CreateJob()).execute(**options)
+
+    class Artifacts:
+        """Имитирует файловое хранилище обычного анализа без нормативного resolver."""
+
+        async def save_request(self, **options: object) -> None:
+            """Принимает реальные параметры PDF/CAD после прикладной проверки."""
+
+        async def delete_request(self, **options: object) -> None:
+            """Освобождает тестовые файлы при ошибке."""
+
+    class CreateJob:
+        """Имитирует сохранение задания с настоящим владельцем и пустым снимком."""
+
+        async def execute(self, **options: object) -> AnalysisJob:
+            """Проверяет отсутствие нормативного контекста перед созданием job."""
+            assert options["normative_snapshot"] is None
+            return AnalysisJob.create(**options)
+
+    async def close() -> None:
+        """Завершает контейнер без внешних подключений."""
+
+    monkeypatch.setattr(
+        IdentityAuthorizer,
+        "_new_client",
+        lambda self: httpx.AsyncClient(transport=httpx.MockTransport(auth_reply)),
+    )
+    settings = Settings(
+        _env_file=None,
+        database=DatabaseSettings(password="test-only-password"),
+        identity_proxy=IdentityProxySettings(
+            enabled=True,
+            authorization_enabled=True,
+            auth_internal_key=SecretStr("a" * 32),
+            user_service_internal_key=SecretStr("u" * 32),
+            technical_assignment_access_key=SecretStr("t" * 32),
+            trusted_proxy_key=SecretStr("p" * 32),
+            public_origin="https://pdrd.example.test",
+        ),
+    )
+    container = ApplicationContainer(
+        settings=settings,
+        check_readiness=None,
+        shutdown_callback=close,
+        submit_analysis=PlainSubmit(),
+    )
+    with TestClient(create_app(container)) as client:
+        if signed_in:
+            client.cookies.set("pdrd_session", "owner")
+        response = client.post(
+            "/api/v1/analyses",
+            files={
+                file_kind: (
+                    "drawing.pdf" if file_kind == "pdf" else "drawing.dxf",
+                    b"drawing",
+                    "application/octet-stream",
+                )
+            },
+            data={}
+            if package_field is None
+            else {"user_package_document_ids": package_field},
+            headers={"Origin": "https://pdrd.example.test"},
+        )
+    assert response.status_code == 202, response.text
+    assert len(calls) == 1

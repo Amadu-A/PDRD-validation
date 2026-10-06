@@ -142,7 +142,7 @@ def create_app(
             if (
                 path.startswith("/api/v1/analyses")
                 or path.startswith("/api/v1/experience/capture/")
-                or path.startswith("/api/v1/normative/sections")
+                or path.startswith("/api/v1/normative/")
             ):
                 denial = await authorizer.authenticate_if_present(request)
                 if denial is None:

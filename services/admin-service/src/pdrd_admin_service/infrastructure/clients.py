@@ -30,6 +30,10 @@ from pdrd_admin_service.contracts.organization_models import (
     OrganizationPage,
     OrganizationResponse,
 )
+from pdrd_admin_service.contracts.section_models import (
+    CatalogSection,
+    SectionAccessResponse,
+)
 
 
 def _validated(model: type[Any], response: httpx.Response) -> Any:
@@ -129,15 +133,29 @@ class UserServiceClient:
         )
         return _validated(RoleDetailResponse, response)
 
+    async def get_sections(
+        self, actor_user_id: UUID, target_user_id: UUID
+    ) -> SectionAccessResponse:
+        """Читает живые назначения через защищённый API владельца профилей."""
+        response = await self._request(
+            "GET",
+            f"/internal/v1/users/{target_user_id}/section-access",
+            actor_user_id=actor_user_id,
+        )
+        return _validated(SectionAccessResponse, response)
+
     async def replace_role(
         self, actor_user_id: UUID, target_user_id: UUID, command: ReplaceRoleRequest
     ) -> RoleDetailResponse:
         """Просит user-service атомарно заменить локальную рабочую роль."""
+        payload = command.model_dump(mode="json")
+        if command.section_ids is None:
+            payload.pop("section_ids")
         response = await self._request(
             "PATCH",
             f"/internal/v1/users/{target_user_id}/role",
             actor_user_id=actor_user_id,
-            json=command.model_dump(mode="json"),
+            json=payload,
         )
         return _validated(RoleDetailResponse, response)
 
@@ -227,3 +245,22 @@ class UserServiceClient:
             json={"authorization_version": authorization_version},
         )
         return _validated(MembershipChangeResponse, response)
+
+
+class KnowledgeSectionClient:
+    """Читает UUID разделов из исходного каталога без доступа к чужим таблицам."""
+
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        """Принимает внутренний HTTP пул из composition root."""
+        self._client = client
+
+    async def list_sections(self) -> tuple[CatalogSection, ...]:
+        """Валидирует каталог; ошибка не превращается в пустой доступный список."""
+        try:
+            response = await self._client.get("/internal/v1/normative/sections")
+            response.raise_for_status()
+            return TypeAdapter(tuple[CatalogSection, ...]).validate_python(
+                response.json()
+            )
+        except (httpx.HTTPError, ValueError, ValidationError) as error:
+            raise UpstreamUnavailable from error

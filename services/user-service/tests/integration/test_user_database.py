@@ -48,6 +48,7 @@ from pdrd_user_service.infrastructure.database.models import (
     OrganizationModel,
     RoleAssignmentEventModel,
     RoleAssignmentModel,
+    SectionAccessEventModel,
     UserModel,
 )
 from pdrd_user_service.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
@@ -62,7 +63,7 @@ pytestmark = pytest.mark.database
 TEST_HOST = "user-test-postgres"
 TEST_NAME = "pdrd_user_test"
 TEST_USER = "user_test"
-EXPECTED_REVISION = "20261005_0002"
+EXPECTED_REVISION = "20261005_0003"
 
 
 def validate_isolated_database_url(raw_url: str) -> URL:
@@ -221,6 +222,11 @@ async def remove_test_users(
         )
         await connection.execute(
             delete(AdminBootstrapModel).where(AdminBootstrapModel.user_id.in_(user_ids))
+        )
+        await connection.execute(
+            delete(SectionAccessEventModel).where(
+                SectionAccessEventModel.user_id.in_(user_ids)
+            )
         )
         await connection.execute(
             delete(UserModel).where(UserModel.user_id.in_(user_ids))
@@ -835,3 +841,86 @@ async def test_local_superuser_bootstrap_lookup_and_admin_promotion(
             )
     finally:
         await remove_test_users(test_engine, admin.user_id, target.user_id)
+
+
+@pytest.mark.asyncio
+async def test_multiple_section_grants_roundtrip_and_rollback(
+    test_engine: AsyncEngine,
+) -> None:
+    """Реальная БД сохраняет UUID и аудит вместе с версией; ошибка откатывает всё."""
+    admin_id, user_id, section_a, section_b = (uuid4() for _ in range(4))
+    sessions = build_session_factory(test_engine)
+    now = datetime.now(UTC)
+    user = corporate_member(user_id=user_id)
+    try:
+        async with SqlAlchemyUnitOfWork(sessions) as work:
+            await work.users.create_user(
+                corporate_member(user_id=admin_id),
+                ExternalIdentity("ad", "test", admin_id.hex, admin_id),
+            )
+            await work.users.create_user(
+                user, ExternalIdentity("ad", "test", user_id.hex, user_id)
+            )
+            await work.commit()
+        async with SqlAlchemyUnitOfWork(sessions) as work:
+            await work.users.replace_sections(
+                user_id,
+                (section_a, section_b),
+                actor_user_id=admin_id,
+                authorization_version=2,
+                created_at=now,
+            )
+            await work.users.replace_worker_roles(
+                updated_user=replace(user, authorization_version=2),
+                previous_assignment_ids=(),
+                new_assignment=None,
+                revoked_at=now,
+                expected_authorization_version=1,
+                actor_user_id=admin_id,
+            )
+            await work.commit()
+        async with SqlAlchemyUnitOfWork(sessions) as work:
+            assert set(await work.users.list_sections(user_id)) == {
+                section_a,
+                section_b,
+            }
+            assert (await work.users.get_user(user_id)).authorization_version == 2
+        with pytest.raises(RuntimeError, match="откат"):
+            async with SqlAlchemyUnitOfWork(sessions) as work:
+                await work.users.replace_sections(
+                    user_id,
+                    (),
+                    actor_user_id=admin_id,
+                    authorization_version=3,
+                    created_at=now,
+                )
+                await work.users.replace_worker_roles(
+                    updated_user=replace(user, authorization_version=3),
+                    previous_assignment_ids=(),
+                    new_assignment=None,
+                    revoked_at=now,
+                    expected_authorization_version=2,
+                    actor_user_id=admin_id,
+                )
+                raise RuntimeError("откат")
+        async with SqlAlchemyUnitOfWork(sessions) as work:
+            assert set(await work.users.list_sections(user_id)) == {
+                section_a,
+                section_b,
+            }
+            assert (await work.users.get_user(user_id)).authorization_version == 2
+        async with test_engine.connect() as connection:
+            events = (
+                (
+                    await connection.execute(
+                        select(SectionAccessEventModel.authorization_version).where(
+                            SectionAccessEventModel.user_id == user_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert events == [2]
+    finally:
+        await remove_test_users(test_engine, user_id, admin_id)

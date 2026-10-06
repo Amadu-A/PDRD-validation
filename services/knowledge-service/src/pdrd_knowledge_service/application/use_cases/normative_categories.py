@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/application/use_cases/normative_categories.py
 
-"""Use cases категорий managed catalog."""
+"""Прикладные сценарии категорий управляемого каталога."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -37,11 +37,11 @@ IdentifierFactory = Callable[
 
 
 class NormativeCategoryNotFoundError(LookupError):
-    """Запрошенная категория managed catalog не найдена."""
+    """Запрошенная категория управляемого каталога не найдена."""
 
 
 class NormativeCategoryParentError(ValueError):
-    """Некорректная parent category или hierarchy."""
+    """Некорректная родительская категория или иерархия."""
 
 
 class NormativeCategoryUpdateError(ValueError):
@@ -74,7 +74,7 @@ async def _require_category(
     unit_of_work: NormativeCatalogUnitOfWork,
     category_id: UUID,
 ) -> NormativeCategory:
-    """Возвращает category или формирует application error."""
+    """Возвращает категорию или формирует прикладную ошибку."""
     category = await unit_of_work.categories.get(
         category_id,
     )
@@ -94,8 +94,9 @@ async def _validate_parent(
     category_id: UUID,
     parent_id: UUID | None,
     area: CatalogArea,
+    owner_user_id: UUID | None = None,
 ) -> None:
-    """Проверяет section, area и отсутствие hierarchy cycle."""
+    """Проверяет раздел, область каталога и отсутствие цикла иерархии."""
     if parent_id is None:
         return
 
@@ -116,6 +117,11 @@ async def _validate_parent(
     if parent.section_id != section_id:
         raise NormativeCategoryParentError(
             "Родительская категория принадлежит другому разделу.",
+        )
+
+    if parent.owner_user_id != owner_user_id:
+        raise NormativeCategoryParentError(
+            "Родительская категория принадлежит другому владельцу."
         )
 
     if parent.area is not area:
@@ -175,11 +181,12 @@ class ListNormativeCategories:
         *,
         section_id: UUID,
         area: CatalogArea = CatalogArea.NORMATIVE,
+        owner_user_id: UUID | None = None,
     ) -> tuple[
         NormativeCategory,
         ...,
     ]:
-        """Возвращает категории section + catalog area."""
+        """Возвращает категории раздела + области каталога."""
         async with self.unit_of_work_factory() as unit_of_work:
             await _require_section(
                 unit_of_work,
@@ -190,12 +197,17 @@ class ListNormativeCategories:
                 section_id,
             )
 
-        return tuple(category for category in categories if category.area is area)
+        return tuple(
+            category
+            for category in categories
+            if category.area is area
+            and (owner_user_id is None or category.owner_user_id == owner_user_id)
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class GetNormativeCategory:
-    """Возвращает одну категорию managed catalog."""
+    """Возвращает одну категорию управляемого каталога."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -204,7 +216,7 @@ class GetNormativeCategory:
         *,
         category_id: UUID,
     ) -> NormativeCategory:
-        """Загружает category по UUID."""
+        """Загружает категорию по UUID."""
         async with self.unit_of_work_factory() as unit_of_work:
             return await _require_category(
                 unit_of_work,
@@ -214,7 +226,7 @@ class GetNormativeCategory:
 
 @dataclass(frozen=True, slots=True)
 class CreateNormativeCategory:
-    """Создаёт категорию внутри section и catalog area."""
+    """Создаёт категорию внутри раздела и области каталога."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -229,8 +241,9 @@ class CreateNormativeCategory:
         name: str,
         parent_id: UUID | None,
         area: CatalogArea = CatalogArea.NORMATIVE,
+        owner_user_id: UUID | None = None,
     ) -> NormativeCategory:
-        """Создаёт category и проверяет её parent."""
+        """Создаёт категорию и проверяет её родителя."""
         created_at = self.clock()
         category_id = self.identifier_factory()
 
@@ -246,6 +259,7 @@ class CreateNormativeCategory:
                 category_id=category_id,
                 parent_id=parent_id,
                 area=area,
+                owner_user_id=owner_user_id,
             )
 
             category = NormativeCategory(
@@ -256,6 +270,7 @@ class CreateNormativeCategory:
                 created_at=created_at,
                 updated_at=created_at,
                 area=area,
+                owner_user_id=owner_user_id,
             )
 
             await unit_of_work.categories.add(
@@ -283,7 +298,7 @@ class UpdateNormativeCategory:
         parent_id: UUID | None = None,
         change_parent: bool = False,
     ) -> NormativeCategory:
-        """Обновляет только явно переданные свойства category."""
+        """Обновляет только явно переданные свойства категорию."""
         if name is None and not change_parent:
             raise NormativeCategoryUpdateError(
                 "Не передано ни одного поля для изменения категории.",
@@ -304,6 +319,7 @@ class UpdateNormativeCategory:
                     category_id=category.category_id,
                     parent_id=parent_id,
                     area=category.area,
+                    owner_user_id=category.owner_user_id,
                 )
 
             if name is not None:
@@ -329,7 +345,7 @@ class UpdateNormativeCategory:
 
 @dataclass(frozen=True, slots=True)
 class DeleteNormativeCategory:
-    """Удаляет category без удаления документов."""
+    """Удаляет категорию без удаления документов."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -338,7 +354,7 @@ class DeleteNormativeCategory:
         *,
         category_id: UUID,
     ) -> UUID:
-        """Удаляет category одной transaction."""
+        """Удаляет категорию одной транзакцией."""
         async with self.unit_of_work_factory() as unit_of_work:
             await _require_category(
                 unit_of_work,
@@ -356,7 +372,7 @@ class DeleteNormativeCategory:
 
 @dataclass(frozen=True, slots=True)
 class NormativeCategoryUseCases:
-    """Группирует application operations категорий."""
+    """Группирует прикладные операции категорий."""
 
     list_categories: ListNormativeCategories
 

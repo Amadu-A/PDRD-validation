@@ -91,7 +91,9 @@ class Users:
         )
 
 
-def make_app(*, enabled: bool = True) -> tuple[object, Sessions, Users]:
+def make_app(
+    *, enabled: bool = True, sections: object = None
+) -> tuple[object, Sessions, Users]:
     """Создаёт приложение без сети и с явно установленными ключами."""
     sessions, users = Sessions(), Users()
     settings = Settings(
@@ -110,7 +112,7 @@ def make_app(*, enabled: bool = True) -> tuple[object, Sessions, Users]:
 
     container = ApplicationContainer(
         settings,
-        AdminUsers(sessions, users) if enabled else None,
+        AdminUsers(sessions, users, sections) if enabled else None,
         ready,
         close,
     )
@@ -223,3 +225,46 @@ def test_platform_admin_assignment_preserves_actor_and_csrf() -> None:
     assert (action, actor, target) == ("replace", ACTOR_ID, TARGET_ID)
     assert command.role == "platform_admin"
     assert command.authorization_version == 3
+
+
+def test_section_catalog_and_multi_assignment_require_admin_csrf_and_known_ids() -> (
+    None
+):
+    """Живой каталог не дублируется, а атомарная команда не принимает чужого актёра."""
+    from pdrd_admin_service.contracts.section_models import CatalogSection
+
+    class Sections:
+        """Имитирует два раздела главной страницы из Knowledge Service."""
+
+        async def list_sections(self) -> tuple:
+            """Возвращает актуальный список UUID и имён."""
+            return (
+                CatalogSection(section_id=ACTOR_ID, name="ЭОМ"),
+                CatalogSection(section_id=TARGET_ID, name="ОВ"),
+            )
+
+    app, sessions, users = make_app(sections=Sections())
+    with TestClient(app) as client:
+        assert client.get("/api/v1/admin/users/section-catalog").status_code == 401
+        client.cookies.set("pdrd_session", "browser-secret")
+        catalog = client.get("/api/v1/admin/users/section-catalog")
+        assert catalog.status_code == 200
+        assert [item["name"] for item in catalog.json()] == ["ЭОМ", "ОВ"]
+        command = {
+            "role": "department_head",
+            "scope": {"kind": "sections"},
+            "authorization_version": 1,
+            "section_ids": [str(ACTOR_ID), str(TARGET_ID)],
+        }
+        path = f"/api/v1/admin/users/{TARGET_ID}/role"
+        assert client.patch(path, json=command).status_code == 403
+        headers = {"X-CSRF-Token": CSRF, "X-PDRD-Actor-Id": str(TARGET_ID)}
+        assert client.patch(path, json=command, headers=headers).status_code == 200
+        assert users.calls[-1][1][0] == ACTOR_ID
+        assert users.calls[-1][1][2].section_ids == (ACTOR_ID, TARGET_ID)
+        writes = len(users.calls)
+        command["section_ids"] = ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]
+        assert client.patch(path, json=command, headers=headers).status_code == 422
+        assert len(users.calls) == writes
+        sessions.permissions = ()
+        assert client.get("/api/v1/admin/users/section-catalog").status_code == 403

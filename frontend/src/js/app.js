@@ -1,7 +1,7 @@
 // frontend/src/js/app.js
 
 /**
- * Composition root браузерного приложения PDRD Validation.
+ * Точка сборки браузерного приложения PDRD Validation.
  */
 
 import {
@@ -31,6 +31,8 @@ import {
 import {
   createNormativeCatalog,
 } from "./features/normative/catalog.js";
+
+import { createUserPackageCatalog } from "./features/normative/user_packages.js";
 
 import {
   createNormativePromptEditor,
@@ -83,6 +85,9 @@ const promptEditor = createNormativePromptEditor(
 );
 
 
+const userPackageCatalog = createUserPackageCatalog(normativeRoot);
+userPackageCatalog.start();
+
 const normativeCatalog = createNormativeCatalog(
   normativeRoot,
   {
@@ -91,16 +96,17 @@ const normativeCatalog = createNormativeCatalog(
     ) => {
       const session = currentSession();
       await Promise.all([
-        hasPermission(session, "system_prompt.manage")
+        (hasPermission(session, "working_prompt.use") || hasPermission(session, "system_prompt.manage"))
           ? promptEditor.setSection(sectionId) : Promise.resolve(),
         technicalAssignmentFilePicker.setSection(sectionId),
+        userPackageCatalog.setSection(hasPermission(session, "user_documents.own.read") ? sectionId : null),
       ]);
     },
   },
 );
 
 bindMainIdentity({
-  root: document.body, normativeCatalog, promptEditor,
+  root: document.body, normativeCatalog, promptEditor, userPackageCatalog,
 });
 
 
@@ -155,14 +161,14 @@ function getNormativeSelection() {
     return null;
   }
 
-  const prompt = hasPermission(currentSession(), "system_prompt.manage")
+  const prompt = (hasPermission(currentSession(), "working_prompt.use") || hasPermission(currentSession(), "system_prompt.manage"))
     ? promptEditor.getOverride(selection.sectionId) : {};
 
   return {
     ...selection,
-
-    userPackageDocumentIds: [],
-
+    ...(hasPermission(currentSession(), "user_documents.own.read")
+      && userPackageCatalog.getSelection()?.documentIds.length
+      ? { userPackageDocumentIds: userPackageCatalog.getSelection().documentIds } : {}),
     ...prompt,
   };
 }

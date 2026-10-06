@@ -29,11 +29,12 @@ export function bindMainAccess(root) {
     canWriteNormative = hasPermission(session, "normative.write");
     root.dataset.canWriteNormative = String(canWriteNormative);
     const packages = root.querySelector("[data-user-packages-block]");
-    // Knowledge Service пока не проверяет владельца пакета: блок закрыт для всех.
-    packages.querySelector("[data-user-packages-accordion]").inert = true;
-    packages.setAttribute("aria-disabled", "true");
+    // UI отражает серверные права; UUID владельца браузер не задаёт.
+    const canUsePackages = hasPermission(session, "user_documents.own.read");
+    packages.querySelector("[data-user-packages-accordion]").inert = !canUsePackages;
+    packages.setAttribute("aria-disabled", String(!canUsePackages));
     root.querySelector("[data-normative-prompt-block]").hidden =
-      !hasPermission(session, "system_prompt.manage");
+      !hasPermission(session, "working_prompt.use") && !hasPermission(session, "system_prompt.manage");
     const experienceNavigation = root.querySelector("[data-experience-nav]");
     if (experienceNavigation) experienceNavigation.hidden =
       !hasPermission(session, "admin.access");

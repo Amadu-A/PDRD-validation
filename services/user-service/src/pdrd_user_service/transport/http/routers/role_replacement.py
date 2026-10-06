@@ -80,6 +80,7 @@ async def replace_user_role(
             actor_user_id=actor_user_id,
             target_user_id=user_id,
             role=command.role,
+            section_ids=command.section_ids,
             scope=scope,
             authorization_version=command.authorization_version,
         )

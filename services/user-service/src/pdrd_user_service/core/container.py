@@ -14,6 +14,7 @@ from pdrd_user_service.application.use_cases.organization_memberships import (
 )
 from pdrd_user_service.application.use_cases.replace_role import ReplaceWorkerRole
 from pdrd_user_service.application.use_cases.review_scope import ReviewScopeAccess
+from pdrd_user_service.application.use_cases.section_access import UserSections
 from pdrd_user_service.application.use_cases.users import UserDirectory
 from pdrd_user_service.core.observability import configure_identity_logging
 from pdrd_user_service.core.settings import Settings, get_settings
@@ -58,6 +59,7 @@ class ApplicationContainer:
     organization_memberships: OrganizationMemberships | None = None
     review_scope_access: ReviewScopeAccess | None = None
     local_superusers: LocalSuperusers | None = None
+    user_sections: UserSections | None = None
 
     async def close(self) -> None:
         """Освобождает созданный пул соединений."""
@@ -111,4 +113,5 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
         organization_memberships=OrganizationMemberships(unit_of_work),
         review_scope_access=ReviewScopeAccess(unit_of_work),
         local_superusers=LocalSuperusers(unit_of_work),
+        user_sections=UserSections(unit_of_work),
     )

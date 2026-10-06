@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/infrastructure/knowledge/user_package_catalog.py
 
-"""HTTP adapter user-package области Knowledge managed catalog."""
+"""HTTP-адаптер личных пакетов каталога Knowledge Service."""
 
 import json
 from collections.abc import Mapping
@@ -33,7 +33,7 @@ _USER_PACKAGE_AREA = "user_package"
 
 
 class _CategoryPayload(BaseModel):
-    """Internal Knowledge category payload."""
+    """Внутренние данные категории Knowledge Service."""
 
     model_config = ConfigDict(
         extra="ignore",
@@ -49,6 +49,8 @@ class _CategoryPayload(BaseModel):
 
     area: str
 
+    owner_user_id: UUID | None = None
+
     created_at: datetime
 
     updated_at: datetime
@@ -56,10 +58,11 @@ class _CategoryPayload(BaseModel):
     def to_view(
         self,
     ) -> NormativeCategoryView:
-        """Преобразует internal payload в application view."""
+        """Преобразует внутренние данные в представление приложения."""
         return NormativeCategoryView(
             category_id=self.category_id,
             section_id=self.section_id,
+            owner_user_id=self.owner_user_id,
             parent_id=self.parent_id,
             name=self.name,
             created_at=self.created_at,
@@ -68,7 +71,7 @@ class _CategoryPayload(BaseModel):
 
 
 class _DocumentPayload(BaseModel):
-    """Internal Knowledge document payload."""
+    """Внутренние данные документа Knowledge Service."""
 
     model_config = ConfigDict(
         extra="ignore",
@@ -88,6 +91,8 @@ class _DocumentPayload(BaseModel):
 
     area: str
 
+    owner_user_id: UUID | None = None
+
     index_status: NormativeIndexingStatus
 
     index_error: str | None
@@ -103,10 +108,11 @@ class _DocumentPayload(BaseModel):
     def to_view(
         self,
     ) -> NormativeDocumentView:
-        """Преобразует internal payload в application view."""
+        """Преобразует внутренние данные в представление приложения."""
         return NormativeDocumentView(
             document_id=self.document_id,
             section_id=self.section_id,
+            owner_user_id=self.owner_user_id,
             category_id=self.category_id,
             original_name=self.original_name,
             mime_type=self.mime_type,
@@ -121,13 +127,13 @@ class _DocumentPayload(BaseModel):
 
 
 class _DeleteCategoryPayload(BaseModel):
-    """Internal delete category payload."""
+    """Внутренний ответ об удалении категории."""
 
     category_id: UUID
 
 
 class _DeleteDocumentPayload(BaseModel):
-    """Internal delete document payload."""
+    """Внутренний ответ об удалении документа."""
 
     document_id: UUID
 
@@ -140,11 +146,21 @@ class HttpUserPackageCatalogManager:
         *,
         settings: KnowledgeServiceSettings,
         transport: httpx.AsyncBaseTransport | None = None,
+        owner_user_id: UUID | None = None,
     ) -> None:
-        """Сохраняет settings и optional test transport."""
+        """Сохраняет настройки и необязательный тестовый транспорт."""
         self._settings = settings
 
         self._transport = transport
+        self._owner_user_id = owner_user_id
+
+    def for_owner(self, owner_user_id: UUID) -> "HttpUserPackageCatalogManager":
+        """Создаёт отдельный адаптер без изменения общего состояния приложения."""
+        return HttpUserPackageCatalogManager(
+            settings=self._settings,
+            transport=self._transport,
+            owner_user_id=owner_user_id,
+        )
 
     async def list_categories(
         self,
@@ -160,6 +176,11 @@ class HttpUserPackageCatalogManager:
             path=(f"/internal/v1/normative/sections/{section_id}/categories"),
             params={
                 "area": _USER_PACKAGE_AREA,
+                **(
+                    {"owner_user_id": str(self._owner_user_id)}
+                    if self._owner_user_id
+                    else {}
+                ),
             },
         )
 
@@ -185,7 +206,13 @@ class HttpUserPackageCatalogManager:
         name: str,
         parent_id: UUID | None,
     ) -> NormativeCategoryView:
-        """Создаёт category area=user_package."""
+        """Создаёт категорию области user_package."""
+        if parent_id is not None:
+            parent = await self.get_category(category_id=parent_id)
+            if parent.section_id != section_id:
+                raise NormativeCatalogValidationError(
+                    "Родитель пакета находится в другом разделе."
+                )
         payload = await self._request_json(
             method="POST",
             path=(f"/internal/v1/normative/sections/{section_id}/categories"),
@@ -199,6 +226,11 @@ class HttpUserPackageCatalogManager:
                     else None
                 ),
                 "area": _USER_PACKAGE_AREA,
+                **(
+                    {"owner_user_id": str(self._owner_user_id)}
+                    if self._owner_user_id
+                    else {}
+                ),
             },
         )
 
@@ -211,7 +243,7 @@ class HttpUserPackageCatalogManager:
         *,
         category_id: UUID,
     ) -> NormativeCategoryView:
-        """Возвращает user-package category."""
+        """Возвращает категорию личного пакета."""
         payload = await self._request_json(
             method="GET",
             path=(f"/internal/v1/normative/categories/{category_id}"),
@@ -230,7 +262,9 @@ class HttpUserPackageCatalogManager:
             object,
         ],
     ) -> NormativeCategoryView:
-        """Изменяет только category area=user_package."""
+        """Изменяет только категорию области user_package."""
+        if changes.get("parent_id") is not None:
+            await self.get_category(category_id=UUID(str(changes["parent_id"])))
         await self.get_category(
             category_id=category_id,
         )
@@ -252,7 +286,7 @@ class HttpUserPackageCatalogManager:
         *,
         category_id: UUID,
     ) -> UUID:
-        """Удаляет только category area=user_package."""
+        """Удаляет только категорию области user_package."""
         await self.get_category(
             category_id=category_id,
         )
@@ -282,12 +316,17 @@ class HttpUserPackageCatalogManager:
         NormativeDocumentView,
         ...,
     ]:
-        """Возвращает только user-package documents."""
+        """Возвращает только user-документы личных пакетов."""
         payload = await self._request_json(
             method="GET",
             path=(f"/internal/v1/normative/sections/{section_id}/documents"),
             params={
                 "area": _USER_PACKAGE_AREA,
+                **(
+                    {"owner_user_id": str(self._owner_user_id)}
+                    if self._owner_user_id
+                    else {}
+                ),
             },
         )
 
@@ -316,9 +355,14 @@ class HttpUserPackageCatalogManager:
         content_type: str,
     ) -> NormativeDocumentView:
         """Загружает user-package PDF/DOC/DOCX."""
+        if category_id is not None:
+            await self.get_category(category_id=category_id)
         data = {
             "area": _USER_PACKAGE_AREA,
         }
+
+        if self._owner_user_id is not None:
+            data["owner_user_id"] = str(self._owner_user_id)
 
         if category_id is not None:
             data["category_id"] = str(
@@ -349,7 +393,7 @@ class HttpUserPackageCatalogManager:
         *,
         document_id: UUID,
     ) -> NormativeDocumentView:
-        """Возвращает user-package document."""
+        """Возвращает документ личного пакета."""
         payload = await self._request_json(
             method="GET",
             path=(f"/internal/v1/normative/documents/{document_id}"),
@@ -365,7 +409,9 @@ class HttpUserPackageCatalogManager:
         document_id: UUID,
         category_id: UUID | None,
     ) -> NormativeDocumentView:
-        """Перемещает только user-package document."""
+        """Перемещает только документ личного пакета."""
+        if category_id is not None:
+            await self.get_category(category_id=category_id)
         await self.get_document(
             document_id=document_id,
         )
@@ -393,7 +439,7 @@ class HttpUserPackageCatalogManager:
         *,
         document_id: UUID,
     ) -> UUID:
-        """Удаляет только user-package document."""
+        """Удаляет только документ личного пакета."""
         await self.get_document(
             document_id=document_id,
         )
@@ -420,7 +466,7 @@ class HttpUserPackageCatalogManager:
         *,
         document_id: UUID,
     ) -> NormativeDocumentView:
-        """Ставит user-package document в indexing queue."""
+        """Ставит user-документ пакета в очередь индексации."""
         await self.get_document(
             document_id=document_id,
         )
@@ -439,7 +485,7 @@ class HttpUserPackageCatalogManager:
         *,
         document_id: UUID,
     ) -> NormativeDocumentContent:
-        """Возвращает browser-viewable package PDF."""
+        """Возвращает доступное для просмотра в браузере package PDF."""
         await self.get_document(
             document_id=document_id,
         )
@@ -476,7 +522,7 @@ class HttpUserPackageCatalogManager:
         ]
         | None = None,
     ) -> object:
-        """Выполняет request и возвращает JSON."""
+        """Выполняет запрос и возвращает JSON."""
         response = await self._request(
             method=method,
             path=path,
@@ -514,7 +560,7 @@ class HttpUserPackageCatalogManager:
         ]
         | None = None,
     ) -> httpx.Response:
-        """Выполняет internal Knowledge HTTP request."""
+        """Выполняет внутренний HTTP-запрос Knowledge Service."""
         base_url = self._settings.base_url.rstrip(
             "/",
         )
@@ -532,6 +578,11 @@ class HttpUserPackageCatalogManager:
                 response = await client.request(
                     method,
                     base_url + path,
+                    headers=(
+                        {"X-PDRD-Package-Owner": str(self._owner_user_id)}
+                        if self._owner_user_id
+                        else {}
+                    ),
                     params=params,
                     json=json_body,
                     data=data,
@@ -554,7 +605,7 @@ class HttpUserPackageCatalogManager:
     def _raise_for_status(
         response: httpx.Response,
     ) -> None:
-        """Преобразует upstream HTTP status в application error."""
+        """Преобразует upstream HTTP status в прикладную ошибку."""
         if response.status_code < 400:
             return
 
@@ -626,7 +677,7 @@ class HttpUserPackageCatalogManager:
     def _response_json(
         response: httpx.Response,
     ) -> object:
-        """Разбирает JSON response."""
+        """Разбирает ответ JSON."""
         try:
             return response.json()
 
@@ -665,11 +716,11 @@ class HttpUserPackageCatalogManager:
 
         return result
 
-    @staticmethod
     def _parse_user_package_category(
+        self,
         payload: object,
     ) -> _CategoryPayload:
-        """Разбирает category и запрещает crossover area."""
+        """Разбирает категорию и запрещает переход в чужую область."""
         try:
             category = _CategoryPayload.model_validate(
                 payload,
@@ -680,18 +731,21 @@ class HttpUserPackageCatalogManager:
                 "Knowledge Service вернул некорректный category payload.",
             ) from error
 
-        if category.area != _USER_PACKAGE_AREA:
+        if category.area != _USER_PACKAGE_AREA or (
+            self._owner_user_id is not None
+            and category.owner_user_id != self._owner_user_id
+        ):
             raise NormativeCatalogNotFoundError(
                 "Пользовательский пакет не найден.",
             )
 
         return category
 
-    @staticmethod
     def _parse_user_package_document(
+        self,
         payload: object,
     ) -> _DocumentPayload:
-        """Разбирает document и запрещает crossover area."""
+        """Разбирает документ и запрещает переход в чужую область."""
         try:
             document = _DocumentPayload.model_validate(
                 payload,
@@ -702,7 +756,10 @@ class HttpUserPackageCatalogManager:
                 "Knowledge Service вернул некорректный document payload.",
             ) from error
 
-        if document.area != _USER_PACKAGE_AREA:
+        if document.area != _USER_PACKAGE_AREA or (
+            self._owner_user_id is not None
+            and document.owner_user_id != self._owner_user_id
+        ):
             raise NormativeCatalogNotFoundError(
                 "Документ пользовательского пакета не найден.",
             )

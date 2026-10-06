@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     enabled: bool = False
     auth_service_url: str = "http://auth-service:8000"
     auth_service_internal_key: SecretStr = SecretStr("")
+    knowledge_service_url: str = "http://knowledge-service:8401"
     user_service_url: str = "http://user-service:8000"
     user_service_internal_key: SecretStr = SecretStr("")
     request_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
@@ -35,7 +36,11 @@ class Settings(BaseSettings):
             for name in ("auth_service_internal_key", "user_service_internal_key"):
                 if len(getattr(self, name).get_secret_value()) < 32:
                     raise ValueError(f"ADMIN_SERVICE_{name.upper()} слишком короткий")
-            for name in ("auth_service_url", "user_service_url"):
+            for name in (
+                "auth_service_url",
+                "user_service_url",
+                "knowledge_service_url",
+            ):
                 if not getattr(self, name).startswith(("http://", "https://")):
                     raise ValueError(
                         f"ADMIN_SERVICE_{name.upper()} должен быть HTTP URL"

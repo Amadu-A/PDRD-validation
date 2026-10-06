@@ -1,0 +1,50 @@
+# ops/compose.knowledge-test.yaml
+# Изолированная проверка миграции владельцев пакетов и PostgreSQL Knowledge Service.
+# Временная БД не подключается к рабочим сетям, томам и секретам.
+
+name: pdrd-knowledge-service-test
+services:
+  knowledge-test-postgres:
+    image: postgres:16-alpine
+    restart: "no"
+    environment:
+      POSTGRES_DB: pdrd_knowledge_test
+      POSTGRES_USER: knowledge_test
+      POSTGRES_PASSWORD: knowledge-test-only
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U knowledge_test -d pdrd_knowledge_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks: [knowledge-test-only]
+  knowledge-test-runner:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.quality
+    restart: "no"
+    depends_on:
+      knowledge-test-postgres:
+        condition: service_healthy
+    environment:
+      PDRD_RUN_KNOWLEDGE_OWNER_DATABASE_TESTS: "1"
+      KNOWLEDGE_OWNER_TEST_DATABASE_URL: postgresql+asyncpg://knowledge_test:knowledge-test-only@knowledge-test-postgres:5432/pdrd_knowledge_test
+      KNOWLEDGE_SERVICE_ENVIRONMENT: test
+      KNOWLEDGE_SERVICE_DATABASE__HOST: knowledge-test-postgres
+      KNOWLEDGE_SERVICE_DATABASE__PORT: 5432
+      KNOWLEDGE_SERVICE_DATABASE__NAME: pdrd_knowledge_test
+      KNOWLEDGE_SERVICE_DATABASE__USER: knowledge_test
+      KNOWLEDGE_SERVICE_DATABASE__PASSWORD: knowledge-test-only
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        set -eu
+        cd /workspace/services/knowledge-service
+        python -m alembic -c alembic.ini upgrade head
+        python -m alembic -c alembic.ini current --check-heads --verbose
+        cd /workspace
+        python -m pytest -q services/knowledge-service/tests/integration/test_package_owner_database.py
+    networks: [knowledge-test-only]
+networks:
+  knowledge-test-only:
+    internal: true

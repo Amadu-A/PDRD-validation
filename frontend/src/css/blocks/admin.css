@@ -25,3 +25,12 @@
 .admin-role-form__message { flex-basis: 100%; min-height: 16px; margin: 0; color: #2457a7; font-size: 12px; }
 .admin-role-list { display: grid; gap: 12px; margin: 18px 0; color: #42536c; font-size: 14px; }
 @media (max-width: 640px) { .admin-role-form, .admin-role-form__department { display: grid; width: 100%; } .admin-role-form select, .admin-role-form input { width: 100%; } }
+
+/* Несколько разделов выбираются доступными с клавиатуры чекбоксами. */
+.admin-role-form__sections { flex: 1 1 100%; min-width: 0; margin: 0; padding: 12px; border: 1px solid #dce3ed; border-radius: 8px; }
+.admin-role-form__sections legend { padding: 0 5px; color: #42536c; font-size: 12px; font-weight: 700; }
+.admin-role-form__sections p { margin: 10px 0 0; color: #5c687b; font-size: 12px; }
+.admin-role-form__choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 9px; max-height: 240px; overflow-y: auto; }
+.admin-role-form label.admin-role-form__section { display: flex; align-items: center; gap: 8px; }
+.admin-role-form__section input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; padding: 0; flex-shrink: 0; accent-color: #2457a7; }
+.admin-role-form__sections:disabled { opacity: .65; }

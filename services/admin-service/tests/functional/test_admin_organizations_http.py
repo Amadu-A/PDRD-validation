@@ -215,7 +215,8 @@ def test_writes_require_csrf_and_use_session_actor() -> None:
             "DELETE", path, json={"authorization_version": 3}, headers=headers
         )
     assert organization.status_code == 201
-    assert department.status_code == 201
+    assert department.status_code == 405
+    assert not any(call[0] == "create_department" for call in directory.calls)
     assert (
         activated.status_code == 200 and activated.json()["authorization_version"] == 3
     )

@@ -35,16 +35,12 @@ test("проектировщик видит Gold, но не утверждени
   assert.ok(result.locked.includes("Собственные пользовательские документы (временно недоступны)"));
 });
 
-test("роль руководителя требует точную область, дизайнер ограничен своим", () => {
+test("руководитель ограничен назначенными разделами, дизайнер своим владельцем", () => {
   assert.deepEqual(roleScope("designer"), { kind: "own" });
   assert.deepEqual(roleScope("platform_admin"), { kind: "platform" });
-  assert.throws(() => roleScope("department_head"), /организацию и отдел/);
-  const organizationId = "11111111-1111-1111-1111-111111111111";
-  const departmentId = "22222222-2222-2222-2222-222222222222";
-  assert.throws(() => roleScope("department_head", "org", "dept"), /организацию и отдел/);
-  assert.deepEqual(roleScope("department_head", organizationId, departmentId), {
-    kind: "department", organization_id: organizationId, department_id: departmentId,
-  });
+  assert.throws(() => roleScope("department_head"), /хотя бы один раздел/);
+  assert.throws(() => roleScope("department_head", ["bad-id"]), /хотя бы один раздел/);
+  assert.deepEqual(roleScope("department_head", ["11111111-1111-4111-8111-111111111111"]), { kind: "sections" });
 });
 
 test("поиск пользователей не вставляет HTML и ищет логин и email", () => {
@@ -93,7 +89,7 @@ test("админский список использует серверную п
   assert.deepEqual(page.items, []);
 });
 
-test("пакеты документов остаются недоступны даже при серверном permission", async () => {
+test("пакеты доступны вошедшему владельцу с серверным permission", async () => {
   const previousFetch = globalThis.fetch;
   const root = new FakeElement();
   const packages = new FakeElement();
@@ -111,8 +107,8 @@ test("пакеты документов остаются недоступны д
   try {
     bindMainAccess(root);
     await refreshSession();
-    assert.equal(accordion.inert, true);
-    assert.equal(packages.getAttribute("aria-disabled"), "true");
+    assert.equal(accordion.inert, false);
+    assert.equal(packages.getAttribute("aria-disabled"), "false");
   } finally {
     globalThis.fetch = previousFetch;
     clearSession();

@@ -2,7 +2,7 @@
 
 """Назначения ролей с источником, областью действия и отзывом прав.
 
-Правила не обращаются к AD или БД. Application layer должен передавать только
+Правила не обращаются к AD или БД. Прикладной слой должен передавать только
 проверенные назначения и сохранять изменение назначения вместе с новой
 версией полномочий пользователя в одной транзакции.
 """
@@ -31,6 +31,7 @@ class ScopeKind(StrEnum):
     ORGANIZATION = "organization"
     DEPARTMENT = "department"
     OWN = "own"
+    SECTIONS = "sections"
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +46,7 @@ class RoleScope:
         """Запрещает неполную область или лишний идентификатор."""
         if not isinstance(self.kind, ScopeKind):
             raise TypeError("kind должен быть ScopeKind")
-        if self.kind in {ScopeKind.PLATFORM, ScopeKind.OWN}:
+        if self.kind in {ScopeKind.PLATFORM, ScopeKind.OWN, ScopeKind.SECTIONS}:
             if self.organization_id is not None or self.department_id is not None:
                 raise ValueError("Глобальная и собственная области не имеют ID")
         elif self.kind is ScopeKind.ORGANIZATION:
@@ -126,11 +127,13 @@ class RoleAssignment:
             or self.source is not RoleSource.LOCAL
         ):
             raise ValueError("Администратор платформы пока назначается локально")
-        if (
-            self.role is Role.DEPARTMENT_HEAD
-            and self.scope.kind is not ScopeKind.DEPARTMENT
-        ):
-            raise ValueError("Руководитель ограничен отделом")
+        if self.role is Role.DEPARTMENT_HEAD and self.scope.kind not in {
+            ScopeKind.DEPARTMENT,
+            ScopeKind.SECTIONS,
+        }:
+            raise ValueError(
+                "Руководитель ограничен назначенными разделами или прежним отделом"
+            )
         if self.role is Role.DESIGNER and self.scope.kind is not ScopeKind.OWN:
             raise ValueError("Роль проектировщика ограничена собственными ресурсами")
 
@@ -158,7 +161,7 @@ def _matches_membership(
     memberships: Iterable[Membership],
 ) -> bool:
     """Проверяет принадлежность пользователя ровно указанной области."""
-    if scope.kind in {ScopeKind.PLATFORM, ScopeKind.OWN}:
+    if scope.kind in {ScopeKind.PLATFORM, ScopeKind.OWN, ScopeKind.SECTIONS}:
         return True
     return any(
         membership.active

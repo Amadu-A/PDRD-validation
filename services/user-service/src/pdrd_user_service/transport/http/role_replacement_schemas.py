@@ -20,6 +20,7 @@ from pdrd_user_service.transport.http.schemas import (
 class ReplaceRoleRequest(StrictSchema):
     """Требует версию прав и выбранную роль с её областью либо оба null."""
 
+    section_ids: tuple[UUID, ...] | None = Field(default=None, max_length=1000)
     role: Role | None
     scope: RoleScopeRequest | None
     authorization_version: int = Field(ge=1, strict=True)

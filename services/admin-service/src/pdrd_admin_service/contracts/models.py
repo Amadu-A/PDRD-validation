@@ -49,14 +49,14 @@ class UserPage(StrictModel):
 class RoleScopeRequest(StrictModel):
     """Сохраняет точную область роли при передаче в user-service."""
 
-    kind: Literal["platform", "organization", "department", "own"]
+    kind: Literal["platform", "organization", "department", "own", "sections"]
     organization_id: UUID | None = None
     department_id: UUID | None = None
 
     @model_validator(mode="after")
     def require_scope_ids(self) -> "RoleScopeRequest":
         """Проверяет соответствие вида области и обязательных UUID."""
-        if self.kind in {"own", "platform"}:
+        if self.kind in {"own", "platform", "sections"}:
             valid = self.organization_id is None and self.department_id is None
         elif self.kind == "organization":
             valid = self.organization_id is not None and self.department_id is None
@@ -70,6 +70,7 @@ class RoleScopeRequest(StrictModel):
 class ReplaceRoleRequest(StrictModel):
     """Атомарно заменяет рабочую роль по ожидаемой версии полномочий."""
 
+    section_ids: tuple[UUID, ...] | None = Field(default=None, max_length=1000)
     role: Literal["designer", "department_head", "platform_admin"] | None
     scope: RoleScopeRequest | None
     authorization_version: int = Field(ge=1)

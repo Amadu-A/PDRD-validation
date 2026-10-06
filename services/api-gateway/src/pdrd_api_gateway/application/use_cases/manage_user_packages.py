@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/application/use_cases/manage_user_packages.py
 
-"""Application facade пользовательских пакетов документов."""
+"""Прикладной фасад пользовательских пакетов документов."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -21,6 +21,10 @@ class UserPackageCatalogFacade:
     """Предоставляет Transport use cases user-package catalog."""
 
     manager: UserPackageCatalogManager
+
+    def for_owner(self, owner_user_id: UUID) -> "UserPackageCatalogFacade":
+        """Ограничивает все операции UUID из проверенной сессии."""
+        return UserPackageCatalogFacade(self.manager.for_owner(owner_user_id))
 
     async def list_categories(
         self,
@@ -92,7 +96,7 @@ class UserPackageCatalogFacade:
         NormativeDocumentView,
         ...,
     ]:
-        """Возвращает package documents."""
+        """Возвращает документ личного пакетаs."""
         return await self.manager.list_documents(
             section_id=section_id,
         )
@@ -106,7 +110,7 @@ class UserPackageCatalogFacade:
         content: bytes,
         content_type: str,
     ) -> NormativeDocumentView:
-        """Загружает package document."""
+        """Загружает документ личного пакета."""
         return await self.manager.upload_document(
             section_id=section_id,
             category_id=category_id,
@@ -120,7 +124,7 @@ class UserPackageCatalogFacade:
         *,
         document_id: UUID,
     ) -> NormativeDocumentView:
-        """Возвращает package document."""
+        """Возвращает документ личного пакета."""
         return await self.manager.get_document(
             document_id=document_id,
         )
@@ -131,7 +135,7 @@ class UserPackageCatalogFacade:
         document_id: UUID,
         category_id: UUID | None,
     ) -> NormativeDocumentView:
-        """Перемещает package document."""
+        """Перемещает документ личного пакета."""
         return await self.manager.move_document(
             document_id=document_id,
             category_id=category_id,
@@ -142,7 +146,7 @@ class UserPackageCatalogFacade:
         *,
         document_id: UUID,
     ) -> UUID:
-        """Удаляет package document."""
+        """Удаляет документ личного пакета."""
         return await self.manager.delete_document(
             document_id=document_id,
         )
@@ -152,7 +156,7 @@ class UserPackageCatalogFacade:
         *,
         document_id: UUID,
     ) -> NormativeDocumentView:
-        """Запускает durable indexing package document."""
+        """Запускает индексацию документа личного пакета через устойчивую очередь."""
         return await self.manager.queue_document(
             document_id=document_id,
         )
@@ -162,7 +166,7 @@ class UserPackageCatalogFacade:
         *,
         document_id: UUID,
     ) -> NormativeDocumentContent:
-        """Возвращает browser-viewable package document."""
+        """Возвращает доступное для просмотра в браузере документ личного пакета."""
         return await self.manager.get_document_content(
             document_id=document_id,
         )

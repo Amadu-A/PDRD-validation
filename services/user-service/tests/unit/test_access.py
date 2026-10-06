@@ -44,11 +44,18 @@ def test_verified_free_account_adds_profile_without_review_rights() -> None:
 
     assert effective_permissions(free) - effective_permissions(
         AccessSubject(AccessTier.GUEST)
-    ) == {Permission.PROFILE_READ, Permission.PROFILE_UPDATE}
+    ) == {
+        Permission.PROFILE_READ,
+        Permission.PROFILE_UPDATE,
+        Permission.USER_DOCUMENT_OWN_READ,
+        Permission.USER_DOCUMENT_OWN_WRITE,
+        Permission.WORKING_PROMPT_USE,
+        Permission.SYSTEM_PROMPT_READ,
+    }
     assert has_operation_permission(free, Permission.NORMATIVE_CATALOG_READ)
     assert not has_operation_permission(free, Permission.NORMATIVE_WRITE)
     assert not has_operation_permission(free, Permission.REVIEW_OWN_READ)
-    assert not has_operation_permission(free, Permission.USER_DOCUMENT_OWN_READ)
+    assert has_operation_permission(free, Permission.USER_DOCUMENT_OWN_READ)
 
 
 def test_designer_can_create_gold_but_cannot_approve_or_capture() -> None:

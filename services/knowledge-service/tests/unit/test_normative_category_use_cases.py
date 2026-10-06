@@ -1,9 +1,9 @@
 # services/knowledge-service/tests/unit/test_normative_category_use_cases.py
 
-"""Unit tests application use cases нормативных категорий."""
+"""Проверяет прикладные сценарии нормативных категорий."""
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import (
     UTC,
     datetime,
@@ -26,6 +26,7 @@ from pdrd_knowledge_service.application.use_cases.normative_sections import (
     NormativeSectionNotFoundError,
 )
 from pdrd_knowledge_service.domain.normative_catalog import (
+    CatalogArea,
     NormativeCategory,
     NormativeSection,
 )
@@ -65,7 +66,7 @@ CHILD_ID = UUID(
 
 @dataclass
 class FakeCatalogState:
-    """Общее in-memory состояние fake Unit of Work."""
+    """Общее состояние имитации транзакции в памяти."""
 
     sections: dict[
         UUID,
@@ -85,47 +86,47 @@ class FakeCatalogState:
 
 
 class FakeSectionRepository:
-    """Минимальный repository разделов."""
+    """Минимальный репозиторий разделов."""
 
     def __init__(
         self,
         state: FakeCatalogState,
     ) -> None:
-        """Сохраняет test state."""
+        """Сохраняет тестовое состояние."""
         self._state = state
 
     async def get(
         self,
         section_id: UUID,
     ) -> NormativeSection | None:
-        """Возвращает section."""
+        """Возвращает раздел."""
         return self._state.sections.get(
             section_id,
         )
 
 
 class FakeCategoryRepository:
-    """In-memory repository категорий."""
+    """Репозиторий категорий в памяти."""
 
     def __init__(
         self,
         state: FakeCatalogState,
     ) -> None:
-        """Сохраняет test state."""
+        """Сохраняет тестовое состояние."""
         self._state = state
 
     async def add(
         self,
         category: NormativeCategory,
     ) -> None:
-        """Добавляет category."""
+        """Добавляет категорию."""
         self._state.categories[category.category_id] = category
 
     async def get(
         self,
         category_id: UUID,
     ) -> NormativeCategory | None:
-        """Возвращает category."""
+        """Возвращает категорию."""
         return self._state.categories.get(
             category_id,
         )
@@ -134,7 +135,7 @@ class FakeCategoryRepository:
         self,
         section_id: UUID,
     ) -> list[NormativeCategory]:
-        """Возвращает категории section."""
+        """Возвращает категории раздела."""
         return [
             category
             for category in self._state.categories.values()
@@ -145,14 +146,14 @@ class FakeCategoryRepository:
         self,
         category: NormativeCategory,
     ) -> None:
-        """Обновляет category."""
+        """Обновляет категорию."""
         self._state.categories[category.category_id] = category
 
     async def delete(
         self,
         category_id: UUID,
     ) -> None:
-        """Удаляет category."""
+        """Удаляет категорию."""
         self._state.categories.pop(
             category_id,
             None,
@@ -160,19 +161,19 @@ class FakeCategoryRepository:
 
 
 class FakeDocumentRepository:
-    """Placeholder repository документов."""
+    """Заглушка репозитория документов."""
 
     pass
 
 
 class FakeUnitOfWork:
-    """Fake Unit of Work category tests."""
+    """Имитирует транзакции для проверки категорий."""
 
     def __init__(
         self,
         state: FakeCatalogState,
     ) -> None:
-        """Создаёт repositories поверх общего state."""
+        """Создаёт репозитории с общим состоянием."""
         self._state = state
 
         self.sections = FakeSectionRepository(
@@ -188,7 +189,7 @@ class FakeUnitOfWork:
     async def __aenter__(
         self,
     ) -> "FakeUnitOfWork":
-        """Открывает fake transaction."""
+        """Открывает имитацию транзакции."""
         return self
 
     async def __aexit__(
@@ -197,7 +198,7 @@ class FakeUnitOfWork:
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Закрывает fake transaction."""
+        """Закрывает имитацию транзакции."""
         return None
 
     async def commit(
@@ -209,7 +210,7 @@ class FakeUnitOfWork:
     async def rollback(
         self,
     ) -> None:
-        """Fake rollback не требуется."""
+        """Откат тестового состояния не требуется."""
         return None
 
 
@@ -219,7 +220,7 @@ def build_factory(
     [],
     FakeUnitOfWork,
 ]:
-    """Создаёт Unit of Work factory."""
+    """Создаёт фабрику транзакций."""
     return lambda: FakeUnitOfWork(
         state,
     )
@@ -230,7 +231,7 @@ def make_section(
     section_id: UUID = SECTION_ID,
     name: str = "ЭОМ",
 ) -> NormativeSection:
-    """Создаёт test section."""
+    """Создаёт тестовый раздел."""
     return NormativeSection(
         section_id=section_id,
         name=name,
@@ -247,7 +248,7 @@ def make_category(
     parent_id: UUID | None = None,
     name: str,
 ) -> NormativeCategory:
-    """Создаёт test category."""
+    """Создаёт тестовую категорию."""
     return NormativeCategory(
         category_id=category_id,
         section_id=section_id,
@@ -260,7 +261,7 @@ def make_category(
 
 @pytest.mark.asyncio
 async def test_create_root_category() -> None:
-    """Новая category может находиться в корне section."""
+    """Новая категория может находиться в корне раздела."""
     state = FakeCatalogState()
 
     state.sections[SECTION_ID] = make_section()
@@ -287,7 +288,7 @@ async def test_create_root_category() -> None:
 
 @pytest.mark.asyncio
 async def test_create_rejects_parent_from_another_section() -> None:
-    """Parent category не может принадлежать другому section."""
+    """Родительская категория не может принадлежать другому разделу."""
     state = FakeCatalogState()
 
     state.sections[SECTION_ID] = make_section()
@@ -326,7 +327,7 @@ async def test_create_rejects_parent_from_another_section() -> None:
 
 @pytest.mark.asyncio
 async def test_update_renames_and_moves_category_to_root() -> None:
-    """Category можно переименовать и перенести в root."""
+    """Категорию можно переименовать и перенести в корень."""
     state = FakeCatalogState()
 
     state.sections[SECTION_ID] = make_section()
@@ -404,7 +405,7 @@ async def test_update_rejects_hierarchy_cycle() -> None:
 
 @pytest.mark.asyncio
 async def test_delete_category() -> None:
-    """Category удаляется одной transaction."""
+    """Категория удаляется одной транзакцией."""
     state = FakeCatalogState()
 
     state.sections[SECTION_ID] = make_section()
@@ -431,7 +432,7 @@ async def test_delete_category() -> None:
 
 @pytest.mark.asyncio
 async def test_list_requires_existing_section() -> None:
-    """Нельзя запросить categories несуществующего section."""
+    """Нельзя запросить категории несуществующего раздела."""
     state = FakeCatalogState()
 
     use_case = ListNormativeCategories(
@@ -449,7 +450,7 @@ async def test_list_requires_existing_section() -> None:
 
 
 def test_update_schema_distinguishes_null_parent_from_omitted_parent() -> None:
-    """Explicit null означает перенос category в root."""
+    """Явный null означает перенос категории в корень."""
     move_to_root = UpdateNormativeCategoryRequest(
         parent_id=None,
     )
@@ -460,3 +461,38 @@ def test_update_schema_distinguishes_null_parent_from_omitted_parent() -> None:
 
     assert move_to_root.changes_parent is True
     assert rename_only.changes_parent is False
+
+
+@pytest.mark.asyncio
+async def test_package_parent_must_have_same_owner_before_write() -> None:
+    """Нельзя создать или переместить папку под чужим пакетом того же раздела."""
+    state = FakeCatalogState()
+    state.sections[SECTION_ID] = make_section()
+    state.categories[PARENT_ID] = replace(
+        make_category(category_id=PARENT_ID, name="Чужой пакет"),
+        area=CatalogArea.USER_PACKAGE,
+        owner_user_id=OTHER_SECTION_ID,
+    )
+    state.categories[CHILD_ID] = replace(
+        make_category(category_id=CHILD_ID, name="Мой пакет"),
+        area=CatalogArea.USER_PACKAGE,
+        owner_user_id=SECTION_ID,
+    )
+    create = CreateNormativeCategory(unit_of_work_factory=build_factory(state))
+    with pytest.raises(NormativeCategoryParentError, match="владельцу"):
+        await create.execute(
+            section_id=SECTION_ID,
+            name="Папка",
+            parent_id=PARENT_ID,
+            area=CatalogArea.USER_PACKAGE,
+            owner_user_id=SECTION_ID,
+        )
+    update = UpdateNormativeCategory(unit_of_work_factory=build_factory(state))
+    with pytest.raises(NormativeCategoryParentError, match="владельцу"):
+        await update.execute(
+            category_id=CHILD_ID,
+            name="Мой пакет",
+            parent_id=PARENT_ID,
+            change_parent=True,
+        )
+    assert state.commits == 0

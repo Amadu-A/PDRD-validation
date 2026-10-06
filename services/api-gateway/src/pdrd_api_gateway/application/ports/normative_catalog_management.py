@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/application/ports/normative_catalog_management.py
 
-"""Application port управления managed normative catalog."""
+"""Порт управления нормативным каталогом."""
 
 from collections.abc import (
     Mapping,
@@ -54,7 +54,7 @@ class NormativeCatalogUnavailableError(
 class NormativeCatalogProtocolError(
     NormativeCatalogUnavailableError,
 ):
-    """Knowledge Service вернул неожиданный transport payload."""
+    """Knowledge Service вернул неожиданный формат данных транспорта."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,10 +88,12 @@ class NormativeCategoryView:
 
     updated_at: datetime
 
+    owner_user_id: UUID | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class NormativeDocumentView:
-    """Публичная metadata managed нормативного документа."""
+    """Публичные метаданные нормативного документа."""
 
     document_id: UUID
 
@@ -116,6 +118,8 @@ class NormativeDocumentView:
     created_at: datetime
 
     updated_at: datetime
+
+    owner_user_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,7 +168,7 @@ class NormativeCatalogManager(Protocol):
             object,
         ],
     ) -> NormativeSectionView:
-        """Изменяет имя и/или system prompt."""
+        """Изменяет имя и/или системный промпт."""
         ...
 
     async def delete_section(
@@ -252,7 +256,7 @@ class NormativeCatalogManager(Protocol):
         *,
         document_id: UUID,
     ) -> NormativeDocumentView:
-        """Возвращает metadata документа."""
+        """Возвращает метаданные документа."""
         ...
 
     async def move_document(
@@ -261,7 +265,7 @@ class NormativeCatalogManager(Protocol):
         document_id: UUID,
         category_id: UUID | None,
     ) -> NormativeDocumentView:
-        """Перемещает document в category или root."""
+        """Перемещает документ в категорию или root."""
         ...
 
     async def delete_document(
@@ -269,7 +273,7 @@ class NormativeCatalogManager(Protocol):
         *,
         document_id: UUID,
     ) -> UUID:
-        """Удаляет document по managed lifecycle."""
+        """Удаляет документ согласно жизненному циклу каталога."""
         ...
 
     async def queue_document(
@@ -277,7 +281,7 @@ class NormativeCatalogManager(Protocol):
         *,
         document_id: UUID,
     ) -> NormativeDocumentView:
-        """Ставит document в durable indexing queue."""
+        """Ставит документ в устойчивую очередь индексации."""
         ...
 
     async def get_document_content(

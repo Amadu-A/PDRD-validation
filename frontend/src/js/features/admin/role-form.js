@@ -1,199 +1,133 @@
 // frontend/src/js/features/admin/role-form.js
 
-/** Выбор роли пользователя и отдела из проверенного справочника admin-service. */
-import { listMemberships } from "./api.js";
-import { allDepartments, allOrganizations } from "./directory.js";
-import { saveRoleWithMembership } from "./role-assignment.js";
+/** Назначает роль и несколько разделов одним запросом с CAS и аудитом. */
+import { changeUserRole, getUserSections, listSectionCatalog } from "./api.js";
 
 const roles = [
-  ["", "Без рабочей роли"],
-  ["designer", "Проектировщик"],
-  ["department_head", "Руководитель отдела"],
-  ["platform_admin", "Администратор платформы"],
+  ["", "Без рабочей роли"], ["designer", "Проектировщик"],
+  ["department_head", "Руководитель отдела"], ["platform_admin", "Администратор платформы"],
 ];
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
-/** Проверяет область выбранной роли и обязательные идентификаторы отдела. */
-export function roleScope(role, organizationId = "", departmentId = "") {
+/** Проверяет область роли; руководитель ограничен отмеченными разделами. */
+export function roleScope(role, sectionIds = []) {
   if (role === "designer") return { kind: "own" };
   if (role === "platform_admin") return { kind: "platform" };
   if (role === "department_head") {
-    if (!UUID.test(organizationId) || !UUID.test(departmentId)) {
-      throw new Error("Для руководителя выберите организацию и отдел.");
+    if (!Array.isArray(sectionIds) || !sectionIds.length || sectionIds.some((id) => !UUID.test(id))) {
+      throw new Error("Для руководителя отметьте хотя бы один раздел.");
     }
-    return {
-      kind: "department",
-      organization_id: organizationId,
-      department_id: departmentId,
-    };
+    return { kind: "sections" };
   }
   return null;
 }
 
-function option(value, label) {
-  const entry = document.createElement("option");
-  entry.value = value;
-  entry.textContent = label;
-  return entry;
-}
-
-function fillSelect(select, placeholder, items, valueKey, preferred = "") {
-  select.replaceChildren(option("", placeholder), ...items.map((item) =>
-    option(item[valueKey], item.name)));
-  select.value = items.some((item) => item[valueKey] === preferred) ? preferred : "";
-}
-
-/** Создаёт форму назначения роли с проверками статуса и версии полномочий. */
+/** Показывает живые названия разделов и сохраняет выбранный набор атомарно с ролью. */
 export function createRoleForm(user, onChanged) {
   const form = document.createElement("form");
   form.className = "admin-role-form";
-  const selectLabel = document.createElement("label");
-  selectLabel.textContent = "Роль PDRD";
-  const select = document.createElement("select");
-  select.name = "role";
+  const roleLabel = document.createElement("label");
+  roleLabel.textContent = "Роль PDRD";
+  const role = document.createElement("select");
+  role.name = "role";
   for (const [value, label] of roles) {
-    const entry = option(value, label);
-    select.append(entry);
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    role.append(option);
   }
-  select.value = user.currentRole ?? user.roles?.[0] ?? "";
-  select.disabled = Boolean(user.roleLocked);
-  selectLabel.append(select);
-
-  const departmentFields = document.createElement("div");
-  departmentFields.className = "admin-role-form__department";
-  const organizationLabel = document.createElement("label");
-  organizationLabel.textContent = "Организация";
-  const organization = document.createElement("select");
-  organization.name = "organization_id";
-  organization.disabled = true;
-  fillSelect(organization, "Выберите организацию", [], "organization_id");
-  organizationLabel.append(organization);
-  const departmentLabel = document.createElement("label");
-  departmentLabel.textContent = "Отдел";
-  const department = document.createElement("select");
-  department.name = "department_id";
-  department.disabled = true;
-  fillSelect(department, "Выберите отдел", [], "department_id");
-  departmentLabel.append(department);
+  role.value = user.currentRole ?? user.roles?.[0] ?? "";
+  role.disabled = Boolean(user.roleLocked);
+  roleLabel.append(role);
+  const fields = document.createElement("fieldset");
+  fields.className = "admin-role-form__sections";
+  const legend = document.createElement("legend");
+  legend.textContent = "Доступные разделы документации";
+  const choices = document.createElement("div");
+  choices.className = "admin-role-form__choices";
+  const hint = document.createElement("p");
+  hint.textContent = "Разделы берутся с главной страницы. Администратор имеет доступ ко всем разделам; личные пакеты остаются у владельца.";
+  fields.append(legend, choices, hint);
   const reload = document.createElement("button");
   reload.type = "button";
-  reload.textContent = "Обновить справочник";
-  departmentFields.append(organizationLabel, departmentLabel, reload);
-
-  const button = document.createElement("button");
-  button.type = "submit";
-  button.textContent = "Сохранить роль";
+  reload.textContent = "Обновить разделы";
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.textContent = "Сохранить роль и доступ";
   const message = document.createElement("p");
   message.className = "admin-role-form__message";
   message.setAttribute("role", "status");
-  let directoryState = "idle";
-  let memberships = [];
-  let departmentLoad = 0;
-  let staleVersion = false;
+  let loaded = false;
+  let stale = false;
+  let checkboxes = [];
 
+  /** Обновляет возможность записи с учётом роли, статуса и полученной версии. */
   function updateControls() {
-    const head = select.value === "department_head";
-    departmentFields.hidden = !head;
-    button.disabled = Boolean(user.roleLocked) || (user.status && user.status !== "active")
-      || staleVersion
-      || (head && (directoryState !== "ready" || !organization.value || !department.value));
-    if (user.roleLocked) {
-      message.textContent = "Назначение из AD меняется в источнике.";
-    } else if (user.status && user.status !== "active") {
-      message.textContent = "Роли доступны только активным пользователям.";
-    } else if (head && directoryState === "loading") {
-      message.textContent = "Загружаем организации и отделы…";
-    } else if (head && directoryState === "error") {
-      message.textContent = "Не удалось загрузить справочник. Повторите запрос.";
-    } else if (head && directoryState === "ready" && !organization.value) {
-      message.textContent = "Выберите организацию. Если список пуст, создайте её в разделе «Роли и группы».";
-    } else if (head && directoryState === "ready" && !department.value) {
-      message.textContent = "Выберите отдел. Если список пуст, создайте его в разделе «Роли и группы».";
-    } else if (!staleVersion) {
-      message.textContent = "";
-    }
+    save.disabled = !loaded || stale || Boolean(user.roleLocked)
+      || (user.status && user.status !== "active");
+    fields.disabled = Boolean(user.roleLocked) || role.value === "platform_admin";
   }
 
-  async function loadDepartmentOptions(preferred = "") {
-    const request = ++departmentLoad;
-    department.disabled = true;
-    fillSelect(department, "Выберите отдел", [], "department_id");
-    directoryState = "loading";
-    updateControls();
-    if (!organization.value) {
-      directoryState = "ready";
-      updateControls();
-      return;
-    }
-    try {
-      const items = (await allDepartments(organization.value)).filter((item) => item.active);
-      if (request !== departmentLoad) return;
-      fillSelect(department, "Выберите отдел", items, "department_id", preferred);
-      department.disabled = false;
-      directoryState = "ready";
-    } catch {
-      if (request !== departmentLoad) return;
-      directoryState = "error";
-    }
-    updateControls();
-  }
-
-  async function loadDirectory() {
-    if (directoryState === "loading") return;
-    directoryState = "loading";
-    organization.disabled = true;
+  /** Загружает каталог и назначения; отказ не превращается в пустой набор для записи. */
+  async function load() {
+    loaded = false;
     reload.disabled = true;
     updateControls();
+    message.textContent = "Загружаем разделы…";
     try {
-      const [items, currentMemberships] = await Promise.all([
-        allOrganizations(), listMemberships(user.user_id),
-      ]);
-      memberships = currentMemberships;
-      fillSelect(organization, "Выберите организацию", items.filter((item) => item.active),
-        "organization_id", user.scope?.organization_id ?? "");
-      organization.disabled = false;
-      await loadDepartmentOptions(user.scope?.department_id ?? "");
-    } catch {
-      directoryState = "error";
-      updateControls();
+      const [catalog, access] = await Promise.all([listSectionCatalog(), getUserSections(user.user_id)]);
+      if (!Array.isArray(catalog) || !Array.isArray(access.section_ids)
+        || access.authorization_version !== user.authorization_version) {
+        throw new Error("Версия прав изменилась. Откройте карточку пользователя заново.");
+      }
+      const selected = new Set(access.section_ids);
+      checkboxes = [];
+      choices.replaceChildren(...catalog.map((section) => {
+        const label = document.createElement("label");
+        label.className = "admin-role-form__section";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.name = "section_ids";
+        input.value = section.section_id;
+        input.checked = selected.has(section.section_id);
+        checkboxes.push(input);
+        const text = document.createElement("span");
+        text.textContent = section.name;
+        label.append(input, text);
+        return label;
+      }));
+      loaded = true;
+      message.textContent = catalog.length ? "" : "Разделов пока нет. Создайте раздел на главной странице.";
+    } catch (error) {
+      message.textContent = error.detail ?? error.message ?? "Не удалось загрузить разделы.";
     } finally {
       reload.disabled = false;
+      updateControls();
     }
   }
 
-  select.addEventListener("change", () => {
-    updateControls();
-    if (select.value === "department_head" && directoryState === "idle") void loadDirectory();
-  });
-  organization.addEventListener("change", () => { void loadDepartmentOptions(); });
-  department.addEventListener("change", updateControls);
-  reload.addEventListener("click", () => { void loadDirectory(); });
-  form.append(selectLabel, departmentFields, button, message);
+  role.addEventListener("change", updateControls);
+  reload.addEventListener("click", () => { void load(); });
+  form.append(roleLabel, fields, reload, save, message);
   updateControls();
-  if (select.value === "department_head" && !user.roleLocked && (!user.status || user.status === "active")) {
-    void loadDirectory();
-  }
-
+  if (!user.roleLocked && (!user.status || user.status === "active")) void load();
+  else message.textContent = user.roleLocked ? "Назначение из AD меняется в источнике." : "Изменения доступны только активным пользователям.";
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (button.disabled) return;
-    button.disabled = true;
+    if (save.disabled) return;
+    save.disabled = true;
     message.textContent = "Сохраняем…";
     try {
-      const scope = roleScope(select.value, organization.value, department.value);
-      await saveRoleWithMembership({
-        user, role: select.value || null, scope, memberships,
-      });
-      message.textContent = "Роль обновлена.";
+      const ids = checkboxes.filter((entry) => entry.checked).map((entry) => entry.value);
+      const scope = roleScope(role.value, ids);
+      await changeUserRole(user.user_id, role.value || null, scope, user.authorization_version, ids);
+      stale = true;
+      message.textContent = "Роль и доступ обновлены.";
       await onChanged();
     } catch (error) {
-      staleVersion = Boolean(error.partial || error.status === 409);
-      message.textContent = error.detail ?? error.message ?? "Не удалось изменить роль.";
-    } finally {
-      button.disabled = staleVersion || Boolean(user.roleLocked) || (user.status && user.status !== "active")
-        || (select.value === "department_head"
-          && (directoryState !== "ready" || !organization.value || !department.value));
-    }
+      stale = error.status === 409;
+      message.textContent = error.detail ?? error.message ?? "Не удалось сохранить доступ.";
+    } finally { updateControls(); }
   });
   return form;
 }
