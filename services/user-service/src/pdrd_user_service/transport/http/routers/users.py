@@ -11,6 +11,9 @@ from pdrd_user_service.application.ports.repository import (
     AuthorizationConflict,
     IdentityConflict,
 )
+from pdrd_user_service.application.ports.section_catalog import (
+    SectionCatalogUnavailable,
+)
 from pdrd_user_service.application.use_cases.users import (
     AdminRequired,
     UserDirectory,
@@ -50,6 +53,10 @@ Directory = Annotated[UserDirectory, Depends(_directory)]
 
 def _raise_domain_error(error: Exception) -> None:
     """Преобразует ожидаемые ошибки в безопасные HTTP коды."""
+    if isinstance(error, SectionCatalogUnavailable):
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Каталог разделов недоступен."
+        ) from error
     if isinstance(error, UserNotFound):
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, "Пользователь не найден."
@@ -86,6 +93,10 @@ async def provision_user(
     except ValueError as error:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)
+        ) from error
+    except SectionCatalogUnavailable as error:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Каталог разделов недоступен."
         ) from error
     except IdentityConflict as error:
         raise HTTPException(status.HTTP_409_CONFLICT, "Идентичность занята.") from error

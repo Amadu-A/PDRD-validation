@@ -114,3 +114,36 @@ test("пакеты доступны вошедшему владельцу с с�
     clearSession();
   }
 });
+
+
+test("руководитель видит Experience и создание разделов, а удаление доступно только админу", async () => {
+  const previousFetch = globalThis.fetch;
+  const root = new FakeElement(); const packages = new FakeElement();
+  packages.selectors.set("[data-user-packages-accordion]", new FakeElement("details"));
+  root.selectors.set("[data-user-packages-block]", packages);
+  root.selectors.set("[data-normative-prompt-block]", new FakeElement());
+  const experience = new FakeElement(); const deleting = new FakeElement("button");
+  root.selectors.set("[data-experience-nav]", experience);
+  root.selectors.set("[data-normative-section-delete]", deleting);
+  let permissions = ["experience.catalog.read", "normative.write"];
+  globalThis.fetch = async () => new Response(JSON.stringify({ authenticated: true,
+    user: { user_id: "head", roles: ["department_head"], permissions } }), { status: 200 });
+  try {
+    bindMainAccess(root); await refreshSession();
+    assert.equal(experience.hidden, false);
+    assert.equal(root.dataset.canWriteNormative, "true");
+    assert.equal(deleting.hidden, true);
+    const trash = { closest: () => trash };
+    let blocked = 0;
+    const click = { target: trash, preventDefault() { blocked += 1; }, stopImmediatePropagation() {} };
+    root.dispatch("click", click);
+    assert.equal(blocked, 1);
+    assert.equal(root.dataset.canDeleteNormative, "false");
+    permissions = [...permissions, "normative.delete"]; await refreshSession();
+    assert.equal(deleting.hidden, false);
+    root.dispatch("click", click);
+    assert.equal(blocked, 1);
+    assert.equal(root.dataset.canDeleteNormative, "true");
+    clearSession(); assert.equal(experience.hidden, true); assert.equal(deleting.hidden, true);
+  } finally { globalThis.fetch = previousFetch; clearSession(); }
+});

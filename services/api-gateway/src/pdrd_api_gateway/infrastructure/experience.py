@@ -68,12 +68,13 @@ class HttpExperienceService:
         command: dict | None,
         index: int | None,
     ) -> dict | bytes:
-        """Actor приходит из сервера Gateway; browser headers не пересылаются."""
+        """Актёр определяется сервером Gateway; браузерные заголовки не пересылаются."""
         base = f"{self.base_url.rstrip('/')}/internal/v1/experience"
         example = str(context.example_id)
         operation = context.operation
         method, suffix = {
             "list": ("GET", ""),
+            "authors": ("GET", "/authors"),
             "export": ("GET", "/export"),
             "capture": ("POST", f"/capture/{context.job_id}"),
             "read": ("GET", f"/{example}"),

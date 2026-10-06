@@ -1050,3 +1050,8 @@
 .page [data-user-packages-block][aria-disabled="true"] {
   opacity: .55;
 }
+
+/* Удаление нормативных объектов требует отдельного серверного права. */
+.page[data-can-delete-normative="false"] [data-normative-delete] {
+  display: none;
+}

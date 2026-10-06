@@ -8,6 +8,7 @@
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -44,10 +45,23 @@ class Settings(BaseSettings):
     enabled: bool = False
     internal_key: SecretStr = SecretStr("")
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    knowledge_service_url: str = "http://knowledge-service:8401"
+    knowledge_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
 
     @model_validator(mode="after")
     def require_runtime_secrets(self) -> "Settings":
         """Не запускает рабочий API без ключа или настоящего пароля БД."""
+        parsed = urlsplit(self.knowledge_service_url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in {"", "/"}
+        ):
+            raise ValueError("Некорректный внутренний адрес Knowledge Service")
         if self.enabled:
             if len(self.internal_key.get_secret_value()) < 32:
                 raise ValueError(

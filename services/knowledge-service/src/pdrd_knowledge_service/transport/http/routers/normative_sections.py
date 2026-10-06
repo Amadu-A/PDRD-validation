@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/transport/http/routers/normative_sections.py
 
-"""Internal HTTP API разделов нормативной базы."""
+"""Внутренний HTTP API разделов нормативной базы."""
 
 from typing import Annotated
 from uuid import UUID
@@ -12,6 +12,10 @@ from fastapi import (
     status,
 )
 
+from pdrd_knowledge_service.application.ports.document_storage import (
+    NormativeDocumentStorageError,
+)
+from pdrd_knowledge_service.application.ports.vector_store import VectorStoreError
 from pdrd_knowledge_service.application.use_cases.normative_sections import (
     NormativeSectionNotEmptyError,
     NormativeSectionNotFoundError,
@@ -63,7 +67,7 @@ def _require_use_cases(
 def _translate_error(
     error: Exception,
 ) -> HTTPException:
-    """Преобразует application/domain error в HTTP contract."""
+    """Преобразует прикладную или доменную ошибку в HTTP-ответ."""
     if isinstance(
         error,
         NormativeSectionNotFoundError,
@@ -125,7 +129,7 @@ async def create_normative_section(
     request: CreateNormativeSectionRequest,
     container: ContainerDependency,
 ) -> NormativeSectionResponse:
-    """Создаёт раздел с default system prompt."""
+    """Создаёт раздел с системным промптом по умолчанию."""
     use_cases = _require_use_cases(
         container,
     )
@@ -216,7 +220,7 @@ async def delete_normative_section(
     section_id: UUID,
     container: ContainerDependency,
 ) -> DeleteNormativeSectionResponse:
-    """Удаляет пустой раздел нормативной базы."""
+    """Идемпотентно удаляет раздел со всеми документами и индексом."""
     use_cases = _require_use_cases(
         container,
     )
@@ -225,6 +229,12 @@ async def delete_normative_section(
         deleted_id = await use_cases.delete_section.execute(
             section_id=section_id,
         )
+
+    except (NormativeDocumentStorageError, VectorStoreError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Удаление раздела не завершено. Проверьте доступность хранилищ и повторите удаление.",
+        ) from error
 
     except (
         NormativeSectionNotFoundError,

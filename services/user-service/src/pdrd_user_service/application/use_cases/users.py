@@ -16,6 +16,9 @@ from pdrd_user_service.application.ports.repository import (
     UnitOfWorkFactory,
     UserRepository,
 )
+from pdrd_user_service.application.ports.section_catalog import SectionCatalog
+from pdrd_user_service.application.use_cases.initial_access import InitialUserAccess
+from pdrd_user_service.core.observability import log_execution_time
 from pdrd_user_service.domain.access import (
     AccessTier,
     Permission,
@@ -74,10 +77,12 @@ class UserDirectory:
         self,
         unit_of_work: UnitOfWorkFactory,
         *,
+        section_catalog: SectionCatalog | None = None,
         clock: Callable[[], datetime] | None = None,
         new_id: Callable[[], UUID] = uuid4,
     ) -> None:
         """Получает транзакционный порт и управляемые источники времени/UUID."""
+        self._initial_access = InitialUserAccess(section_catalog)
         self._unit_of_work = unit_of_work
         self._clock = clock or (lambda: datetime.now(UTC))
         self._new_id = new_id
@@ -104,6 +109,7 @@ class UserDirectory:
         async with self._unit_of_work() as work:
             return await work.users.find_by_login(login.strip().lower())
 
+    @log_execution_time(operation="identity_user_provision")
     async def provision(
         self,
         *,
@@ -133,6 +139,13 @@ class UserDirectory:
             raise ValueError(
                 "Email-профиль создаётся через регистрацию с подтверждением"
             )
+        # Уже созданные профили не зависят от доступности Knowledge Service.
+        existing = await self.find_identity(provider_id, namespace, subject)
+        if existing is not None:
+            if existing.kind is not kind:
+                raise IdentityConflict("Тип учётной записи не совпадает")
+            return existing
+        section_ids = await self._initial_access.read_sections()
         try:
             async with self._unit_of_work() as work:
                 existing = await work.users.find_identity(
@@ -158,6 +171,9 @@ class UserDirectory:
                     email=email,
                 )
                 await work.users.create_user(user, identity_key)
+                user = await self._initial_access.initialize(
+                    work.users, user, section_ids, user.created_at
+                )
                 await work.commit()
                 return user
         except IdentityConflict:
@@ -199,9 +215,13 @@ class UserDirectory:
     ) -> RoleChange:
         """Назначает локальную роль после чтения действующей роли администратора."""
         async with self._unit_of_work() as work:
+            profiles = {
+                item: await work.users.get_user(item, for_update=True)
+                for item in sorted({actor_user_id, target_user_id})
+            }
             actor, actor_assignments = await self._load_admin(work.users, actor_user_id)
             self._assert_admin(actor, actor_assignments, self._clock())
-            target = await work.users.get_user(target_user_id, for_update=True)
+            target = profiles[target_user_id]
             if target is None:
                 raise UserNotFound(target_user_id)
             existing = await work.users.list_assignments(
@@ -235,9 +255,13 @@ class UserDirectory:
     ) -> RoleChange:
         """Отзывает локальную роль и увеличивает версию полномочий пользователя."""
         async with self._unit_of_work() as work:
+            profiles = {
+                item: await work.users.get_user(item, for_update=True)
+                for item in sorted({actor_user_id, target_user_id})
+            }
             actor, actor_assignments = await self._load_admin(work.users, actor_user_id)
             self._assert_admin(actor, actor_assignments, self._clock())
-            target = await work.users.get_user(target_user_id, for_update=True)
+            target = profiles[target_user_id]
             if target is None:
                 raise UserNotFound(target_user_id)
             existing = await work.users.list_assignments(

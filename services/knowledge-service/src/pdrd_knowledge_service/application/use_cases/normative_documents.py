@@ -4,7 +4,7 @@
 
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import (
     UTC,
     datetime,
@@ -36,6 +36,10 @@ from pdrd_knowledge_service.application.ports.document_storage import (
 from pdrd_knowledge_service.application.ports.persistence import (
     NormativeCatalogUnitOfWork,
     NormativeCatalogUnitOfWorkFactory,
+)
+from pdrd_knowledge_service.application.ports.section_locks import (
+    CatalogSectionLocks,
+    InMemoryCatalogSectionLocks,
 )
 from pdrd_knowledge_service.application.ports.vector_store import (
     VectorStore,
@@ -114,7 +118,7 @@ class NormativeDocumentContent:
 
 
 def utc_now() -> datetime:
-    """Возвращает текущее timezone-aware UTC время."""
+    """Возвращает текущее время UTC с часовым поясом."""
     return datetime.now(
         UTC,
     )
@@ -129,7 +133,7 @@ async def _require_section(
         section_id,
     )
 
-    if section is None:
+    if section is None or section.deleting:
         raise NormativeSectionNotFoundError(
             f"Раздел нормативной базы {section_id} не найден.",
         )
@@ -259,7 +263,7 @@ def _validate_pdf_content(
 def _validate_doc_content(
     content: bytes,
 ) -> None:
-    """Проверяет Compound File Binary signature старого DOC."""
+    """Проверяет сигнатуру составного двоичного файла старого DOC."""
     if not content.startswith(
         _DOC_SIGNATURE,
     ):
@@ -420,11 +424,36 @@ class UploadNormativeDocument:
 
     max_upload_bytes: int
 
+    section_locks: CatalogSectionLocks = field(
+        default_factory=InMemoryCatalogSectionLocks
+    )
+
     clock: Clock = utc_now
 
     identifier_factory: IdentifierFactory = uuid4
 
     async def execute(
+        self,
+        *,
+        section_id: UUID,
+        category_id: UUID | None,
+        original_name: str,
+        content: bytes,
+        area: CatalogArea = CatalogArea.NORMATIVE,
+        owner_user_id: UUID | None = None,
+    ) -> NormativeDocument:
+        """Не допускает удаления раздела между записью файла и SQL commit."""
+        async with self.section_locks.shared(section_id):
+            return await self._execute(
+                section_id=section_id,
+                category_id=category_id,
+                original_name=original_name,
+                content=content,
+                area=area,
+                owner_user_id=owner_user_id,
+            )
+
+    async def _execute(
         self,
         *,
         section_id: UUID,
@@ -530,7 +559,7 @@ class GetNormativeDocumentContent:
         *,
         document_id: UUID,
     ) -> NormativeDocumentContent:
-        """Для Word возвращает ready PDF-preview."""
+        """Для Word возвращает готовый предпросмотр PDF."""
         async with self.unit_of_work_factory() as unit_of_work:
             document = await _require_document(
                 unit_of_work,

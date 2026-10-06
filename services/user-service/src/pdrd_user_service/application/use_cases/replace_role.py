@@ -116,7 +116,11 @@ class ReplaceWorkerRole:
         if role is not None and role not in MANAGED_ROLES:
             raise ValueError("Эта роль назначается отдельной защищённой процедурой")
         async with self._unit_of_work() as work:
-            actor = await work.users.get_user(actor_user_id, for_update=True)
+            profiles = {
+                item: await work.users.get_user(item, for_update=True)
+                for item in sorted({actor_user_id, target_user_id})
+            }
+            actor = profiles[actor_user_id]
             if actor is None:
                 raise AdminRequired("Администратор не найден")
             actor_assignments = await work.users.list_assignments(
@@ -126,7 +130,7 @@ class ReplaceWorkerRole:
                 actor, actor_assignments, (), self._clock()
             ):
                 raise AdminRequired("Требуется действующая роль администратора")
-            target = await work.users.get_user(target_user_id, for_update=True)
+            target = profiles[target_user_id]
             if target is None:
                 raise UserNotFound(target_user_id)
             if target.authorization_version != authorization_version:

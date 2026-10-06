@@ -1,6 +1,6 @@
 # services/api-gateway/tests/unit/test_normative_snapshot.py
 
-"""Unit tests immutable normative snapshot analysis job."""
+"""Проверки неизменяемого нормативного снимка задания анализа."""
 
 from datetime import (
     UTC,
@@ -72,7 +72,7 @@ BASE_TIME = datetime(
 
 
 class FakeNormativeCatalogReader:
-    """Fake managed normative catalog."""
+    """Имитирует управляемый нормативный каталог."""
 
     def __init__(
         self,
@@ -80,7 +80,7 @@ class FakeNormativeCatalogReader:
         ready_b: bool = True,
         system_prompt: str = "  DB prompt\n",
     ) -> None:
-        """Сохраняет controlled catalog state."""
+        """Сохраняет управляемое состояние каталога."""
         self._ready_b = ready_b
         self._system_prompt = system_prompt
 
@@ -105,7 +105,7 @@ class FakeNormativeCatalogReader:
         NormativeDocumentRecord,
         ...,
     ]:
-        """Возвращает два managed test documents."""
+        """Возвращает два тестовых документа каталога."""
         assert section_id == SECTION_ID
 
         return (
@@ -124,7 +124,7 @@ class FakeNormativeCatalogReader:
 
 @pytest.mark.asyncio
 async def test_resolver_snapshots_db_prompt_and_ordered_documents() -> None:
-    """Resolver фиксирует DB prompt и удаляет duplicate document IDs."""
+    """Сценарий фиксирует промпт из БД и исключает повторяющиеся UUID документов."""
     snapshot = await ResolveNormativeSnapshot(
         catalog_reader=FakeNormativeCatalogReader(),
     ).execute(
@@ -152,7 +152,7 @@ async def test_resolver_snapshots_db_prompt_and_ordered_documents() -> None:
 
 @pytest.mark.asyncio
 async def test_explicit_empty_prompt_override_is_preserved() -> None:
-    """Empty working override отличается от restore system prompt."""
+    """Пустой рабочий промпт отличается от восстановления системного промпта."""
     snapshot = await ResolveNormativeSnapshot(
         catalog_reader=FakeNormativeCatalogReader(),
     ).execute(
@@ -188,7 +188,7 @@ async def test_non_ready_document_is_rejected_before_job_creation() -> None:
 
 
 def test_snapshot_rejects_nul_prompt() -> None:
-    """Snapshot не допускает NUL, но не strip-ит prompt."""
+    """Снимок не допускает NUL, сохраняя крайние пробелы промпта."""
     with pytest.raises(
         InvalidNormativeAnalysisSnapshotError,
     ):
@@ -200,7 +200,7 @@ def test_snapshot_rejects_nul_prompt() -> None:
 
 
 def test_absent_snapshot_is_bound_as_sql_null() -> None:
-    """Python None для snapshot должен сохраняться как SQL NULL."""
+    """Пустой снимок Python сохраняется как SQL NULL."""
     column = AnalysisJobModel.__table__.c.normative_snapshot
 
     assert column.nullable is True
@@ -209,7 +209,7 @@ def test_absent_snapshot_is_bound_as_sql_null() -> None:
 
 
 def test_repository_restores_snapshot_from_jsonb_payload() -> None:
-    """Repository восстанавливает immutable snapshot из ORM model."""
+    """Репозиторий восстанавливает неизменяемый снимок из ORM-модели."""
     snapshot = NormativeAnalysisSnapshot.create(
         section_id=SECTION_ID,
         document_ids=(DOCUMENT_A_ID,),
@@ -236,7 +236,7 @@ def test_repository_restores_snapshot_from_jsonb_payload() -> None:
 
 
 def test_n8n_form_data_contains_exact_snapshot() -> None:
-    """N8n adapter передаёт точные IDs и prompt из job snapshot."""
+    """Адаптер n8n передаёт точные UUID и промпт из снимка задания."""
     snapshot = NormativeAnalysisSnapshot.create(
         section_id=SECTION_ID,
         document_ids=(
@@ -278,7 +278,7 @@ def test_n8n_form_data_contains_exact_snapshot() -> None:
 
 
 def test_analysis_job_keeps_frozen_snapshot_object() -> None:
-    """AnalysisJob ссылается на frozen snapshot."""
+    """Задание анализа ссылается на неизменяемый снимок."""
     snapshot = NormativeAnalysisSnapshot.create(
         section_id=SECTION_ID,
         document_ids=(DOCUMENT_A_ID,),
@@ -291,3 +291,29 @@ def test_analysis_job_keeps_frozen_snapshot_object() -> None:
     )
 
     assert job.normative_snapshot is snapshot
+
+
+@pytest.mark.asyncio
+async def test_deleting_section_cannot_create_new_snapshot() -> None:
+    """Удаляемый раздел отклоняется до выборки документов и формирования снимка."""
+
+    class DeletingCatalog:
+        """Предоставляет tombstone, сохраняя UUID для повторного удаления."""
+
+        async def get_section(self, *, section_id):
+            """Возвращает состояние удаления из Knowledge Service."""
+            return NormativeSectionRecord(
+                section_id=section_id, system_prompt="Промпт", deleting=True
+            )
+
+        async def list_documents(self, *, section_id):
+            """Не допускает чтение документов удаляемого раздела."""
+            raise AssertionError("Документы tombstone не должны запрашиваться")
+
+    with pytest.raises(NormativeSelectionConflictError, match="Раздел удаляется"):
+        await ResolveNormativeSnapshot(DeletingCatalog()).execute(
+            section_id=SECTION_ID,
+            document_ids=(),
+            prompt_override_enabled=False,
+            prompt_override="",
+        )

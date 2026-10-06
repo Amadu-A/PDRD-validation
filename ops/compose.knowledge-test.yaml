@@ -1,5 +1,5 @@
 # ops/compose.knowledge-test.yaml
-# Изолированная проверка миграции владельцев пакетов и PostgreSQL Knowledge Service.
+# Изолированная проверка миграций, PostgreSQL и очистки Qdrant Knowledge Service.
 # Временная БД не подключается к рабочим сетям, томам и секретам.
 
 name: pdrd-knowledge-service-test
@@ -18,6 +18,11 @@ services:
       timeout: 2s
       retries: 30
     networks: [knowledge-test-only]
+  knowledge-test-qdrant:
+    image: qdrant/qdrant:v1.19.0
+    restart: "no"
+    tmpfs: [/qdrant/storage]
+    networks: [knowledge-test-only]
   knowledge-test-runner:
     build:
       context: ..
@@ -26,7 +31,11 @@ services:
     depends_on:
       knowledge-test-postgres:
         condition: service_healthy
+      knowledge-test-qdrant:
+        condition: service_started
     environment:
+      PDRD_RUN_KNOWLEDGE_VECTOR_TESTS: "1"
+      KNOWLEDGE_TEST_QDRANT_URL: http://knowledge-test-qdrant:6333
       PDRD_RUN_KNOWLEDGE_OWNER_DATABASE_TESTS: "1"
       KNOWLEDGE_OWNER_TEST_DATABASE_URL: postgresql+asyncpg://knowledge_test:knowledge-test-only@knowledge-test-postgres:5432/pdrd_knowledge_test
       KNOWLEDGE_SERVICE_ENVIRONMENT: test
@@ -43,7 +52,7 @@ services:
         python -m alembic -c alembic.ini upgrade head
         python -m alembic -c alembic.ini current --check-heads --verbose
         cd /workspace
-        python -m pytest -q services/knowledge-service/tests/integration/test_package_owner_database.py
+        python -m pytest -q services/knowledge-service/tests/integration/test_package_owner_database.py services/knowledge-service/tests/integration/test_section_vector_cleanup.py
     networks: [knowledge-test-only]
 networks:
   knowledge-test-only:

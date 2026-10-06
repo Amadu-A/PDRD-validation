@@ -29,6 +29,7 @@ from pdrd_user_service.domain.role_assignments import (
 )
 from pdrd_user_service.infrastructure.database.models import (
     AdminBootstrapModel,
+    CatalogSectionDistributionModel,
     DepartmentModel,
     ExternalIdentityModel,
     MembershipModel,
@@ -40,6 +41,7 @@ from pdrd_user_service.infrastructure.database.models import (
     UserSectionModel,
 )
 from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -201,6 +203,85 @@ class SqlAlchemyUserRepository:
                 await self._session.flush()
         except IntegrityError as error:
             raise IdentityConflict("Профиль или идентичность уже существуют") from error
+
+    async def initialize_access(
+        self,
+        updated_user: UserAccount,
+        assignment: RoleAssignment,
+        section_ids: tuple[UUID, ...],
+        *,
+        expected_authorization_version: int,
+        activate_external: bool = False,
+    ) -> None:
+        """Сохраняет первичный доступ без промежуточного состояния и второго CAS."""
+        if (
+            assignment.user_id != updated_user.user_id
+            or updated_user.kind not in {UserKind.CORPORATE, UserKind.EXTERNAL}
+            or expected_authorization_version != 1
+            or assignment.expires_at is not None
+            or assignment.revoked_at is not None
+            or assignment.role is not Role.DESIGNER
+            or assignment.source is not RoleSource.LOCAL
+            or assignment.scope.kind is not ScopeKind.OWN
+            or updated_user.status is not UserStatus.ACTIVE
+            or updated_user.tier is not AccessTier.MEMBER
+            or updated_user.authorization_version != expected_authorization_version + 1
+        ):
+            raise ValueError("Некорректное первичное назначение доступа")
+        async with self._session.begin_nested():
+            current = await self.get_user(updated_user.user_id, for_update=True)
+            if (
+                current is None
+                or current.authorization_version != expected_authorization_version
+                or await self.list_assignments(updated_user.user_id, for_update=True)
+                or await self.list_sections(updated_user.user_id)
+            ):
+                raise AuthorizationConflict("Первичный доступ уже назначен")
+            if activate_external:
+                if (
+                    current.kind is not UserKind.EXTERNAL
+                    or current.status is not UserStatus.PENDING_VERIFICATION
+                ):
+                    raise AuthorizationConflict(
+                        "Профиль уже подтверждён или заблокирован"
+                    )
+                await self.activate_external(
+                    updated_user, expected_authorization_version
+                )
+                await self._session.execute(
+                    update(UserModel)
+                    .where(UserModel.user_id == updated_user.user_id)
+                    .values(tier=AccessTier.MEMBER.value)
+                )
+            else:
+                if current.status is not UserStatus.ACTIVE:
+                    raise AuthorizationConflict("Профиль не является активным")
+                await self._bump_version(updated_user, expected_authorization_version)
+                await self._session.execute(
+                    update(UserModel)
+                    .where(UserModel.user_id == updated_user.user_id)
+                    .values(tier=AccessTier.MEMBER.value)
+                )
+            self._session.add(_assignment_to_model(assignment))
+            await self._session.flush()
+            self._session.add(
+                RoleAssignmentEventModel(
+                    event_id=uuid4(),
+                    assignment_id=assignment.assignment_id,
+                    actor_user_id=updated_user.user_id,
+                    action="assign",
+                    occurred_at=assignment.created_at,
+                    authorization_version=updated_user.authorization_version,
+                )
+            )
+            await self.replace_sections(
+                updated_user.user_id,
+                section_ids,
+                actor_user_id=updated_user.user_id,
+                authorization_version=updated_user.authorization_version,
+                created_at=assignment.created_at,
+            )
+            await self._session.flush()
 
     async def activate_external(
         self, updated_user: UserAccount, expected_authorization_version: int
@@ -693,6 +774,60 @@ class SqlAlchemyUserRepository:
                     )
                 )
             await self._session.flush()
+
+    async def lock_section_catalog(self) -> None:
+        """Берёт общий транзакционный PostgreSQL lock первичных назначений каталога."""
+        await self._session.execute(
+            select(func.pg_advisory_xact_lock(0x50445244534543))
+        )
+
+    async def list_distributed_sections(self) -> tuple[UUID, ...]:
+        """Читает завершённые распределения из собственной таблицы."""
+        return tuple(
+            await self._session.scalars(
+                select(CatalogSectionDistributionModel.section_id).order_by(
+                    CatalogSectionDistributionModel.section_id
+                )
+            )
+        )
+
+    async def lock_catalog_users(self, actor_user_id: UUID) -> tuple[UserAccount, ...]:
+        """Блокирует профили в общем UUID-порядке, включая неактивного актёра."""
+        rows = (
+            await self._session.scalars(
+                select(UserModel)
+                .where(
+                    or_(
+                        and_(
+                            UserModel.status == UserStatus.ACTIVE.value,
+                            UserModel.tier == AccessTier.MEMBER.value,
+                        ),
+                        UserModel.user_id == actor_user_id,
+                    )
+                )
+                .order_by(UserModel.user_id)
+                .with_for_update()
+            )
+        ).all()
+        return tuple(_user_from_model(row) for row in rows)
+
+    async def reserve_section_distribution(
+        self, section_id: UUID, actor_user_id: UUID, created_at: datetime
+    ) -> bool:
+        """Вставляет marker атомарно; rollback разрешает повтор после частичного сбоя."""
+        reserved = await self._session.scalar(
+            insert(CatalogSectionDistributionModel)
+            .values(
+                section_id=section_id,
+                actor_user_id=actor_user_id,
+                created_at=created_at,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[CatalogSectionDistributionModel.section_id]
+            )
+            .returning(CatalogSectionDistributionModel.section_id)
+        )
+        return reserved is not None
 
     async def list_sections(self, user_id: UUID) -> tuple[UUID, ...]:
         """Читает назначенные разделы одним запросом в пределах транзакции."""

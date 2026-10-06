@@ -6,7 +6,7 @@ import { subscribeSession } from "./session.js";
 
 const normativeControls = [
   "[data-normative-section-create]", "[data-normative-section-rename]",
-  "[data-normative-section-delete]", "[data-normative-category-create]",
+  "[data-normative-section-delete]", "[data-normative-delete]", "[data-normative-category-create]",
   "[data-normative-upload-zone]", "[data-normative-file-input]",
   "[data-normative-tree] .normative-sidebar__category-actions",
   "[data-normative-tree] .normative-sidebar__document-actions",
@@ -14,20 +14,28 @@ const normativeControls = [
 
 export function bindMainAccess(root) {
   let canWriteNormative = false;
+  let canDeleteNormative = false;
   root.addEventListener("click", (event) => {
-    if (canWriteNormative || !event.target.closest(normativeControls)) return;
+    const deleting = event.target.closest("[data-normative-section-delete], [data-normative-delete]");
+    if ((deleting ? canDeleteNormative : canWriteNormative)
+      || !event.target.closest(normativeControls)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   }, true);
   root.addEventListener("keydown", (event) => {
-    if (canWriteNormative || !["Enter", " "].includes(event.key)
+    const deleting = event.target.closest("[data-normative-section-delete], [data-normative-delete]");
+    if ((deleting ? canDeleteNormative : canWriteNormative) || !["Enter", " "].includes(event.key)
       || !event.target.closest(normativeControls)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   }, true);
   subscribeSession((session) => {
     canWriteNormative = hasPermission(session, "normative.write");
+    canDeleteNormative = hasPermission(session, "normative.delete");
+    const deleteSection = root.querySelector("[data-normative-section-delete]");
+    if (deleteSection) deleteSection.hidden = !canDeleteNormative;
     root.dataset.canWriteNormative = String(canWriteNormative);
+    root.dataset.canDeleteNormative = String(canDeleteNormative);
     const packages = root.querySelector("[data-user-packages-block]");
     // UI отражает серверные права; UUID владельца браузер не задаёт.
     const canUsePackages = hasPermission(session, "user_documents.own.read");
@@ -37,6 +45,6 @@ export function bindMainAccess(root) {
       !hasPermission(session, "working_prompt.use") && !hasPermission(session, "system_prompt.manage");
     const experienceNavigation = root.querySelector("[data-experience-nav]");
     if (experienceNavigation) experienceNavigation.hidden =
-      !hasPermission(session, "admin.access");
+      !hasPermission(session, "experience.catalog.read");
   });
 }

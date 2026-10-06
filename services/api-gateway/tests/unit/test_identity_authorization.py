@@ -125,9 +125,15 @@ def test_policy_keeps_guest_analysis_and_restricts_mutations() -> None:
     assert required_permission("POST", "/api/v1/experience/capture/id") == (
         "experience.capture",
     )
-    assert required_permission("GET", "/api/v1/experience") == ("admin.access",)
-    assert required_permission("GET", "/api/v1/experience/id") == ("admin.access",)
-    assert required_permission("GET", "/api/v1/experience/export") == ("admin.access",)
+    assert required_permission("GET", "/api/v1/experience") == (
+        "experience.catalog.read",
+    )
+    assert required_permission("GET", "/api/v1/experience/id") == (
+        "experience.catalog.read",
+    )
+    assert required_permission("GET", "/api/v1/experience/export") == (
+        "experience.catalog.read",
+    )
     assert required_permission("GET", "/api/v1/experience-versions") == (
         "admin.access",
     )
@@ -292,3 +298,54 @@ def test_request_actor_only_uses_server_verified_state() -> None:
     user_id = uuid4()
     http_request.state.identity_user_id = user_id
     assert authenticated_actor(http_request) == f"user:{user_id}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "upstream", ["success", "unavailable", "wrong-section", "invalid-count"]
+)
+async def test_created_section_distribution_uses_verified_actor_and_validates_result(
+    upstream,
+):
+    """Браузерный актёр не влияет на RPC, а неполная выдача доступа не становится успехом."""
+    section_id, actor_id, browser_id = uuid4(), uuid4(), uuid4()
+
+    def reply(received: httpx.Request) -> httpx.Response:
+        """Проверяет служебный канал и имитирует разные ответы User Service."""
+        assert received.url.path == "/internal/v1/users/section-catalog/grants"
+        assert received.headers["Authorization"] == "Bearer " + "u" * 32
+        assert received.headers["X-PDRD-Actor-Id"] == str(actor_id)
+        assert json.loads(received.content) == {"section_id": str(section_id)}
+        if upstream == "unavailable":
+            return httpx.Response(503)
+        return httpx.Response(
+            200,
+            json={
+                "section_id": str(
+                    uuid4() if upstream == "wrong-section" else section_id
+                ),
+                "granted_users": True if upstream == "invalid-count" else 3,
+                "already_distributed": False,
+            },
+        )
+
+    subject = IdentityAuthorizer(
+        settings(),
+        client_factory=lambda: httpx.AsyncClient(transport=httpx.MockTransport(reply)),
+    )
+    current = request(
+        "POST",
+        "/api/v1/normative/sections",
+        body=json.dumps({"actor_user_id": str(browser_id)}).encode(),
+    )
+    current.state.verified_identity = VerifiedIdentity(
+        actor_id, frozenset({"normative.write"})
+    )
+    current.state.allowed_section_ids = frozenset()
+    result = await subject.distribute_created_section(current, section_id)
+    assert (result is None) is (upstream == "success")
+    if result is not None:
+        assert result.status_code == 503
+        assert json.loads(result.body)["section_id"] == str(section_id)
+    else:
+        assert current.state.allowed_section_ids is None

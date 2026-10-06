@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/core/container.py
 
-"""Composition root микросервиса API Gateway."""
+"""Собирает зависимости микросервиса API Gateway."""
 
 from collections.abc import (
     Awaitable,
@@ -90,6 +90,7 @@ from pdrd_api_gateway.infrastructure.experience import (
     ControlledExperienceContext,
     HttpExperienceService,
 )
+from pdrd_api_gateway.infrastructure.experience_authors import HttpExperienceAuthors
 from pdrd_api_gateway.infrastructure.identity_proxy import IdentityProxy
 from pdrd_api_gateway.infrastructure.knowledge.normative_catalog import (
     HttpNormativeCatalogReader,
@@ -140,7 +141,7 @@ ShutdownCallback = Callable[
 
 @dataclass(frozen=True, slots=True)
 class ApplicationContainer:
-    """Хранит runtime dependencies API Gateway."""
+    """Хранит зависимости работающего API Gateway."""
 
     settings: Settings
 
@@ -193,7 +194,7 @@ class ApplicationContainer:
 
 
 def build_container() -> ApplicationContainer:
-    """Собирает production dependencies API Gateway."""
+    """Собирает рабочие зависимости API Gateway."""
     settings = get_settings()
 
     engine = build_async_engine(
@@ -386,6 +387,15 @@ def build_container() -> ApplicationContainer:
             service=HttpExperienceService(
                 base_url=settings.review.base_url,
                 internal_key=settings.review.internal_key.get_secret_value(),
+            ),
+            author_profiles=(
+                HttpExperienceAuthors(
+                    base_url=settings.identity_proxy.user_service_url,
+                    internal_key=settings.identity_proxy.user_service_internal_key.get_secret_value(),
+                    timeout_seconds=settings.identity_proxy.timeout_seconds,
+                )
+                if settings.identity_proxy.authorization_enabled
+                else None
             ),
         )
         get_reviewed_pdf = GetReviewedPdf(

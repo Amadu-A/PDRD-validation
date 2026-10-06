@@ -68,3 +68,18 @@ def test_secret_values_are_hidden_in_settings_repr() -> None:
     shown = repr(settings)
     assert "secret-user-service-key-long-enough" not in shown
     assert "secret-database-password" not in shown
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///tmp/catalog",
+        "http://user:password@knowledge:8401",
+        "http://knowledge:8401/path",
+        "http://knowledge:8401?token=secret",
+    ],
+)
+def test_knowledge_url_rejects_credentials_and_alternate_routes(url: str) -> None:
+    """Каталог использует фиксированный внутренний адрес без учётных данных в URL."""
+    with pytest.raises(ValidationError, match="адрес Knowledge"):
+        Settings(_env_file=None, knowledge_service_url=url)

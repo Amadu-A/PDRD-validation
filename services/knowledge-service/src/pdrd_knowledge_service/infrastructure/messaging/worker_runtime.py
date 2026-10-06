@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/infrastructure/messaging/worker_runtime.py
 
-"""Runtime composition одного задания N/U indexing."""
+"""Собирает зависимости задания индексации нормативки и личных пакетов."""
 
 from functools import partial
 from uuid import UUID
@@ -17,6 +17,9 @@ from pdrd_knowledge_service.domain.normative_catalog import (
 from pdrd_knowledge_service.infrastructure.database.engine import (
     build_async_engine,
     build_session_factory,
+)
+from pdrd_knowledge_service.infrastructure.database.section_locks import (
+    PostgresCatalogSectionLocks,
 )
 from pdrd_knowledge_service.infrastructure.database.unit_of_work import (
     SqlAlchemyNormativeCatalogUnitOfWork,
@@ -42,7 +45,7 @@ async def execute_normative_indexing(
     *,
     document_id: UUID,
 ) -> NormativeDocument:
-    """Индексирует managed N/U document unified model."""
+    """Индексирует документ нормативки или личного пакета по общей модели."""
     settings = get_settings()
 
     engine = build_async_engine(
@@ -67,6 +70,7 @@ async def execute_normative_indexing(
 
     use_case = IndexNormativeDocument(
         unit_of_work_factory=unit_of_work_factory,
+        section_locks=PostgresCatalogSectionLocks(engine),
         storage=LocalFilesystemNormativeDocumentStorage(
             root_path=settings.storage.root_path,
         ),

@@ -6,12 +6,16 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+import httpx
+
+from pdrd_user_service.application.use_cases.distribute_section import DistributeSection
 from pdrd_user_service.application.use_cases.external_accounts import ExternalAccounts
 from pdrd_user_service.application.use_cases.list_users import AdminUserListing
 from pdrd_user_service.application.use_cases.local_superuser import LocalSuperusers
 from pdrd_user_service.application.use_cases.organization_memberships import (
     OrganizationMemberships,
 )
+from pdrd_user_service.application.use_cases.public_profiles import PublicProfiles
 from pdrd_user_service.application.use_cases.replace_role import ReplaceWorkerRole
 from pdrd_user_service.application.use_cases.review_scope import ReviewScopeAccess
 from pdrd_user_service.application.use_cases.section_access import UserSections
@@ -24,6 +28,7 @@ from pdrd_user_service.infrastructure.database.engine import (
 )
 from pdrd_user_service.infrastructure.database.health import DatabaseReadinessProbe
 from pdrd_user_service.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
+from pdrd_user_service.infrastructure.section_catalog import KnowledgeSectionCatalog
 
 
 class ReadinessProbe(Protocol):
@@ -60,6 +65,8 @@ class ApplicationContainer:
     review_scope_access: ReviewScopeAccess | None = None
     local_superusers: LocalSuperusers | None = None
     user_sections: UserSections | None = None
+    section_distribution: DistributeSection | None = None
+    public_profiles: PublicProfiles | None = None
 
     async def close(self) -> None:
         """Освобождает созданный пул соединений."""
@@ -91,9 +98,19 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
     engine = build_async_engine(actual_settings.database)
     session_factory = build_session_factory(engine)
 
+    knowledge_http = httpx.AsyncClient(
+        base_url=actual_settings.knowledge_service_url,
+        timeout=actual_settings.knowledge_timeout_seconds,
+        trust_env=False,
+    )
+    section_catalog = KnowledgeSectionCatalog(knowledge_http)
+
     async def close_database() -> None:
-        """Закрывает пул подключения User Service."""
-        await engine.dispose()
+        """Закрывает HTTP и PostgreSQL пулы User Service."""
+        try:
+            await knowledge_http.aclose()
+        finally:
+            await engine.dispose()
 
     def unit_of_work() -> SqlAlchemyUnitOfWork:
         """Создаёт отдельную транзакцию для каждого сценария каталога."""
@@ -105,13 +122,17 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
             engine,
             timeout_seconds=actual_settings.database.health_timeout_seconds,
         ),
-        directory=UserDirectory(unit_of_work),
+        directory=UserDirectory(unit_of_work, section_catalog=section_catalog),
         shutdown_callback=close_database,
-        external_accounts=ExternalAccounts(unit_of_work),
+        external_accounts=ExternalAccounts(
+            unit_of_work, section_catalog=section_catalog
+        ),
         user_listing=AdminUserListing(unit_of_work),
         role_replacement=ReplaceWorkerRole(unit_of_work),
         organization_memberships=OrganizationMemberships(unit_of_work),
         review_scope_access=ReviewScopeAccess(unit_of_work),
         local_superusers=LocalSuperusers(unit_of_work),
         user_sections=UserSections(unit_of_work),
+        section_distribution=DistributeSection(unit_of_work, section_catalog),
+        public_profiles=PublicProfiles(unit_of_work),
     )

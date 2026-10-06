@@ -34,7 +34,7 @@ class UserPackageReaderNotConfiguredError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class ResolveNormativeSnapshot:
-    """Валидирует selection и фиксирует exact active системный промпт."""
+    """Проверяет выбор документов и фиксирует точный текст действующего системного промпта."""
 
     catalog_reader: NormativeCatalogReader
 
@@ -91,6 +91,11 @@ class ResolveNormativeSnapshot:
             section = await self.catalog_reader.get_section(
                 section_id=section_id,
             )
+
+            if section.deleting:
+                raise NormativeSelectionConflictError(
+                    "Раздел удаляется. Выберите другой раздел или анализ без раздела."
+                )
 
             documents = await self.catalog_reader.list_documents(
                 section_id=section_id,

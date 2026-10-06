@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/infrastructure/vector_store/qdrant.py
 
-"""Qdrant vector storage adapter."""
+"""Адаптер векторного хранилища Qdrant."""
 
 from typing import Any
 
@@ -20,7 +20,7 @@ from pdrd_knowledge_service.domain.search import (
 
 
 class QdrantVectorStore:
-    """Vector operations через Qdrant REST API."""
+    """Выполняет векторные операции через Qdrant REST API."""
 
     def __init__(
         self,
@@ -249,10 +249,11 @@ class QdrantVectorStore:
         key: str,
         value: str,
     ) -> None:
-        """Удаляет filtered points."""
+        """Идемпотентно удаляет выбранные points, включая отсутствие коллекции."""
         await self._request(
             "POST",
             (f"/collections/{collection}/points/delete"),
+            allow_not_found=True,
             params={
                 "wait": "true",
             },
@@ -372,7 +373,7 @@ class QdrantVectorStore:
         self,
         alias: str,
     ) -> str | None:
-        """Возвращает target global Qdrant alias."""
+        """Возвращает целевую коллекцию общего псевдонима Qdrant."""
         response = await self._request(
             "GET",
             "/aliases",

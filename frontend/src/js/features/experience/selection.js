@@ -1,7 +1,7 @@
 // frontend/src/js/features/experience/selection.js
 
 /** Выбор редакций между страницами, атомарное удаление и поиск отсутствующих в версии. */
-export function createExperienceSelection({ api, criteria, onChanged, onSaved, notice, document: dom = document }) {
+export function createExperienceSelection({ api, criteria, onChanged, onSaved, notice, document: dom = document, canDelete = true, canManageVersions = true }) {
   const find = (key) => dom.querySelector(`[data-experience-${key}]`);
   const selected = new Map();
   let members = new Map();
@@ -12,9 +12,9 @@ export function createExperienceSelection({ api, criteria, onChanged, onSaved, n
   const references = () => [...selected].map(([id, revision]) => ({ id, revision }));
   function changed() {
     find("selected-count").textContent = `Выбрано: ${selected.size}`;
-    find("delete-selection").disabled = busy || !selected.size;
-    find("build-version").disabled = busy || preparing || !selected.size;
-    find("prepare-fine-tune").disabled = busy || preparing || !selected.size;
+    find("delete-selection").disabled = !canDelete || busy || !selected.size;
+    find("build-version").disabled = !canManageVersions || busy || preparing || !selected.size;
+    find("prepare-fine-tune").disabled = !canManageVersions || busy || preparing || !selected.size;
     find("select-all").disabled = busy;
     find("select-missing").disabled = busy || !members.size;
     onChanged();
@@ -49,7 +49,7 @@ export function createExperienceSelection({ api, criteria, onChanged, onSaved, n
     finally { busy = false; changed(); }
   }
   async function remove(items) {
-    if (busy || !items.length) return;
+    if (!canDelete || busy || !items.length) return;
     busy = true; changed();
     try { await api.deleteSelection(items); clear(); await onSaved(); notice.textContent = `Удалено замечаний: ${items.length}. История сохранена.`; }
     catch (error) { report(error); }

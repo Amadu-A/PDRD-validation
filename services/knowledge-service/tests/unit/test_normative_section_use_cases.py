@@ -1,10 +1,11 @@
 # services/knowledge-service/tests/unit/test_normative_section_use_cases.py
 
-"""Unit tests application use cases нормативных разделов."""
+"""Проверки прикладных сценариев нормативных разделов."""
 
 from dataclasses import (
     dataclass,
     field,
+    replace,
 )
 from datetime import (
     UTC,
@@ -26,11 +27,12 @@ from pdrd_knowledge_service.application.use_cases.normative_sections import (
     DeleteNormativeSection,
     GetNormativeSection,
     ListNormativeSections,
-    NormativeSectionNotEmptyError,
     NormativeSectionNotFoundError,
     UpdateNormativeSection,
 )
 from pdrd_knowledge_service.domain.normative_catalog import (
+    CatalogArea,
+    IndexingStatus,
     NormativeCategory,
     NormativeDocument,
     NormativeSection,
@@ -50,7 +52,7 @@ SECTION_ID = UUID("11111111-1111-1111-1111-111111111111")
 
 @dataclass
 class FakeCatalogState:
-    """Общее in-memory состояние нескольких Unit of Work."""
+    """Общее состояние нескольких тестовых транзакций в памяти."""
 
     sections: dict[
         UUID,
@@ -116,14 +118,17 @@ class FakeSectionRepository:
         section_id: UUID,
     ) -> None:
         """Удаляет раздел."""
-        self._state.sections.pop(
-            section_id,
-            None,
-        )
+        self._state.sections.pop(section_id, None)
+        self._state.categories[:] = [
+            c for c in self._state.categories if c.section_id != section_id
+        ]
+        self._state.documents[:] = [
+            d for d in self._state.documents if d.section_id != section_id
+        ]
 
 
 class FakeCategoryRepository:
-    """Минимальный repository категорий для section tests."""
+    """Минимальный репозиторий папок для проверки разделов."""
 
     def __init__(
         self,
@@ -145,7 +150,7 @@ class FakeCategoryRepository:
 
 
 class FakeDocumentRepository:
-    """Минимальный repository документов для section tests."""
+    """Минимальный репозиторий документов для проверки разделов."""
 
     def __init__(
         self,
@@ -165,15 +170,34 @@ class FakeDocumentRepository:
             if document.section_id == section_id
         ]
 
+    async def get_for_update(self, document_id: UUID) -> NormativeDocument | None:
+        """Возвращает документ текущего fake состояния."""
+        return next(
+            (d for d in self._state.documents if d.document_id == document_id), None
+        )
+
+    async def update(self, document: NormativeDocument) -> None:
+        """Обновляет метаданные, сохраняя соседние документы."""
+        self._state.documents[:] = [
+            document if d.document_id == document.document_id else d
+            for d in self._state.documents
+        ]
+
+    async def delete(self, document_id: UUID) -> None:
+        """Идемпотентно удаляет документ по UUID."""
+        self._state.documents[:] = [
+            d for d in self._state.documents if d.document_id != document_id
+        ]
+
 
 class FakeUnitOfWork:
-    """In-memory Unit of Work section use cases."""
+    """Имитирует транзакцию сценариев раздела в памяти."""
 
     def __init__(
         self,
         state: FakeCatalogState,
     ) -> None:
-        """Создаёт repositories поверх общего test state."""
+        """Создаёт репозитории поверх общего тестового состояния."""
         self._state = state
 
         self.sections = FakeSectionRepository(
@@ -212,7 +236,7 @@ class FakeUnitOfWork:
     async def rollback(
         self,
     ) -> None:
-        """Fake rollback не нужен этим unit tests."""
+        """Изолированным проверкам не требуется имитация отката."""
         return None
 
 
@@ -230,7 +254,7 @@ def make_section() -> NormativeSection:
 def build_factory(
     state: FakeCatalogState,
 ):
-    """Создаёт factory новых fake Unit of Work."""
+    """Создаёт фабрику новых тестовых транзакций."""
     return lambda: FakeUnitOfWork(
         state,
     )
@@ -238,7 +262,7 @@ def build_factory(
 
 @pytest.mark.asyncio
 async def test_create_section_uses_default_prompt() -> None:
-    """Новый раздел автоматически получает default system prompt."""
+    """Новый раздел получает системный промпт по умолчанию."""
     state = FakeCatalogState()
 
     use_case = CreateNormativeSection(
@@ -266,7 +290,7 @@ async def test_create_section_uses_default_prompt() -> None:
 
 @pytest.mark.asyncio
 async def test_list_and_get_sections() -> None:
-    """Разделы доступны через list и get use cases."""
+    """Сценарии чтения возвращают список разделов и отдельный раздел."""
     state = FakeCatalogState()
 
     section = make_section()
@@ -294,7 +318,7 @@ async def test_list_and_get_sections() -> None:
 
 @pytest.mark.asyncio
 async def test_get_missing_section_fails() -> None:
-    """Несуществующий UUID превращается в application error."""
+    """Несуществующий UUID превращается в прикладную ошибку."""
     state = FakeCatalogState()
 
     use_case = GetNormativeSection(
@@ -343,58 +367,121 @@ async def test_update_preserves_exact_prompt_text() -> None:
     assert state.commits == 1
 
 
-@pytest.mark.asyncio
-async def test_delete_non_empty_section_is_rejected() -> None:
-    """Раздел с category нельзя удалить обычным SQL cascade."""
-    state = FakeCatalogState()
+class FakeStorage:
+    """Записывает очистку конкретных файлов и папки раздела."""
 
-    state.sections[SECTION_ID] = make_section()
+    def __init__(self) -> None:
+        """Готовит журнал и переключатель внешнего сбоя."""
+        self.deleted = []
+        self.sections = []
+        self.fail = False
 
-    state.categories.append(
-        NormativeCategory(
-            category_id=uuid4(),
-            section_id=SECTION_ID,
-            parent_id=None,
-            name="СП",
-            created_at=BASE_TIME,
-            updated_at=BASE_TIME,
-        )
-    )
+    async def delete(self, *, storage_key: str) -> None:
+        """Повторяемо удаляет файл либо имитирует недоступность хранилища."""
+        if self.fail:
+            raise RuntimeError("storage offline")
+        self.deleted.append(storage_key)
 
-    use_case = DeleteNormativeSection(
-        unit_of_work_factory=build_factory(
-            state,
-        ),
-    )
+    async def delete_section(self, *, section_id: UUID) -> None:
+        """Записывает удаление папки одного UUID."""
+        self.sections.append(section_id)
 
-    with pytest.raises(
-        NormativeSectionNotEmptyError,
-    ):
-        await use_case.execute(
-            section_id=SECTION_ID,
-        )
 
-    assert SECTION_ID in state.sections
-    assert state.commits == 0
+class FakeVectors:
+    """Удаляет исключительно фильтрованные вектора общей коллекции."""
+
+    def __init__(self) -> None:
+        """Создаёт журнал фильтров."""
+        self.deleted = []
+
+    async def delete_by_filter(self, **kwargs) -> None:
+        """Записывает фильтр без операции над всей коллекцией."""
+        self.deleted.append(kwargs)
 
 
 @pytest.mark.asyncio
-async def test_delete_empty_section() -> None:
-    """Пустой раздел удаляется одной transaction."""
+async def test_delete_non_empty_section_and_repeat() -> None:
+    """Каскад удаляет папки обеих областей и не задевает соседний раздел."""
     state = FakeCatalogState()
-
     state.sections[SECTION_ID] = make_section()
-
-    use_case = DeleteNormativeSection(
-        unit_of_work_factory=build_factory(
-            state,
-        ),
+    other = uuid4()
+    state.sections[other] = replace(make_section(), section_id=other)
+    state.categories.extend(
+        [
+            NormativeCategory(
+                category_id=uuid4(),
+                section_id=SECTION_ID,
+                parent_id=None,
+                name="СП",
+                created_at=BASE_TIME,
+                updated_at=BASE_TIME,
+            ),
+            NormativeCategory(
+                category_id=uuid4(),
+                section_id=other,
+                parent_id=None,
+                name="Другой",
+                created_at=BASE_TIME,
+                updated_at=BASE_TIME,
+            ),
+        ]
     )
+    storage, vectors = FakeStorage(), FakeVectors()
+    use_case = DeleteNormativeSection(build_factory(state), storage, vectors, "shared")
+    assert await use_case.execute(section_id=SECTION_ID) == SECTION_ID
+    assert await use_case.execute(section_id=SECTION_ID) == SECTION_ID
+    assert set(state.sections) == {other}
+    assert len(state.categories) == 1
+    assert vectors.deleted == [
+        {"collection": "shared", "key": "section_id", "value": str(SECTION_ID)}
+    ]
+    assert storage.sections == [SECTION_ID]
+    assert state.commits == 2
 
-    deleted_id = await use_case.execute(
-        section_id=SECTION_ID,
-    )
 
-    assert deleted_id == SECTION_ID
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", list(IndexingStatus))
+async def test_partial_delete_retains_metadata_and_resumes(status) -> None:
+    """После сбоя хранилища повтор очищает обе области из любого состояния индексации."""
+    state = FakeCatalogState()
+    state.sections[SECTION_ID] = make_section()
+    for area in CatalogArea:
+        doc_id = uuid4()
+        state.documents.append(
+            NormativeDocument(
+                document_id=doc_id,
+                section_id=SECTION_ID,
+                category_id=None,
+                original_name="file.pdf",
+                storage_key=f"{SECTION_ID}/{doc_id}.pdf",
+                mime_type="application/pdf",
+                size_bytes=12,
+                sha256="a" * 64,
+                index_status=status,
+                index_error="failed" if status is IndexingStatus.FAILED else None,
+                indexed_at=BASE_TIME if status is IndexingStatus.READY else None,
+                created_at=BASE_TIME,
+                updated_at=BASE_TIME,
+                area=area,
+                owner_user_id=uuid4() if area is CatalogArea.USER_PACKAGE else None,
+            )
+        )
+    storage, vectors = FakeStorage(), FakeVectors()
+    use_case = DeleteNormativeSection(build_factory(state), storage, vectors, "shared")
+    storage.fail = True
+    with pytest.raises(RuntimeError, match="storage offline"):
+        await use_case.execute(section_id=SECTION_ID)
+    assert state.sections[SECTION_ID].deleting
+    assert len(state.documents) == 2
+    assert state.documents[0].index_status is IndexingStatus.DELETING
+    storage.fail = False
+    assert await use_case.execute(section_id=SECTION_ID) == SECTION_ID
+    assert state.documents == []
     assert SECTION_ID not in state.sections
-    assert state.commits == 1
+    assert len(storage.deleted) == 4
+    assert {v["collection"] for v in vectors.deleted} == {"shared"}
+    assert vectors.deleted[-1] == {
+        "collection": "shared",
+        "key": "section_id",
+        "value": str(SECTION_ID),
+    }

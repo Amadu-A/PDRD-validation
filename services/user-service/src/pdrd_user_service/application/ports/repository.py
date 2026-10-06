@@ -58,6 +58,18 @@ class UserRepository(Protocol):
         """Атомарно создаёт профиль и устойчивую идентичность."""
         ...
 
+    async def initialize_access(
+        self,
+        updated_user: UserAccount,
+        assignment: RoleAssignment,
+        section_ids: tuple[UUID, ...],
+        *,
+        expected_authorization_version: int,
+        activate_external: bool = False,
+    ) -> None:
+        """Однократно сохраняет подтверждение, роль, разделы и аудит одной версией."""
+        ...
+
     async def activate_external(
         self, updated_user: UserAccount, expected_authorization_version: int
     ) -> None:
@@ -151,6 +163,24 @@ class UserRepository(Protocol):
         actor_user_id: UUID,
     ) -> None:
         """Одной транзакцией меняет рабочие роли, версию прав и аудит."""
+        ...
+
+    async def lock_section_catalog(self) -> None:
+        """Сериализует первичное назначение и выдачу новых разделов."""
+        ...
+
+    async def list_distributed_sections(self) -> tuple[UUID, ...]:
+        """Читает UUID новых разделов, распределённых после снимка Knowledge."""
+        ...
+
+    async def lock_catalog_users(self, actor_user_id: UUID) -> tuple[UserAccount, ...]:
+        """Блокирует активных участников и актёра в едином порядке UUID."""
+        ...
+
+    async def reserve_section_distribution(
+        self, section_id: UUID, actor_user_id: UUID, created_at: datetime
+    ) -> bool:
+        """Резервирует одноразовую выдачу; повтор не восстанавливает ручные отзывы."""
         ...
 
     async def list_sections(self, user_id: UUID) -> tuple[UUID, ...]:

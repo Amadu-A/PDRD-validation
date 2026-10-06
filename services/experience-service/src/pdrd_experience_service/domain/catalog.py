@@ -156,6 +156,7 @@ class CatalogFilter:
     offset: int = 0
     limit: int = 50
     section_id: str = ""
+    author: str = ""
 
 
 @dataclass(frozen=True, slots=True)

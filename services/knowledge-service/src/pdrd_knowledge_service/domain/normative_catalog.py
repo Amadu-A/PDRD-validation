@@ -138,7 +138,7 @@ def _validate_aware_datetime(
     *,
     field_name: str,
 ) -> None:
-    """Требует timezone-aware datetime."""
+    """Требует дату и время с часовым поясом."""
     if value.tzinfo is None or value.utcoffset() is None:
         raise NormativeCatalogError(
             f"{field_name} должен содержать timezone.",
@@ -197,6 +197,8 @@ class NormativeSection:
     created_at: datetime
 
     updated_at: datetime
+
+    deleting: bool = False
 
     def __post_init__(
         self,
@@ -483,7 +485,7 @@ class NormativeDocument:
     def _validate_index_state(
         self,
     ) -> None:
-        """Проверяет согласованность status, error и indexed timestamp."""
+        """Проверяет согласованность статуса, ошибки и времени индексации."""
         if self.index_status is IndexingStatus.FAILED:
             if self.index_error is None:
                 raise NormativeCatalogError(

@@ -48,7 +48,7 @@ class NormativeCatalogConflictError(
 class NormativeCatalogUnavailableError(
     NormativeCatalogManagementError,
 ):
-    """Knowledge Service или его dependency временно недоступны."""
+    """Knowledge Service или его зависимость временно недоступны."""
 
 
 class NormativeCatalogProtocolError(
@@ -70,6 +70,8 @@ class NormativeSectionView:
     created_at: datetime
 
     updated_at: datetime
+
+    deleting: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -43,7 +43,7 @@ class SqlAlchemyNormativeSectionRepository:
         self,
         session: AsyncSession,
     ) -> None:
-        """Сохраняет session текущего Unit of Work."""
+        """Сохраняет сеанс текущей транзакции."""
         self._session = session
 
     async def add(
@@ -56,6 +56,7 @@ class SqlAlchemyNormativeSectionRepository:
                 id=section.section_id,
                 name=section.name,
                 system_prompt=section.system_prompt,
+                deleting=section.deleting,
                 created_at=section.created_at,
                 updated_at=section.updated_at,
             )
@@ -118,6 +119,7 @@ class SqlAlchemyNormativeSectionRepository:
         model.name = section.name
         model.system_prompt = section.system_prompt
         model.updated_at = section.updated_at
+        model.deleting = section.deleting
 
     async def delete(
         self,
@@ -141,6 +143,7 @@ class SqlAlchemyNormativeSectionRepository:
             section_id=model.id,
             name=model.name,
             system_prompt=model.system_prompt,
+            deleting=bool(model.deleting),
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -153,7 +156,7 @@ class SqlAlchemyNormativeCategoryRepository:
         self,
         session: AsyncSession,
     ) -> None:
-        """Сохраняет session текущего Unit of Work."""
+        """Сохраняет сеанс текущей транзакции."""
         self._session = session
 
     async def add(
@@ -278,7 +281,7 @@ class SqlAlchemyNormativeDocumentRepository:
         self,
         session: AsyncSession,
     ) -> None:
-        """Сохраняет session текущего Unit of Work."""
+        """Сохраняет сеанс текущей транзакции."""
         self._session = session
 
     async def add(
@@ -374,7 +377,7 @@ class SqlAlchemyNormativeDocumentRepository:
             ...,
         ],
     ) -> list[NormativeDocument]:
-        """Возвращает документы по набору UUID одним SQL query."""
+        """Возвращает документы по набору UUID одним SQL-запросом."""
         if not document_ids:
             return []
 

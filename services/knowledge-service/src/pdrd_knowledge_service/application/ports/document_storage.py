@@ -3,6 +3,7 @@
 """Порт физического хранения нормативных документов."""
 
 from typing import Protocol
+from uuid import UUID
 
 
 class NormativeDocumentStorageError(RuntimeError):
@@ -41,4 +42,8 @@ class NormativeDocumentStorage(Protocol):
         storage_key: str,
     ) -> None:
         """Идемпотентно удаляет физический документ."""
+        ...
+
+    async def delete_section(self, *, section_id: UUID) -> None:
+        """Удаляет папку одного раздела и осиротевшие артефакты внутри неё."""
         ...

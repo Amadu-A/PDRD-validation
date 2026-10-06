@@ -382,3 +382,19 @@ class SectionAccessEventModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+class CatalogSectionDistributionModel(Base):
+    """Отмечает завершённую выдачу раздела без FK в чужую схему Knowledge."""
+
+    __tablename__ = "catalog_section_distributions"
+    __table_args__: ClassVar[dict[str, str]] = {"schema": "users"}
+    section_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    actor_user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.accounts.user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )

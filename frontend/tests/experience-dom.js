@@ -25,7 +25,7 @@ export class Node {
 export function setup() {
   const elements = new Map();
   const keys = ["filter", "rows", "count", "notice", "export", "previous", "next", "refresh",
-    "caption", "pagination", "image-dialog", "large-image", "image-original", "image-close",
+    "caption", "pagination", "author-filter", "image-dialog", "large-image", "image-original", "image-close",
     "edit-dialog", "edit-form", "edit-error", "edit-save", "edit-reload", "edit-close",
     "rejection-fields", "source-text", "history-dialog", "history-content", "history-close"];
   keys.push("delete-selection", "selected-count", "select-all", "clear-selection", "select-missing", "build-version", "prepare-fine-tune",
@@ -34,11 +34,12 @@ export function setup() {
     "version-status", "version-status-title", "version-build-status", "version-quality-status", "version-apply-status", "version-failure-status",
     "version-dataset", "quality-controls", "quality-file", "quality-submit", "quality-revoke");
   for (const key of keys) elements.set(`[data-experience-${key}]`, new Node());
-  const filter = Object.fromEntries(["query", "tag", "decision", "active", "learning_use", "job_id", "section_id"].map((name) => [name, new Node()]));
+  const filter = Object.fromEntries(["query", "tag", "decision", "active", "learning_use", "job_id", "section_id", "author"].map((name) => [name, new Node()]));
   const fields = Object.fromEntries(["document_title", "text", "normative_basis", "normative_reference", "active", "rejection_reason", "negative_target", "section_id", "section_title"].map((name) => [name, new Node()]));
   const versionFields = Object.fromEntries(["name", "model"].map((name) => [name, new Node()]));
   elements.get("[data-experience-version-form]").elements = { namedItem: (name) => versionFields[name] };
   elements.get("[data-experience-version-kind]").value = "vector";
+  elements.set("[data-experience-author-filter]", filter.author);
   elements.get("[data-experience-filter]").fields = filter;
   elements.get("[data-experience-filter]").elements = { namedItem: (name) => filter[name] };
   elements.get("[data-experience-edit-form]").elements = { namedItem: (name) => fields[name] };

@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/infrastructure/knowledge/normative_catalog_management.py
 
-"""HTTP adapter полного управления managed normative catalog."""
+"""HTTP-адаптер управления нормативным каталогом."""
 
 import json
 from collections.abc import Mapping
@@ -37,7 +37,7 @@ _INDEXING_STATUSES = {
 
 
 class HttpNormativeCatalogManager:
-    """Управляет normative catalog через internal Knowledge HTTP API."""
+    """Управляет нормативным каталогом через внутренний HTTP API Knowledge Service."""
 
     def __init__(
         self,
@@ -45,7 +45,7 @@ class HttpNormativeCatalogManager:
         settings: KnowledgeServiceSettings,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        """Сохраняет настройки и optional test transport."""
+        """Сохраняет настройки и необязательный тестовый транспорт."""
         self._settings = settings
         self._transport = transport
 
@@ -136,7 +136,7 @@ class HttpNormativeCatalogManager:
         *,
         section_id: UUID,
     ) -> UUID:
-        """Удаляет section."""
+        """Повторяемо удаляет раздел и его содержимое через Knowledge Service."""
         payload = await self._request_json(
             method="DELETE",
             path=f"/internal/v1/normative/sections/{section_id}",
@@ -428,7 +428,7 @@ class HttpNormativeCatalogManager:
         path: str,
         json_body: object | None = None,
     ) -> object:
-        """Выполняет HTTP request и разбирает JSON."""
+        """Выполняет HTTP-запрос и разбирает JSON."""
         response = await self._request(
             method=method,
             path=path,
@@ -460,7 +460,7 @@ class HttpNormativeCatalogManager:
         ]
         | None = None,
     ) -> httpx.Response:
-        """Выполняет internal HTTP request."""
+        """Выполняет внутренний HTTP-запрос."""
         base_url = self._settings.base_url.rstrip(
             "/",
         )
@@ -508,7 +508,7 @@ class HttpNormativeCatalogManager:
     def _raise_for_status(
         response: httpx.Response,
     ) -> None:
-        """Преобразует Knowledge HTTP status в application error."""
+        """Преобразует HTTP-статус Knowledge Service в прикладную ошибку."""
         if response.status_code < 400:
             return
 
@@ -602,7 +602,7 @@ class HttpNormativeCatalogManager:
         str,
         object,
     ]:
-        """Преобразует UUID values в JSON-compatible значения."""
+        """Преобразует UUID в значения, совместимые с JSON."""
         result: dict[
             str,
             object,
@@ -634,6 +634,7 @@ class HttpNormativeCatalogManager:
         )
 
         return NormativeSectionView(
+            deleting=bool(data.get("deleting", False)),
             section_id=cls._uuid(
                 data,
                 "section_id",
@@ -981,7 +982,7 @@ class HttpNormativeCatalogManager:
         ],
         field_name: str,
     ) -> datetime | None:
-        """Извлекает nullable ISO datetime."""
+        """Извлекает дату и время ISO, допуская пустое значение."""
         value = data.get(
             field_name,
         )

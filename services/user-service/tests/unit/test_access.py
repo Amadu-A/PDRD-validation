@@ -143,3 +143,14 @@ def test_permission_result_cannot_be_mutated() -> None:
     assert isinstance(permissions, frozenset)
     with pytest.raises(AttributeError):
         permissions.add(Permission.ADMIN_ACCESS)  # type: ignore[attr-defined]
+
+
+def test_only_admin_can_delete_normative_sections_and_heads_can_write():
+    """Руководитель создаёт и переименовывает; каскадное удаление доступно администратору."""
+    head = AccessSubject(AccessTier.MEMBER, frozenset({Role.DEPARTMENT_HEAD}))
+    admin = AccessSubject(AccessTier.MEMBER, frozenset({Role.PLATFORM_ADMIN}))
+    designer = AccessSubject(AccessTier.MEMBER, frozenset({Role.DESIGNER}))
+    assert has_operation_permission(head, Permission.NORMATIVE_WRITE)
+    assert not has_operation_permission(head, Permission.NORMATIVE_DELETE)
+    assert has_operation_permission(admin, Permission.NORMATIVE_DELETE)
+    assert not has_operation_permission(designer, Permission.NORMATIVE_WRITE)

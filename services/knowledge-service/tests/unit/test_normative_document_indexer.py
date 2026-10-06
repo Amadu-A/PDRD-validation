@@ -1,6 +1,6 @@
 # services/knowledge-service/tests/unit/test_normative_document_indexer.py
 
-"""Unit tests managed normative indexing worker use case."""
+"""Проверки сценария индексации нормативных документов."""
 
 from collections.abc import Callable
 from dataclasses import (
@@ -11,7 +11,7 @@ from datetime import (
     datetime,
     timedelta,
 )
-from types import TracebackType
+from types import SimpleNamespace, TracebackType
 from uuid import UUID
 
 import pytest
@@ -62,7 +62,7 @@ DOCUMENT_ID = UUID(
 
 @dataclass
 class FakeState:
-    """Общее состояние fake Unit of Work."""
+    """Общее состояние имитации транзакции."""
 
     document: NormativeDocument
 
@@ -70,7 +70,7 @@ class FakeState:
 
 
 class FakeDocumentRepository:
-    """Fake document repository."""
+    """Имитирует репозиторий документов."""
 
     def __init__(
         self,
@@ -98,13 +98,15 @@ class FakeDocumentRepository:
 
 
 class PlaceholderRepository:
-    """Неиспользуемый fake repository."""
+    """Минимальный репозиторий активного раздела для индексатора."""
 
-    pass
+    async def get(self, section_id: UUID):
+        """Возвращает активный раздел тестового документа."""
+        return SimpleNamespace(section_id=section_id, deleting=False)
 
 
 class FakeUnitOfWork:
-    """Fake Unit of Work indexing tests."""
+    """Имитирует транзакцию для проверки индексации."""
 
     def __init__(
         self,
@@ -145,12 +147,12 @@ class FakeUnitOfWork:
     async def rollback(
         self,
     ) -> None:
-        """Fake rollback."""
+        """Имитирует откат транзакции."""
         return None
 
 
 class FakeStorage:
-    """Fake managed filesystem storage."""
+    """Имитирует файловое хранилище документов."""
 
     def __init__(
         self,
@@ -163,7 +165,7 @@ class FakeStorage:
         *,
         storage_key: str,
     ) -> bytes:
-        """Возвращает test PDF bytes."""
+        """Возвращает байты тестового PDF."""
         self.read_count += 1
 
         assert storage_key.endswith(
@@ -174,7 +176,7 @@ class FakeStorage:
 
 
 class FakePdfExtractor:
-    """Fake PDF text extractor."""
+    """Имитирует извлечение текста из PDF."""
 
     def __init__(
         self,
@@ -208,7 +210,7 @@ class FakePdfExtractor:
 
 
 class FakeEmbeddingProvider:
-    """Fake embedding provider."""
+    """Имитирует вычисление векторных представлений."""
 
     def __init__(
         self,
@@ -226,7 +228,7 @@ class FakeEmbeddingProvider:
         *,
         instruction: str | None,
     ) -> list[list[float]]:
-        """Возвращает deterministic test vectors."""
+        """Возвращает воспроизводимые тестовые векторы."""
         if self._fail:
             raise EmbeddingProviderError(
                 "Embedding failure.",
@@ -254,12 +256,12 @@ class FakeEmbeddingProvider:
 
 
 class FakeVectorStore:
-    """Fake Qdrant adapter."""
+    """Имитирует адаптер Qdrant."""
 
     def __init__(
         self,
     ) -> None:
-        """Создаёт пустой fake vector store."""
+        """Создаёт пустое тестовое векторное хранилище."""
         self.delete_calls: list[
             tuple[
                 str,
@@ -318,7 +320,7 @@ def build_factory(
     [],
     FakeUnitOfWork,
 ]:
-    """Создаёт fake Unit of Work factory."""
+    """Создаёт фабрику тестовых транзакций."""
     return lambda: FakeUnitOfWork(
         state,
     )
@@ -328,7 +330,7 @@ def make_document(
     *,
     status: IndexingStatus,
 ) -> NormativeDocument:
-    """Создаёт test document нужного lifecycle status."""
+    """Создаёт тестовый документ в нужном состоянии обработки."""
     indexed_at = BASE_TIME if status is IndexingStatus.READY else None
 
     index_error = "Previous failure." if status is IndexingStatus.FAILED else None
@@ -362,7 +364,7 @@ def build_use_case(
         datetime,
     ],
 ) -> IndexNormativeDocument:
-    """Создаёт indexing use case с fake adapters."""
+    """Создаёт сценарий индексации с тестовыми адаптерами."""
     return IndexNormativeDocument(
         unit_of_work_factory=build_factory(
             state,
@@ -382,7 +384,7 @@ def build_use_case(
 
 @pytest.mark.asyncio
 async def test_queued_document_becomes_ready() -> None:
-    """Worker выполняет queued -> indexing -> ready."""
+    """Обработчик переводит документ из очереди через индексацию в готовое состояние."""
     state = FakeState(
         document=make_document(
             status=IndexingStatus.QUEUED,
@@ -455,7 +457,7 @@ async def test_queued_document_becomes_ready() -> None:
 
 @pytest.mark.asyncio
 async def test_embedding_failure_marks_document_failed() -> None:
-    """Ошибка embeddings переводит indexing document в failed."""
+    """Ошибка вычисления векторов переводит индексируемый документ в состояние ошибки."""
     state = FakeState(
         document=make_document(
             status=IndexingStatus.QUEUED,
@@ -509,7 +511,7 @@ async def test_embedding_failure_marks_document_failed() -> None:
 
 @pytest.mark.asyncio
 async def test_redelivered_ready_task_is_idempotent() -> None:
-    """Redelivery завершённого task не выполняет indexing повторно."""
+    """Повторная доставка завершённого задания не выполняет индексацию заново."""
     state = FakeState(
         document=make_document(
             status=IndexingStatus.READY,
@@ -542,7 +544,7 @@ async def test_redelivered_ready_task_is_idempotent() -> None:
 
 @pytest.mark.asyncio
 async def test_redelivered_indexing_task_resumes() -> None:
-    """Task после worker loss продолжает document в indexing."""
+    """Повтор задания после остановки обработчика продолжает индексацию документа."""
     state = FakeState(
         document=make_document(
             status=IndexingStatus.INDEXING,

@@ -11,6 +11,9 @@ from pdrd_user_service.application.ports.repository import (
     AuthorizationConflict,
     IdentityConflict,
 )
+from pdrd_user_service.application.ports.section_catalog import (
+    SectionCatalogUnavailable,
+)
 from pdrd_user_service.application.use_cases.external_accounts import (
     ExternalAccountConflict,
     ExternalAccounts,
@@ -65,6 +68,10 @@ async def verify_external_email(
     """Активирует только профиль, связанный с проверенной учётной записью."""
     try:
         user = await accounts.verify_email(user_id=user_id, subject=command.subject)
+    except SectionCatalogUnavailable as error:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Каталог разделов недоступен."
+        ) from error
     except UserNotFound as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Профиль не найден.") from error
     except (IdentityConflict, ExternalAccountConflict, AuthorizationConflict) as error:

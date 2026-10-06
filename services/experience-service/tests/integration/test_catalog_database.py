@@ -45,9 +45,16 @@ from .test_confirmed_areas_database import engine as engine
 pytestmark = pytest.mark.database
 
 
-async def rejected_source(engine, *, scenario="original", sha=None):
+async def rejected_source(engine, *, scenario="original", sha=None, author=None):
     """Утверждённый Bad без когда-либо записанного подтверждения области."""
     review = initial(uuid4())
+    if author is not None:
+        review = replace(
+            review,
+            findings=tuple(
+                replace(item, created_by=author) for item in review.findings
+            ),
+        )
     review = replace(
         review, source_sha256=sha or hashlib.sha256(review.job_id.bytes).hexdigest()
     )
@@ -164,7 +171,7 @@ async def test_bad_without_confirmation_persists_original_and_modified_regions(
 
 
 async def prepared(engine, *, source_sha256=None):
-    """Создаёт и утверждает один VLM-пример через настоящие Review и Area repository."""
+    """Создаёт и утверждает один VLM-пример через настоящие репозитории Review и областей."""
     job_id = uuid4()
     review = replace(
         initial(job_id),
@@ -495,3 +502,37 @@ async def test_index_keyset_scan_keeps_cursor_across_excluded_examples(engine, e
     finally:
         for item in fixtures:
             await remove_catalog(engine, item[3].job_id)
+
+
+async def test_author_filter_uses_immutable_source_and_distinct_catalog_authors(engine):
+    """Фильтр не путает автора с поздним редактором и исключает удалённые замечания."""
+    author = f"user:{uuid4()}"
+    other = f"user:{uuid4()}"
+    first_review, first, repository = await rejected_source(engine, author=author)
+    second_review, second, _ = await rejected_source(engine, author=other)
+    try:
+        for review, example in ((first_review, first), (second_review, second)):
+            await repository.capture(
+                review=review, area_versions=(), examples=(example,), actor=author
+            )
+        revised = first.curate(
+            fields={"text": "Редактор не является автором"},
+            actor=other,
+            at=datetime.now(UTC),
+        )
+        await repository.update(example=revised, expected_revision=first.revision)
+        selected, total = await repository.list(CatalogFilter(author=author))
+        assert total == 1 and selected[0].example.id == first.id
+        assert selected[0].example.curated_by == other
+        authors, _ = await repository.authors(offset=0, limit=100)
+        assert author in authors and other in authors
+        selected, total = await repository.list(CatalogFilter(author=author + "%"))
+        assert not selected and total == 0
+        await repository.delete_many(
+            references=((first.id, revised.revision),), actor=other
+        )
+        authors, _ = await repository.authors(offset=0, limit=100)
+        assert author not in authors and other in authors
+    finally:
+        await remove_catalog(engine, first_review.job_id)
+        await remove_catalog(engine, second_review.job_id)

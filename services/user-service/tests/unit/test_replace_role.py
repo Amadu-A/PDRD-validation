@@ -369,6 +369,7 @@ async def test_section_snapshot_allows_self_and_admin_only() -> None:
         await access.read(actor_user_id=TARGET_ID, target_user_id=ADMIN_ID)
 
 
+@pytest.mark.asyncio
 async def test_inactive_user_cannot_receive_sections_without_a_role() -> None:
     """Изменение только разделов не обходит проверку заблокированного профиля."""
     users = Users()

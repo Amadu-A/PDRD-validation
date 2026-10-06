@@ -3,7 +3,7 @@
 /** Настоящий каталог серверного Review и явно обозначенная локальная демонстрация. */
 import { createExperienceApi } from "./api.js";
 import { mountExperienceCatalog } from "./server-page.js";
-import { isAdmin } from "../auth/access.js";
+import { hasPermission, isAdmin } from "../auth/access.js";
 import { refreshSession } from "../auth/session.js";
 
 const api = createExperienceApi();
@@ -13,10 +13,14 @@ try {
   if (typeof config?.enabled !== "boolean") throw new Error("Сервер не подтвердил режим каталога. Обновите страницу.");
   if (config.enabled) {
     const session = await refreshSession();
-    if (!isAdmin(session)) {
+    if (!hasPermission(session, "experience.catalog.read")) {
       document.querySelector(".experience-page").dataset.accessDenied = "true";
-      if (notice) notice.textContent = "Каталог Experience и версии доступны только администратору PDRD.";
-    } else await mountExperienceCatalog({ api });
+      if (notice) notice.textContent = "Каталог Experience доступен руководителю отдела и администратору PDRD.";
+    } else {
+      const canManage = isAdmin(session);
+      document.querySelectorAll?.("[data-experience-admin-only]").forEach((node) => { node.hidden = !canManage; });
+      await mountExperienceCatalog({ api, canCurate: canManage, canManageVersions: canManage });
+    }
   }
   else {
     document.querySelectorAll?.("[data-experience-server-only]").forEach((node) => { node.hidden = true; });

@@ -6,6 +6,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -56,6 +57,10 @@ class NormativeSectionModel(Base):
     name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
+    )
+
+    deleting: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
     )
 
     system_prompt: Mapped[str] = mapped_column(

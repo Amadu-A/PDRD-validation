@@ -3,7 +3,7 @@
 """Прикладные сценарии категорий управляемого каталога."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import (
     UTC,
     datetime,
@@ -16,6 +16,10 @@ from uuid import (
 from pdrd_knowledge_service.application.ports.persistence import (
     NormativeCatalogUnitOfWork,
     NormativeCatalogUnitOfWorkFactory,
+)
+from pdrd_knowledge_service.application.ports.section_locks import (
+    CatalogSectionLocks,
+    InMemoryCatalogSectionLocks,
 )
 from pdrd_knowledge_service.application.use_cases.normative_sections import (
     NormativeSectionNotFoundError,
@@ -49,7 +53,7 @@ class NormativeCategoryUpdateError(ValueError):
 
 
 def utc_now() -> datetime:
-    """Возвращает текущее timezone-aware UTC время."""
+    """Возвращает текущее время UTC с часовым поясом."""
     return datetime.now(
         UTC,
     )
@@ -64,7 +68,7 @@ async def _require_section(
         section_id,
     )
 
-    if section is None:
+    if section is None or section.deleting:
         raise NormativeSectionNotFoundError(
             f"Раздел нормативной базы {section_id} не найден.",
         )
@@ -230,11 +234,34 @@ class CreateNormativeCategory:
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
+    section_locks: CatalogSectionLocks = field(
+        default_factory=InMemoryCatalogSectionLocks
+    )
+
     clock: Clock = utc_now
 
     identifier_factory: IdentifierFactory = uuid4
 
     async def execute(
+        self,
+        *,
+        section_id: UUID,
+        name: str,
+        parent_id: UUID | None,
+        area: CatalogArea = CatalogArea.NORMATIVE,
+        owner_user_id: UUID | None = None,
+    ) -> NormativeCategory:
+        """Согласует создание папки с удалением всего раздела."""
+        async with self.section_locks.shared(section_id):
+            return await self._execute(
+                section_id=section_id,
+                name=name,
+                parent_id=parent_id,
+                area=area,
+                owner_user_id=owner_user_id,
+            )
+
+    async def _execute(
         self,
         *,
         section_id: UUID,

@@ -79,7 +79,8 @@ def required_permission(
     if segments[2] == "experience":
         if method == "POST" and len(segments) == 5 and segments[3] == "capture":
             return ("experience.capture",)
-        # Общий каталог пока не фильтрует записи по владельцу/отделу.
+        if method in {"GET", "HEAD"}:
+            return ("experience.catalog.read",)
         return ("admin.access",)
 
     if segments[2] == "experience-versions":
@@ -219,6 +220,45 @@ class IdentityAuthorizer:
             ) from error
         request.state.allowed_section_ids = result
         return result
+
+    async def distribute_created_section(
+        self, request: Request, section_id: UUID
+    ) -> JSONResponse | None:
+        """Передаёт новый раздел User Service от имени подтверждённого создателя."""
+        identity = getattr(request.state, "verified_identity", None)
+        if identity is None:
+            return JSONResponse(status_code=401, content={"detail": "Требуется вход"})
+        try:
+            async with self._client_factory() as client:
+                response = await client.post(
+                    f"{self._settings.user_service_url}/internal/v1/users/section-catalog/grants",
+                    headers={
+                        "Authorization": "Bearer "
+                        + self._settings.user_service_internal_key.get_secret_value(),
+                        "X-PDRD-Actor-Id": str(identity.user_id),
+                    },
+                    json={"section_id": str(section_id)},
+                )
+            response.raise_for_status()
+            body = response.json()
+            if (
+                UUID(body["section_id"]) != section_id
+                or not isinstance(body["granted_users"], int)
+                or isinstance(body["granted_users"], bool)
+                or body["granted_users"] < 0
+                or not isinstance(body["already_distributed"], bool)
+            ):
+                raise ValueError("Некорректный ответ выдачи доступа")
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": "Раздел создан, но автоматическая выдача доступа недоступна.",
+                    "section_id": str(section_id),
+                },
+            )
+        request.state.allowed_section_ids = None
+        return None
 
     async def require_section(
         self, request: Request, section_id: UUID

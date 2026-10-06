@@ -47,3 +47,9 @@ test("явный непустой выбор пакетов сериализуе
   const form = buildForm(t, { sectionId: "section", documentIds: [], userPackageDocumentIds: ["document"] });
   assert.deepEqual(JSON.parse(form.toFormData().get("user_package_document_ids")), ["document"]);
 });
+
+
+test("анализ удаляемого раздела блокируется до отправки запроса", (t) => {
+  const form = buildForm(t, { sectionId: "section", documentIds: [], deleting: true });
+  assert.deepEqual(form.validate(), { valid: false, message: "Раздел удаляется. Выберите другой раздел или анализ без раздела." });
+});

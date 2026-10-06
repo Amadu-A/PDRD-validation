@@ -6,6 +6,9 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi.testclient import TestClient
+from pdrd_user_service.application.ports.section_catalog import (
+    SectionCatalogUnavailable,
+)
 from pdrd_user_service.application.use_cases.users import (
     AdminRequired,
     PermissionSnapshot,
@@ -57,6 +60,7 @@ class Directory:
         """Создаёт след вызовов."""
         self.calls: list[tuple[str, object]] = []
         self.fail_database = False
+        self.fail_catalog = False
 
     async def get_user(self, user_id: UUID) -> UserAccount:
         """Возвращает профиль или безопасный not found."""
@@ -79,6 +83,8 @@ class Directory:
     async def provision(self, **values: object) -> UserAccount:
         """Фиксирует параметры закрытого создания профиля."""
         self.calls.append(("provision", values))
+        if self.fail_catalog:
+            raise SectionCatalogUnavailable("Приватные сетевые детали")
         return profile()
 
     async def permissions(self, user_id: UUID) -> PermissionSnapshot:
@@ -294,3 +300,24 @@ def test_unhandled_database_error_does_not_leak_details() -> None:
         )
     assert response.status_code == 500
     assert "private database host" not in response.text
+
+
+def test_new_profile_returns_safe_503_when_catalog_is_unavailable() -> None:
+    """HTTP отказ каталога не выдаёт успешный профиль или приватный адрес."""
+    app, directory, _ = make_app()
+    directory.fail_catalog = True
+    with TestClient(app) as client:
+        response = client.post(
+            "/internal/v1/users",
+            headers={"Authorization": f"Bearer {KEY}"},
+            json={
+                "provider_id": "ad",
+                "namespace": "company",
+                "subject": "new",
+                "kind": "corporate",
+                "display_name": "Сотрудник",
+                "login": "new.user",
+            },
+        )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Каталог разделов недоступен."}

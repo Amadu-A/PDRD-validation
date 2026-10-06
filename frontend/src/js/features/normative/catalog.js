@@ -1,7 +1,7 @@
 // frontend/src/js/features/normative/catalog.js
 
 /**
- * UI controller managed normative catalog.
+ * Управляет выбором раздела, документами и операциями нормативного каталога.
  */
 
 import { createTrashIcon } from "../../components/icons.js";
@@ -99,6 +99,7 @@ function createTrashButton(
   );
 
   button.type = "button";
+  button.dataset.normativeDelete = "";
 
   button.className = (
     "normative-sidebar__trash-button"
@@ -254,6 +255,11 @@ export function createNormativeCatalog(
     statusElement.dataset.state = stateName;
   }
 
+
+  /** Возвращает состояние удаления выбранного раздела для всех операций UI. */
+  function selectedSectionDeleting() {
+    return state.sections.find((item) => item.section_id === state.sectionId)?.deleting === true;
+  }
 
   function selectedSet() {
     if (!state.sectionId) {
@@ -515,7 +521,7 @@ export function createNormativeCatalog(
 
       option.value = section.section_id;
 
-      option.textContent = section.name;
+      option.textContent = section.deleting ? `${section.name} — удаляется` : section.name;
 
       option.selected = (
         section.section_id
@@ -527,7 +533,7 @@ export function createNormativeCatalog(
       );
     }
 
-    const disabled = !state.sectionId;
+    const disabled = !state.sectionId || selectedSectionDeleting();
 
     sectionSelect.disabled = (
       state.sections.length === 0
@@ -535,7 +541,7 @@ export function createNormativeCatalog(
 
     renameSectionButton.disabled = disabled;
 
-    deleteSectionButton.disabled = disabled;
+    deleteSectionButton.disabled = !state.sectionId;
 
     createCategoryButton.disabled = disabled;
 
@@ -1252,7 +1258,7 @@ export function createNormativeCatalog(
   function renderTree() {
     tree.replaceChildren();
 
-    if (!state.sectionId) {
+    if (!state.sectionId || selectedSectionDeleting()) {
       const empty = document.createElement(
         "p",
       );
@@ -1262,7 +1268,7 @@ export function createNormativeCatalog(
       );
 
       empty.textContent = (
-        "Создайте или выберите нормативный раздел."
+        selectedSectionDeleting() ? "Удаление не завершено. Повторите удаление раздела; новая работа с ним запрещена." : "Создайте или выберите нормативный раздел."
       );
 
       tree.append(
@@ -1438,7 +1444,7 @@ export function createNormativeCatalog(
   async function refreshSectionData(
     silent = true,
   ) {
-    if (!state.sectionId) {
+    if (!state.sectionId || selectedSectionDeleting()) {
       state.categories = [];
 
       state.documents = [];
@@ -1503,7 +1509,7 @@ export function createNormativeCatalog(
     renderSectionSelect();
 
     await onSectionChange(
-      state.sectionId,
+      selectedSectionDeleting() ? null : state.sectionId,
     );
 
     if (generation !== state.generation) return;
@@ -1545,7 +1551,7 @@ export function createNormativeCatalog(
     files,
     categoryId = null,
   ) {
-    if (!state.sectionId) {
+    if (!state.sectionId || selectedSectionDeleting()) {
       setStatus(
         "Сначала выберите нормативный раздел.",
         "error",
@@ -1681,7 +1687,7 @@ export function createNormativeCatalog(
   async function createCategoryInteractive(
     parentId = null,
   ) {
-    if (!state.sectionId) {
+    if (!state.sectionId || selectedSectionDeleting()) {
       return;
     }
 
@@ -1732,8 +1738,9 @@ export function createNormativeCatalog(
 
         await runAction(
           async () => {
+            renderSectionSelect();
             await onSectionChange(
-              state.sectionId,
+              selectedSectionDeleting() ? null : state.sectionId,
             );
 
             await refreshSectionData(
@@ -1839,7 +1846,7 @@ export function createNormativeCatalog(
         const confirmed = window.confirm(
           (
             `Удалить раздел "${section.name}"? `
-            + "Раздел должен быть пустым."
+            + "Будут удалены все нормативные документы и личные пакеты пользователей в этом разделе, исходные файлы, PDF предпросмотры и поисковый индекс. Действие необратимо."
           ),
         );
 
@@ -1849,9 +1856,20 @@ export function createNormativeCatalog(
 
         await runAction(
           async () => {
-            await deleteSection(
-              section.section_id,
-            );
+            state.generation += 1;
+            clearPolling();
+            section.deleting = true;
+            renderSectionSelect();
+            await onSectionChange(null);
+            await refreshSectionData(true);
+            try {
+              await deleteSection(section.section_id);
+            } catch (error) {
+              // Сервер сохраняет tombstone после начала удаления; перечитываем его
+              // и оставляем доступной кнопку повторного DELETE.
+              await reloadSections(section.section_id);
+              throw error;
+            }
 
             state.selectedBySection.delete(
               section.section_id,
@@ -2038,6 +2056,7 @@ export function createNormativeCatalog(
 
     return {
       sectionId: state.sectionId,
+      deleting: selectedSectionDeleting(),
 
       documentIds: state.documents
         .filter(

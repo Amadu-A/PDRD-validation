@@ -1,10 +1,10 @@
 # services/knowledge-service/src/pdrd_knowledge_service/application/use_cases/index_normative_document.py
 
-"""Use case полной индексации managed нормативного документа."""
+"""Сценарий полной индексации управляемого нормативного документа."""
 
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import (
     UTC,
     datetime,
@@ -30,6 +30,10 @@ from pdrd_knowledge_service.application.ports.office_conversion import (
 )
 from pdrd_knowledge_service.application.ports.persistence import (
     NormativeCatalogUnitOfWorkFactory,
+)
+from pdrd_knowledge_service.application.ports.section_locks import (
+    CatalogSectionLocks,
+    InMemoryCatalogSectionLocks,
 )
 from pdrd_knowledge_service.application.ports.vector_store import (
     VectorStore,
@@ -75,7 +79,7 @@ def utc_now() -> datetime:
 
 @dataclass(frozen=True, slots=True)
 class IndexNormativeDocument:
-    """Нормализует документ, строит embeddings и Qdrant points."""
+    """Нормализует документ, вычисляет векторные представления и точки Qdrant."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -97,16 +101,31 @@ class IndexNormativeDocument:
 
     upsert_batch_size: int
 
+    section_locks: CatalogSectionLocks = field(
+        default_factory=InMemoryCatalogSectionLocks
+    )
+
     office_converter: NormativeOfficeToPdfConverter | None = None
 
     clock: Clock = utc_now
 
-    async def execute(
+    async def execute(self, *, document_id: UUID) -> NormativeDocument:
+        """Держит общую блокировку до завершения записи векторов и PDF."""
+        async with self.unit_of_work_factory() as unit_of_work:
+            document = await unit_of_work.documents.get(document_id)
+            if document is None:
+                raise NormativeDocumentNotFoundError(
+                    f"Документ {document_id} не найден."
+                )
+        async with self.section_locks.shared(document.section_id):
+            return await self._execute(document_id=document_id)
+
+    async def _execute(
         self,
         *,
         document_id: UUID,
     ) -> NormativeDocument:
-        """Выполняет idempotent indexing lifecycle документа."""
+        """Повторяемо выполняет цикл индексации документа."""
         document, should_process = await self._start_indexing(
             document_id=document_id,
         )
@@ -206,7 +225,7 @@ class IndexNormativeDocument:
         document: NormativeDocument,
         content: bytes,
     ) -> bytes:
-        """Возвращает PDF bytes для общего page extraction pipeline."""
+        """Возвращает байты PDF для общего процесса извлечения страниц."""
         if document.mime_type == PDF_MIME_TYPE:
             return content
 
@@ -254,7 +273,7 @@ class IndexNormativeDocument:
         VectorRecord,
         ...,
     ]:
-        """Строит deterministic Qdrant records."""
+        """Создаёт воспроизводимые записи Qdrant."""
         records: list[VectorRecord] = []
 
         for start in range(
@@ -329,7 +348,7 @@ class IndexNormativeDocument:
         NormativeDocument,
         bool,
     ]:
-        """Переводит queued document в indexing либо восстанавливает retry."""
+        """Переводит документ из очереди в индексацию либо продолжает прерванную обработку."""
         async with self.unit_of_work_factory() as unit_of_work:
             document = await unit_of_work.documents.get(
                 document_id,
@@ -338,6 +357,12 @@ class IndexNormativeDocument:
             if document is None:
                 raise NormativeDocumentNotFoundError(
                     f"Нормативный документ {document_id} не найден.",
+                )
+
+            section = await unit_of_work.sections.get(document.section_id)
+            if section is None or section.deleting:
+                raise NormativeIndexingStateError(
+                    "Раздел удаляется; индексация запрещена."
                 )
 
             if document.index_status in {

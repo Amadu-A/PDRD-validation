@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/transport/http/routers/experience.py
 
-"""Experience через тот же закрытый frontend-канал и отдельный application use case."""
+"""Открывает Experience через закрытый канал интерфейса и отдельный прикладной сценарий."""
 
 from typing import Annotated
 from uuid import UUID
@@ -24,7 +24,7 @@ Filters = Annotated[ExperienceQuery, Query()]
 
 
 async def invoke(container: ApplicationContainer, request: Request, **options):
-    """Безопасные ошибки use case сохраняют свои статусы HTTP."""
+    """Безопасные прикладные ошибки сохраняют свои статусы HTTP."""
     if container.manage_experience is None:
         raise HTTPException(503, "Каталог Experience не подключён.")
     try:
@@ -44,6 +44,22 @@ async def examples(filters: Filters, request: Request, container: Container) -> 
         operation="list",
         job_id=filters.job_id,
         query=filters.model_dump(mode="json", exclude_none=True),
+    )
+
+
+@router.get("/authors")
+async def authors(
+    request: Request,
+    container: Container,
+    offset: Annotated[int, Query(ge=0, le=1_000_000)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+) -> dict:
+    """Обогащённый справочник содержит только реальных авторов сохранённых замечаний."""
+    return await invoke(
+        container,
+        request,
+        operation="authors",
+        query={"offset": offset, "limit": limit},
     )
 
 

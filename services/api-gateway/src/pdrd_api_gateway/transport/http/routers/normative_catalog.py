@@ -16,6 +16,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import JSONResponse
 
 from pdrd_api_gateway.application.ports.normative_catalog_management import (
     NormativeCatalogConflictError,
@@ -245,8 +246,8 @@ async def create_normative_section(
     request: CreateNormativeSectionRequest,
     http_request: Request,
     container: ContainerDependency,
-) -> NormativeSectionResponse:
-    """Создаёт нормативный раздел."""
+) -> NormativeSectionResponse | JSONResponse:
+    """Создаёт раздел и выдаёт его действующим проектировщикам и руководителям."""
     facade = _require_facade(
         container,
     )
@@ -264,6 +265,13 @@ async def create_normative_section(
             error,
         ) from error
 
+    authorizer = http_request.app.state.identity_authorizer
+    if authorizer is not None:
+        denial = await authorizer.distribute_created_section(
+            http_request, section.section_id
+        )
+        if denial is not None:
+            return denial
     return _visible_section(NormativeSectionResponse.from_view(section), http_request)
 
 
@@ -339,7 +347,7 @@ async def delete_normative_section(
     section_id: UUID,
     container: ContainerDependency,
 ) -> DeleteNormativeSectionResponse:
-    """Удаляет пустой раздел."""
+    """Повторяемо удаляет раздел и его документы из всех хранилищ."""
     facade = _require_facade(
         container,
     )
@@ -579,7 +587,7 @@ async def upload_normative_document(
         Form(),
     ] = None,
 ) -> NormativeDocumentResponse:
-    """Загружает normative PDF через Gateway."""
+    """Загружает нормативный PDF через Gateway."""
     facade = _require_facade(
         container,
     )
@@ -748,7 +756,7 @@ async def get_normative_document_content(
     document_id: UUID,
     container: ContainerDependency,
 ) -> Response:
-    """Возвращает normative PDF inline."""
+    """Возвращает нормативный PDF для просмотра в браузере."""
     facade = _require_facade(
         container,
     )

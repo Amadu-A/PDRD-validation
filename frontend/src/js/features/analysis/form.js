@@ -553,7 +553,11 @@ export function createAnalysisForm({
   }
 
 
+  /** Проверяет файлы и запрещает новую работу с удаляемым разделом. */
   function validate() {
+    if (getNormativeSelection()?.deleting === true) {
+      return { valid: false, message: "Раздел удаляется. Выберите другой раздел или анализ без раздела." };
+    }
     const mode = getMode();
 
     pagesInput.setCustomValidity("");

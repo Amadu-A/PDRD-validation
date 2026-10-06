@@ -12,6 +12,9 @@ from pdrd_user_service.application.ports.repository import (
     BootstrapAlreadyPerformed,
     IdentityConflict,
 )
+from pdrd_user_service.application.ports.section_catalog import (
+    SectionCatalogUnavailable,
+)
 from pdrd_user_service.application.use_cases.bootstrap import bootstrap_first_admin
 from pdrd_user_service.application.use_cases.users import AdminRequired, UserDirectory
 from pdrd_user_service.domain.access import AccessTier, Permission, Role
@@ -64,6 +67,14 @@ def admin_assignment() -> RoleAssignment:
     )
 
 
+class SectionCatalog:
+    """Возвращает два раздела из исходного каталога при первом входе."""
+
+    async def list_section_ids(self) -> tuple[UUID, ...]:
+        """Не выполняет HTTP в тесте прикладного сценария."""
+        return (ORG, DEPT)
+
+
 class MemoryRepository:
     """Хранит профили и назначения для проверки прикладной политики."""
 
@@ -73,6 +84,8 @@ class MemoryRepository:
         self.identities: dict[tuple[str, str, str], UUID] = {}
         self.memberships: dict[UUID, tuple[Membership, ...]] = {}
         self.assignments: dict[UUID, tuple[RoleAssignment, ...]] = {}
+        self.sections: dict[UUID, tuple[UUID, ...]] = {}
+        self.distributed: tuple[UUID, ...] = ()
         self.bootstrapped = False
         self.audit_actors: list[UUID] = []
 
@@ -96,6 +109,32 @@ class MemoryRepository:
             raise IdentityConflict
         self.users[user.user_id] = user
         self.identities[identity.stable_key] = user.user_id
+
+    async def lock_section_catalog(self) -> None:
+        """Имитирует общий транзакционный lock каталога."""
+
+    async def list_distributed_sections(self) -> tuple[UUID, ...]:
+        """Возвращает пустой список ещё не созданных разделов."""
+        return self.distributed
+
+    async def initialize_access(
+        self,
+        updated_user: UserAccount,
+        assignment: RoleAssignment,
+        section_ids: tuple[UUID, ...],
+        *,
+        expected_authorization_version: int,
+        activate_external: bool = False,
+    ) -> None:
+        """Сохраняет первичное назначение и выбранные разделы одной версией."""
+        del activate_external
+        await self.add_role_assignment(
+            updated_user,
+            assignment,
+            expected_authorization_version,
+            updated_user.user_id,
+        )
+        self.sections[updated_user.user_id] = section_ids
 
     async def list_memberships(self, user_id: UUID) -> tuple[Membership, ...]:
         """Возвращает снимок членства."""
@@ -194,7 +233,10 @@ async def test_provision_is_idempotent_only_by_stable_identity() -> None:
     store = MemoryRepository()
     ids = iter((TARGET, ADMIN))
     directory = UserDirectory(
-        lambda: MemoryUnitOfWork(store), clock=lambda: AT, new_id=lambda: next(ids)
+        lambda: MemoryUnitOfWork(store),
+        section_catalog=SectionCatalog(),
+        clock=lambda: AT,
+        new_id=lambda: next(ids),
     )
     first = await directory.provision(
         provider_id="oidc",
@@ -222,7 +264,10 @@ async def test_provision_is_idempotent_only_by_stable_identity() -> None:
     )
     assert repeated == first
     assert second.user_id != first.user_id
-    assert first.tier is AccessTier.REGISTERED_FREE
+    assert first.tier is AccessTier.MEMBER
+    assert first.authorization_version == 2
+    assert store.sections[first.user_id] == tuple(sorted((ORG, DEPT), key=str))
+    assert (await directory.permissions(first.user_id)).roles == (Role.DESIGNER,)
     assert len(store.users) == 2
 
     with pytest.raises(IdentityConflict, match="Тип учётной записи"):
@@ -357,3 +402,72 @@ async def test_bootstrap_admin_once_only_for_existing_active_employee() -> None:
             clock=lambda: AT,
             new_id=lambda: ROLE_ID,
         )
+
+
+@pytest.mark.asyncio
+async def test_existing_identity_preserves_admin_and_restricted_sections_when_catalog_down() -> (
+    None
+):
+    """Повторный вход не меняет роль и назначения администратора и не требует Knowledge."""
+    store = MemoryRepository()
+    store.users[ADMIN] = member(ADMIN)
+    store.identities[("ad", "company", "same-account")] = ADMIN
+    store.assignments[ADMIN] = (admin_assignment(),)
+    store.sections[ADMIN] = (ORG,)
+    directory = UserDirectory(lambda: MemoryUnitOfWork(store), clock=lambda: AT)
+    repeated = await directory.provision(
+        provider_id="ad",
+        namespace="company",
+        subject="same-account",
+        kind=UserKind.CORPORATE,
+        display_name="Другое имя",
+        login="admin",
+    )
+    assert repeated == member(ADMIN)
+    assert store.assignments[ADMIN] == (admin_assignment(),)
+    assert store.sections[ADMIN] == (ORG,)
+    assert store.audit_actors == []
+
+
+@pytest.mark.asyncio
+async def test_new_identity_requires_catalog_before_any_creation() -> None:
+    """Недоступный каталог не оставляет нового профиля или частично назначенной роли."""
+    store = MemoryRepository()
+    directory = UserDirectory(lambda: MemoryUnitOfWork(store), clock=lambda: AT)
+    with pytest.raises(SectionCatalogUnavailable):
+        await directory.provision(
+            provider_id="ad",
+            namespace="company",
+            subject="new-account",
+            kind=UserKind.CORPORATE,
+            display_name="Новый сотрудник",
+            login="new.user",
+        )
+    assert store.users == {}
+    assert store.identities == {}
+    assert store.assignments == {}
+    assert store.sections == {}
+
+
+@pytest.mark.asyncio
+async def test_first_login_includes_distribution_after_external_catalog_snapshot() -> (
+    None
+):
+    """Первичное назначение включает раздел, созданный после внешнего снимка каталога."""
+    store = MemoryRepository()
+    store.distributed = (OTHER_ORG,)
+    directory = UserDirectory(
+        lambda: MemoryUnitOfWork(store),
+        section_catalog=SectionCatalog(),
+        clock=lambda: AT,
+        new_id=lambda: TARGET,
+    )
+    user = await directory.provision(
+        provider_id="ad",
+        namespace="company",
+        subject="new-account",
+        kind=UserKind.CORPORATE,
+        display_name="Новый сотрудник",
+        login="new.user",
+    )
+    assert set(store.sections[user.user_id]) == {ORG, DEPT, OTHER_ORG}

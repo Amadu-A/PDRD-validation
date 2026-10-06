@@ -130,7 +130,6 @@ _HEAD_PERMISSIONS = frozenset(
         Permission.REVIEW_APPROVE,
         Permission.REVIEWED_PDF_DOWNLOAD,
         Permission.NORMATIVE_WRITE,
-        Permission.NORMATIVE_DELETE,
         Permission.EXPERIENCE_CATALOG_READ,
         Permission.EXPERIENCE_CAPTURE,
     }
@@ -141,6 +140,7 @@ _ADMIN_PERMISSIONS = frozenset(
         *_PUBLIC_PERMISSIONS,
         *_PROFILE_PERMISSIONS,
         *_HEAD_PERMISSIONS,
+        Permission.NORMATIVE_DELETE,
         Permission.EXPERIENCE_VERSION_CREATE,
         Permission.EXPERIENCE_VERSION_APPLY,
         Permission.SYSTEM_PROMPT_MANAGE,

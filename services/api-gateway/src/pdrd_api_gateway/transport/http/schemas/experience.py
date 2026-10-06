@@ -28,6 +28,7 @@ class ExperienceQuery(BaseModel):
     learning_use: Literal["", "positive", "negative", "needs_adjudication"] = ""
     job_id: UUID | None = None
     section_id: str = Field(default="", max_length=128)
+    author: str = Field(default="", max_length=200)
     offset: int = Field(default=0, ge=0, le=1_000_000)
     limit: int = Field(default=50, ge=1, le=100)
 

@@ -679,6 +679,8 @@ services:
       <<: *user-service-database-environment
       USER_SERVICE_ENABLED: "true"
       USER_SERVICE_INTERNAL_KEY: ${USER_SERVICE_INTERNAL_KEY:-}
+      USER_SERVICE_KNOWLEDGE_SERVICE_URL: ${USER_SERVICE_KNOWLEDGE_SERVICE_URL:-http://knowledge-service:8401}
+      USER_SERVICE_KNOWLEDGE_TIMEOUT_SECONDS: ${USER_SERVICE_KNOWLEDGE_TIMEOUT_SECONDS:-10}
     depends_on:
       user-migrate:
         condition: service_completed_successfully

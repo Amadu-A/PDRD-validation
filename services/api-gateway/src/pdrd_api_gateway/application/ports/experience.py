@@ -8,6 +8,7 @@ from uuid import UUID
 
 ExperienceOperation = Literal[
     "list",
+    "authors",
     "read",
     "curate",
     "deactivate",
@@ -73,4 +74,14 @@ class ExperienceService(Protocol):
         index: int | None,
     ) -> dict | bytes:
         """Выполняет фиксированную операцию каталога, без пользовательских URL."""
+        ...
+
+
+class ExperienceAuthorProfiles(Protocol):
+    """User Service — единственный источник имени, логина и актуальных ролей автора."""
+
+    async def read(
+        self, *, actor_user_id: UUID, user_ids: tuple[UUID, ...]
+    ) -> dict[UUID, dict]:
+        """Пакетно читает ограниченную публичную проекцию без credential и паролей."""
         ...

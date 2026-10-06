@@ -16,8 +16,10 @@ from pdrd_user_service.application.ports.repository import (
     BootstrapAlreadyPerformed,
     IdentityConflict,
 )
+from pdrd_user_service.application.use_cases.distribute_section import DistributeSection
 from pdrd_user_service.application.use_cases.external_accounts import ExternalAccounts
 from pdrd_user_service.application.use_cases.review_scope import ReviewScopeAccess
+from pdrd_user_service.application.use_cases.users import UserDirectory
 from pdrd_user_service.core.settings import DatabaseSettings, Settings
 from pdrd_user_service.domain.access import AccessTier, Role
 from pdrd_user_service.domain.identity import (
@@ -44,6 +46,7 @@ from pdrd_user_service.infrastructure.database.migration_url import (
 )
 from pdrd_user_service.infrastructure.database.models import (
     AdminBootstrapModel,
+    CatalogSectionDistributionModel,
     DepartmentModel,
     OrganizationModel,
     RoleAssignmentEventModel,
@@ -63,7 +66,7 @@ pytestmark = pytest.mark.database
 TEST_HOST = "user-test-postgres"
 TEST_NAME = "pdrd_user_test"
 TEST_USER = "user_test"
-EXPECTED_REVISION = "20261005_0003"
+EXPECTED_REVISION = "20261006_0004"
 
 
 def validate_isolated_database_url(raw_url: str) -> URL:
@@ -229,6 +232,11 @@ async def remove_test_users(
             )
         )
         await connection.execute(
+            delete(CatalogSectionDistributionModel).where(
+                CatalogSectionDistributionModel.actor_user_id.in_(user_ids)
+            )
+        )
+        await connection.execute(
             delete(UserModel).where(UserModel.user_id.in_(user_ids))
         )
         if organization_ids:
@@ -284,6 +292,18 @@ async def test_stable_identity_is_unique_but_same_email_is_not(
         await remove_test_users(test_engine, user_a.user_id, user_b.user_id, ghost_id)
 
 
+class SectionCatalog:
+    """Выдаёт конкретные разделы изолированному PostgreSQL сценарию."""
+
+    def __init__(self, section_ids: tuple[UUID, ...] = ()) -> None:
+        """Хранит внешний снимок без FK к Knowledge Service."""
+        self.section_ids = section_ids
+
+    async def list_section_ids(self) -> tuple[UUID, ...]:
+        """Возвращает исходные UUID при первой активации."""
+        return self.section_ids
+
+
 @pytest.mark.asyncio
 async def test_external_registration_and_verification_persist_status_and_version(
     test_engine: AsyncEngine,
@@ -292,7 +312,9 @@ async def test_external_registration_and_verification_persist_status_and_version
     user_id, subject = uuid4(), uuid4()
     factory = build_session_factory(test_engine)
     accounts = ExternalAccounts(
-        lambda: SqlAlchemyUnitOfWork(factory), new_id=lambda: user_id
+        lambda: SqlAlchemyUnitOfWork(factory),
+        section_catalog=SectionCatalog(),
+        new_id=lambda: user_id,
     )
     try:
         pending = await accounts.register(
@@ -309,6 +331,7 @@ async def test_external_registration_and_verification_persist_status_and_version
         repeated = await accounts.verify_email(user_id=user_id, subject=subject)
         assert repeated == active
         assert active.status is UserStatus.ACTIVE
+        assert active.tier is AccessTier.MEMBER
         assert active.authorization_version == pending.authorization_version + 1
         async with SqlAlchemyUnitOfWork(factory) as work:
             assert await work.users.get_user(user_id) == active
@@ -924,3 +947,381 @@ async def test_multiple_section_grants_roundtrip_and_rollback(
             assert events == [2]
     finally:
         await remove_test_users(test_engine, user_id, admin_id)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_ad_provisioning_assigns_default_access_once(
+    test_engine: AsyncEngine,
+) -> None:
+    """Параллельный первый вход даёт один профиль, designer, разделы и аудит v2."""
+    subject = uuid4().hex
+    section_ids = (uuid4(), uuid4())
+    candidate_ids = tuple(uuid4() for _ in range(8))
+    factory = build_session_factory(test_engine)
+
+    async def first_login(user_id: UUID) -> UserAccount:
+        """Открывает отдельную транзакцию первого подтверждённого AD-входа."""
+        directory = UserDirectory(
+            lambda: SqlAlchemyUnitOfWork(factory),
+            section_catalog=SectionCatalog(section_ids),
+            new_id=lambda: user_id,
+        )
+        return await directory.provision(
+            provider_id="ad",
+            namespace="onboarding-test",
+            subject=subject,
+            kind=UserKind.CORPORATE,
+            display_name="Новый сотрудник",
+            login=f"new-{subject}",
+        )
+
+    try:
+        users = await asyncio.gather(
+            *(first_login(user_id) for user_id in candidate_ids)
+        )
+        assert len({user.user_id for user in users}) == 1
+        assert all(user.authorization_version == 2 for user in users)
+        user_id = users[0].user_id
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            assignments = await work.users.list_assignments(user_id)
+            assert len(assignments) == 1
+            assert assignments[0].role is Role.DESIGNER
+            assert set(await work.users.list_sections(user_id)) == set(section_ids)
+        async with factory() as session:
+            role_versions = tuple(
+                await session.scalars(
+                    select(RoleAssignmentEventModel.authorization_version).where(
+                        RoleAssignmentEventModel.assignment_id
+                        == assignments[0].assignment_id
+                    )
+                )
+            )
+            section_versions = tuple(
+                await session.scalars(
+                    select(SectionAccessEventModel.authorization_version).where(
+                        SectionAccessEventModel.user_id == user_id
+                    )
+                )
+            )
+            assert role_versions == section_versions == (2,)
+    finally:
+        await remove_test_users(test_engine, *candidate_ids)
+
+
+@pytest.mark.asyncio
+async def test_email_confirmation_initializes_role_sections_and_single_version(
+    test_engine: AsyncEngine,
+) -> None:
+    """Подтверждение email атомарно сохраняет MEMBER, designer и все UUID разделов."""
+    user_id, subject = uuid4(), uuid4()
+    section_ids = (uuid4(), uuid4())
+    factory = build_session_factory(test_engine)
+    accounts = ExternalAccounts(
+        lambda: SqlAlchemyUnitOfWork(factory),
+        section_catalog=SectionCatalog(section_ids),
+        new_id=lambda: user_id,
+    )
+    try:
+        pending = await accounts.register(
+            subject=subject,
+            display_name="Новый клиент",
+            email=f"{subject.hex}@example.test",
+        )
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            assert pending.tier is AccessTier.REGISTERED_FREE
+            assert await work.users.list_assignments(user_id) == ()
+            assert await work.users.list_sections(user_id) == ()
+        active, repeated = await asyncio.gather(
+            accounts.verify_email(user_id=user_id, subject=subject),
+            accounts.verify_email(user_id=user_id, subject=subject),
+        )
+        assert active == repeated
+        assert active.authorization_version == 2
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            saved = await work.users.get_user(user_id)
+            assert saved == active
+            assert saved.tier is AccessTier.MEMBER
+            assert len(await work.users.list_assignments(user_id)) == 1
+            assert set(await work.users.list_sections(user_id)) == set(section_ids)
+        async with factory() as session:
+            events = tuple(
+                await session.scalars(
+                    select(SectionAccessEventModel.authorization_version).where(
+                        SectionAccessEventModel.user_id == user_id
+                    )
+                )
+            )
+            assert events == (2,)
+    finally:
+        await remove_test_users(test_engine, user_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("email_confirmation", [False, True])
+async def test_initial_access_failure_rolls_back_all_records(
+    test_engine: AsyncEngine, email_confirmation: bool
+) -> None:
+    """Сбой перед commit откатывает профиль/активацию, роль, гранты и оба аудита."""
+    user_id, subject = uuid4(), uuid4()
+    factory = build_session_factory(test_engine)
+    catalog = SectionCatalog((uuid4(), uuid4()))
+
+    class FailingCommit(SqlAlchemyUnitOfWork):
+        """Останавливает транзакцию после сохранения всех новых записей."""
+
+        async def commit(self) -> None:
+            """Не допускает commit, чтобы проверить реальный rollback PostgreSQL."""
+            raise RuntimeError("Сбой после сохранения доступа")
+
+    try:
+        if email_confirmation:
+            accounts = ExternalAccounts(
+                lambda: SqlAlchemyUnitOfWork(factory),
+                section_catalog=catalog,
+                new_id=lambda: user_id,
+            )
+            pending = await accounts.register(
+                subject=subject,
+                display_name="Клиент",
+                email=f"{subject.hex}@example.test",
+            )
+            failed = ExternalAccounts(
+                lambda: FailingCommit(factory), section_catalog=catalog
+            )
+            with pytest.raises(RuntimeError, match="после сохранения"):
+                await failed.verify_email(user_id=user_id, subject=subject)
+        else:
+            directory = UserDirectory(
+                lambda: FailingCommit(factory),
+                section_catalog=catalog,
+                new_id=lambda: user_id,
+            )
+            with pytest.raises(RuntimeError, match="после сохранения"):
+                await directory.provision(
+                    provider_id="ad",
+                    namespace="rollback-test",
+                    subject=str(subject),
+                    kind=UserKind.CORPORATE,
+                    display_name="Сотрудник",
+                    login=f"rollback-{subject.hex}",
+                )
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            saved = await work.users.get_user(user_id)
+            if email_confirmation:
+                assert saved == pending
+            else:
+                assert saved is None
+                assert (
+                    await work.users.find_identity("ad", "rollback-test", str(subject))
+                    is None
+                )
+            assert await work.users.list_assignments(user_id) == ()
+            assert await work.users.list_sections(user_id) == ()
+        async with factory() as session:
+            assert (
+                tuple(
+                    await session.scalars(
+                        select(SectionAccessEventModel.event_id).where(
+                            SectionAccessEventModel.user_id == user_id
+                        )
+                    )
+                )
+                == ()
+            )
+            assert (
+                tuple(
+                    await session.scalars(
+                        select(RoleAssignmentEventModel.event_id).where(
+                            RoleAssignmentEventModel.actor_user_id == user_id
+                        )
+                    )
+                )
+                == ()
+            )
+    finally:
+        await remove_test_users(test_engine, user_id)
+
+
+async def create_catalog_worker(
+    factory: object, user_id: UUID, role: Role
+) -> UserAccount:
+    """Создаёт только собственную тестовую рабочую роль с итоговой версией 2."""
+    profile = corporate_member(user_id=user_id)
+    updated = replace(profile, authorization_version=2)
+    scope = ScopeKind.SECTIONS if role is Role.DEPARTMENT_HEAD else ScopeKind.OWN
+    assignment = RoleAssignment(
+        assignment_id=uuid4(),
+        user_id=user_id,
+        role=role,
+        source=RoleSource.LOCAL,
+        scope=RoleScope(scope),
+        created_at=datetime.now(UTC),
+    )
+    async with SqlAlchemyUnitOfWork(factory) as work:
+        await work.users.create_user(
+            profile, ExternalIdentity("test", "catalog-worker", user_id.hex, user_id)
+        )
+        await work.users.add_role_assignment(updated, assignment, 1, user_id)
+        await work.commit()
+    return updated
+
+
+@pytest.mark.asyncio
+async def test_concurrent_section_distribution_preserves_sessions_and_manual_revocations(
+    test_engine: AsyncEngine,
+) -> None:
+    """PG marker выдаёт раздел один раз, не меняя версии и не возвращая ручной отзыв."""
+    head_id, target_id, new_section, old_section = (uuid4() for _ in range(4))
+    factory = build_session_factory(test_engine)
+    try:
+        await create_catalog_worker(factory, head_id, Role.DEPARTMENT_HEAD)
+        target = await create_catalog_worker(factory, target_id, Role.DESIGNER)
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            for user_id in (head_id, target_id):
+                await work.users.replace_sections(
+                    user_id,
+                    (old_section,),
+                    actor_user_id=head_id,
+                    authorization_version=2,
+                    created_at=datetime.now(UTC),
+                )
+            await work.commit()
+        service = DistributeSection(
+            lambda: SqlAlchemyUnitOfWork(factory), SectionCatalog((new_section,))
+        )
+        results = await asyncio.gather(
+            *(
+                service.execute(section_id=new_section, actor_user_id=head_id)
+                for _ in range(4)
+            )
+        )
+        assert sum(result.granted_users for result in results) == 2
+        assert sum(not result.already_distributed for result in results) == 1
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            for user_id in (head_id, target_id):
+                assert (await work.users.get_user(user_id)).authorization_version == 2
+                assert set(await work.users.list_sections(user_id)) == {
+                    new_section,
+                    old_section,
+                }
+            # Ручная CAS-правка оставляет роль, но снимает новый раздел с новой версией.
+            changed = replace(target, authorization_version=3)
+            await work.users.replace_worker_roles(
+                changed, (), None, datetime.now(UTC), 2, head_id
+            )
+            await work.users.replace_sections(
+                target_id,
+                (old_section,),
+                actor_user_id=head_id,
+                authorization_version=3,
+                created_at=datetime.now(UTC),
+            )
+            await work.commit()
+        repeated = await service.execute(section_id=new_section, actor_user_id=head_id)
+        assert repeated.already_distributed is True
+        assert repeated.granted_users == 0
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            assert await work.users.list_sections(target_id) == (old_section,)
+            assert (await work.users.get_user(target_id)).authorization_version == 3
+        async with factory() as session:
+            assert tuple(
+                await session.scalars(
+                    select(CatalogSectionDistributionModel.section_id).where(
+                        CatalogSectionDistributionModel.section_id == new_section
+                    )
+                )
+            ) == (new_section,)
+    finally:
+        await remove_test_users(test_engine, head_id, target_id)
+
+
+@pytest.mark.asyncio
+async def test_distribution_failure_rolls_back_marker_and_grants_in_postgresql(
+    test_engine: AsyncEngine,
+) -> None:
+    """Настоящий rollback позволяет повторить целую выдачу после сбоя commit."""
+    head_id, target_id, new_section = (uuid4() for _ in range(3))
+    factory = build_session_factory(test_engine)
+
+    class FailingCommit(SqlAlchemyUnitOfWork):
+        """Имитирует отказ после записи marker и всех назначений."""
+
+        async def commit(self) -> None:
+            """Оставляет внешнему контексту rollback незавершённой транзакции."""
+            raise RuntimeError("Сбой фиксации выдачи")
+
+    try:
+        await create_catalog_worker(factory, head_id, Role.DEPARTMENT_HEAD)
+        await create_catalog_worker(factory, target_id, Role.DESIGNER)
+        catalog = SectionCatalog((new_section,))
+        service = DistributeSection(lambda: FailingCommit(factory), catalog)
+        with pytest.raises(RuntimeError, match="фиксации выдачи"):
+            await service.execute(section_id=new_section, actor_user_id=head_id)
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            assert await work.users.list_sections(head_id) == ()
+            assert await work.users.list_sections(target_id) == ()
+            assert new_section not in await work.users.list_distributed_sections()
+        service = DistributeSection(lambda: SqlAlchemyUnitOfWork(factory), catalog)
+        assert (
+            await service.execute(section_id=new_section, actor_user_id=head_id)
+        ).granted_users == 2
+    finally:
+        await remove_test_users(test_engine, head_id, target_id)
+
+
+@pytest.mark.asyncio
+async def test_first_login_snapshot_race_keeps_newly_distributed_section(
+    test_engine: AsyncEngine,
+) -> None:
+    """Advisory lock и marker закрывают разрыв между HTTP-снимком и созданием профиля."""
+    head_id, target_id, old_section, new_section = (uuid4() for _ in range(4))
+    factory = build_session_factory(test_engine)
+    snapshot_started, release_snapshot = asyncio.Event(), asyncio.Event()
+
+    class SnapshotCatalog:
+        """Останавливает внешний снимок, пока другой сценарий создаёт новый раздел."""
+
+        async def list_section_ids(self) -> tuple[UUID, ...]:
+            """Возвращает прежний каталог после завершения конкурентной выдачи."""
+            snapshot_started.set()
+            await release_snapshot.wait()
+            return (old_section,)
+
+    task = None
+    try:
+        await create_catalog_worker(factory, head_id, Role.DEPARTMENT_HEAD)
+        directory = UserDirectory(
+            lambda: SqlAlchemyUnitOfWork(factory),
+            section_catalog=SnapshotCatalog(),
+            new_id=lambda: target_id,
+        )
+        task = asyncio.create_task(
+            directory.provision(
+                provider_id="ad",
+                namespace="catalog-race",
+                subject=target_id.hex,
+                kind=UserKind.CORPORATE,
+                display_name="Новый сотрудник",
+                login=f"race-{target_id.hex}",
+            )
+        )
+        await asyncio.wait_for(snapshot_started.wait(), 10)
+        service = DistributeSection(
+            lambda: SqlAlchemyUnitOfWork(factory), SectionCatalog((new_section,))
+        )
+        result = await service.execute(section_id=new_section, actor_user_id=head_id)
+        assert result.granted_users == 1
+        release_snapshot.set()
+        user = await asyncio.wait_for(task, 10)
+        assert user.authorization_version == 2
+        async with SqlAlchemyUnitOfWork(factory) as work:
+            assert set(await work.users.list_sections(target_id)) == {
+                old_section,
+                new_section,
+            }
+    finally:
+        release_snapshot.set()
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await remove_test_users(test_engine, head_id, target_id)

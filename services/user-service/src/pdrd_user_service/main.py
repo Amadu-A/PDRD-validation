@@ -21,6 +21,9 @@ from pdrd_user_service.transport.http.routers.local_accounts import (
 from pdrd_user_service.transport.http.routers.organization_memberships import (
     router as organization_memberships_router,
 )
+from pdrd_user_service.transport.http.routers.public_profiles import (
+    router as public_profiles_router,
+)
 from pdrd_user_service.transport.http.routers.review_scope import (
     router as review_scope_router,
 )
@@ -29,6 +32,9 @@ from pdrd_user_service.transport.http.routers.role_replacement import (
 )
 from pdrd_user_service.transport.http.routers.section_access import (
     router as section_access_router,
+)
+from pdrd_user_service.transport.http.routers.section_distribution import (
+    router as section_distribution_router,
 )
 from pdrd_user_service.transport.http.routers.users import router as users_router
 
@@ -69,8 +75,10 @@ def create_app(container: ApplicationContainer | None = None) -> FastAPI:
     app.include_router(health_router)
     if actual.settings.enabled and actual.settings.internal_key.get_secret_value():
         app.include_router(local_accounts_router)
+        app.include_router(public_profiles_router)
         app.include_router(users_router)
         app.include_router(section_access_router)
+        app.include_router(section_distribution_router)
         app.include_router(external_accounts_router)
         app.include_router(admin_users_router)
         app.include_router(role_replacement_router)

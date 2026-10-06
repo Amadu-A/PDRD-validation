@@ -11,23 +11,35 @@ from pdrd_user_service.application.ports.repository import (
     AuthorizationConflict,
     IdentityConflict,
 )
+from pdrd_user_service.application.ports.section_catalog import (
+    SectionCatalogUnavailable,
+)
 from pdrd_user_service.application.use_cases.external_accounts import (
     ExternalAccountConflict,
     ExternalAccounts,
 )
 from pdrd_user_service.application.use_cases.users import UserDirectory, UserNotFound
-from pdrd_user_service.domain.access import AccessTier
+from pdrd_user_service.domain.access import AccessTier, Role
 from pdrd_user_service.domain.identity import (
     ExternalIdentity,
     UserAccount,
     UserKind,
     UserStatus,
 )
+from pdrd_user_service.domain.role_assignments import RoleAssignment
 
 AT = datetime(2026, 10, 1, 10, 0, tzinfo=UTC)
 USER_ID = UUID("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa")
 SUBJECT = UUID("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb")
 OTHER_SUBJECT = UUID("cccccccc-cccc-4ccc-cccc-cccccccccccc")
+
+
+class SectionCatalog:
+    """Имитирует исходный раздел без настоящего Knowledge Service."""
+
+    async def list_section_ids(self) -> tuple[UUID, ...]:
+        """Возвращает актуальный UUID раздела."""
+        return (OTHER_SUBJECT,)
 
 
 class MemoryUsers:
@@ -38,6 +50,8 @@ class MemoryUsers:
         self.accounts: dict[UUID, UserAccount] = {}
         self.identities: dict[tuple[str, str, str], UUID] = {}
         self.activation_count = 0
+        self.assignments: dict[UUID, RoleAssignment] = {}
+        self.sections: dict[UUID, tuple[UUID, ...]] = {}
 
     async def find_identity(
         self, provider_id: str, namespace: str, subject: str
@@ -59,6 +73,28 @@ class MemoryUsers:
             raise IdentityConflict("Занято")
         self.accounts[user.user_id] = user
         self.identities[identity.stable_key] = user.user_id
+
+    async def lock_section_catalog(self) -> None:
+        """Имитирует общий транзакционный lock каталога."""
+
+    async def list_distributed_sections(self) -> tuple[UUID, ...]:
+        """Возвращает пустой список ещё не созданных разделов."""
+        return ()
+
+    async def initialize_access(
+        self,
+        updated_user: UserAccount,
+        assignment: RoleAssignment,
+        section_ids: tuple[UUID, ...],
+        *,
+        expected_authorization_version: int,
+        activate_external: bool = False,
+    ) -> None:
+        """Имитирует единый переход подтверждения, роли и разделов."""
+        assert activate_external
+        await self.activate_external(updated_user, expected_authorization_version)
+        self.assignments[updated_user.user_id] = assignment
+        self.sections[updated_user.user_id] = section_ids
 
     async def activate_external(
         self, updated_user: UserAccount, expected_authorization_version: int
@@ -98,7 +134,10 @@ class MemoryWork:
 def directory(users: MemoryUsers) -> ExternalAccounts:
     """Создаёт сценарий с фиксированными временем и идентификатором."""
     return ExternalAccounts(
-        lambda: MemoryWork(users), clock=lambda: AT, new_id=lambda: USER_ID
+        lambda: MemoryWork(users),
+        section_catalog=SectionCatalog(),
+        clock=lambda: AT,
+        new_id=lambda: USER_ID,
     )
 
 
@@ -119,6 +158,8 @@ async def test_registration_remains_pending_and_retry_is_idempotent() -> None:
     assert first.authorization_version == 1
     assert first.last_login_at is None
     assert len(users.accounts) == 1
+    assert users.assignments == {}
+    assert users.sections == {}
     assert users.identities == {("email", "pdrd", str(SUBJECT)): USER_ID}
 
 
@@ -140,6 +181,9 @@ async def test_verification_requires_matching_identity_and_is_idempotent() -> No
     assert active.authorization_version == 2
     assert repeated == active
     assert users.activation_count == 1
+    assert active.tier is AccessTier.MEMBER
+    assert users.assignments[USER_ID].role is Role.DESIGNER
+    assert users.sections[USER_ID] == (OTHER_SUBJECT,)
 
 
 @pytest.mark.asyncio
@@ -197,3 +241,46 @@ async def test_legacy_provision_cannot_activate_unverified_email(
             email="client@example.test",
         )
     assert users.accounts == {}
+
+
+@pytest.mark.asyncio
+async def test_pending_verification_does_not_activate_when_catalog_unavailable() -> (
+    None
+):
+    """Без каталога подтверждённая личность остаётся pending, без роли и разделов."""
+    users = MemoryUsers()
+    service = ExternalAccounts(
+        lambda: MemoryWork(users), clock=lambda: AT, new_id=lambda: USER_ID
+    )
+    pending = await service.register(
+        subject=SUBJECT, display_name="Клиент", email="client@example.test"
+    )
+    with pytest.raises(SectionCatalogUnavailable):
+        await service.verify_email(user_id=pending.user_id, subject=SUBJECT)
+    assert users.accounts[USER_ID] == pending
+    assert users.activation_count == 0
+    assert users.assignments == {}
+    assert users.sections == {}
+
+
+@pytest.mark.asyncio
+async def test_repeated_verification_keeps_existing_rights_without_live_catalog() -> (
+    None
+):
+    """Повтор письма не возвращает изменённые администратором разделы к умолчаниям."""
+    users = MemoryUsers()
+    service = directory(users)
+    pending = await service.register(
+        subject=SUBJECT, display_name="Клиент", email="client@example.test"
+    )
+    active = await service.verify_email(user_id=pending.user_id, subject=SUBJECT)
+    users.sections[USER_ID] = ()
+    service_without_catalog = ExternalAccounts(
+        lambda: MemoryWork(users), clock=lambda: AT
+    )
+    assert (
+        await service_without_catalog.verify_email(user_id=USER_ID, subject=SUBJECT)
+        == active
+    )
+    assert users.sections[USER_ID] == ()
+    assert users.activation_count == 1
