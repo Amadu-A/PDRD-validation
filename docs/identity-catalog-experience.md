@@ -164,7 +164,7 @@ BASH
 профили. Перед обновлением сохраняйте текущие `identity,auth,review` и остальные
 используемые профили. Нужны новые версии Knowledge service/indexer и Gateway
 вместе; ручное обновление только frontend недостаточно. Ожидаемые ревизии:
-Knowledge `20261006_0006`, User `20261006_0006`. Experience не требует новой миграции.
+Knowledge `20261006_0006`, User `20261006_0006`. Experience `20261006_0006` согласует ключ дедупликации с объяснением отказа.
 
 Новое значение по умолчанию уже есть в Compose:
 `USER_SERVICE_KNOWLEDGE_SERVICE_URL=http://knowledge-service:8401`.

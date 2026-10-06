@@ -45,7 +45,15 @@ from .test_confirmed_areas_database import engine as engine
 pytestmark = pytest.mark.database
 
 
-async def rejected_source(engine, *, scenario="original", sha=None, author=None):
+async def rejected_source(
+    engine,
+    *,
+    scenario="original",
+    sha=None,
+    author=None,
+    reason="false_positive",
+    comment="",
+):
     """Утверждённый Bad без когда-либо записанного подтверждения области."""
     review = initial(uuid4())
     if author is not None:
@@ -96,7 +104,8 @@ async def rejected_source(engine, *, scenario="original", sha=None, author=None)
     rejected = review.decide(
         finding_id="vlm:1",
         decision=Decision.REJECTED,
-        reason_category="false_positive",
+        reason_category=reason,
+        comment=comment,
         actor="integration:1",
         at=datetime.now(UTC),
         expected_revision=review.revision,
@@ -281,7 +290,7 @@ async def test_catalog_capture_is_idempotent_and_survives_repository_recreation(
                         "SELECT version_num FROM experience.alembic_version_experience"
                     )
                 )
-                == "20260929_0005"
+                == "20261006_0006"
             )
     finally:
         await remove_catalog(engine, approved.job_id)
