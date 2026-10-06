@@ -2,6 +2,7 @@
 
 """Internal HTTP API lifecycle технического задания."""
 
+from secrets import compare_digest
 from typing import Annotated
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from fastapi import (
     Depends,
     File,
     Form,
+    Header,
     HTTPException,
     Query,
     Response,
@@ -27,6 +29,9 @@ from pdrd_knowledge_service.application.use_cases.technical_assignment_requireme
     ListTechnicalAssignmentRequirements,
     TechnicalAssignmentRequirementsConflictError,
 )
+from pdrd_knowledge_service.application.use_cases.technical_assignment_retention import (
+    TechnicalAssignmentRetentionConflictError,
+)
 from pdrd_knowledge_service.application.use_cases.technical_assignments import (
     GetTechnicalAssignment,
     GetTechnicalAssignmentContent,
@@ -34,6 +39,7 @@ from pdrd_knowledge_service.application.use_cases.technical_assignments import (
     TechnicalAssignmentContentUnavailableError,
     TechnicalAssignmentNotFoundError,
     TechnicalAssignmentRegistrationConflictError,
+    TechnicalAssignmentSourceExpiredError,
     TechnicalAssignmentUploadError,
 )
 from pdrd_knowledge_service.core.container import (
@@ -57,7 +63,7 @@ router = APIRouter(
 class TechnicalAssignmentResponse(
     BaseModel,
 ):
-    """HTTP representation T lifecycle."""
+    """HTTP-представление жизненного цикла ТЗ."""
 
     technical_assignment_id: UUID
 
@@ -105,7 +111,7 @@ class TechnicalAssignmentRequirementResponse(
 class TechnicalAssignmentRequirementListResponse(
     BaseModel,
 ):
-    """Bounded deterministic page atomic requirements."""
+    """Ограниченная страница атомарных требований с устойчивым порядком."""
 
     technical_assignment_id: UUID
 
@@ -129,7 +135,7 @@ class TechnicalAssignmentRequirementListResponse(
 def _response(
     assignment: TechnicalAssignment,
 ) -> TechnicalAssignmentResponse:
-    """Domain -> HTTP schema."""
+    """Преобразует доменную запись в HTTP-схему."""
     return TechnicalAssignmentResponse(
         technical_assignment_id=assignment.technical_assignment_id,
         analysis_document_id=assignment.analysis_document_id,
@@ -407,6 +413,9 @@ async def get_technical_assignment_content(
             ),
         ) from error
 
+    except TechnicalAssignmentSourceExpiredError as error:
+        raise HTTPException(410, str(error)) from error
+
     except TechnicalAssignmentContentUnavailableError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -458,3 +467,34 @@ async def get_technical_assignment(
     return _response(
         assignment,
     )
+
+
+@router.delete("/{technical_assignment_id}/retention", status_code=204)
+async def cleanup_technical_assignment(
+    technical_assignment_id: UUID,
+    analysis_document_id: UUID,
+    sha256: str,
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+    retention_key: Annotated[str | None, Header(alias="X-PDRD-Retention-Key")] = None,
+    purge_metadata: bool = False,
+) -> Response:
+    """Закрытый канал очистки не принимает пути и не раскрывает серверный ключ."""
+    expected = container.settings.technical_assignment.retention_internal_key.get_secret_value()
+    if (
+        len(expected) < 32
+        or retention_key is None
+        or not compare_digest(retention_key, expected)
+    ):
+        raise HTTPException(403, "Недопустимый серверный ключ очистки.")
+    if container.cleanup_technical_assignment is None:
+        raise HTTPException(503, "Очистка ТЗ не настроена.")
+    try:
+        await container.cleanup_technical_assignment.execute(
+            technical_assignment_id=technical_assignment_id,
+            analysis_document_id=analysis_document_id,
+            sha256=sha256,
+            purge_metadata=purge_metadata,
+        )
+    except TechnicalAssignmentRetentionConflictError as error:
+        raise HTTPException(409, str(error)) from error
+    return Response(status_code=204)

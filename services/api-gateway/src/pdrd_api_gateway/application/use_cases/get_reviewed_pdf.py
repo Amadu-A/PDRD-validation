@@ -49,6 +49,11 @@ class GetReviewedPdf:
         job = await self.jobs.execute(job_id=manifest.job_id)
         if job is None or job.document_id != manifest.document_id:
             raise ReviewRequestError(409, "Исходный документ Review изменён.")
+        if getattr(job, "source_artifacts_deleted_at", None) is not None:
+            raise ReviewRequestError(
+                410,
+                "Исходный PDF удалён по сроку хранения 30 дней. Human Review сохранён.",
+            )
         try:
             artifacts = await self.artifacts.load_request(
                 document_id=manifest.document_id

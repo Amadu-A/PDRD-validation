@@ -40,10 +40,15 @@ export async function restoreAnalysisReport(resultView, { isCurrent = () => true
       return;
     }
     const payload = await getAnalysisResult(jobId);
-    const visualization = ["pdf_only", "pdf_cad"].includes(payload.source_mode)
+    const visualization = !payload.source_artifacts_expired && ["pdf_only", "pdf_cad"].includes(payload.source_mode)
       ? await getAnalysisVisualization(jobId) : null;
     if (!isCurrent()) return;
     const report = renderAnalysisReport(payload, { jobId, visualization });
+    if (payload.source_artifacts_expired) {
+      const notice = document.createElement("p");
+      notice.textContent = payload.source_artifacts_message || "Исходные файлы удалены по сроку хранения. Результат и Human Review сохранены.";
+      report.prepend(notice);
+    }
     appendAnnotatedPdfDownload(report, { jobId, payload });
     appendGuestShareLink(report, jobId);
     resultView.showReport(report, { jobId });

@@ -49,6 +49,31 @@ class AnalysisJobRepository(Protocol):
         """Возвращает job по document_id с PostgreSQL row lock."""
         ...
 
+    async def list_retention_candidates(
+        self,
+        *,
+        source_before: datetime,
+        guest_before: datetime,
+        limit: int,
+    ) -> list[AnalysisJob]:
+        """Выбирает завершённые задания с истёкшим сроком хранения."""
+        ...
+
+    async def technical_assignment_retention(
+        self,
+        *,
+        technical_assignment_id: UUID,
+        exclude_job_id: UUID,
+        source_before: datetime,
+        guest_before: datetime,
+    ) -> tuple[bool, bool]:
+        """Возвращает наличие свежих/активных ссылок и бессрочных ссылок владельца."""
+        ...
+
+    async def delete(self, job_id: UUID) -> None:
+        """Удаляет гостевую строку и связанные исходящие события."""
+        ...
+
     async def count_waiting_before(
         self,
         *,

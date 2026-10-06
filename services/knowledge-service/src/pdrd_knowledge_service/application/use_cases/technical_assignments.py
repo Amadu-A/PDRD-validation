@@ -82,6 +82,10 @@ class TechnicalAssignmentRegistrationConflictError(
     """Повторный technical_assignment_id имеет другое содержимое."""
 
 
+class TechnicalAssignmentSourceExpiredError(RuntimeError):
+    """Исходный файл ТЗ удалён по сроку хранения, его метаданные сохранены."""
+
+
 class TechnicalAssignmentContentUnavailableError(
     RuntimeError,
 ):
@@ -439,6 +443,11 @@ class GetTechnicalAssignmentContent:
         assignment = await self.get_technical_assignment.execute(
             technical_assignment_id=technical_assignment_id,
         )
+
+        if getattr(assignment, "source_removed_at", None) is not None:
+            raise TechnicalAssignmentSourceExpiredError(
+                "Исходный файл ТЗ удалён по сроку хранения."
+            )
 
         storage_key = build_technical_assignment_storage_key(
             analysis_document_id=assignment.analysis_document_id,

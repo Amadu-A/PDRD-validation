@@ -61,6 +61,9 @@ from pdrd_knowledge_service.application.use_cases.project_context import (
 from pdrd_knowledge_service.application.use_cases.technical_assignment_requirements import (
     ListTechnicalAssignmentRequirements,
 )
+from pdrd_knowledge_service.application.use_cases.technical_assignment_retention import (
+    CleanupTechnicalAssignment,
+)
 from pdrd_knowledge_service.application.use_cases.technical_assignment_retrieval import (
     SearchTechnicalAssignment,
     SearchTechnicalAssignmentGuidedNormative,
@@ -144,6 +147,8 @@ class ApplicationContainer:
     queue_normative_document: QueueNormativeDocument | None = None
 
     register_technical_assignment: RegisterTechnicalAssignment | None = None
+
+    cleanup_technical_assignment: CleanupTechnicalAssignment | None = None
 
     get_technical_assignment: GetTechnicalAssignment | None = None
 
@@ -426,6 +431,12 @@ def build_container() -> ApplicationContainer:
                 storage=(technical_assignment_storage),
                 max_upload_bytes=(settings.technical_assignment.max_upload_bytes),
             )
+        ),
+        cleanup_technical_assignment=CleanupTechnicalAssignment(
+            unit_of_work_factory=technical_assignment_uow_factory,
+            storage=technical_assignment_storage,
+            vector_store=vector_store,
+            collection=settings.qdrant.multimodal_collection,
         ),
         get_technical_assignment=(get_technical_assignment),
         get_technical_assignment_content=(

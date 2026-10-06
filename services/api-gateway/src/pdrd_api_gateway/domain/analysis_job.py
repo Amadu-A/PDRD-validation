@@ -154,6 +154,8 @@ class AnalysisJob:
 
     owner_user_id: UUID | None = None
 
+    source_artifacts_deleted_at: datetime | None = None
+
     guest_access_token_hash: str | None = None
 
     guest_access_expires_at: datetime | None = None

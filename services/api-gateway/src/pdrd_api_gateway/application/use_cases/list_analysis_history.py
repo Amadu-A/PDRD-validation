@@ -138,6 +138,7 @@ class ListAnalysisHistory:
         pdf_kind = None
         if (
             artifacts_available
+            and getattr(job, "source_artifacts_deleted_at", None) is None
             and metadata.pdf_available
             and job.status == AnalysisJobStatus.COMPLETED
         ):
@@ -169,6 +170,10 @@ class ListAnalysisHistory:
             "review_status": review_status,
             "review_revision": review_revision,
             "result_available": artifacts_available,
+            "source_artifacts_expired": getattr(
+                job, "source_artifacts_deleted_at", None
+            )
+            is not None,
             "open_url": f"/?job_id={job.id}",
             "pdf_url": pdf_url,
             "pdf_kind": pdf_kind,

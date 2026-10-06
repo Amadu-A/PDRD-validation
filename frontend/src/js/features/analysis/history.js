@@ -80,7 +80,11 @@ export function createAnalysisHistory(root, {
       });
       links.append(pdf);
     }
-    li.append(heading, details, links);
+    li.append(heading, details);
+    if (item.source_artifacts_expired) {
+      li.append(element("p", "analysis-history__details", "Исходные файлы и изображения удалены по сроку хранения 30 дней. Результат и Review сохранены."));
+    }
+    li.append(links);
     return li;
   }
 

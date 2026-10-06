@@ -111,6 +111,7 @@ def _auth_preflight_environment(**overrides: str) -> str:
     """Возвращает безопасный набор фиктивных значений для auth preflight."""
     values = {
         "PDRD_POSTGRES_PASSWORD": "test-postgres-password",
+        "PDRD_RETENTION_INTERNAL_KEY": "r" * 32,
         "PDRD_RABBITMQ_PASSWORD": "test-rabbitmq-password",
         "COMPOSE_PROFILES": "identity,auth",
         "USER_SERVICE_INTERNAL_KEY": "u" * 32,
@@ -374,3 +375,12 @@ def _run_stack_check(
     )
     trace = (tmp_path / "trace.log").read_text(encoding="utf-8").splitlines()
     return result, trace
+
+
+def test_startup_rejects_missing_retention_key(tmp_path: Path) -> None:
+    """Без закрытого ключа очистки стек не запускается с частично действующей политикой."""
+    result = _run_startup_preflight(
+        tmp_path, _auth_preflight_environment(PDRD_RETENTION_INTERNAL_KEY="")
+    )
+    assert result.returncode == 1
+    assert "PDRD_RETENTION_INTERNAL_KEY должен быть задан" in result.stderr

@@ -44,6 +44,7 @@ export function appendAnnotatedPdfDownload(
 ) {
   if (
     !jobId
+    || payload?.source_artifacts_expired === true
     || payload?.status !== "completed"
     || ![
       "pdf_only",

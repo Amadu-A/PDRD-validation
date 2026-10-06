@@ -29,7 +29,7 @@ from pdrd_knowledge_service.infrastructure.database.technical_assignment_models 
 
 
 class SqlAlchemyTechnicalAssignmentRepository:
-    """PostgreSQL repository T lifecycle."""
+    """Репозиторий жизненного цикла ТЗ в PostgreSQL."""
 
     def __init__(
         self,
@@ -139,6 +139,16 @@ class SqlAlchemyTechnicalAssignmentRepository:
             for model in result.all()
         ]
 
+    async def delete(self, technical_assignment_id: UUID) -> None:
+        """Удаляет строку ТЗ после успешной очистки файла и векторных точек."""
+        from sqlalchemy import delete
+
+        await self._session.execute(
+            delete(TechnicalAssignmentModel).where(
+                TechnicalAssignmentModel.id == technical_assignment_id
+            )
+        )
+
     async def list_all(
         self,
     ) -> list[TechnicalAssignment]:
@@ -185,6 +195,7 @@ class SqlAlchemyTechnicalAssignmentRepository:
         model.indexed_at = assignment.indexed_at
         model.created_at = assignment.created_at
         model.updated_at = assignment.updated_at
+        model.source_removed_at = assignment.source_removed_at
 
     @staticmethod
     def _to_model(
@@ -204,6 +215,7 @@ class SqlAlchemyTechnicalAssignmentRepository:
             indexed_at=assignment.indexed_at,
             created_at=assignment.created_at,
             updated_at=assignment.updated_at,
+            source_removed_at=assignment.source_removed_at,
         )
 
     @staticmethod
@@ -228,6 +240,7 @@ class SqlAlchemyTechnicalAssignmentRepository:
             indexed_at=model.indexed_at,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            source_removed_at=model.source_removed_at,
         )
 
 
@@ -334,7 +347,7 @@ class SqlAlchemyTechnicalAssignmentOutboxRepository:
 
 
 class SqlAlchemyTechnicalAssignmentUnitOfWork:
-    """Transaction boundary T lifecycle."""
+    """Транзакционная граница жизненного цикла ТЗ."""
 
     def __init__(
         self,
@@ -376,11 +389,11 @@ class SqlAlchemyTechnicalAssignmentUnitOfWork:
     async def commit(
         self,
     ) -> None:
-        """Commit."""
+        """Фиксирует изменения транзакции."""
         await self._session.commit()
 
     async def rollback(
         self,
     ) -> None:
-        """Rollback."""
+        """Откатывает изменения транзакции."""
         await self._session.rollback()

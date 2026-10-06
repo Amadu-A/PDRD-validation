@@ -155,6 +155,11 @@ class GetAnalysisAnnotatedPdf:
                 "Completed analysis job не содержит document_id.",
             )
 
+        if getattr(job, "source_artifacts_deleted_at", None) is not None:
+            raise AnalysisAnnotatedPdfSourceUnavailableError(
+                "Исходный PDF удалён по сроку хранения 30 дней. Результат и Human Review сохранены.",
+            )
+
         try:
             artifacts = await self.artifact_store.load_request(
                 document_id=job.document_id,

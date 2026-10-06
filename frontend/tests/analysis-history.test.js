@@ -103,3 +103,13 @@ test("HTTP-клиент истории не отправляет owner и ска
   assert.equal(requests[1].options.method, "POST");
   assert.deepEqual(JSON.parse(requests[1].options.body), { expected_revision: 4 });
 });
+
+
+test("истёкшие исходники не скрывают результат и показывают причину отсутствия PDF", async () => {
+  const ui = view({ async list() { return { items: [{ ...item, pdf_url: null, source_artifacts_expired: true }], has_more: false }; } });
+  ui.publish(owner); await tick();
+  assert.match(ui.rows()[0].children[2].textContent, /30 дней/);
+  assert.match(ui.rows()[0].children[2].textContent, /Review сохранены/);
+  assert.equal(ui.rows()[0].children[3].children.length, 1);
+  assert.equal(ui.rows()[0].children[3].children[0].textContent, "Открыть");
+});

@@ -96,3 +96,12 @@ test("гостевой PDF скачивается по заголовку без
     URL.revokeObjectURL = previousRevoke;
   }
 });
+
+
+test("после срока хранения исходников PDF-кнопки не предлагаются", () => {
+  const parent = new Element("div");
+  appendAnnotatedPdfDownload(parent, { jobId: "old", payload: {
+    status: "completed", source_mode: "pdf_only", source_artifacts_expired: true,
+  } });
+  assert.equal(parent.children.length, 0);
+});

@@ -40,7 +40,7 @@ services:
         python -m alembic -c alembic.ini upgrade head
         python -m alembic -c alembic.ini current --check-heads --verbose
         cd /workspace
-        python -m pytest -q services/api-gateway/tests/integration/test_analysis_history_database.py
+        python -m pytest -q services/api-gateway/tests/integration/test_analysis_history_database.py services/api-gateway/tests/integration/test_analysis_retention_database.py
     networks: [gateway-test-only]
 networks:
   gateway-test-only:

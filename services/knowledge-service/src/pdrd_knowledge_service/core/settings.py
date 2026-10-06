@@ -324,6 +324,8 @@ class NormativeIndexingSettings(BaseModel):
 class TechnicalAssignmentSettings(BaseModel):
     """Параметры T ingestion/indexing."""
 
+    retention_internal_key: SecretStr = SecretStr("")
+
     storage_root_path: Path = Path(
         "/data/technical-assignments",
     )
@@ -419,7 +421,7 @@ class OfficeConversionSettings(BaseModel):
 
 
 class EmbeddingSettings(BaseModel):
-    """Unified embedding-service transport."""
+    """Подключение к общему сервису эмбеддингов."""
 
     base_url: str = "http://pdrd-multimodal-embedding-service:8601"
 
@@ -540,7 +542,7 @@ class ExperienceIndexSettings(BaseModel):
 
 
 class SearchSettings(BaseModel):
-    """Runtime RAG retrieval."""
+    """Настройки поиска контекста для анализа."""
 
     normative_top_k: int = Field(
         default=4,

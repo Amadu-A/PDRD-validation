@@ -116,6 +116,11 @@ class AnalysisJobModel(Base):
         nullable=True,
     )
 
+    source_artifacts_deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     normative_snapshot: Mapped[
         dict[
             str,

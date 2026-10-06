@@ -53,7 +53,7 @@ async def test_history_migration_owner_filter_and_pagination():
         async with engine.connect() as connection:
             assert (
                 await connection.scalar(text("SELECT version_num FROM alembic_version"))
-                == "20261006_0006"
+                == "20261006_0007"
             )
             assert (
                 await connection.scalar(

@@ -58,6 +58,10 @@ class TechnicalAssignmentRepository(
         """Возвращает stale indexing и просроченные queued/indexing ТЗ."""
         ...
 
+    async def delete(self, technical_assignment_id: UUID) -> None:
+        """Удаляет гостевое ТЗ с каскадом его исходящих событий."""
+        ...
+
     async def list_all(
         self,
     ) -> list[TechnicalAssignment]:
@@ -103,7 +107,7 @@ class TechnicalAssignmentOutboxRepository(
 class TechnicalAssignmentUnitOfWork(
     Protocol,
 ):
-    """Transaction boundary T lifecycle."""
+    """Транзакционная граница жизненного цикла ТЗ."""
 
     sections: NormativeSectionRepository
 
@@ -129,13 +133,13 @@ class TechnicalAssignmentUnitOfWork(
     async def commit(
         self,
     ) -> None:
-        """Commit."""
+        """Фиксирует изменения транзакции."""
         ...
 
     async def rollback(
         self,
     ) -> None:
-        """Rollback."""
+        """Откатывает изменения транзакции."""
         ...
 
 

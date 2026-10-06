@@ -17,6 +17,7 @@ x-app-env-files: &app-env-files
   - .env
 
 x-api-gateway-environment: &api-gateway-environment
+  API_GATEWAY_RETENTION__INTERNAL_KEY: ${PDRD_RETENTION_INTERNAL_KEY:-}
   API_GATEWAY_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
   API_GATEWAY_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
   API_GATEWAY_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
@@ -28,6 +29,7 @@ x-api-gateway-environment: &api-gateway-environment
   API_GATEWAY_BROKER__VIRTUAL_HOST: ${PDRD_RABBITMQ_VHOST:-pdrd-validation}
 
 x-knowledge-service-environment: &knowledge-service-environment
+  KNOWLEDGE_SERVICE_TECHNICAL_ASSIGNMENT__RETENTION_INTERNAL_KEY: ${PDRD_RETENTION_INTERNAL_KEY:-}
   KNOWLEDGE_SERVICE_EXPERIENCE__KEY: ${PDRD_EXPERIENCE_INDEX_KEY:-}
   KNOWLEDGE_SERVICE_DATABASE__HOST: postgres
   KNOWLEDGE_SERVICE_DATABASE__PORT: 5432
@@ -197,6 +199,9 @@ services:
         "-m",
         "pdrd_api_gateway.infrastructure.messaging.dispatcher"
       ]
+
+    volumes:
+      - analysis_artifacts:/data/analyses
 
     depends_on:
       postgres:

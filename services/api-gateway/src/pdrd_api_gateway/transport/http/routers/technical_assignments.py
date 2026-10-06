@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/transport/http/routers/technical_assignments.py
 
-"""Public T preparation/content API."""
+"""Публичный API подготовки и просмотра технического задания."""
 
 from datetime import datetime
 from typing import Annotated
@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from pdrd_api_gateway.application.ports.technical_assignment_content import (
     TechnicalAssignmentContentError,
+    TechnicalAssignmentContentExpiredError,
     TechnicalAssignmentContentNotFoundError,
     TechnicalAssignmentContentReader,
 )
@@ -320,6 +321,9 @@ async def get_technical_assignment_content(
                 error,
             ),
         ) from error
+
+    except TechnicalAssignmentContentExpiredError as error:
+        raise HTTPException(410, str(error)) from error
 
     except TechnicalAssignmentContentError as error:
         raise HTTPException(

@@ -50,6 +50,7 @@ class SqlAlchemyAnalysisJobRepository:
                 id=job.id,
                 document_id=job.document_id,
                 owner_user_id=job.owner_user_id,
+                source_artifacts_deleted_at=job.source_artifacts_deleted_at,
                 guest_access_token_hash=job.guest_access_token_hash,
                 guest_access_expires_at=job.guest_access_expires_at,
                 normative_snapshot=(
@@ -141,6 +142,85 @@ class SqlAlchemyAnalysisJobRepository:
 
         return self._to_domain(
             model,
+        )
+
+    async def list_retention_candidates(
+        self,
+        *,
+        source_before: datetime,
+        guest_before: datetime,
+        limit: int,
+    ) -> list[AnalysisJob]:
+        """Отбирает только завершённые задания; владельцы очищаются один раз."""
+        rows = await self._session.scalars(
+            select(AnalysisJobModel)
+            .where(
+                AnalysisJobModel.status.in_(("completed", "failed", "cancelled")),
+                or_(
+                    and_(
+                        AnalysisJobModel.owner_user_id.is_(None),
+                        AnalysisJobModel.created_at <= guest_before,
+                    ),
+                    and_(
+                        AnalysisJobModel.owner_user_id.is_not(None),
+                        AnalysisJobModel.source_artifacts_deleted_at.is_(None),
+                        AnalysisJobModel.created_at <= source_before,
+                    ),
+                ),
+            )
+            .order_by(AnalysisJobModel.created_at, AnalysisJobModel.id)
+            .limit(limit)
+        )
+        return [self._to_domain(row) for row in rows.all()]
+
+    async def technical_assignment_retention(
+        self,
+        *,
+        technical_assignment_id: UUID,
+        exclude_job_id: UUID,
+        source_before: datetime,
+        guest_before: datetime,
+    ) -> tuple[bool, bool]:
+        """Проверяет все ссылки на ТЗ, включая анализы с другими document_id."""
+        references = and_(
+            AnalysisJobModel.id != exclude_job_id,
+            AnalysisJobModel.normative_snapshot["technical_assignment"][
+                "technical_assignment_id"
+            ].astext
+            == str(technical_assignment_id),
+        )
+        active = ~AnalysisJobModel.status.in_(("completed", "failed", "cancelled"))
+        fresh = or_(
+            active,
+            and_(
+                AnalysisJobModel.owner_user_id.is_not(None),
+                AnalysisJobModel.created_at > source_before,
+            ),
+            and_(
+                AnalysisJobModel.owner_user_id.is_(None),
+                AnalysisJobModel.created_at > guest_before,
+            ),
+        )
+        retained = await self._session.scalar(
+            select(AnalysisJobModel.id).where(references, fresh).limit(1)
+        )
+        owned = await self._session.scalar(
+            select(AnalysisJobModel.id)
+            .where(references, AnalysisJobModel.owner_user_id.is_not(None))
+            .limit(1)
+        )
+        return retained is not None, owned is not None
+
+    async def delete(self, job_id: UUID) -> None:
+        """Удаляет только строку без владельца, с каскадом исходящих событий."""
+        from sqlalchemy import delete
+
+        await self._session.execute(
+            delete(AnalysisJobModel).where(
+                AnalysisJobModel.id == job_id,
+                AnalysisJobModel.owner_user_id.is_(None),
+                AnalysisJobModel.status.in_(("completed", "failed", "cancelled")),
+            )
         )
 
     async def count_waiting_before(
@@ -245,6 +325,7 @@ class SqlAlchemyAnalysisJobRepository:
                 f"Analysis job {job.id} not found.",
             )
 
+        model.source_artifacts_deleted_at = job.source_artifacts_deleted_at
         model.document_id = job.document_id
 
         model.status = job.status.value
@@ -275,6 +356,7 @@ class SqlAlchemyAnalysisJobRepository:
             id=model.id,
             document_id=model.document_id,
             owner_user_id=model.owner_user_id,
+            source_artifacts_deleted_at=model.source_artifacts_deleted_at,
             guest_access_token_hash=model.guest_access_token_hash,
             guest_access_expires_at=model.guest_access_expires_at,
             normative_snapshot=snapshot,

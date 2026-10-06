@@ -153,6 +153,8 @@ class TechnicalAssignment:
 
     updated_at: datetime
 
+    source_removed_at: datetime | None = None
+
     def __post_init__(
         self,
     ) -> None:

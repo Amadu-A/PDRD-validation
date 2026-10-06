@@ -3,6 +3,7 @@
 /** Регрессия обычного PDF/CAD без обязательного раздела и пустого поля пакетов. */
 import assert from "node:assert/strict";
 import test from "node:test";
+import { File } from "node:buffer";
 import { createAnalysisForm } from "../src/js/features/analysis/form.js";
 import { FakeElement } from "./helpers/fake-dom.js";
 

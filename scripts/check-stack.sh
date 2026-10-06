@@ -300,6 +300,12 @@ else
 fi
 
 echo
+if (( ${#PDRD_RETENTION_INTERNAL_KEY} < 32 )); then
+    bad "Не настроен серверный ключ очистки PDRD_RETENTION_INTERNAL_KEY"
+else
+    ok "Серверный ключ очистки настроен"
+fi
+
 echo "=== PDRD containers ==="
 
 docker compose ps || fail=1
@@ -313,12 +319,14 @@ check_service_state "qdrant"
 check_completed_service "knowledge-embedding-migrator"
 
 check_service_state "api-gateway"
+check_migrations_current "api-gateway" "identity" "API Gateway"
 check_service_state "api-gateway-outbox"
 check_service_state "api-gateway-worker"
 
 check_service_state "document-service"
 
 check_service_state "knowledge-service"
+check_migrations_current "knowledge-service" "identity" "Knowledge Service"
 check_service_state "knowledge-service-outbox"
 check_service_state "knowledge-indexer"
 check_service_state "technical-assignment-indexer"

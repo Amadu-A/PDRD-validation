@@ -82,4 +82,13 @@ class GetAnalysisResult:
                 "Analysis job имеет статус completed, но result.json отсутствует.",
             )
 
+        if getattr(job, "source_artifacts_deleted_at", None) is not None:
+            return {
+                **result,
+                "source_artifacts_expired": True,
+                "source_artifacts_message": (
+                    "Исходные файлы и изображения удалены по сроку хранения 30 дней. "
+                    "Результат и Human Review сохранены."
+                ),
+            }
         return result

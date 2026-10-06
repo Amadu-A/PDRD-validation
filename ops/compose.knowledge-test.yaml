@@ -52,7 +52,7 @@ services:
         python -m alembic -c alembic.ini upgrade head
         python -m alembic -c alembic.ini current --check-heads --verbose
         cd /workspace
-        python -m pytest -q services/knowledge-service/tests/integration/test_package_owner_database.py services/knowledge-service/tests/integration/test_section_vector_cleanup.py
+        python -m pytest -q services/knowledge-service/tests/integration/test_package_owner_database.py services/knowledge-service/tests/integration/test_section_vector_cleanup.py services/knowledge-service/tests/integration/test_technical_assignment_retention_database.py
     networks: [knowledge-test-only]
 networks:
   knowledge-test-only:

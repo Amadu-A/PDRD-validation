@@ -63,6 +63,11 @@ else
     PDRD_STARTUP_TIMEOUT_SECONDS="${PDRD_STARTUP_TIMEOUT_SECONDS:-360}"
 fi
 
+validate_secret "PDRD_RETENTION_INTERNAL_KEY"
+if (( ${#PDRD_RETENTION_INTERNAL_KEY} < 32 )); then
+    die "PDRD_RETENTION_INTERNAL_KEY должен содержать не менее 32 символов."
+fi
+
 validate_secret "PDRD_POSTGRES_PASSWORD"
 validate_secret "PDRD_RABBITMQ_PASSWORD"
 if profile_enabled "identity"; then
