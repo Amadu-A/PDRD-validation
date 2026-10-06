@@ -42,6 +42,7 @@ import {
   createReviewPersistence,
 } from "./features/review/persistence.js";
 import { bindReportRestoration } from "./features/analysis/restore.js";
+import { mountAnalysisHistoryNavigation } from "./features/analysis/history.js";
 import { bindMainIdentity } from "./features/auth/main-page.js";
 import { currentSession } from "./features/auth/session.js";
 import { hasPermission } from "./features/auth/access.js";
@@ -66,6 +67,7 @@ const normativeRoot = requireElement(
 
 
 mountExperienceNavigation(requireElement(".page__content"));
+const analysisHistory = mountAnalysisHistoryNavigation(requireElement(".page__content"));
 
 
 const technicalAssignmentFilePicker = (
@@ -146,7 +148,10 @@ const resultView = createResultView(
     "[data-analysis-result]",
   ),
   {
-    onReportRendered: (root, options) => mountAuthorizedReview(reviewController, root, options),
+    onReportRendered: (root, options) => {
+      mountAuthorizedReview(reviewController, root, options);
+      void analysisHistory.refresh();
+    },
     onReportCleared: reviewController.clear,
   },
 );

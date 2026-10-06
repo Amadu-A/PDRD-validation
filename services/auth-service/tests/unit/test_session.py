@@ -63,13 +63,13 @@ def test_expired_or_revoked_session_cannot_be_renewed() -> None:
         (timedelta(0), timedelta(hours=8)),
         (timedelta(days=2), timedelta(days=3)),
         (timedelta(hours=9), timedelta(hours=8)),
-        (timedelta(hours=2), timedelta(days=1, seconds=1)),
+        (timedelta(hours=2), timedelta(days=30, seconds=1)),
     ],
 )
 def test_policy_rejects_unbounded_or_invalid_timeouts(
     idle: timedelta, absolute: timedelta
 ) -> None:
-    """Обычная сессия не может длиться более суток."""
+    """Политика ограничивает простой сутками и срок сессии 30 днями."""
     with pytest.raises(ValueError):
         SessionPolicy(idle_timeout=idle, absolute_timeout=absolute)
 
@@ -90,7 +90,7 @@ def test_session_contains_digest_instead_of_browser_token() -> None:
         )
 
 
-def test_session_record_rejects_absolute_expiry_beyond_one_day() -> None:
+def test_session_record_rejects_absolute_expiry_beyond_thirty_days() -> None:
     """Даже создание доменной записи в обход политики не даст долгую сессию."""
     with pytest.raises(ValueError, match="хронология"):
         AuthSession(
@@ -101,5 +101,5 @@ def test_session_record_rejects_absolute_expiry_beyond_one_day() -> None:
             created_at=NOW,
             last_seen_at=NOW,
             idle_expires_at=NOW + timedelta(hours=2),
-            absolute_expires_at=NOW + timedelta(days=2),
+            absolute_expires_at=NOW + timedelta(days=31),
         )

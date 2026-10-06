@@ -74,5 +74,5 @@ async def test_enabled_auth_passes_verified_settings_to_adapter(
     assert captured[0].connect_timeout_seconds == 3
     assert captured[0].receive_timeout_seconds == 7
     assert not hasattr(captured[0], "password")
-    assert policy.idle_timeout.total_seconds() == 7200
-    assert policy.absolute_timeout.total_seconds() == 28800
+    assert policy.idle_timeout.total_seconds() == 86400
+    assert policy.absolute_timeout.total_seconds() == 2592000

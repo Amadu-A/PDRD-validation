@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pdrd_document_service.application.ports.pdf import PdfReader
 from pdrd_document_service.domain.pdf import (
     PdfDocument,
+    PdfSelection,
     parse_page_spec,
 )
 
@@ -33,7 +34,12 @@ class ExtractPdfDocument:
         content: bytes,
         page_spec: str | None,
     ) -> PdfDocument:
-        """Проверяет запрос и выполняет PDF extraction."""
+        """Проверяет выбор перед рендерингом и извлечением страниц."""
+        selection = self.inspect(content=content, page_spec=page_spec)
+        return self.reader.extract(content, selected_pages=selection.selected_pages)
+
+    def inspect(self, *, content: bytes, page_spec: str | None) -> PdfSelection:
+        """Проверяет размер и диапазон без подготовки изображений и вызова VLM."""
         if not content:
             raise EmptyPdfError(
                 "Загруженный PDF пуст.",
@@ -54,7 +60,4 @@ class ExtractPdfDocument:
             max_selected_pages=self.max_analysis_pages,
         )
 
-        return self.reader.extract(
-            content,
-            selected_pages=selected_pages,
-        )
+        return PdfSelection(total_pages=total_pages, selected_pages=selected_pages)

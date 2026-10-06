@@ -33,9 +33,9 @@ class PdfSettings(BaseModel):
     )
 
     max_analysis_pages: int = Field(
-        default=50,
+        default=200,
         ge=1,
-        le=500,
+        le=200,
     )
 
     max_context_pages: int = Field(

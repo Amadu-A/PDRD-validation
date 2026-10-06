@@ -9,6 +9,7 @@ from uuid import UUID
 from pdrd_api_gateway.application.ports.artifacts import (
     AnalysisArtifactStore,
 )
+from pdrd_api_gateway.application.ports.pdf_selection import PdfSelectionValidator
 from pdrd_api_gateway.application.use_cases.create_analysis_job import (
     CreateAnalysisJob,
 )
@@ -47,6 +48,7 @@ class SubmitAnalysis:
     create_analysis_job: CreateAnalysisJob
 
     resolve_normative_snapshot: ResolveNormativeSnapshot | None = None
+    pdf_selection: PdfSelectionValidator | None = None
 
     async def execute(
         self,
@@ -153,6 +155,13 @@ class SubmitAnalysis:
             note_start_page=note_start_page,
             note_end_page=note_end_page,
         )
+
+        if pdf_content is not None and self.pdf_selection is not None:
+            await self.pdf_selection.validate(
+                content=pdf_content,
+                file_name=submission.pdf_file_name or "document.pdf",
+                pages=submission.pages,
+            )
 
         if technical_assignment_content is not None:
             if normative_snapshot is None:

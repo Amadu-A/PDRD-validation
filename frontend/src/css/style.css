@@ -10,6 +10,7 @@
 @import url("./global.css");
 
 @import url("./blocks/page.css");
+@import url("./blocks/analysis-history.css");
 @import url("./blocks/site-header.css");
 @import url("./blocks/auth-dialog.css");
 @import url("./blocks/portal-shell.css");

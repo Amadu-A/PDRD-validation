@@ -7,9 +7,11 @@ import base64
 import binascii
 import json
 import shutil
+from contextlib import suppress
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pdrd_api_gateway.application.ports.analysis_visualization import (
     AnalysisBoundingBox,
@@ -21,6 +23,7 @@ from pdrd_api_gateway.application.ports.artifacts import (
     AnalysisArtifactStorageError,
     AnalysisRequestArtifacts,
 )
+from pdrd_api_gateway.domain.analysis_history import AnalysisHistoryMetadata
 from pdrd_api_gateway.domain.analysis_submission import (
     AnalysisSourceMode,
     AnalysisSubmission,
@@ -39,6 +42,8 @@ class LocalFilesystemAnalysisArtifactStore:
     _TECHNICAL_ASSIGNMENT_FILE = "technical_assignment.bin"
 
     _RESULT_FILE = "result.json"
+
+    _HISTORY_FILE = "history.json"
 
     _VISUALIZATION_DIRECTORY = "visualization"
 
@@ -95,6 +100,44 @@ class LocalFilesystemAnalysisArtifactStore:
             document_id,
         )
 
+    async def load_summary(self, *, document_id: UUID) -> AnalysisHistoryMetadata:
+        """Читает сводку в отдельном потоке; старые задания поддерживаются лениво."""
+        return await asyncio.to_thread(self._load_summary_sync, document_id)
+
+    def _load_summary_sync(self, document_id: UUID) -> AnalysisHistoryMetadata:
+        """Не читает исходные бинарные файлы и не запускает анализ или Review."""
+        directory = self._document_directory(document_id)
+        try:
+            cache = directory / self._HISTORY_FILE
+            if cache.is_file():
+                summary = AnalysisHistoryMetadata(
+                    **json.loads(cache.read_text(encoding="utf-8"))
+                )
+            else:
+                request_path = directory / self._MANIFEST_FILE
+                manifest = (
+                    json.loads(request_path.read_text(encoding="utf-8"))
+                    if request_path.is_file()
+                    else {}
+                )
+                result = self._load_result_sync(document_id)
+                summary = AnalysisHistoryMetadata.from_artifacts(
+                    manifest, result, pdf_available=False
+                )
+                if result is not None:
+                    # Сводка — кеш: сбой записи или гонка вкладок не скрывают имеющийся результат.
+                    with suppress(OSError):
+                        self._write_json_atomic(cache, asdict(summary), unique=True)
+            return replace(
+                summary,
+                pdf_available=(directory / self._PDF_FILE).is_file(),
+                result_available=(directory / self._RESULT_FILE).is_file(),
+            )
+        except (OSError, ValueError, TypeError) as error:
+            raise AnalysisArtifactStorageError(
+                "Не удалось прочитать сводку проверки."
+            ) from error
+
     async def load_request(
         self,
         *,
@@ -128,6 +171,10 @@ class LocalFilesystemAnalysisArtifactStore:
             self._save_result_sync,
             document_id,
             result,
+        )
+        await asyncio.to_thread(
+            (self._document_directory(document_id) / self._HISTORY_FILE).unlink,
+            missing_ok=True,
         )
 
     async def load_result(
@@ -851,26 +898,33 @@ class LocalFilesystemAnalysisArtifactStore:
     def _write_json_atomic(
         path: Path,
         payload: dict[str, Any],
+        *,
+        unique: bool = False,
     ) -> None:
         temporary_path = path.with_suffix(
-            f"{path.suffix}.tmp",
+            f"{path.suffix}.{uuid4().hex}.tmp" if unique else f"{path.suffix}.tmp",
         )
 
-        temporary_path.write_text(
-            json.dumps(
-                payload,
-                ensure_ascii=False,
-                separators=(
-                    ",",
-                    ":",
+        try:
+            temporary_path.write_text(
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    separators=(
+                        ",",
+                        ":",
+                    ),
                 ),
-            ),
-            encoding="utf-8",
-        )
+                encoding="utf-8",
+            )
 
-        temporary_path.replace(
-            path,
-        )
+            temporary_path.replace(
+                path,
+            )
+        finally:
+            if unique:
+                with suppress(OSError):
+                    temporary_path.unlink(missing_ok=True)
 
     @staticmethod
     def _write_bytes_atomic(

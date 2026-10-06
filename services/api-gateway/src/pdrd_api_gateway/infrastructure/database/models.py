@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/infrastructure/database/models.py
 
-"""SQLAlchemy persistence models API Gateway."""
+"""Модели хранения заданий и исходящих событий API Gateway."""
 
 from datetime import datetime
 from uuid import UUID
@@ -84,6 +84,7 @@ class AnalysisJobModel(Base):
             "created_at",
         ),
         Index("ix_analysis_jobs_owner_user_id", "owner_user_id"),
+        Index("ix_analysis_jobs_owner_history", "owner_user_id", "created_at", "id"),
     )
 
     id: Mapped[UUID] = mapped_column(

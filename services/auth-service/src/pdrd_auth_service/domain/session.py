@@ -23,16 +23,16 @@ def _aware(value: datetime, name: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class SessionPolicy:
-    """Ограничивает обычную сессию независимо от будущего remember-grant."""
+    """Ограничивает простой сутками, а срок с исходного входа — 30 днями."""
 
-    idle_timeout: timedelta = timedelta(hours=2)
-    absolute_timeout: timedelta = timedelta(hours=8)
+    idle_timeout: timedelta = timedelta(hours=24)
+    absolute_timeout: timedelta = timedelta(days=30)
 
     def __post_init__(self) -> None:
         """Не разрешает нулевой, отрицательный или чрезмерный срок."""
         if not timedelta(0) < self.idle_timeout <= timedelta(days=1):
             raise ValueError("Недопустимый срок неактивности сессии")
-        if not self.idle_timeout <= self.absolute_timeout <= timedelta(days=1):
+        if not self.idle_timeout <= self.absolute_timeout <= timedelta(days=30):
             raise ValueError("Недопустимый абсолютный срок сессии")
 
 
@@ -80,7 +80,7 @@ class AuthSession:
             <= self.last_seen_at
             < self.idle_expires_at
             <= self.absolute_expires_at
-            <= self.created_at + timedelta(days=1)
+            <= self.created_at + timedelta(days=30)
         ):
             raise ValueError("Неверная хронология сессии")
 

@@ -12,6 +12,7 @@ from uuid import UUID
 from pdrd_api_gateway.application.ports.analysis_visualization import (
     AnalysisPagePreview,
 )
+from pdrd_api_gateway.domain.analysis_history import AnalysisHistoryMetadata
 from pdrd_api_gateway.domain.analysis_submission import (
     AnalysisSubmission,
 )
@@ -73,6 +74,10 @@ class AnalysisArtifactStore(Protocol):
         document_id: UUID,
     ) -> bytes | None:
         """Возвращает исходные bytes ТЗ, если файл был загружен."""
+        ...
+
+    async def load_summary(self, *, document_id: UUID) -> AnalysisHistoryMetadata:
+        """Читает компактную сводку без исходных PDF/CAD и изображений."""
         ...
 
     async def load_request(

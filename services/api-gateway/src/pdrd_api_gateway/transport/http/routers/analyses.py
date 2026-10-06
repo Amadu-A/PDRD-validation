@@ -15,16 +15,22 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     UploadFile,
     status,
 )
+from sqlalchemy.exc import SQLAlchemyError
 
 from pdrd_api_gateway.application.ports.normative_catalog import (
     NormativeCatalogReadError,
 )
 from pdrd_api_gateway.application.ports.normative_catalog_management import (
     NormativeCatalogUnavailableError,
+)
+from pdrd_api_gateway.application.ports.pdf_selection import (
+    InvalidPdfSelectionError,
+    PdfSelectionUnavailableError,
 )
 from pdrd_api_gateway.application.use_cases.get_analysis_job import (
     GetAnalysisJob,
@@ -289,6 +295,36 @@ def build_technical_assignment_response(
     )
 
 
+@router.get("/history")
+async def list_analysis_history(
+    request: Request,
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+    limit: Annotated[int, Query(ge=1, le=20)] = 20,
+    offset: Annotated[int, Query(ge=0, le=100000)] = 0,
+) -> dict[str, object]:
+    """UUID владельца берётся только из проверенной сервером сессии."""
+    owner = getattr(request.state, "identity_user_id", None)
+    if not isinstance(owner, UUID):
+        raise HTTPException(
+            401,
+            "Войдите, чтобы открыть историю проверок.",
+            headers={"Cache-Control": "no-store"},
+        )
+    if container.list_analysis_history is None:
+        raise HTTPException(503, "История проверок временно недоступна.")
+    identity = getattr(request.state, "verified_identity", None)
+    try:
+        return await container.list_analysis_history.execute(
+            owner_user_id=owner,
+            limit=limit,
+            offset=offset,
+            can_download_reviewed_pdf="review.pdf.download"
+            in getattr(identity, "permissions", ()),
+        )
+    except (SQLAlchemyError, OSError, TimeoutError, ValueError) as error:
+        raise HTTPException(503, "История проверок временно недоступна.") from error
+
+
 @router.post(
     "",
     status_code=status.HTTP_202_ACCEPTED,
@@ -504,6 +540,7 @@ async def create_analysis(
 
     except (
         InvalidAnalysisSubmissionError,
+        InvalidPdfSelectionError,
         InvalidNormativeSelectionError,
         InvalidNormativeAnalysisSnapshotError,
         InvalidTechnicalAssignmentSnapshotError,
@@ -524,6 +561,7 @@ async def create_analysis(
         ) from error
 
     except (
+        PdfSelectionUnavailableError,
         NormativeCatalogReadError,
         NormativeCatalogUnavailableError,
         NormativeSnapshotResolverNotConfiguredError,

@@ -134,12 +134,12 @@ async def test_issue_stores_only_digest_and_resolve_renews_idle() -> None:
     assert issued.token not in str(store.rows)
     assert token_digest(issued.token) in store.rows
     assert not hasattr(issued.session, "token_hash")
-    assert issued.session.absolute_expires_at == NOW + timedelta(hours=8)
+    assert issued.session.absolute_expires_at == NOW + timedelta(days=30)
 
     clock.now += timedelta(hours=1)
     resolved = await sessions.resolve(issued.token)
-    assert resolved.idle_expires_at == NOW + timedelta(hours=3)
-    assert resolved.absolute_expires_at == NOW + timedelta(hours=8)
+    assert resolved.idle_expires_at == NOW + timedelta(hours=25)
+    assert resolved.absolute_expires_at == NOW + timedelta(days=30)
     assert users.calls == 2
 
 
@@ -170,7 +170,7 @@ async def test_expiry_and_version_change_fail_closed() -> None:
     assert store.rows[token_digest(issued.token)].revoked_at == NOW
 
     another = await sessions.issue(USER_ID)
-    clock.now += timedelta(hours=2)
+    clock.now += timedelta(hours=24)
     with pytest.raises(SessionInvalid):
         await sessions.resolve(another.token)
 
@@ -226,3 +226,41 @@ def test_session_policy_can_be_configured_within_cap() -> None:
     """Политика допускает ужесточение IT без смены модели данных."""
     policy = SessionPolicy(timedelta(minutes=30), timedelta(hours=4))
     assert policy.idle_timeout < policy.absolute_timeout
+
+
+@pytest.mark.asyncio
+async def test_daily_activity_keeps_session_until_original_thirty_day_boundary() -> (
+    None
+):
+    """Запросы каждые 23 часа продлевают простой, но не исходный абсолютный срок."""
+    sessions, _, users, clock = service()
+    issued = await sessions.issue(USER_ID)
+    original_expiry = NOW + timedelta(days=30)
+    for hours in range(23, 720, 23):
+        clock.now = NOW + timedelta(hours=hours)
+        resolved = await sessions.resolve(issued.token)
+        assert resolved.idle_expires_at == min(
+            clock.now + timedelta(hours=24), original_expiry
+        )
+        assert resolved.absolute_expires_at == original_expiry
+    assert resolved.idle_expires_at == original_expiry
+    clock.now = original_expiry - timedelta(seconds=1)
+    assert (await sessions.resolve(issued.token)).absolute_expires_at == original_expiry
+    checked = users.calls
+    clock.now = original_expiry
+    with pytest.raises(SessionInvalid):
+        await sessions.resolve(issued.token)
+    assert users.calls == checked
+
+
+@pytest.mark.asyncio
+async def test_idle_boundary_requires_login_even_before_absolute_expiry() -> None:
+    """Возврат до 24 часов сохраняет вход, ровно 24 часа простоя требуют пароль."""
+    sessions, _, _, clock = service()
+    issued = await sessions.issue(USER_ID)
+    clock.now += timedelta(hours=24) - timedelta(seconds=1)
+    renewed = await sessions.resolve(issued.token)
+    clock.now = renewed.idle_expires_at
+    assert clock.now < renewed.absolute_expires_at
+    with pytest.raises(SessionInvalid):
+        await sessions.resolve(issued.token)

@@ -29,6 +29,12 @@ class AnalysisJobRepository(Protocol):
         """Возвращает задание по идентификатору."""
         ...
 
+    async def list_by_owner(
+        self, *, owner_user_id: UUID, limit: int, offset: int
+    ) -> list[AnalysisJob]:
+        """Возвращает только задания владельца, новые раньше старых, с устойчивым порядком."""
+        ...
+
     async def get_for_update(
         self,
         job_id: UUID,

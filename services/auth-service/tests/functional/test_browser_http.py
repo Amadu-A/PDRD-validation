@@ -99,8 +99,8 @@ def fake_runtime() -> SimpleNamespace:
         authorization_version=1,
         created_at=now,
         last_seen_at=now,
-        idle_expires_at=now + timedelta(hours=2),
-        absolute_expires_at=now + timedelta(hours=8),
+        idle_expires_at=now + timedelta(hours=24),
+        absolute_expires_at=now + timedelta(days=30),
     )
     current_user = CurrentUser(
         session=session,
@@ -188,6 +188,8 @@ async def test_guest_login_session_logout_and_csrf() -> None:
         )
         assert logged_in.status_code == 200
         assert "httponly" in logged_in.headers["set-cookie"].lower()
+        assert "secure" in logged_in.headers["set-cookie"].lower()
+        assert "max-age=2592000" in logged_in.headers["set-cookie"].lower()
         assert "secure" in logged_in.headers["set-cookie"].lower()
 
         active = await client.get("/api/v1/auth/session")

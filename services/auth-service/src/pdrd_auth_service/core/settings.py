@@ -46,10 +46,10 @@ class DatabaseSettings(BaseModel):
 
 
 class SessionSettings(BaseModel):
-    """Сроки короткой сессии; 30-дневный remember-grant будет отдельным."""
+    """Сутки простоя и максимум 30 дней с момента исходного входа."""
 
-    idle_timeout_seconds: int = Field(default=7200, ge=60, le=86400)
-    absolute_timeout_seconds: int = Field(default=28800, ge=60, le=86400)
+    idle_timeout_seconds: int = Field(default=86400, ge=60, le=86400)
+    absolute_timeout_seconds: int = Field(default=2592000, ge=60, le=2592000)
 
     @model_validator(mode="after")
     def require_consistent_timeouts(self) -> "SessionSettings":

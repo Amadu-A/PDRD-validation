@@ -23,6 +23,7 @@
         <li><a href="#overview" aria-current="location">Обзор</a></li>
         <li><a href="#profile">Профиль</a></li>
         <li><a href="#rights">Мой доступ</a></li>
+        <li><a href="#history" data-account-history-link hidden>История проверок</a></li>
         <li><a href="#security">Безопасность</a></li>
         <li><a href="/admin.html" data-account-admin-link hidden>Админка</a></li>
       </ul></nav>
@@ -32,7 +33,7 @@
       <div class="portal-main__top"><span>PDRD / Личный кабинет</span><a href="/">Перейти к анализу ↗</a></div>
       <p class="portal-main__eyebrow">Профиль и возможности</p>
       <h1 class="portal-main__title">Личный кабинет</h1>
-      <p class="portal-main__intro">Профиль, доступные действия и активные устройства.</p>
+      <p class="portal-main__intro">Профиль, история проверок, доступные действия и активные устройства.</p>
       <p class="portal-status" data-account-status role="status" aria-live="polite">Проверяем сессию…</p>
       <div class="account-grid">
         <section class="account-card account-card--hero" aria-labelledby="accountHeroTitle">
@@ -54,6 +55,10 @@
         <p class="account-card__overline">Полномочия</p><h2 class="account-card__title" id="rightsTitle">Что доступно</h2>
         <p class="account-card__description">Сервер отдельно проверяет доступ к каждому действию и документу.</p>
         <div class="account-capabilities"><div><h3>Доступно</h3><ul data-account-allowed></ul></div><div><h3>Ограничено</h3><ul data-account-locked></ul></div></div>
+      </section>
+      <section class="account-card account-card--spaced analysis-history" id="history" data-analysis-history hidden aria-labelledby="historyTitle">
+        <h2 class="account-card__title" id="historyTitle">История проверок</h2>
+        <p class="account-card__description">Ваши сохранённые задания. Открытие результата не запускает анализ повторно.</p>
       </section>
       <section class="account-card account-card--spaced" id="security" aria-labelledby="securityTitle">
         <p class="account-card__overline">Учётная запись</p><h2 class="account-card__title" id="securityTitle">Безопасность и устройства</h2>

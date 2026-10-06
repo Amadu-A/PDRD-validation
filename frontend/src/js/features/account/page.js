@@ -2,6 +2,7 @@
 
 /** Производственный личный кабинет на основе проверенной серверной сессии. */
 import { verifyEmail } from "../auth/api.js";
+import { createAnalysisHistory } from "../analysis/history.js";
 import { accessDescription, isAdmin } from "../auth/access.js";
 import { bindSiteHeader } from "../auth/header.js";
 import { currentSession, subscribeSession } from "../auth/session.js";
@@ -36,6 +37,7 @@ function renderAccount(state) {
     ? "Пароль корпоративной учётной записи в PDRD не хранится."
     : "Профиль появится после регистрации или корпоративного входа.";
   document.querySelector("[data-account-admin-link]").hidden = !isAdmin(state);
+  document.querySelector("[data-account-history-link]").hidden = !state.authenticated;
   renderCapabilities(document, state);
 }
 
@@ -51,6 +53,7 @@ async function confirmEmailFromLink(token) {
 }
 
 export async function startAccountPage() {
+  createAnalysisHistory(document.querySelector("[data-analysis-history]"));
   const verificationToken = consumeVerificationToken(window.location, window.history);
   bindPortalNavigation(document.querySelector(".portal-nav"));
   subscribeSession((session) => {

@@ -48,6 +48,9 @@ from pdrd_api_gateway.application.use_cases.get_analysis_visualization import (
 )
 from pdrd_api_gateway.application.use_cases.get_review_source import GetReviewSource
 from pdrd_api_gateway.application.use_cases.get_reviewed_pdf import GetReviewedPdf
+from pdrd_api_gateway.application.use_cases.list_analysis_history import (
+    ListAnalysisHistory,
+)
 from pdrd_api_gateway.application.use_cases.manage_experience import ManageExperience
 from pdrd_api_gateway.application.use_cases.manage_normative_catalog import (
     NormativeCatalogFacade,
@@ -111,6 +114,7 @@ from pdrd_api_gateway.infrastructure.messaging.broker import (
     RabbitMqReadinessProbe,
     build_broker_url,
 )
+from pdrd_api_gateway.infrastructure.pdf_selection import HttpPdfSelectionValidator
 from pdrd_api_gateway.infrastructure.project_context_preflight import (
     HttpProjectContextPreflightCoordinator,
 )
@@ -152,6 +156,7 @@ class ApplicationContainer:
     create_analysis_job: CreateAnalysisJob | None = None
 
     get_analysis_job: GetAnalysisJob | None = None
+    list_analysis_history: ListAnalysisHistory | None = None
 
     manage_review: ManageReview | None = None
     get_review_source: GetReviewSource | None = None
@@ -309,6 +314,7 @@ def build_container() -> ApplicationContainer:
         artifact_store=artifact_store,
         create_analysis_job=create_analysis_job,
         resolve_normative_snapshot=(resolve_normative_snapshot),
+        pdf_selection=HttpPdfSelectionValidator(settings.document_service),
     )
 
     get_analysis_result = GetAnalysisResult(
@@ -414,6 +420,18 @@ def build_container() -> ApplicationContainer:
         shutdown_callback=(_shutdown_database),
         create_analysis_job=(create_analysis_job),
         get_analysis_job=(get_analysis_job),
+        list_analysis_history=ListAnalysisHistory(
+            unit_of_work_factory=unit_of_work_factory,
+            artifacts=artifact_store,
+            sections=normative_catalog_manager,
+            reviews=HttpReviewService(
+                base_url=settings.review.base_url,
+                internal_key=settings.review.internal_key.get_secret_value(),
+                timeout_seconds=5,
+            )
+            if settings.review.enabled
+            else None,
+        ),
         manage_review=manage_review,
         get_review_source=get_review_source,
         get_reviewed_pdf=get_reviewed_pdf,

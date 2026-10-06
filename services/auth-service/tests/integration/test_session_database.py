@@ -4,7 +4,7 @@
 
 import asyncio
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -222,6 +222,42 @@ async def test_parallel_session_issuance_and_resolution(engine: AsyncEngine) -> 
         assert {item.session_id for item in resolved} == {
             item.session.session_id for item in issued
         }
+    finally:
+        async with engine.begin() as connection:
+            await connection.execute(
+                delete(SessionModel).where(SessionModel.user_id == user_id)
+            )
+
+
+@pytest.mark.asyncio
+async def test_sliding_idle_uses_database_and_stops_at_original_thirty_days(
+    engine: AsyncEngine,
+) -> None:
+    """Атомарное SQL-продление сохраняет границы 24 часа простоя и 30 дней жизни."""
+    user_id = uuid4()
+    store = SqlAlchemySessionStore(build_session_factory(engine))
+    users = FakeUsers(user_id)
+    started = datetime.now(UTC)
+    current = started
+    service = SessionService(store, users, clock=lambda: current)
+    issued = await service.issue(user_id)
+    try:
+        absolute = started + timedelta(days=30)
+        for hours in range(23, 720, 23):
+            current = started + timedelta(hours=hours)
+            resolved = await service.resolve(issued.token)
+            assert resolved.idle_expires_at == min(
+                current + timedelta(hours=24), absolute
+            )
+            assert resolved.absolute_expires_at == absolute
+        current = absolute
+        with pytest.raises(SessionInvalid):
+            await service.resolve(issued.token)
+        stored = await store.find_by_token_hash(token_digest(issued.token))
+        assert (
+            stored.absolute_expires_at == absolute
+            and stored.idle_expires_at == absolute
+        )
     finally:
         async with engine.begin() as connection:
             await connection.execute(

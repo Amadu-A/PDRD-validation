@@ -115,9 +115,9 @@ def test_private_env_and_process_override_catalog(
 
 def test_session_timeouts_are_bounded_and_consistent() -> None:
     """Настройка не допускает простоя длиннее абсолютного срока."""
-    assert SessionSettings().idle_timeout_seconds == 7200
-    assert SessionSettings().absolute_timeout_seconds == 28800
+    assert SessionSettings().idle_timeout_seconds == 86400
+    assert SessionSettings().absolute_timeout_seconds == 2592000
     with pytest.raises(ValidationError, match="Срок простоя"):
         SessionSettings(idle_timeout_seconds=9000, absolute_timeout_seconds=3600)
     with pytest.raises(ValidationError):
-        SessionSettings(absolute_timeout_seconds=86401)
+        SessionSettings(absolute_timeout_seconds=2592001)

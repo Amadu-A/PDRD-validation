@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/infrastructure/database/repositories.py
 
-"""SQLAlchemy repositories API Gateway."""
+"""Репозитории заданий и исходящих событий API Gateway на SQLAlchemy."""
 
 from datetime import datetime
 from uuid import UUID
@@ -85,6 +85,19 @@ class SqlAlchemyAnalysisJobRepository:
         return self._to_domain(
             model,
         )
+
+    async def list_by_owner(
+        self, *, owner_user_id: UUID, limit: int, offset: int
+    ) -> list[AnalysisJob]:
+        """Фильтрует владельца в SQL до сортировки, ограничения и чтения артефактов."""
+        rows = await self._session.scalars(
+            select(AnalysisJobModel)
+            .where(AnalysisJobModel.owner_user_id == owner_user_id)
+            .order_by(AnalysisJobModel.created_at.desc(), AnalysisJobModel.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        return [self._to_domain(row) for row in rows.all()]
 
     async def get_for_update(
         self,
@@ -284,7 +297,7 @@ class SqlAlchemyAnalysisJobRepository:
 
 
 class SqlAlchemyOutboxRepository:
-    """SQLAlchemy implementation transactional outbox."""
+    """Реализация транзакционного журнала исходящих событий на SQLAlchemy."""
 
     def __init__(
         self,

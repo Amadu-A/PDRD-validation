@@ -1,7 +1,7 @@
 // frontend/src/js/features/analysis/form.js
 
 /**
- * Состояние, валидация и serialization формы анализа.
+ * Состояние, проверка и подготовка данных формы анализа.
  */
 
 import {
@@ -339,7 +339,7 @@ export function createAnalysisForm({
 
       pagesHint.textContent = (
         "Для PDF-only можно анализировать "
-        + "одну или несколько страниц."
+        + "до 200 страниц за одну проверку. Для большого PDF укажите диапазон, например 1-200."
       );
     }
 
