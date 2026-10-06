@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/core/container.py
 
-"""Composition root Knowledge Service."""
+"""Собирает зависимости Knowledge Service."""
 
 from dataclasses import dataclass
 from functools import partial
@@ -61,6 +61,9 @@ from pdrd_knowledge_service.application.use_cases.project_context import (
 from pdrd_knowledge_service.application.use_cases.technical_assignment_requirements import (
     ListTechnicalAssignmentRequirements,
 )
+from pdrd_knowledge_service.application.use_cases.technical_assignment_retention import (
+    CleanupTechnicalAssignment,
+)
 from pdrd_knowledge_service.application.use_cases.technical_assignment_retrieval import (
     SearchTechnicalAssignment,
     SearchTechnicalAssignmentGuidedNormative,
@@ -87,6 +90,9 @@ from pdrd_knowledge_service.infrastructure.database.engine import (
 )
 from pdrd_knowledge_service.infrastructure.database.health import (
     DatabaseReadinessProbe,
+)
+from pdrd_knowledge_service.infrastructure.database.section_locks import (
+    PostgresCatalogSectionLocks,
 )
 from pdrd_knowledge_service.infrastructure.database.technical_assignment_persistence import (
     SqlAlchemyTechnicalAssignmentUnitOfWork,
@@ -116,7 +122,7 @@ from pdrd_knowledge_service.infrastructure.vector_store.technical_assignment_req
 
 @dataclass(frozen=True, slots=True)
 class ApplicationContainer:
-    """Runtime dependencies Knowledge Service."""
+    """Хранит зависимости работающего Knowledge Service."""
 
     settings: Settings
 
@@ -141,6 +147,8 @@ class ApplicationContainer:
     queue_normative_document: QueueNormativeDocument | None = None
 
     register_technical_assignment: RegisterTechnicalAssignment | None = None
+
+    cleanup_technical_assignment: CleanupTechnicalAssignment | None = None
 
     get_technical_assignment: GetTechnicalAssignment | None = None
 
@@ -225,6 +233,8 @@ def build_container() -> ApplicationContainer:
         health_timeout_seconds=(settings.multimodal_embedding.health_timeout_seconds),
     )
 
+    section_locks = PostgresCatalogSectionLocks(database_engine)
+
     normative_sections = NormativeSectionUseCases(
         list_sections=(
             ListNormativeSections(
@@ -245,11 +255,16 @@ def build_container() -> ApplicationContainer:
         update_section=(
             UpdateNormativeSection(
                 unit_of_work_factory=(normative_catalog_uow_factory),
+                section_locks=section_locks,
             )
         ),
         delete_section=(
             DeleteNormativeSection(
                 unit_of_work_factory=(normative_catalog_uow_factory),
+                storage=document_storage,
+                vector_store=vector_store,
+                collection=settings.qdrant.normative_collection,
+                section_locks=section_locks,
             )
         ),
     )
@@ -268,6 +283,7 @@ def build_container() -> ApplicationContainer:
         create_category=(
             CreateNormativeCategory(
                 unit_of_work_factory=(normative_catalog_uow_factory),
+                section_locks=section_locks,
             )
         ),
         update_category=(
@@ -296,6 +312,7 @@ def build_container() -> ApplicationContainer:
         upload_document=(
             UploadNormativeDocument(
                 unit_of_work_factory=(normative_catalog_uow_factory),
+                section_locks=section_locks,
                 storage=document_storage,
                 max_upload_bytes=(settings.storage.max_upload_bytes),
             )
@@ -414,6 +431,12 @@ def build_container() -> ApplicationContainer:
                 storage=(technical_assignment_storage),
                 max_upload_bytes=(settings.technical_assignment.max_upload_bytes),
             )
+        ),
+        cleanup_technical_assignment=CleanupTechnicalAssignment(
+            unit_of_work_factory=technical_assignment_uow_factory,
+            storage=technical_assignment_storage,
+            vector_store=vector_store,
+            collection=settings.qdrant.multimodal_collection,
         ),
         get_technical_assignment=(get_technical_assignment),
         get_technical_assignment_content=(

@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/application/use_cases/resolve_normative_snapshot.py
 
-"""Use case фиксации normative/package snapshot перед созданием job."""
+"""Фиксирует снимок нормативов и пакетов перед созданием задания."""
 
 from dataclasses import dataclass
 from uuid import UUID
@@ -21,7 +21,7 @@ from pdrd_api_gateway.domain.normative_snapshot import (
 
 
 class InvalidNormativeSelectionError(ValueError):
-    """Пользователь передал некорректный managed selection."""
+    """Пользователь передал некорректный выбор каталога."""
 
 
 class NormativeSelectionConflictError(RuntimeError):
@@ -29,12 +29,12 @@ class NormativeSelectionConflictError(RuntimeError):
 
 
 class UserPackageReaderNotConfiguredError(RuntimeError):
-    """Package selection передан без configured package reader."""
+    """Пакеты переданы без настроенного порта чтения документов."""
 
 
 @dataclass(frozen=True, slots=True)
 class ResolveNormativeSnapshot:
-    """Валидирует selection и фиксирует exact active system prompt."""
+    """Проверяет выбор документов и фиксирует точный текст действующего системного промпта."""
 
     catalog_reader: NormativeCatalogReader
 
@@ -44,6 +44,7 @@ class ResolveNormativeSnapshot:
         self,
         *,
         section_id: UUID | None,
+        owner_user_id: UUID | None = None,
         document_ids: tuple[
             UUID,
             ...,
@@ -57,7 +58,7 @@ class ResolveNormativeSnapshot:
         ]
         | None = None,
     ) -> NormativeAnalysisSnapshot | None:
-        """Возвращает immutable snapshot либо legacy None."""
+        """Возвращает неизменяемый снимок либо None для обычного анализа."""
         selection_absent = (
             section_id is None
             and document_ids is None
@@ -90,6 +91,11 @@ class ResolveNormativeSnapshot:
             section = await self.catalog_reader.get_section(
                 section_id=section_id,
             )
+
+            if section.deleting:
+                raise NormativeSelectionConflictError(
+                    "Раздел удаляется. Выберите другой раздел или анализ без раздела."
+                )
 
             documents = await self.catalog_reader.list_documents(
                 section_id=section_id,
@@ -155,6 +161,7 @@ class ResolveNormativeSnapshot:
         await self._validate_user_packages(
             section_id=section_id,
             document_ids=normalized_package_ids,
+            owner_user_id=owner_user_id,
         )
 
         active_prompt = (
@@ -172,12 +179,13 @@ class ResolveNormativeSnapshot:
         self,
         *,
         section_id: UUID,
+        owner_user_id: UUID | None,
         document_ids: tuple[
             UUID,
             ...,
         ],
     ) -> None:
-        """Проверяет package scope независимо от нормативного scope."""
+        """Проверяет область личных пакетов независимо от нормативной области."""
         if not document_ids:
             return
 
@@ -187,6 +195,9 @@ class ResolveNormativeSnapshot:
             raise UserPackageReaderNotConfiguredError(
                 "User-package catalog reader не настроен.",
             )
+
+        if owner_user_id is not None:
+            reader = reader.for_owner(owner_user_id)
 
         try:
             documents = await reader.list_documents(
@@ -288,7 +299,7 @@ class ResolveNormativeSnapshot:
     def _format_ids(
         document_ids: list[UUID,],
     ) -> str:
-        """Формирует стабильный список UUID для application error."""
+        """Формирует стабильный список UUID для прикладной ошибки."""
         return ", ".join(
             str(
                 document_id,

@@ -6,7 +6,7 @@
 контекста и политику доступа, не меняя модель или хранилище Experience.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from uuid import UUID
 
@@ -61,9 +61,12 @@ class ManageReview:
         job_id: UUID,
         operation: ReviewOperation,
         command: dict[str, Any] | None = None,
+        actor: str | None = None,
     ) -> dict[str, Any]:
         """Не принимает actor, роли, теги или серверные оригиналы из браузера."""
         context = self.contexts.resolve(job_id=job_id, operation=operation)
+        if actor is not None:
+            context = replace(context, actor=actor)
         if context.job_id != job_id or context.operation != operation:
             raise ReviewRequestError(
                 403, "Серверный контекст не соответствует операции."

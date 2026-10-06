@@ -54,6 +54,7 @@ class HttpReviewService:
             async with httpx.AsyncClient(
                 timeout=self.timeout_seconds,
                 follow_redirects=False,
+                trust_env=False,
                 transport=self.transport,
             ) as client:
                 response = await client.request(

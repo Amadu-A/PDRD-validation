@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/application/use_cases/user_packages.py
 
-"""Semantic retrieval выбранных пользовательских документов."""
+"""Семантический поиск в выбранных пользовательских документах."""
 
 from dataclasses import dataclass
 from uuid import UUID
@@ -37,8 +37,8 @@ class SearchUserPackages:
         section_id: UUID | None,
         document_ids: list[UUID] | None,
     ) -> UserPackageSearchResult:
-        """Возвращает U-sources либо пустой результат без package scope."""
-        if section_id is None and document_ids is None:
+        """Возвращает источники U либо пустой результат без выбранных пакетов."""
+        if not document_ids:
             return UserPackageSearchResult(
                 queries=tuple(query.strip() for query in queries if query.strip()),
                 sources=(),

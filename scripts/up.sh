@@ -9,8 +9,8 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${REPO_DIR}"
 
 SHARED_STARTUP_TIMEOUT_SECONDS="${SHARED_STARTUP_TIMEOUT_SECONDS:-240}"
-PDRD_STARTUP_TIMEOUT_SECONDS="${PDRD_STARTUP_TIMEOUT_SECONDS:-360}"
 PDRD_STARTUP_POLL_SECONDS="${PDRD_STARTUP_POLL_SECONDS:-5}"
+AUTH_SERVICE_AD_CA_HOST_PATH="${REPO_DIR}/ops/certificates/ad-ca.pem"
 
 die() {
     printf 'ERROR: %s\n' "$1" >&2
@@ -32,17 +32,109 @@ validate_secret() {
     esac
 }
 
+if [[ ! -f ".env.example" ]]; then
+    die "Файл ${REPO_DIR}/.env.example не найден."
+fi
+
 if [[ ! -f ".env" ]]; then
     die "Файл ${REPO_DIR}/.env не найден."
 fi
 
 set -a
 # shellcheck disable=SC1091
+source ".env.example"
+# shellcheck disable=SC1091
 source ".env"
 set +a
 
+# shellcheck source=scripts/lib/shared-infrastructure.sh
+source "${REPO_DIR}/scripts/lib/shared-infrastructure.sh"
+
+profile_enabled() {
+    local profile="$1"
+    [[ ",${COMPOSE_PROFILES:-}," == *,"${profile}",* ]]
+}
+
+if profile_enabled "experience-index"; then
+    profile_enabled "review" \
+        || die "COMPOSE_PROFILES=experience-index требует также review."
+    PDRD_STARTUP_TIMEOUT_SECONDS="${PDRD_STARTUP_TIMEOUT_SECONDS:-1200}"
+else
+    PDRD_STARTUP_TIMEOUT_SECONDS="${PDRD_STARTUP_TIMEOUT_SECONDS:-360}"
+fi
+
+validate_secret "PDRD_RETENTION_INTERNAL_KEY"
+if (( ${#PDRD_RETENTION_INTERNAL_KEY} < 32 )); then
+    die "PDRD_RETENTION_INTERNAL_KEY должен содержать не менее 32 символов."
+fi
+
 validate_secret "PDRD_POSTGRES_PASSWORD"
 validate_secret "PDRD_RABBITMQ_PASSWORD"
+if profile_enabled "identity"; then
+    validate_secret "USER_SERVICE_INTERNAL_KEY"
+    if (( ${#USER_SERVICE_INTERNAL_KEY} < 32 )); then
+        die "USER_SERVICE_INTERNAL_KEY должен содержать не менее 32 символов."
+    fi
+fi
+
+if profile_enabled "review"; then
+    if [[ "${API_GATEWAY_REVIEW__ENABLED:-false}" != "true" || "${API_GATEWAY_REVIEW__CONTROLLED_ACCESS:-false}" != "true" ]]; then
+        die "Профиль review требует включённый закрытый канал Gateway."
+    fi
+    validate_secret "API_GATEWAY_REVIEW__ACTOR"
+    validate_secret "API_GATEWAY_REVIEW__UI_KEY"
+    validate_secret "API_GATEWAY_REVIEW__INTERNAL_KEY"
+    if [[ "${API_GATEWAY_REVIEW__UI_KEY}" == "${API_GATEWAY_REVIEW__INTERNAL_KEY}" ]]; then
+        die "Служебные ключи Review должны различаться."
+    fi
+fi
+
+if profile_enabled "auth"; then
+    profile_enabled "identity" \
+        || die "COMPOSE_PROFILES=auth требует также identity."
+
+    validate_secret "AUTH_SERVICE_HTTP__PUBLIC_ORIGIN"
+    validate_secret "AUTH_SERVICE_EMAIL__PUBLIC_BASE_URL"
+    if [[ "${AUTH_SERVICE_HTTP__PUBLIC_ORIGIN}" != https://* ]]; then
+        die "AUTH_SERVICE_HTTP__PUBLIC_ORIGIN должен начинаться с https://."
+    fi
+    if [[ "${AUTH_SERVICE_EMAIL__PUBLIC_BASE_URL%/}" != "${AUTH_SERVICE_HTTP__PUBLIC_ORIGIN%/}" ]]; then
+        die "Адрес ссылки подтверждения должен совпадать с публичным origin."
+    fi
+
+    validate_secret "AUTH_SERVICE_HTTP__INTERNAL_KEY"
+    validate_secret "AUTH_SERVICE_HTTP__CSRF_KEY"
+    validate_secret "PDRD_FRONTEND_PROXY_KEY"
+    validate_secret "PDRD_TECHNICAL_ASSIGNMENT_ACCESS_KEY"
+    if (( ${#AUTH_SERVICE_HTTP__INTERNAL_KEY} < 32 )); then
+        die "AUTH_SERVICE_HTTP__INTERNAL_KEY должен содержать не менее 32 символов."
+    fi
+    if (( ${#AUTH_SERVICE_HTTP__CSRF_KEY} < 32 )); then
+        die "AUTH_SERVICE_HTTP__CSRF_KEY должен содержать не менее 32 символов."
+    fi
+    if (( ${#PDRD_FRONTEND_PROXY_KEY} < 32 )); then
+        die "PDRD_FRONTEND_PROXY_KEY должен содержать не менее 32 символов."
+    fi
+    if (( ${#PDRD_TECHNICAL_ASSIGNMENT_ACCESS_KEY} < 32 )); then
+        die "PDRD_TECHNICAL_ASSIGNMENT_ACCESS_KEY должен содержать не менее 32 символов."
+    fi
+
+    validate_secret "AUTH_SERVICE_EMAIL__SMTP_USER"
+    validate_secret "AUTH_SERVICE_EMAIL__SMTP_PASSWORD"
+    validate_secret "AUTH_SERVICE_EMAIL__FROM_EMAIL"
+    if [[ "${API_GATEWAY_IDENTITY_PROXY__ENABLED:-false}" != "true" ]]; then
+        die "Для профиля auth задайте API_GATEWAY_IDENTITY_PROXY__ENABLED=true."
+    fi
+    if [[ "${API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED:-false}" != "true" ]]; then
+        die "Для профиля auth задайте API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED=true."
+    fi
+
+    if [[ "${AUTH_SERVICE_ENABLED:-false}" == "true" ]]; then
+        if [[ ! -r "${AUTH_SERVICE_AD_CA_HOST_PATH}" || ! -s "${AUTH_SERVICE_AD_CA_HOST_PATH}" ]]; then
+            die "Для AUTH_SERVICE_ENABLED=true нужен непустой читаемый ops/certificates/ad-ca.pem."
+        fi
+    fi
+fi
 
 PDRD_RABBITMQ_USER="${PDRD_RABBITMQ_USER:-pdrd_validation}"
 PDRD_RABBITMQ_VHOST="${PDRD_RABBITMQ_VHOST:-pdrd-validation}"
@@ -86,10 +178,13 @@ fi
 echo "PDRD repository: ${REPO_DIR}"
 echo "Shared infrastructure: ${SHARED_INFRA_DIR}"
 
+require_separate_shared_namespace "${COMPOSE_PROJECT_NAME:-pdrd-validation-ai}"
+
 echo
 echo "=== Shared infrastructure ==="
 
 (
+    isolate_shared_compose_environment
     cd "${SHARED_INFRA_DIR}"
 
     bash scripts/bootstrap.sh
@@ -104,6 +199,7 @@ echo "=== Shared infrastructure ==="
 
 rabbitmqctl_shared() {
     (
+        isolate_shared_compose_environment
         cd "${SHARED_INFRA_DIR}"
 
         docker compose exec \
@@ -227,6 +323,7 @@ docker compose run \
 echo
 echo "=== Application stack ==="
 
+# При выбранных профилях Compose сначала выполнит миграции через depends_on.
 docker compose up -d --remove-orphans
 
 echo
@@ -237,6 +334,19 @@ docker compose up \
     --no-deps \
     --force-recreate \
     frontend
+
+# Nginx разрешает адрес Gateway при старте. После его пересоздания обновляем
+# также отдельно поднятый Review frontend, даже если review не указан в .env.
+review_frontend_container="$(
+    docker compose --profile review ps --all --quiet review-frontend
+)"
+if profile_enabled "review" || [[ -n "${review_frontend_container}" ]]; then
+    docker compose --profile review up \
+        -d \
+        --no-deps \
+        --force-recreate \
+        review-frontend
+fi
 
 echo
 echo "=== Stack readiness ==="
@@ -253,15 +363,32 @@ while true; do
         docker compose ps
 
         echo
+        log_services=(
+            api-gateway
+            api-gateway-worker
+            knowledge-service
+            knowledge-embedding-migrator
+            knowledge-indexer
+            technical-assignment-indexer
+            analysis-service
+        )
+
+        if profile_enabled "review"; then
+            log_services+=(experience-migrate experience-service review-frontend)
+        fi
+        if profile_enabled "identity"; then
+            log_services+=(user-migrate user-service)
+        fi
+        if profile_enabled "auth"; then
+            log_services+=(auth-migrate auth-service admin-service)
+        fi
+        if profile_enabled "experience-index"; then
+            log_services+=(experience-indexer)
+        fi
+
         docker compose logs \
             --tail=80 \
-            api-gateway \
-            api-gateway-worker \
-            knowledge-service \
-            knowledge-embedding-migrator \
-            knowledge-indexer \
-            technical-assignment-indexer \
-            analysis-service \
+            "${log_services[@]}" \
             || true
 
         die "PDRD stack не стал ready."

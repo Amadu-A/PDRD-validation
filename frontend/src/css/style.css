@@ -10,12 +10,20 @@
 @import url("./global.css");
 
 @import url("./blocks/page.css");
+@import url("./blocks/analysis-history.css");
+@import url("./blocks/site-header.css");
+@import url("./blocks/auth-dialog.css");
+@import url("./blocks/portal-shell.css");
+@import url("./blocks/account.css");
+@import url("./blocks/admin.css");
+@import url("./blocks/admin-directory.css");
 @import url("./blocks/normative-sidebar.css");
 @import url("./blocks/analysis-panel.css");
 @import url("./blocks/analysis-form.css");
 @import url("./blocks/analysis-result.css");
 @import url("./blocks/analysis-annotation-detail.css");
 @import url("./blocks/analysis-export.css");
+@import url("./blocks/analysis-share.css");
 @import url("./blocks/analysis-modal.css");
 @import url("./blocks/review.css");
 @import url("./blocks/review-resize.css");

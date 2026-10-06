@@ -62,6 +62,10 @@ class CatalogRepository(Protocol):
         """Фильтрует и считает записи на сервере."""
         ...
 
+    async def authors(self, *, offset: int, limit: int) -> tuple[tuple[str, ...], int]:
+        """Читает стабильных авторов каталога без обращения к чужой базе пользователей."""
+        ...
+
     async def get(self, example_id: UUID) -> CatalogEntry | None:
         """Вычисляет актуальность Review и координат при каждом чтении."""
         ...

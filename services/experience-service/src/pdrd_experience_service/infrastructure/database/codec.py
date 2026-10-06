@@ -23,7 +23,7 @@ from pdrd_experience_service.domain.review import (
 
 
 def _encode(value: Any) -> Any:
-    """Normalize UUID, timestamps and nested dataclass dicts before JSONB storage."""
+    """Нормализует UUID, время и вложенные структуры перед записью JSONB."""
     if isinstance(value, (UUID, datetime)):
         return str(value) if isinstance(value, UUID) else value.isoformat()
 
@@ -37,7 +37,7 @@ def _encode(value: Any) -> Any:
 
 
 def _timestamp(value: str) -> datetime:
-    """Recover a timezone-aware timestamp; reject corrupt persisted audit metadata."""
+    """Восстанавливает время с часовым поясом и отсекает повреждённый аудит."""
     result = datetime.fromisoformat(value)
 
     if result.tzinfo is None or result.utcoffset() is None:
@@ -49,7 +49,7 @@ def _timestamp(value: str) -> datetime:
 def _rectangle(
     value: dict[str, Any] | None,
 ) -> Rectangle | None:
-    """Restore and validate a normalized PDF rectangle."""
+    """Восстанавливает и проверяет прямоугольник PDF."""
     return Rectangle(**value) if value is not None else None
 
 
@@ -69,7 +69,7 @@ def _proposed_regions(value: list[dict[str, Any]]) -> tuple[ProposedRegion, ...]
 def finding_to_json(
     finding: ReviewedFinding,
 ) -> dict[str, Any]:
-    """Encode current/audited review findings without losing provenance."""
+    """Кодирует текущее или историческое замечание без потери происхождения."""
     return _encode(
         asdict(finding),
     )
@@ -78,7 +78,7 @@ def finding_to_json(
 def finding_from_json(
     value: dict[str, Any],
 ) -> ReviewedFinding:
-    """Restore a typed finding, including both Gold rectangles when present."""
+    """Восстанавливает замечание, включая оба прямоугольника Gold."""
     return ReviewedFinding(
         finding_id=value["finding_id"],
         origin=Origin(value["origin"]),
@@ -88,6 +88,8 @@ def finding_from_json(
         original_basis=value["original_basis"],
         normative_basis=value["normative_basis"],
         decision=Decision(value["decision"]),
+        reason_category=value.get("reason_category"),
+        comment=value.get("comment", ""),
         issue_box=_rectangle(value["issue_box"]),
         callout_box=_rectangle(value["callout_box"]),
         created_by=value["created_by"],
@@ -107,7 +109,7 @@ def finding_from_json(
 def snapshot_to_json(
     session: ReviewSession,
 ) -> dict[str, Any]:
-    """Serialize current state only; event history remains in its own SQL table."""
+    """Кодирует текущее состояние; история хранится в собственной SQL-таблице."""
     return {
         "job_id": str(session.job_id),
         "document_id": str(session.document_id),
@@ -126,7 +128,7 @@ def snapshot_from_json(
     snapshot: dict[str, Any],
     events: tuple[ReviewEvent, ...],
 ) -> ReviewSession:
-    """Reconstruct an operational review with its separate, complete audit trail."""
+    """Восстанавливает рабочее ревью с полной отдельной историей аудита."""
     return ReviewSession(
         job_id=UUID(snapshot["job_id"]),
         document_id=UUID(snapshot["document_id"]),
@@ -145,7 +147,7 @@ def snapshot_from_json(
 def event_to_json(
     event: ReviewEvent,
 ) -> dict[str, Any]:
-    """Encode full before/after audit evidence for a separate immutable row."""
+    """Кодирует снимки до и после действия для неизменной записи аудита."""
     return {
         "before": (finding_to_json(event.before) if event.before else None),
         "after": (finding_to_json(event.after) if event.after else None),
@@ -160,7 +162,7 @@ def event_from_json(
     revision: int,
     details: dict[str, Any],
 ) -> ReviewEvent:
-    """Decode an audited command and preserve historical original/edited texts."""
+    """Восстанавливает действие аудита с историческими оригиналами и правками."""
     return ReviewEvent(
         action=Action(action),
         actor=actor,

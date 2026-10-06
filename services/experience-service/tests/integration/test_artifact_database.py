@@ -285,10 +285,19 @@ async def test_replacement_and_explicit_rollback_choose_one_version_per_section(
         await remove_catalog(engine, data[3].job_id)
 
 
-async def test_legacy_bad_migration_and_repeated_pdf_repair_without_duplicate(engine):
+@pytest.mark.parametrize(
+    "reason,comment",
+    [
+        ("false_positive", ""),
+        ("misunderstood_drawing", "Это резервный насос, значение корректно"),
+    ],
+)
+async def test_legacy_bad_migration_and_repeated_pdf_repair_without_duplicate(
+    engine, reason, comment
+):
     """Старый текстовый Bad с известной VLM-областью не размножается новым прогоном."""
-    first = await rejected_source(engine, sha="e" * 64)
-    second = await rejected_source(engine, sha="e" * 64)
+    first = await rejected_source(engine, sha="e" * 64, reason=reason, comment=comment)
+    second = await rejected_source(engine, sha="e" * 64, reason=reason, comment=comment)
     review, example, repository = first
     configuration = Config(str(MIGRATION_CONFIG))
     try:
@@ -324,7 +333,11 @@ async def test_legacy_bad_migration_and_repeated_pdf_repair_without_duplicate(en
         )
         await asyncio.to_thread(alembic_command.upgrade, configuration, "head")
         existing = await repository.find_source(second[1].source)
+        assert existing is not None
         assert existing.example.id == example.id and existing.example.crops == ()
+        assert existing.example.source.reason_category == reason
+        assert existing.example.source.comment == comment
+        assert len(await repository.history(example.id)) == 1
         incoming = replace(
             second[1],
             id=example.id,
@@ -343,6 +356,8 @@ async def test_legacy_bad_migration_and_repeated_pdf_repair_without_duplicate(en
         )
         assert result["created"] == 0 and result["repaired"][0]["revision"] == 1
         repaired = (await repository.get(example.id)).example
+        assert repaired.source.reason_category == reason
+        assert repaired.source.comment == comment
         assert (
             repaired.crops
             and repaired.source.proposed_regions == review.findings[0].proposed_regions

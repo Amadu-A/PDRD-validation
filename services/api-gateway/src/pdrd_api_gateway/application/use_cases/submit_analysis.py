@@ -9,6 +9,7 @@ from uuid import UUID
 from pdrd_api_gateway.application.ports.artifacts import (
     AnalysisArtifactStore,
 )
+from pdrd_api_gateway.application.ports.pdf_selection import PdfSelectionValidator
 from pdrd_api_gateway.application.use_cases.create_analysis_job import (
     CreateAnalysisJob,
 )
@@ -35,7 +36,7 @@ class EmptyAnalysisFileError(ValueError):
 class NormativeSnapshotResolverNotConfiguredError(
     RuntimeError,
 ):
-    """Managed selection передан без configured resolver."""
+    """Выбор каталога передан без настроенного обработчика снимка."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,7 @@ class SubmitAnalysis:
     create_analysis_job: CreateAnalysisJob
 
     resolve_normative_snapshot: ResolveNormativeSnapshot | None = None
+    pdf_selection: PdfSelectionValidator | None = None
 
     async def execute(
         self,
@@ -80,6 +82,8 @@ class SubmitAnalysis:
         technical_assignment_file_name: str | None = None,
         technical_assignment_id: UUID | None = None,
         technical_assignment_analysis_document_id: UUID | None = None,
+        owner_user_id: UUID | None = None,
+        guest_access: bool = False,
     ) -> AnalysisJob:
         """Принимает документы и создаёт надёжное задание."""
         self._validate_file_content(
@@ -113,7 +117,7 @@ class SubmitAnalysis:
         managed_selection_requested = (
             normative_section_id is not None
             or normative_document_ids is not None
-            or user_package_document_ids is not None
+            or bool(user_package_document_ids)
             or normative_prompt_override_enabled
             or technical_assignment_content is not None
         )
@@ -130,6 +134,11 @@ class SubmitAnalysis:
 
             normative_snapshot = await resolver.execute(
                 section_id=normative_section_id,
+                **(
+                    {"owner_user_id": owner_user_id}
+                    if owner_user_id is not None
+                    else {}
+                ),
                 document_ids=normative_document_ids,
                 user_package_document_ids=(user_package_document_ids),
                 prompt_override_enabled=(normative_prompt_override_enabled),
@@ -146,6 +155,13 @@ class SubmitAnalysis:
             note_start_page=note_start_page,
             note_end_page=note_end_page,
         )
+
+        if pdf_content is not None and self.pdf_selection is not None:
+            await self.pdf_selection.validate(
+                content=pdf_content,
+                file_name=submission.pdf_file_name or "document.pdf",
+                pages=submission.pages,
+            )
 
         if technical_assignment_content is not None:
             if normative_snapshot is None:
@@ -182,10 +198,14 @@ class SubmitAnalysis:
                     content=technical_assignment_content,
                 )
 
-            return await self.create_analysis_job.execute(
-                document_id=submission.document_id,
-                normative_snapshot=normative_snapshot,
-            )
+            create_kwargs = {
+                "document_id": submission.document_id,
+                "normative_snapshot": normative_snapshot,
+            }
+            if owner_user_id is not None or guest_access:
+                create_kwargs["owner_user_id"] = owner_user_id
+                create_kwargs["guest_access"] = guest_access
+            return await self.create_analysis_job.execute(**create_kwargs)
 
         except BaseException:
             await self.artifact_store.delete_request(

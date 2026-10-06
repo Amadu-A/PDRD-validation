@@ -7,18 +7,13 @@
 зависимости, Ruff, весь pytest и пробелы Git. Каждый внешний процесс проверяется
 по коду завершения; pytest получает новый временный каталог и не создаёт кеш.
 
--Fix сначала применяет исправления Ruff. -CommitMessage после успешных проверок
-коммитит все неигнорируемые изменения на feature/experience-base. -Push требует
--CommitMessage и отправляет эту ветку по push-адресам origin через
-системный OpenSSH. Отдельные remotes, например neoterm, пушатся отдельно.
-Без этих параметров скрипт только проверяет рабочую копию.
+-Fix сначала применяет исправления Ruff. Скрипт не индексирует, не коммитит
+и не отправляет файлы: публикация выполняется отдельно после просмотра diff.
 #>
 
 [CmdletBinding()]
 param(
-    [switch]$Fix,
-    [string]$CommitMessage,
-    [switch]$Push
+    [switch]$Fix
 )
 
 Set-StrictMode -Version Latest
@@ -42,14 +37,6 @@ function Invoke-CheckedCommand {
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $safeDirectory = $repositoryRoot.Replace("\", "/")
 $gitArguments = @("--no-pager", "-c", "safe.directory=$safeDirectory")
-$hasCommitMessage = -not [string]::IsNullOrWhiteSpace($CommitMessage)
-
-if ($PSBoundParameters.ContainsKey("CommitMessage") -and -not $hasCommitMessage) {
-    throw "Сообщение коммита не должно быть пустым."
-}
-if ($Push -and -not $hasCommitMessage) {
-    throw "Для -Push нужно указать -CommitMessage; push выполняется после проверок и коммита."
-}
 
 $pythonExecutable = $null
 foreach ($candidate in @(".venv-dev\Scripts\python.exe", ".venv\Scripts\python.exe")) {
@@ -65,10 +52,24 @@ if (-not $pythonExecutable) {
 
 $previousPath = $env:PATH
 $previousPythonIoEncoding = $env:PYTHONIOENCODING
+$previousPythonPath = $env:PYTHONPATH
 Push-Location $repositoryRoot
 try {
     # Совпадает с UTF-8 OutputEncoding PowerShell и сохраняет русский вывод pytest.
     $env:PYTHONIOENCODING = "utf-8"
+    # Новые сервисы ещё могут отсутствовать в существующем локальном venv.
+    $userServiceSource = Join-Path $repositoryRoot "services\user-service\src"
+    $authServiceSource = Join-Path $repositoryRoot "services\auth-service\src"
+    $adminServiceSource = Join-Path $repositoryRoot "services\admin-service\src"
+    $identitySources = @(
+        $userServiceSource, $authServiceSource, $adminServiceSource
+    ) -join [IO.Path]::PathSeparator
+    if ([string]::IsNullOrEmpty($previousPythonPath)) {
+        $env:PYTHONPATH = $identitySources
+    }
+    else {
+        $env:PYTHONPATH = "$identitySources$([IO.Path]::PathSeparator)$previousPythonPath"
+    }
     $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
     if (-not $nodeCommand) {
         $nodeDirectory = Join-Path $env:ProgramFiles "nodejs"
@@ -83,17 +84,6 @@ try {
     Invoke-CheckedCommand $pythonExecutable @("--version") "Не удалось запустить Python."
     Invoke-CheckedCommand $nodeCommand.Source @("--version") "Не удалось запустить Node.js."
     Invoke-CheckedCommand $gitCommand.Source @("--version") "Не удалось запустить Git."
-
-    if ($hasCommitMessage) {
-        $branch = & $gitCommand.Source @gitArguments branch --show-current
-        if ($LASTEXITCODE -ne 0) {
-            throw "Не удалось определить ветку Git."
-        }
-        if ($branch -ne "feature/experience-base") {
-            throw "Коммит разрешён в feature/experience-base; текущая ветка: $branch."
-        }
-        Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @("status", "--short")) "Не удалось прочитать состояние Git."
-    }
 
     Invoke-CheckedCommand $pythonExecutable @("-m", "pip", "check") "Нарушена совместимость зависимостей."
     if ($Fix) {
@@ -121,34 +111,11 @@ try {
     Invoke-CheckedCommand $nodeCommand.Source (@("--test") + $jsTestFiles) "Frontend-тесты завершились с ошибкой."
     Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @("diff", "--check")) "Git обнаружил ошибки пробелов."
 
-    if ($hasCommitMessage) {
-        Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @("add", "--all")) "Не удалось подготовить изменения к коммиту."
-        Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @("diff", "--cached", "--check")) "В подготовленных изменениях есть ошибки пробелов."
-        & $gitCommand.Source @gitArguments diff --cached --quiet
-        $stagedExitCode = $LASTEXITCODE
-        if ($stagedExitCode -eq 0) {
-            throw "Нет изменений для коммита."
-        }
-        if ($stagedExitCode -ne 1) {
-            throw "Не удалось проверить подготовленные изменения."
-        }
-        Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @("commit", "-m", $CommitMessage)) "Не удалось создать коммит."
-        if ($Push) {
-            $sshExecutable = Join-Path $env:WINDIR "System32\OpenSSH\ssh.exe"
-            if (-not (Test-Path -LiteralPath $sshExecutable -PathType Leaf)) {
-                throw "Системный OpenSSH не найден; коммит создан, push не выполнен."
-            }
-            $sshCommand = $sshExecutable.Replace("\", "/")
-            Invoke-CheckedCommand $gitCommand.Source ($gitArguments + @(
-                "-c", "core.sshCommand=$sshCommand", "push",
-                "origin", "feature/experience-base"
-            )) "Push не завершён; коммит сохранён локально."
-        }
-    }
     Write-Host "Все проверки качества успешно завершены."
 }
 finally {
     $env:PATH = $previousPath
     $env:PYTHONIOENCODING = $previousPythonIoEncoding
+    $env:PYTHONPATH = $previousPythonPath
     Pop-Location
 }

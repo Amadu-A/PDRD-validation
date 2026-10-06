@@ -22,7 +22,10 @@ const MESSAGES = {
 };
 
 /** Монтирует новую независимую очередь при смене задания или отчёта. */
-export function createReviewPersistence({ api = createReviewApi() } = {}) {
+export function createReviewPersistence({
+  api = createReviewApi(),
+  getCapabilities = () => ({ canCreateGold: true, canDecide: true, canDownloadReview: true }),
+} = {}) {
   let active = null;
   const sessions = new Set();
   const hasPending = () => [...sessions].some((session) => session.pending > 0);
@@ -53,7 +56,8 @@ export function createReviewPersistence({ api = createReviewApi() } = {}) {
     let pdf = null;
     let busy = false;
     let latestStatus = { mode: "loading" };
-    const controller = createReviewController({ onChange: () => sync?.changed() });
+    const capabilities = getCapabilities();
+    const controller = createReviewController({ onChange: () => sync?.changed(), capabilities });
     controller.mount(root);
     const tooltips = mountReviewTooltips(root);
     active = { controller, tooltips, sync: null };
@@ -95,7 +99,9 @@ export function createReviewPersistence({ api = createReviewApi() } = {}) {
       hydrate: controller.hydrate,
       onStatus: applyStatus,
     });
-    pdf = mountReviewedPdf({ root, jobId, api, sync, onBusy });
+    if (capabilities.canDownloadReview !== false) {
+      pdf = mountReviewedPdf({ root, jobId, api, sync, onBusy });
+    }
     active.pdf = pdf;
     active.sync = sync;
     sessions.add(sync);

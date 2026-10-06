@@ -4,9 +4,14 @@
 
 import asyncio
 import logging
+from contextlib import suppress
 from functools import partial
+from pathlib import Path
 from time import monotonic
 
+from pdrd_api_gateway.application.use_cases.cleanup_analysis_retention import (
+    CleanupAnalysisRetention,
+)
 from pdrd_api_gateway.application.use_cases.dispatch_outbox import (
     DispatchOutbox,
 )
@@ -21,11 +26,17 @@ from pdrd_api_gateway.infrastructure.database.engine import (
 from pdrd_api_gateway.infrastructure.database.unit_of_work import (
     SqlAlchemyUnitOfWork,
 )
+from pdrd_api_gateway.infrastructure.knowledge.analysis_retention import (
+    HttpTechnicalAssignmentRetention,
+)
 from pdrd_api_gateway.infrastructure.messaging.celery_app import (
     celery_app,
 )
 from pdrd_api_gateway.infrastructure.messaging.publisher import (
     CeleryOutboxPublisher,
+)
+from pdrd_api_gateway.infrastructure.storage.analysis_retention import (
+    LocalAnalysisRetentionArtifacts,
 )
 
 LOGGER = logging.getLogger(
@@ -67,6 +78,23 @@ async def run_dispatcher() -> None:
         stale_processing_seconds=settings.lifecycle.stale_processing_seconds,
     )
 
+    retention = CleanupAnalysisRetention(
+        unit_of_work_factory=unit_of_work_factory,
+        artifacts=LocalAnalysisRetentionArtifacts(
+            root_path=Path(settings.storage.root_path)
+        ),
+        technical_assignments=HttpTechnicalAssignmentRetention(
+            base_url=settings.knowledge_service.base_url,
+            internal_key=settings.retention.internal_key.get_secret_value(),
+        ),
+    )
+    retention_task = asyncio.create_task(
+        run_retention(
+            retention,
+            interval_seconds=settings.retention.interval_seconds,
+            batch_size=settings.retention.batch_size,
+        )
+    )
     next_recovery_at = 0.0
 
     try:
@@ -107,7 +135,29 @@ async def run_dispatcher() -> None:
             else:
                 await asyncio.sleep(0)
     finally:
+        retention_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await retention_task
         await engine.dispose()
+
+
+async def run_retention(
+    use_case: CleanupAnalysisRetention, *, interval_seconds: int, batch_size: int
+) -> None:
+    """Изолирует ошибки очистки от публикации очереди; запускается сразу и раз в час."""
+    while True:
+        try:
+            report = await use_case.execute(limit=batch_size)
+            # Большой накопленный объём очищается пакетами с паузой, без голодания очереди.
+            delay = (
+                1
+                if report.selected == batch_size and report.failed == 0
+                else interval_seconds
+            )
+        except Exception:
+            LOGGER.exception("analysis_retention_cycle_failed")
+            delay = interval_seconds
+        await asyncio.sleep(delay)
 
 
 def main() -> None:

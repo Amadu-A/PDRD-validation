@@ -45,6 +45,7 @@ def test_unaccepted_finding_does_not_confirm_current_area(decision) -> None:
         session = session.decide(
             finding_id="vlm:1",
             decision=decision,
+            reason_category="false_positive" if decision is Decision.REJECTED else None,
             actor="engineer:1",
             at=NOW,
             expected_revision=0,

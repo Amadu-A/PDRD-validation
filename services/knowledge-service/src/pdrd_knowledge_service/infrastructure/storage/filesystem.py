@@ -4,12 +4,13 @@
 
 import asyncio
 import os
+import shutil
 from contextlib import suppress
 from pathlib import (
     Path,
     PurePosixPath,
 )
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from pdrd_knowledge_service.application.ports.document_storage import (
     NormativeDocumentStorageError,
@@ -34,7 +35,7 @@ class LocalFilesystemNormativeDocumentStorage:
         storage_key: str,
         content: bytes,
     ) -> None:
-        """Атомарно сохраняет документ вне asyncio event loop."""
+        """Атомарно сохраняет документ вне цикла событий asyncio."""
         await asyncio.to_thread(
             self._save_sync,
             storage_key,
@@ -46,7 +47,7 @@ class LocalFilesystemNormativeDocumentStorage:
         *,
         storage_key: str,
     ) -> bytes:
-        """Читает документ вне asyncio event loop."""
+        """Читает документ вне цикла событий asyncio."""
         return await asyncio.to_thread(
             self._read_sync,
             storage_key,
@@ -63,12 +64,33 @@ class LocalFilesystemNormativeDocumentStorage:
             storage_key,
         )
 
+    async def delete_section(self, *, section_id: UUID) -> None:
+        """Идемпотентно очищает проверенную папку UUID, включая потерянные previews."""
+        await asyncio.to_thread(self._delete_section_sync, section_id)
+
+    def _delete_section_sync(self, section_id: UUID) -> None:
+        """Проверяет абсолютную границу удаления и запрещает переадресующий symlink."""
+        root = self._root_path.resolve()
+        expected = root / str(section_id)
+        if expected.is_symlink() or expected.resolve() != expected:
+            raise NormativeDocumentStorageError(
+                "Папка раздела не должна быть символической ссылкой."
+            )
+        try:
+            shutil.rmtree(expected)
+        except FileNotFoundError:
+            return
+        except OSError as error:
+            raise NormativeDocumentStorageError(
+                "Не удалось очистить папку раздела."
+            ) from error
+
     def _save_sync(
         self,
         storage_key: str,
         content: bytes,
     ) -> None:
-        """Сохраняет bytes через temporary file и atomic replace."""
+        """Сохраняет байты через временный файл с атомарной заменой."""
         path = self._resolve_path(
             storage_key,
         )
@@ -174,7 +196,7 @@ class LocalFilesystemNormativeDocumentStorage:
         self,
         storage_key: str,
     ) -> Path:
-        """Преобразует безопасный internal key в filesystem path."""
+        """Преобразует безопасный внутренний ключ в путь файловой системы."""
         if not storage_key.strip():
             raise NormativeDocumentStorageError(
                 "Storage key не может быть пустым.",
@@ -189,6 +211,10 @@ class LocalFilesystemNormativeDocumentStorage:
                 "Недопустимый storage key нормативного документа.",
             )
 
-        return self._root_path.joinpath(
-            *relative.parts,
-        )
+        root = self._root_path.resolve()
+        expected = root.joinpath(*relative.parts)
+        if expected.resolve() != expected:
+            raise NormativeDocumentStorageError(
+                "Путь документа не должен проходить через символическую ссылку."
+            )
+        return expected

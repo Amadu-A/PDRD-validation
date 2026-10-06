@@ -1,0 +1,39 @@
+# services/user-service/pyproject.toml
+# Зависимости самостоятельного HTTP-приложения User Service и его тестов.
+
+[build-system]
+requires = ["setuptools>=80,<82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdrd-user-service"
+version = "0.1.0"
+description = "Пользователи и права доступа PDRD."
+requires-python = ">=3.12"
+dependencies = [
+    "alembic==1.19.1",
+    "asyncpg==0.31.0",
+    "fastapi==0.141.1",
+    "httpx==0.28.1",
+    "pydantic-settings==2.15.0",
+    "SQLAlchemy==2.0.52",
+    "uvicorn[standard]==0.52.4",
+]
+
+[project.optional-dependencies]
+test = [
+    "httpx==0.28.1",
+    "pytest>=8.4,<10.0",
+    "pytest-asyncio>=1.1,<2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = ["-ra", "--strict-config", "--strict-markers"]
+testpaths = ["tests"]
+markers = [
+    "database: isolated PostgreSQL integration tests requiring an explicit test URL",
+]

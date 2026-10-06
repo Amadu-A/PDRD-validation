@@ -89,7 +89,18 @@ def test_all_gateway_catalog_routes_require_closed_review_channel():
             for decorator in node.decorator_list
         )
     ]
-    assert len(endpoints) == 9
+    assert {node.name for node in endpoints} == {
+        "examples",
+        "authors",
+        "export_examples",
+        "capture_examples",
+        "example",
+        "delete_selection",
+        "edit_example",
+        "deactivate_example",
+        "history",
+        "image",
+    }
     assert all(
         any(
             argument.arg == "container"
@@ -102,7 +113,7 @@ def test_all_gateway_catalog_routes_require_closed_review_channel():
 
 
 def test_catalog_frontend_is_modular_and_uses_real_crop_urls():
-    """Controller, network и dialogs не сливаются в app/page; серверные примеры не вымышленные."""
+    """Управление, сетевой клиент и диалоги остаются отдельными модулями; серверные примеры реальные."""
     root = ROOT / "frontend/src/js/features/experience"
     for name in (
         "page.js",

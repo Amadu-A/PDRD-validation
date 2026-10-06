@@ -29,22 +29,25 @@
   min-width: 0;
 }
 
+.page__auxiliary { display: grid; align-content: start; gap: var(--space-4); min-width: 0; }
+.page__auxiliary[hidden] { display: none; }
+
 @media (min-width: 981px) and (max-width: 1379px) {
-  .experience-nav {
+  .page__auxiliary {
     grid-column: 2;
     grid-row: 2;
   }
 }
 
 @media (min-width: 1380px) {
-  .page__content:has(.experience-nav) {
+  .page__content:has(.page__auxiliary:not([hidden])) {
     grid-template-columns:
       minmax(300px, var(--sidebar-width))
       minmax(0, 1fr)
       minmax(190px, 220px);
   }
 
-  .experience-nav {
+  .page__auxiliary {
     grid-column: 3;
     grid-row: 1;
   }

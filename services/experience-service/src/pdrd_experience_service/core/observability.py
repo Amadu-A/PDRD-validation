@@ -9,7 +9,7 @@ from time import perf_counter
 
 def configure_catalog_logging() -> None:
     """Настраивает собственные timing-логгеры один раз, не меняя root/Uvicorn."""
-    for module in ("capture_experience", "catalog", "export_catalog"):
+    for module in ("capture_experience", "catalog", "export_catalog", "review"):
         logger = logging.getLogger(
             f"pdrd_experience_service.application.use_cases.{module}"
         )

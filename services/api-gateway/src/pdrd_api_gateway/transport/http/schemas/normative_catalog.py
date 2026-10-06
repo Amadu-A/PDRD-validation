@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/transport/http/schemas/normative_catalog.py
 
-"""Public HTTP schemas managed normative catalog."""
+"""Публичные HTTP-схемы управляемого нормативного каталога."""
 
 from datetime import datetime
 from typing import Self
@@ -93,14 +93,17 @@ class NormativeSectionResponse(BaseModel):
 
     updated_at: datetime
 
+    deleting: bool = False
+
     @classmethod
     def from_view(
         cls,
         section: NormativeSectionView,
     ) -> "NormativeSectionResponse":
-        """Создаёт response из application view."""
+        """Создаёт ответ из прикладного представления."""
         return cls(
             section_id=section.section_id,
+            deleting=section.deleting,
             name=section.name,
             system_prompt=section.system_prompt,
             created_at=section.created_at,
@@ -194,7 +197,7 @@ class NormativeCategoryResponse(BaseModel):
         cls,
         category: NormativeCategoryView,
     ) -> "NormativeCategoryResponse":
-        """Создаёт response из application view."""
+        """Создаёт ответ из прикладного представления."""
         return cls(
             category_id=category.category_id,
             section_id=category.section_id,
@@ -218,7 +221,7 @@ class DeleteNormativeCategoryResponse(BaseModel):
 
 
 class MoveNormativeDocumentRequest(BaseModel):
-    """Перемещение document в category или root."""
+    """Перемещение документа в папку или корень раздела."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -263,7 +266,7 @@ class NormativeDocumentResponse(BaseModel):
         cls,
         document: NormativeDocumentView,
     ) -> "NormativeDocumentResponse":
-        """Создаёт response из application view."""
+        """Создаёт ответ из прикладного представления."""
         return cls(
             document_id=document.document_id,
             section_id=document.section_id,

@@ -88,6 +88,8 @@ def index_projection(entry: CatalogEntry) -> dict | None:
             for crop in example.crops
         ],
     }
+    if source.reason_category is not None:
+        payload.update(reason_category=source.reason_category, comment=source.comment)
     canonical = json.dumps(
         payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")
     )

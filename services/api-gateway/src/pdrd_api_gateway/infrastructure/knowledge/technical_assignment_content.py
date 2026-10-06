@@ -9,6 +9,7 @@ import httpx
 from pdrd_api_gateway.application.ports.technical_assignment_content import (
     TechnicalAssignmentContent,
     TechnicalAssignmentContentError,
+    TechnicalAssignmentContentExpiredError,
     TechnicalAssignmentContentNotFoundError,
 )
 from pdrd_api_gateway.core.settings import (
@@ -62,6 +63,11 @@ class HttpTechnicalAssignmentContentReader:
             raise TechnicalAssignmentContentError(
                 "Knowledge Service недоступен при чтении ТЗ.",
             ) from error
+
+        if response.status_code == 410:
+            raise TechnicalAssignmentContentExpiredError(
+                "Исходный файл ТЗ удалён по сроку хранения."
+            )
 
         if response.status_code == 404:
             raise TechnicalAssignmentContentNotFoundError(

@@ -1,7 +1,7 @@
 // frontend/src/js/app.js
 
 /**
- * Composition root браузерного приложения PDRD Validation.
+ * Точка сборки браузерного приложения PDRD Validation.
  */
 
 import {
@@ -32,18 +32,21 @@ import {
   createNormativeCatalog,
 } from "./features/normative/catalog.js";
 
+import { createUserPackageCatalog } from "./features/normative/user_packages.js";
+
 import {
   createNormativePromptEditor,
 } from "./features/normative/prompt.js";
 
 import {
-  createUserPackageCatalog,
-} from "./features/normative/user_packages.js";
-
-import {
   createReviewPersistence,
 } from "./features/review/persistence.js";
 import { bindReportRestoration } from "./features/analysis/restore.js";
+import { mountAnalysisHistoryNavigation } from "./features/analysis/history.js";
+import { bindMainIdentity } from "./features/auth/main-page.js";
+import { currentSession } from "./features/auth/session.js";
+import { hasPermission } from "./features/auth/access.js";
+import { mountAuthorizedReview, reviewCapabilities } from "./features/review/access.js";
 
 import {
   createTechnicalAssignmentFilePicker,
@@ -62,7 +65,9 @@ const normativeRoot = requireElement(
   "[data-normative-sidebar]",
 );
 
+
 mountExperienceNavigation(requireElement(".page__content"));
+const analysisHistory = mountAnalysisHistoryNavigation(requireElement(".page__content"));
 
 
 const technicalAssignmentFilePicker = (
@@ -82,12 +87,8 @@ const promptEditor = createNormativePromptEditor(
 );
 
 
-const userPackageCatalog = createUserPackageCatalog(
-  normativeRoot,
-);
-
+const userPackageCatalog = createUserPackageCatalog(normativeRoot);
 userPackageCatalog.start();
-
 
 const normativeCatalog = createNormativeCatalog(
   normativeRoot,
@@ -95,24 +96,20 @@ const normativeCatalog = createNormativeCatalog(
     onSectionChange: async (
       sectionId,
     ) => {
-      await Promise.all(
-        [
-          promptEditor.setSection(
-            sectionId,
-          ),
-
-          userPackageCatalog.setSection(
-            sectionId,
-          ),
-
-          technicalAssignmentFilePicker.setSection(
-            sectionId,
-          ),
-        ],
-      );
+      const session = currentSession();
+      await Promise.all([
+        (hasPermission(session, "working_prompt.use") || hasPermission(session, "system_prompt.manage"))
+          ? promptEditor.setSection(sectionId) : Promise.resolve(),
+        technicalAssignmentFilePicker.setSection(sectionId),
+        userPackageCatalog.setSection(hasPermission(session, "user_documents.own.read") ? sectionId : null),
+      ]);
     },
   },
 );
+
+bindMainIdentity({
+  root: document.body, normativeCatalog, promptEditor, userPackageCatalog,
+});
 
 
 const modal = createModal({
@@ -144,14 +141,17 @@ const modal = createModal({
 });
 
 
-const reviewController = createReviewPersistence();
+const reviewController = createReviewPersistence({ getCapabilities: reviewCapabilities });
 
 const resultView = createResultView(
   requireElement(
     "[data-analysis-result]",
   ),
   {
-    onReportRendered: reviewController.mount,
+    onReportRendered: (root, options) => {
+      mountAuthorizedReview(reviewController, root, options);
+      void analysisHistory.refresh();
+    },
     onReportCleared: reviewController.clear,
   },
 );
@@ -166,31 +166,14 @@ function getNormativeSelection() {
     return null;
   }
 
-  const packageSelection = (
-    userPackageCatalog.getSelection()
-  );
-
-  const packageDocumentIds = (
-    packageSelection
-    && (
-      packageSelection.sectionId
-      === selection.sectionId
-    )
-      ? packageSelection.documentIds
-      : []
-  );
-
-  const prompt = promptEditor.getOverride(
-    selection.sectionId,
-  );
+  const prompt = (hasPermission(currentSession(), "working_prompt.use") || hasPermission(currentSession(), "system_prompt.manage"))
+    ? promptEditor.getOverride(selection.sectionId) : {};
 
   return {
     ...selection,
-
-    userPackageDocumentIds: (
-      packageDocumentIds
-    ),
-
+    ...(hasPermission(currentSession(), "user_documents.own.read")
+      && userPackageCatalog.getSelection()?.documentIds.length
+      ? { userPackageDocumentIds: userPackageCatalog.getSelection().documentIds } : {}),
     ...prompt,
   };
 }

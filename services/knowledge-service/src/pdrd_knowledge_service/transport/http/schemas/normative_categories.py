@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/transport/http/schemas/normative_categories.py
 
-"""HTTP schemas категорий managed catalog."""
+"""HTTP-схемы категорий управляемого каталога."""
 
 from datetime import datetime
 from typing import Self
@@ -20,7 +20,7 @@ from pdrd_knowledge_service.domain.normative_catalog import (
 
 
 class CreateNormativeCategoryRequest(BaseModel):
-    """Запрос создания категории managed catalog."""
+    """Запрос создания категории управляемого каталога."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -33,11 +33,13 @@ class CreateNormativeCategoryRequest(BaseModel):
 
     parent_id: UUID | None = None
 
+    owner_user_id: UUID | None = None
+
     area: CatalogArea = CatalogArea.NORMATIVE
 
 
 class UpdateNormativeCategoryRequest(BaseModel):
-    """Частичное изменение категории managed catalog."""
+    """Частичное изменение категории управляемого каталога."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -81,7 +83,7 @@ class UpdateNormativeCategoryRequest(BaseModel):
 
 
 class NormativeCategoryResponse(BaseModel):
-    """Категория managed catalog."""
+    """Категория управляемого каталога."""
 
     model_config = ConfigDict(
         frozen=True,
@@ -95,6 +97,8 @@ class NormativeCategoryResponse(BaseModel):
 
     name: str
 
+    owner_user_id: UUID | None = None
+
     area: CatalogArea
 
     created_at: datetime
@@ -106,13 +110,14 @@ class NormativeCategoryResponse(BaseModel):
         cls,
         category: NormativeCategory,
     ) -> "NormativeCategoryResponse":
-        """Создаёт HTTP response из Domain entity."""
+        """Создаёт HTTP-ответ из доменной сущности."""
         return cls(
             category_id=category.category_id,
             section_id=category.section_id,
             parent_id=category.parent_id,
             name=category.name,
             area=category.area,
+            owner_user_id=category.owner_user_id,
             created_at=category.created_at,
             updated_at=category.updated_at,
         )

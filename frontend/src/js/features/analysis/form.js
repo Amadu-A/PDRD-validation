@@ -1,12 +1,15 @@
 // frontend/src/js/features/analysis/form.js
 
 /**
- * Состояние, валидация и serialization формы анализа.
+ * Состояние, проверка и подготовка данных формы анализа.
  */
 
 import {
   EXPLANATORY_NOTE_ENABLED,
 } from "../../config.js";
+import {
+  appendTechnicalAssignmentPayload, technicalAssignmentAccessError,
+} from "../technical_assignment/form-payload.js";
 
 
 const TECHNICAL_ASSIGNMENT_FILE_PATTERN = (
@@ -336,7 +339,7 @@ export function createAnalysisForm({
 
       pagesHint.textContent = (
         "Для PDF-only можно анализировать "
-        + "одну или несколько страниц."
+        + "до 200 страниц за одну проверку. Для большого PDF укажите диапазон, например 1-200."
       );
     }
 
@@ -534,6 +537,14 @@ export function createAnalysisForm({
       };
     }
 
+    const accessError = technicalAssignmentAccessError(technicalAssignmentInput);
+    if (accessError) {
+      return {
+        valid: false,
+        message: accessError,
+      };
+    }
+
     return {
       valid: true,
 
@@ -542,7 +553,11 @@ export function createAnalysisForm({
   }
 
 
+  /** Проверяет файлы и запрещает новую работу с удаляемым разделом. */
   function validate() {
+    if (getNormativeSelection()?.deleting === true) {
+      return { valid: false, message: "Раздел удаляется. Выберите другой раздел или анализ без раздела." };
+    }
     const mode = getMode();
 
     pagesInput.setCustomValidity("");
@@ -624,13 +639,12 @@ export function createAnalysisForm({
       ),
     );
 
-    body.append(
-      "user_package_document_ids",
-      JSON.stringify(
-        selection.userPackageDocumentIds
-        ?? [],
-      ),
-    );
+    if (selection.userPackageDocumentIds?.length) {
+      body.append(
+        "user_package_document_ids",
+        JSON.stringify(selection.userPackageDocumentIds),
+      );
+    }
 
     body.append(
       "normative_prompt_override_enabled",
@@ -649,34 +663,6 @@ export function createAnalysisForm({
         selection.promptOverride ?? "",
       );
     }
-  }
-
-
-  function appendTechnicalAssignment(
-    body,
-  ) {
-    const technicalAssignment = (
-      technicalAssignmentInput.files[0]
-    );
-
-    if (!technicalAssignment) {
-      return;
-    }
-
-    body.append(
-      "technical_assignment",
-      technicalAssignment,
-    );
-
-    body.append(
-      "technical_assignment_id",
-      technicalAssignmentInput.dataset.technicalAssignmentId,
-    );
-
-    body.append(
-      "technical_assignment_analysis_document_id",
-      technicalAssignmentInput.dataset.analysisDocumentId,
-    );
   }
 
 
@@ -701,9 +687,7 @@ export function createAnalysisForm({
       );
     }
 
-    appendTechnicalAssignment(
-      body,
-    );
+    appendTechnicalAssignmentPayload(body, technicalAssignmentInput);
 
     if (
       !pagesInput.disabled

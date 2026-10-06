@@ -42,7 +42,7 @@ class SqlAlchemyCatalogRepository:
     """Все операции используют независимые сессии; выдача проверяет текущий источник."""
 
     def __init__(self, sessions: Callable[[], AsyncSession]) -> None:
-        """Получает фабрику из Composition Root, не создаёт engine самостоятельно."""
+        """Получает фабрику при сборке приложения; соединение с БД отдельно не создаёт."""
         self._sessions = sessions
 
     @staticmethod
@@ -399,6 +399,10 @@ class SqlAlchemyCatalogRepository:
         """Поиск использует параметры SQLAlchemy и не загружает весь каталог в память."""
         row = CatalogExampleModel
         query = self._query().where(row.deleted.is_(False))
+        if criteria.author:
+            query = query.where(
+                row.snapshot["source"]["created_by"].astext == criteria.author
+            )
         if criteria.section_id:
             query = query.where(row.section_id == criteria.section_id)
         if criteria.query:
@@ -453,6 +457,21 @@ class SqlAlchemyCatalogRepository:
             return tuple(
                 self._entry(record, current) for record, current in records
             ), total
+
+    async def authors(self, *, offset: int, limit: int) -> tuple[tuple[str, ...], int]:
+        """DISTINCT по неизменяемому source работает и для прежних строк без миграции."""
+        row = CatalogExampleModel
+        author = row.snapshot["source"]["created_by"].astext.label("author")
+        query = select(author).where(row.deleted.is_(False)).distinct().subquery()
+        async with self._sessions() as database:
+            total = await database.scalar(select(func.count()).select_from(query))
+            names = await database.scalars(
+                select(query.c.author)
+                .order_by(query.c.author)
+                .offset(offset)
+                .limit(limit)
+            )
+            return tuple(names), total
 
     async def get(self, example_id: UUID) -> CatalogEntry | None:
         """Получает одну запись вместе с актуальностью её источника."""

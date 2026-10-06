@@ -55,6 +55,11 @@ class GetReviewSource:
             raise ReviewRequestError(404, "Задание не найдено.")
         if job.status is not AnalysisJobStatus.COMPLETED or job.document_id is None:
             raise ReviewRequestError(409, "Анализ ещё не завершён.")
+        if getattr(job, "source_artifacts_deleted_at", None) is not None:
+            raise ReviewRequestError(
+                410,
+                "Исходный PDF удалён по сроку хранения 30 дней. Существующий Human Review сохранён.",
+            )
         artifacts = await self.artifacts.load_request(document_id=job.document_id)
         if artifacts.submission.document_id != job.document_id:
             raise ReviewRequestError(422, "Исходный документ не соответствует заданию.")

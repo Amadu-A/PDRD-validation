@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/infrastructure/knowledge/normative_catalog.py
 
-"""HTTP adapter чтения managed normative catalog."""
+"""HTTP адаптер чтения управляемого нормативного каталога."""
 
 from typing import Any
 from uuid import UUID
@@ -19,7 +19,7 @@ from pdrd_api_gateway.core.settings import (
 
 
 class HttpNormativeCatalogReader:
-    """Читает normative catalog через internal Knowledge HTTP API."""
+    """Читает нормативный каталог через внутренний HTTP API Knowledge Service."""
 
     def __init__(
         self,
@@ -34,7 +34,7 @@ class HttpNormativeCatalogReader:
         *,
         section_id: UUID,
     ) -> NormativeSectionRecord:
-        """Возвращает section и его exact DB system prompt."""
+        """Возвращает раздел и точный системный промпт из базы данных."""
         payload = await self._get_json(
             path=f"/internal/v1/normative/sections/{section_id}",
         )
@@ -73,7 +73,13 @@ class HttpNormativeCatalogReader:
             raise NormativeCatalogReadError(
                 "Knowledge Service вернул некорректное название раздела."
             )
+        deleting = payload.get("deleting", False)
+        if not isinstance(deleting, bool):
+            raise NormativeCatalogReadError(
+                "Knowledge Service вернул некорректное состояние удаления раздела."
+            )
         return NormativeSectionRecord(
+            deleting=deleting,
             section_id=payload_section_id,
             system_prompt=system_prompt,
             name=name.strip(),
@@ -87,7 +93,7 @@ class HttpNormativeCatalogReader:
         NormativeDocumentRecord,
         ...,
     ]:
-        """Возвращает managed documents section."""
+        """Возвращает управляемые документы раздела."""
         payload = await self._get_json(
             path=(f"/internal/v1/normative/sections/{section_id}/documents"),
         )
@@ -151,7 +157,7 @@ class HttpNormativeCatalogReader:
         *,
         path: str,
     ) -> Any:
-        """Выполняет один internal GET к Knowledge Service."""
+        """Выполняет один внутренний GET к Knowledge Service."""
         base_url = self._settings.base_url.rstrip(
             "/",
         )

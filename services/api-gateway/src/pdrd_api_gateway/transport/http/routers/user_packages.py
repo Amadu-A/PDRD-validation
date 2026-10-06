@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/transport/http/routers/user_packages.py
 
-"""Public HTTP API пользовательских пакетов документов."""
+"""Публичное HTTP API пользовательских пакетов документов."""
 
 from typing import Annotated
 from uuid import UUID
@@ -11,6 +11,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     Response,
     UploadFile,
     status,
@@ -42,6 +43,45 @@ from pdrd_api_gateway.transport.http.schemas.normative_catalog import (
     UpdateNormativeCategoryRequest,
 )
 
+
+async def require_user_package_owner_model(request: Request) -> UUID:
+    """Получает владельца только из проверенной сервером сессии."""
+    owner = getattr(request.state, "identity_user_id", None)
+    if not isinstance(owner, UUID):
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "Для личных пакетов требуется вход."
+        )
+    parts = request.url.path.strip("/").split("/")
+    authorizer = request.app.state.identity_authorizer
+    if authorizer is not None:
+        facade = _require_facade(request.app.state.container, owner)
+        if parts[3] == "sections":
+            try:
+                section_id = UUID(parts[4])
+            except ValueError as error:
+                raise HTTPException(422, "Требуется UUID раздела") from error
+        else:
+            try:
+                if parts[4] == "categories":
+                    resource = await facade.get_category(category_id=UUID(parts[5]))
+                else:
+                    resource = await facade.get_document(document_id=UUID(parts[5]))
+            except Exception as error:
+                raise _translate_error(error) from error
+            section_id = resource.section_id
+        denial = await authorizer.require_section(request, section_id)
+        if denial is not None:
+            raise HTTPException(
+                denial.status_code,
+                "Нет доступа к разделу"
+                if denial.status_code == 403
+                else "Проверка раздела недоступна",
+            )
+    return owner
+
+
+OwnerDependency = Annotated[UUID, Depends(require_user_package_owner_model)]
+
 router = APIRouter(
     prefix="/api/v1/normative",
     tags=["user-packages"],
@@ -59,8 +99,9 @@ _UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 def _require_facade(
     container: ApplicationContainer,
+    owner_user_id: UUID,
 ) -> UserPackageCatalogFacade:
-    """Возвращает configured user-package facade."""
+    """Возвращает настроенный фасад личных пакетов."""
     facade = container.user_package_catalog
 
     if facade is None:
@@ -69,13 +110,13 @@ def _require_facade(
             detail="User-package catalog facade не настроен.",
         )
 
-    return facade
+    return facade.for_owner(owner_user_id)
 
 
 def _translate_error(
     error: Exception,
 ) -> HTTPException:
-    """Преобразует application error в public HTTP status."""
+    """Преобразует прикладную ошибку в публичный HTTP-статус."""
     if isinstance(
         error,
         NormativeCatalogNotFoundError,
@@ -178,10 +219,12 @@ async def _read_upload(
 async def list_user_package_categories(
     section_id: UUID,
     container: ContainerDependency,
+    owner_user_id: OwnerDependency,
 ) -> list[NormativeCategoryResponse]:
     """Возвращает дерево пользовательских пакетов раздела."""
     facade = _require_facade(
         container,
+        owner_user_id,
     )
 
     try:
@@ -211,10 +254,12 @@ async def create_user_package_category(
     section_id: UUID,
     request: CreateNormativeCategoryRequest,
     container: ContainerDependency,
+    owner_user_id: OwnerDependency,
 ) -> NormativeCategoryResponse:
     """Создаёт пользовательский пакет или вложенную папку."""
     facade = _require_facade(
         container,
+        owner_user_id,
     )
 
     try:
@@ -241,10 +286,12 @@ async def create_user_package_category(
 async def get_user_package_category(
     category_id: UUID,
     container: ContainerDependency,
+    owner_user_id: OwnerDependency,
 ) -> NormativeCategoryResponse:
-    """Возвращает package category."""
+    """Возвращает категорию личного пакета."""
     facade = _require_facade(
         container,
+        owner_user_id,
     )
 
     try:
@@ -270,10 +317,12 @@ async def update_user_package_category(
     category_id: UUID,
     request: UpdateNormativeCategoryRequest,
     container: ContainerDependency,
+    owner_user_id: OwnerDependency,
 ) -> NormativeCategoryResponse:
-    """Переименовывает или перемещает package category."""
+    """Переименовывает или перемещает категорию личного пакета."""
     facade = _require_facade(
         container,
+        owner_user_id,
     )
 
     try:
@@ -301,10 +350,12 @@ async def update_user_package_category(
 async def delete_user_package_category(
     category_id: UUID,
     container: ContainerDependency,
+    owner_user_id: OwnerDependency,
 ) -> DeleteNormativeCategoryResponse:
-    """Удаляет package category."""
+    """Удаляет категорию личного пакета."""
     facade = _require_facade(
         container,
+        owner_user_id,
     )
 
     try:
@@ -329,10 +380,12 @@ async def delete_user_package_category(
 async def list_user_package_documents(
     section_id: UUID,
     container: ContainerDependency,
+    owner_user_id: OwnerDependency,
 ) -> list[NormativeDocumentResponse]:
-    """Возвращает package documents выбранного раздела."""
+    """Возвращает документы личных пакетов выбранного раздела."""
     facade = _require_facade(
         container,
+        owner_user_id,
     )
 
     try:
@@ -365,6 +418,7 @@ async def upload_user_package_document(
         File(),
     ],
     container: ContainerDependency,
+    owner_user_id: OwnerDependency,
     category_id: Annotated[
         UUID | None,
         Form(),
@@ -373,6 +427,7 @@ async def upload_user_package_document(
     """Загружает PDF/DOC/DOCX в пользовательский пакет."""
     facade = _require_facade(
         container,
+        owner_user_id,
     )
 
     try:
@@ -412,10 +467,12 @@ async def upload_user_package_document(
 async def get_user_package_document(
     document_id: UUID,
     container: ContainerDependency,
+    owner_user_id: OwnerDependency,
 ) -> NormativeDocumentResponse:
-    """Возвращает package document metadata."""
+    """Возвращает метаданные документа личного пакета."""
     facade = _require_facade(
         container,
+        owner_user_id,
     )
 
     try:
@@ -441,10 +498,12 @@ async def move_user_package_document(
     document_id: UUID,
     request: MoveNormativeDocumentRequest,
     container: ContainerDependency,
+    owner_user_id: OwnerDependency,
 ) -> NormativeDocumentResponse:
-    """Перемещает package document."""
+    """Перемещает документ личного пакета."""
     facade = _require_facade(
         container,
+        owner_user_id,
     )
 
     try:
@@ -470,10 +529,12 @@ async def move_user_package_document(
 async def delete_user_package_document(
     document_id: UUID,
     container: ContainerDependency,
+    owner_user_id: OwnerDependency,
 ) -> DeleteNormativeDocumentResponse:
-    """Удаляет package document."""
+    """Удаляет документ личного пакета."""
     facade = _require_facade(
         container,
+        owner_user_id,
     )
 
     try:
@@ -499,10 +560,12 @@ async def delete_user_package_document(
 async def queue_user_package_document(
     document_id: UUID,
     container: ContainerDependency,
+    owner_user_id: OwnerDependency,
 ) -> NormativeDocumentResponse:
-    """Запускает durable indexing package document."""
+    """Запускает индексацию документа пакета через устойчивую очередь."""
     facade = _require_facade(
         container,
+        owner_user_id,
     )
 
     try:
@@ -526,10 +589,12 @@ async def queue_user_package_document(
 async def get_user_package_document_content(
     document_id: UUID,
     container: ContainerDependency,
+    owner_user_id: OwnerDependency,
 ) -> Response:
     """Возвращает package PDF/Word-preview inline."""
     facade = _require_facade(
         container,
+        owner_user_id,
     )
 
     try:

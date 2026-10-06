@@ -32,6 +32,7 @@ export function createExperienceApi() {
     headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   return {
     config: () => fetchJson("/api/v1/review/config", { cache: "no-store" }),
+    authors: (criteria) => fetchJson(`${BASE}/authors?${parameters(criteria)}`, { cache: "no-store" }),
     list: (criteria) => fetchJson(`${BASE}?${parameters(criteria)}`, { cache: "no-store" }),
     get: (id) => fetchJson(`${BASE}/${encode(id)}`, { cache: "no-store" }),
     update: (id, revision, fields) => send(`${BASE}/${encode(id)}`, "PATCH", { expected_revision: revision, fields }),

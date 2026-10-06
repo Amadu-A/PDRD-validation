@@ -78,6 +78,25 @@ async def list_examples(filters: Filters, actor: Actor, container: Container) ->
     }
 
 
+@router.get("/authors")
+async def authors(
+    actor: Actor,
+    container: Container,
+    offset: Annotated[int, Query(ge=0, le=1_000_000)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+) -> dict:
+    """Отдаёт только идентичности, связанные с сохранёнными замечаниями."""
+    del actor
+    with catalog_errors():
+        items, total = await connected(container).authors(offset=offset, limit=limit)
+    return {
+        "items": [{"id": item} for item in items],
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    }
+
+
 @router.get("/export")
 async def export_examples(
     filters: Filters, actor: Actor, container: Container
@@ -136,7 +155,7 @@ async def delete_selection(
 async def read_selection(
     command: DeleteSelection, actor: Actor, container: Container
 ) -> dict:
-    """Внутренний batch-read исключает N отдельных сетевых/SQL чтений в Gateway."""
+    """Внутреннее пакетное чтение исключает отдельные сетевые и SQL-запросы каждой строки."""
     del actor
     with catalog_errors():
         return await connected(container).read_selection(

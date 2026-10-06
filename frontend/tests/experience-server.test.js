@@ -376,3 +376,46 @@ test("уведомления выбора не разблокируют повт
   assert.equal(ui.get("build-version").disabled, false);
   assert.equal(ui.get("prepare-fine-tune").disabled, false);
 });
+
+
+test("руководитель читает замечания и историю без вызова административных версий и удаления", async () => {
+  const ui = setup(); const api = apiStub(); let writes = 0;
+  api.versions = async () => { throw new Error("Руководитель не должен обращаться к версиям"); };
+  api.deleteSelection = async () => { writes += 1; };
+  const controller = await mountExperienceCatalog({ api, canCurate: false, canManageVersions: false });
+  const row = ui.get("rows").children[0];
+  assert.equal(row.children[0].hidden, true);
+  assert.equal(row.children[9].children.length, 1);
+  assert.equal(row.children[9].children[0].attributes.get("aria-label"), "История");
+  await row.children[9].children[0].click();
+  assert.equal(ui.get("history-dialog").open, true);
+  await controller.selection.remove(record());
+  assert.equal(writes, 0);
+  assert.equal(ui.get("delete-selection").disabled, true);
+  assert.equal(ui.get("build-version").disabled, true);
+  assert.match(ui.get("notice").textContent, /Просмотр сохранённых/);
+});
+
+test("автор содержит логин, имя и русскую роль; фильтр передаёт стабильную идентичность", async () => {
+  const ui = setup(); const api = apiStub(); const queries = [];
+  const author = { id: "user:3a9346b1-7f52-4bc5-8296-f07bc969d69b", login: "i.mein",
+    display_name: "Иван Мейн", roles: ["department_head"], resolved: true };
+  api.list = async (query) => { queries.push(query); return { items: [record({ author })], total: 1 }; };
+  api.authors = async () => ({ items: [{ id: author.id, author }], total: 1 });
+  await mountExperienceCatalog({ api });
+  assert.equal(ui.get("rows").children[0].children[7].textContent, "i.mein · Иван Мейн · Руководитель отдела");
+  assert.equal(ui.filter.author.children[1].textContent, "i.mein · Иван Мейн · Руководитель отдела");
+  assert.equal(ui.filter.author.children[1].value, author.id);
+  ui.filter.author.value = author.id; await ui.get("filter").emit("change");
+  await new Promise((done) => setImmediate(done));
+  assert.equal(queries.at(-1).author, author.id);
+});
+
+test("сбой User Service показывает сохранённого автора и не скрывает готовые замечания", async () => {
+  const ui = setup(); const api = apiStub();
+  api.list = async () => ({ items: [record()], total: 1, authors_unavailable: true });
+  await mountExperienceCatalog({ api });
+  assert.equal(ui.get("rows").children.length, 1);
+  assert.match(ui.get("rows").children[0].children[7].textContent, /engineer:1.*профиль недоступен/);
+  assert.match(ui.get("notice").textContent, /Профили авторов временно недоступны/);
+});

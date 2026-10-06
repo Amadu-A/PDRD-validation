@@ -1,7 +1,7 @@
 // frontend/src/js/features/normative/catalog.js
 
 /**
- * UI controller managed normative catalog.
+ * Управляет выбором раздела, документами и операциями нормативного каталога.
  */
 
 import { createTrashIcon } from "../../components/icons.js";
@@ -30,6 +30,8 @@ import {
   updateSection,
   uploadDocument,
 } from "./api.js";
+
+import { retainSectionSelection } from "./section-selection.js";
 
 
 const DOCUMENT_DRAG_TYPE = (
@@ -97,6 +99,7 @@ function createTrashButton(
   );
 
   button.type = "button";
+  button.dataset.normativeDelete = "";
 
   button.className = (
     "normative-sidebar__trash-button"
@@ -239,6 +242,7 @@ export function createNormativeCatalog(
     readySeenBySection: new Map(),
 
     pollTimer: null,
+    generation: 0,
   };
 
 
@@ -251,6 +255,11 @@ export function createNormativeCatalog(
     statusElement.dataset.state = stateName;
   }
 
+
+  /** Возвращает состояние удаления выбранного раздела для всех операций UI. */
+  function selectedSectionDeleting() {
+    return state.sections.find((item) => item.section_id === state.sectionId)?.deleting === true;
+  }
 
   function selectedSet() {
     if (!state.sectionId) {
@@ -499,6 +508,12 @@ export function createNormativeCatalog(
   function renderSectionSelect() {
     sectionSelect.replaceChildren();
 
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Выберите раздел";
+    placeholder.selected = !state.sectionId;
+    sectionSelect.append(placeholder);
+
     for (const section of state.sections) {
       const option = document.createElement(
         "option",
@@ -506,7 +521,7 @@ export function createNormativeCatalog(
 
       option.value = section.section_id;
 
-      option.textContent = section.name;
+      option.textContent = section.deleting ? `${section.name} — удаляется` : section.name;
 
       option.selected = (
         section.section_id
@@ -518,7 +533,7 @@ export function createNormativeCatalog(
       );
     }
 
-    const disabled = !state.sectionId;
+    const disabled = !state.sectionId || selectedSectionDeleting();
 
     sectionSelect.disabled = (
       state.sections.length === 0
@@ -526,7 +541,7 @@ export function createNormativeCatalog(
 
     renameSectionButton.disabled = disabled;
 
-    deleteSectionButton.disabled = disabled;
+    deleteSectionButton.disabled = !state.sectionId;
 
     createCategoryButton.disabled = disabled;
 
@@ -1243,7 +1258,7 @@ export function createNormativeCatalog(
   function renderTree() {
     tree.replaceChildren();
 
-    if (!state.sectionId) {
+    if (!state.sectionId || selectedSectionDeleting()) {
       const empty = document.createElement(
         "p",
       );
@@ -1253,7 +1268,7 @@ export function createNormativeCatalog(
       );
 
       empty.textContent = (
-        "Создайте или выберите нормативный раздел."
+        selectedSectionDeleting() ? "Удаление не завершено. Повторите удаление раздела; новая работа с ним запрещена." : "Создайте или выберите нормативный раздел."
       );
 
       tree.append(
@@ -1429,7 +1444,7 @@ export function createNormativeCatalog(
   async function refreshSectionData(
     silent = true,
   ) {
-    if (!state.sectionId) {
+    if (!state.sectionId || selectedSectionDeleting()) {
       state.categories = [];
 
       state.documents = [];
@@ -1441,6 +1456,7 @@ export function createNormativeCatalog(
       return;
     }
 
+    const generation = state.generation;
     const [
       categories,
       documents,
@@ -1456,6 +1472,7 @@ export function createNormativeCatalog(
       ],
     );
 
+    if (generation !== state.generation) return;
     state.categories = categories;
 
     state.documents = documents;
@@ -1477,45 +1494,25 @@ export function createNormativeCatalog(
   async function reloadSections(
     preferredSectionId = null,
   ) {
-    state.sections = await listSections();
+    const generation = ++state.generation;
+    clearPolling();
+    const sections = await listSections();
+    if (generation !== state.generation) return;
+    state.sections = sections;
 
-    const availableIds = new Set(
-      state.sections.map(
-        (section) => section.section_id,
-      ),
+    state.sectionId = retainSectionSelection(
+      state.sections,
+      state.sectionId,
+      preferredSectionId,
     );
-
-    if (
-      preferredSectionId
-      && availableIds.has(
-        preferredSectionId,
-      )
-    ) {
-      state.sectionId = preferredSectionId;
-
-    } else if (
-      state.sectionId
-      && availableIds.has(
-        state.sectionId,
-      )
-    ) {
-      // Сохраняем текущий section.
-
-    } else {
-      state.sectionId = (
-        state.sections[
-          0
-        ]?.section_id
-        || null
-      );
-    }
 
     renderSectionSelect();
 
     await onSectionChange(
-      state.sectionId,
+      selectedSectionDeleting() ? null : state.sectionId,
     );
 
+    if (generation !== state.generation) return;
     await refreshSectionData(
       true,
     );
@@ -1554,7 +1551,7 @@ export function createNormativeCatalog(
     files,
     categoryId = null,
   ) {
-    if (!state.sectionId) {
+    if (!state.sectionId || selectedSectionDeleting()) {
       setStatus(
         "Сначала выберите нормативный раздел.",
         "error",
@@ -1690,7 +1687,7 @@ export function createNormativeCatalog(
   async function createCategoryInteractive(
     parentId = null,
   ) {
-    if (!state.sectionId) {
+    if (!state.sectionId || selectedSectionDeleting()) {
       return;
     }
 
@@ -1730,6 +1727,10 @@ export function createNormativeCatalog(
     sectionSelect.addEventListener(
       "change",
       async () => {
+        state.generation += 1;
+        clearPolling();
+        state.categories = [];
+        state.documents = [];
         state.sectionId = (
           sectionSelect.value
           || null
@@ -1737,8 +1738,9 @@ export function createNormativeCatalog(
 
         await runAction(
           async () => {
+            renderSectionSelect();
             await onSectionChange(
-              state.sectionId,
+              selectedSectionDeleting() ? null : state.sectionId,
             );
 
             await refreshSectionData(
@@ -1844,7 +1846,7 @@ export function createNormativeCatalog(
         const confirmed = window.confirm(
           (
             `Удалить раздел "${section.name}"? `
-            + "Раздел должен быть пустым."
+            + "Будут удалены все нормативные документы и личные пакеты пользователей в этом разделе, исходные файлы, PDF предпросмотры и поисковый индекс. Действие необратимо."
           ),
         );
 
@@ -1854,9 +1856,20 @@ export function createNormativeCatalog(
 
         await runAction(
           async () => {
-            await deleteSection(
-              section.section_id,
-            );
+            state.generation += 1;
+            clearPolling();
+            section.deleting = true;
+            renderSectionSelect();
+            await onSectionChange(null);
+            await refreshSectionData(true);
+            try {
+              await deleteSection(section.section_id);
+            } catch (error) {
+              // Сервер сохраняет tombstone после начала удаления; перечитываем его
+              // и оставляем доступной кнопку повторного DELETE.
+              await reloadSections(section.section_id);
+              throw error;
+            }
 
             state.selectedBySection.delete(
               section.section_id,
@@ -2018,7 +2031,9 @@ export function createNormativeCatalog(
       setStatus(
         state.sectionId
           ? "Нормативный каталог готов."
-          : "Нормативные разделы пока не созданы.",
+          : state.sections.length
+            ? "Выберите раздел проектной документации."
+            : "Нет доступных разделов. Обычный анализ доступен без раздела.",
       );
 
     } catch (error) {
@@ -2041,6 +2056,7 @@ export function createNormativeCatalog(
 
     return {
       sectionId: state.sectionId,
+      deleting: selectedSectionDeleting(),
 
       documentIds: state.documents
         .filter(
@@ -2064,6 +2080,7 @@ export function createNormativeCatalog(
 
   return {
     getSelection,
+    reload: reloadSections,
     start,
   };
 }

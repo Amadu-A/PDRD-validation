@@ -1,7 +1,7 @@
 // frontend/src/js/features/normative/user_packages.js
 
 /**
- * UI controller пользовательских пакетов managed catalog.
+ * Управляет личными пакетами; все HTTP операции проверяют владельца на сервере.
  */
 
 import { createTrashIcon } from "../../components/icons.js";
@@ -208,6 +208,7 @@ export function createUserPackageCatalog(
     selectedBySection: new Map(),
 
     pollTimer: null,
+    generation: 0,
   };
 
 
@@ -1301,6 +1302,7 @@ export function createUserPackageCatalog(
       return;
     }
 
+    const generation = state.generation;
     const [
       categories,
       documents,
@@ -1316,6 +1318,7 @@ export function createUserPackageCatalog(
       ],
     );
 
+    if (generation !== state.generation) return;
     state.categories = categories;
 
     state.documents = documents;
@@ -1388,9 +1391,12 @@ export function createUserPackageCatalog(
       return;
     }
 
+    const generation = state.generation;
+    const sectionId = state.sectionId;
     const failures = [];
 
     for (const file of packageFiles) {
+      if (generation !== state.generation) return;
       try {
         setStatus(
           `Загружаем ${file.name}…`,
@@ -1398,7 +1404,7 @@ export function createUserPackageCatalog(
 
         const documentItem = (
           await uploadUserPackageDocument(
-            state.sectionId,
+            sectionId,
             {
               file,
               categoryId,
@@ -1406,6 +1412,7 @@ export function createUserPackageCatalog(
           )
         );
 
+        if (generation !== state.generation) return;
         try {
           await queueUserPackageDocument(
             documentItem.document_id,
@@ -1432,9 +1439,11 @@ export function createUserPackageCatalog(
       }
     }
 
+    if (generation !== state.generation) return;
     await refresh(
       true,
     );
+    if (generation !== state.generation) return;
 
     if (failures.length) {
       setStatus(
@@ -1680,6 +1689,7 @@ export function createUserPackageCatalog(
   async function setSection(
     sectionId,
   ) {
+    const generation = ++state.generation;
     clearPolling();
 
     state.sectionId = (
@@ -1712,11 +1722,13 @@ export function createUserPackageCatalog(
         true,
       );
 
+      if (generation !== state.generation) return;
       setStatus(
         "Пользовательские пакеты готовы.",
       );
 
     } catch (error) {
+      if (generation !== state.generation) return;
       state.categories = [];
 
       state.documents = [];
@@ -1765,6 +1777,11 @@ export function createUserPackageCatalog(
 
   return {
     getSelection,
+    reset: () => {
+      state.selectedBySection.clear();
+      clearPolling();
+      return setSection(null);
+    },
     setSection,
     start,
   };

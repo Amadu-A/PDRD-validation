@@ -1,6 +1,6 @@
 # services/api-gateway/tests/integration/test_user_package_endpoints.py
 
-"""HTTP contract tests public user-package catalog."""
+"""Проверяет публичный HTTP-контракт личных пакетов."""
 
 from collections.abc import (
     Awaitable,
@@ -57,7 +57,7 @@ NOW = datetime(
 
 
 class StaticReadiness:
-    """Fake readiness dependency."""
+    """Имитирует проверку готовности."""
 
     async def is_ready(
         self,
@@ -67,12 +67,12 @@ class StaticReadiness:
 
 
 class FakeUserPackageCatalogManager:
-    """In-memory fake user-package manager."""
+    """Имитирует хранилище личных пакетов в памяти."""
 
     def __init__(
         self,
     ) -> None:
-        """Создаёт predictable state."""
+        """Создаёт предсказуемое тестовое состояние."""
         self.category = NormativeCategoryView(
             category_id=CATEGORY_ID,
             section_id=SECTION_ID,
@@ -104,6 +104,11 @@ class FakeUserPackageCatalogManager:
             object,
         ] = {}
 
+    def for_owner(self, owner_user_id: UUID) -> "FakeUserPackageCatalogManager":
+        """Проверяет, что transport передал идентификатор проверенной сессии."""
+        assert owner_user_id == DOCUMENT_ID
+        return self
+
     async def list_categories(
         self,
         *,
@@ -112,7 +117,7 @@ class FakeUserPackageCatalogManager:
         NormativeCategoryView,
         ...,
     ]:
-        """Возвращает package category."""
+        """Возвращает категорию личного пакета."""
         assert section_id == SECTION_ID
 
         return (self.category,)
@@ -124,7 +129,7 @@ class FakeUserPackageCatalogManager:
         name: str,
         parent_id: UUID | None,
     ) -> NormativeCategoryView:
-        """Создаёт package category."""
+        """Создаёт категорию личного пакета."""
         return NormativeCategoryView(
             category_id=CATEGORY_ID,
             section_id=section_id,
@@ -139,7 +144,7 @@ class FakeUserPackageCatalogManager:
         *,
         category_id: UUID,
     ) -> NormativeCategoryView:
-        """Возвращает package category."""
+        """Возвращает категорию личного пакета."""
         assert category_id == CATEGORY_ID
 
         return self.category
@@ -153,7 +158,7 @@ class FakeUserPackageCatalogManager:
             object,
         ],
     ) -> NormativeCategoryView:
-        """Изменяет package category."""
+        """Изменяет категорию личного пакета."""
         assert category_id == CATEGORY_ID
 
         self.category_changes = dict(
@@ -167,7 +172,7 @@ class FakeUserPackageCatalogManager:
         *,
         category_id: UUID,
     ) -> UUID:
-        """Удаляет package category."""
+        """Удаляет категорию личного пакета."""
         return category_id
 
     async def list_documents(
@@ -178,7 +183,7 @@ class FakeUserPackageCatalogManager:
         NormativeDocumentView,
         ...,
     ]:
-        """Возвращает package documents."""
+        """Возвращает документы личных пакетов."""
         assert section_id == SECTION_ID
 
         return (self.document,)
@@ -210,7 +215,7 @@ class FakeUserPackageCatalogManager:
         *,
         document_id: UUID,
     ) -> NormativeDocumentView:
-        """Возвращает package document."""
+        """Возвращает документ личного пакета."""
         assert document_id == DOCUMENT_ID
 
         return self.document
@@ -221,7 +226,7 @@ class FakeUserPackageCatalogManager:
         document_id: UUID,
         category_id: UUID | None,
     ) -> NormativeDocumentView:
-        """Перемещает package document."""
+        """Перемещает документ личного пакета."""
         assert document_id == DOCUMENT_ID
 
         return NormativeDocumentView(
@@ -244,7 +249,7 @@ class FakeUserPackageCatalogManager:
         *,
         document_id: UUID,
     ) -> UUID:
-        """Удаляет package document."""
+        """Удаляет документ личного пакета."""
         return document_id
 
     async def queue_document(
@@ -252,7 +257,7 @@ class FakeUserPackageCatalogManager:
         *,
         document_id: UUID,
     ) -> NormativeDocumentView:
-        """Возвращает queued package document."""
+        """Возвращает документ личного пакета в очереди."""
         assert document_id == DOCUMENT_ID
 
         return NormativeDocumentView(
@@ -275,7 +280,7 @@ class FakeUserPackageCatalogManager:
         *,
         document_id: UUID,
     ) -> NormativeDocumentContent:
-        """Возвращает fake PDF."""
+        """Возвращает тестовый PDF."""
         assert document_id == DOCUMENT_ID
 
         return NormativeDocumentContent(
@@ -291,7 +296,7 @@ async def noop_shutdown() -> None:
 def build_client(
     manager: FakeUserPackageCatalogManager,
 ) -> TestClient:
-    """Создаёт Gateway HTTP client с fake package manager."""
+    """Создаёт HTTP-клиент Gateway с имитацией личного каталога."""
     settings = Settings(
         _env_file=None,
         environment="test",
@@ -319,11 +324,15 @@ def build_client(
         ),
     )
 
-    return TestClient(
-        create_app(
-            container=container,
-        )
-    )
+    app = create_app(container)
+
+    @app.middleware("http")
+    async def trusted_test_identity(request, call_next):
+        """Подставляет UUID только после имитированной серверной проверки сессии."""
+        request.state.identity_user_id = DOCUMENT_ID
+        return await call_next(request)
+
+    return TestClient(app)
 
 
 def test_public_user_package_category_contract() -> None:

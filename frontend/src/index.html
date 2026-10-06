@@ -33,6 +33,23 @@
 </head>
 
 <body class="page">
+  <header class="site-header" data-site-header>
+    <a class="site-header__brand" href="/" aria-label="PDRD — анализ документов">
+      <span class="site-header__mark" aria-hidden="true">P</span>
+      <span>PDRD <small>Validation</small></span>
+    </a>
+    <nav class="site-header__nav" aria-label="Основная навигация">
+      <a href="/" aria-current="page">Анализ</a>
+      <a href="/account.html" data-account-link hidden>Личный кабинет</a>
+      <a href="/admin.html" data-admin-link hidden>Админка</a>
+    </nav>
+    <div class="site-header__actions">
+      <span class="site-header__identity" data-header-identity hidden></span>
+      <button type="button" data-open-login>Войти</button>
+      <button type="button" class="site-header__primary" data-open-register>Регистрация</button>
+      <button type="button" data-header-logout hidden>Выйти</button>
+    </div>
+  </header>
   <main class="page__content">
     <aside
       class="normative-sidebar"
@@ -284,7 +301,11 @@
       <section
         class="normative-sidebar__block normative-sidebar__user-packages"
         data-user-packages-block
+        aria-disabled="true"
       >
+        <p class="normative-sidebar__block-hint" data-user-packages-unavailable role="status">
+          Будет доступно после привязки пакетов к владельцу.
+        </p>
         <details
           class="normative-sidebar__accordion"
           data-user-packages-accordion
@@ -667,7 +688,7 @@
               class="analysis-form__hint"
               data-pages-hint
             >
-              Для PDF-only можно анализировать одну или несколько страниц.
+              Для PDF-only можно анализировать до 200 страниц за одну проверку. Для большого PDF укажите диапазон, например 1-200.
             </p>
           </div>
 
@@ -851,5 +872,31 @@
       </p>
     </div>
   </div>
+  <dialog class="auth-dialog" data-auth-dialog aria-labelledby="authDialogTitle">
+    <div class="auth-dialog__top">
+      <div>
+        <p class="auth-dialog__eyebrow">Учётная запись PDRD</p>
+        <h2 id="authDialogTitle" data-auth-title>Вход</h2>
+      </div>
+      <button type="button" class="auth-dialog__close" data-auth-close aria-label="Закрыть">×</button>
+    </div>
+    <div class="auth-dialog__tabs" role="group" aria-label="Способ входа">
+      <button type="button" data-auth-tab="login" aria-pressed="true">Войти</button>
+      <button type="button" data-auth-tab="register" aria-pressed="false">Регистрация</button>
+    </div>
+    <form data-auth-login-form class="auth-dialog__form">
+      <label>Корпоративный логин или email<input name="login" autocomplete="username" required></label>
+      <label>Пароль<input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit" class="auth-dialog__submit">Войти</button>
+    </form>
+    <form data-auth-register-form class="auth-dialog__form" hidden>
+      <label>Имя<input name="display_name" autocomplete="name" maxlength="255" required></label>
+      <label>Email<input name="email" type="email" autocomplete="email" maxlength="320" required></label>
+      <label>Пароль<input name="password" type="password" autocomplete="new-password" minlength="12" required></label>
+      <button type="submit" class="auth-dialog__submit">Создать аккаунт</button>
+    </form>
+    <p class="auth-dialog__hint" data-auth-hint>Корпоративный вход проверяется через защищённое соединение с AD.</p>
+    <p class="auth-dialog__message" data-auth-message role="status" aria-live="polite"></p>
+  </dialog>
 </body>
 </html>

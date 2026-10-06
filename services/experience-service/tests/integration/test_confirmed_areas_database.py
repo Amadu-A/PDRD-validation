@@ -116,7 +116,7 @@ async def engine() -> AsyncIterator[AsyncEngine]:
                 text("SELECT version_num FROM experience.alembic_version_experience")
             )
 
-            assert revision == "20260929_0005"
+            assert revision == "20261006_0006"
 
         assert await DatabaseReadinessProbe(
             instance,
@@ -292,6 +292,7 @@ async def test_reject_never_confirms_new_or_changed_area(
             job_id=job,
             finding_id="vlm:1",
             decision=Decision.REJECTED,
+            reason_category="false_positive",
             actor="integration:2",
             expected_revision=current.revision,
         )

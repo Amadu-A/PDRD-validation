@@ -99,6 +99,10 @@ class TechnicalAssignmentModel(
         nullable=False,
     )
 
+    source_removed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     original_name: Mapped[str] = mapped_column(
         String(
             255,

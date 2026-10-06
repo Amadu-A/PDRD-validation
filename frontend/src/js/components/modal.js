@@ -54,7 +54,7 @@ async function copyText(
 
   if (!copied) {
     throw new Error(
-      "Не удалось скопировать номер задания.",
+      "Не удалось скопировать ссылку или номер задания.",
     );
   }
 }
@@ -73,6 +73,8 @@ export function createModal({
   copyStatusElement,
 }) {
   let jobId = null;
+  let copyValue = null;
+  let shareExpiresAt = null;
 
   let cancelHandler = null;
 
@@ -155,14 +157,20 @@ export function createModal({
 
   function setJobId(
     value,
+    { shareUrl = null, expiresAt = null } = {},
   ) {
     jobId = value;
+    copyValue = shareUrl ?? value;
+    shareExpiresAt = shareUrl ? expiresAt : null;
 
     jobIdElement.textContent = value;
 
     jobElement.hidden = false;
 
-    copyStatusElement.textContent = "";
+    copyButton.textContent = shareUrl ? "Копировать временную ссылку" : "Копировать ID";
+    copyStatusElement.textContent = shareUrl && expiresAt
+      ? `Ссылка действует до ${new Date(expiresAt).toLocaleString("ru-RU")}. Доступна каждому, у кого есть ссылка.`
+      : "";
 
     cancelButton.hidden = false;
 
@@ -174,6 +182,8 @@ export function createModal({
 
   function clearJobId() {
     jobId = null;
+    copyValue = null;
+    shareExpiresAt = null;
 
     jobIdElement.textContent = "";
 
@@ -198,11 +208,11 @@ export function createModal({
 
       try {
         await copyText(
-          jobId,
+          copyValue,
         );
 
         copyStatusElement.textContent = (
-          "Скопировано"
+          shareExpiresAt ? "Временная ссылка скопирована" : "Номер задания скопирован"
         );
 
       } catch (error) {

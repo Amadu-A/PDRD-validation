@@ -1,0 +1,47 @@
+# ops/compose.gateway-test.yaml
+# Изолированная проверка миграции и PostgreSQL-истории без рабочей БД и брокера.
+name: pdrd-gateway-test
+services:
+  gateway-test-postgres:
+    image: postgres:16-alpine
+    restart: "no"
+    environment:
+      POSTGRES_DB: pdrd_gateway_test
+      POSTGRES_USER: gateway_test
+      POSTGRES_PASSWORD: gateway-test-only
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway_test -d pdrd_gateway_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks: [gateway-test-only]
+  gateway-test-runner:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.quality
+    restart: "no"
+    depends_on:
+      gateway-test-postgres:
+        condition: service_healthy
+    environment:
+      PDRD_RUN_DATABASE_TESTS: "1"
+      API_GATEWAY_ENVIRONMENT: test
+      API_GATEWAY_DATABASE__HOST: gateway-test-postgres
+      API_GATEWAY_DATABASE__PORT: 5432
+      API_GATEWAY_DATABASE__NAME: pdrd_gateway_test
+      API_GATEWAY_DATABASE__USER: gateway_test
+      API_GATEWAY_DATABASE__PASSWORD: gateway-test-only
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        set -eu
+        cd /workspace/services/api-gateway
+        python -m alembic -c alembic.ini upgrade head
+        python -m alembic -c alembic.ini current --check-heads --verbose
+        cd /workspace
+        python -m pytest -q services/api-gateway/tests/integration/test_analysis_history_database.py services/api-gateway/tests/integration/test_analysis_retention_database.py
+    networks: [gateway-test-only]
+networks:
+  gateway-test-only:
+    internal: true

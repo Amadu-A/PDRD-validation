@@ -4,7 +4,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from pdrd_api_gateway.transport.http.routers.experience import Container, invoke
@@ -27,11 +27,12 @@ class RegisterQuality(QualityRevision):
 
 @router.post("/{version_id}/quality")
 async def register_quality(
-    version_id: UUID, command: RegisterQuality, container: Container
+    version_id: UUID, command: RegisterQuality, request: Request, container: Container
 ) -> dict:
     """Права проверяются на каждое исходное задание зафиксированного состава."""
     return await invoke(
         container,
+        request,
         operation="version_quality",
         example_id=version_id,
         command=command.model_dump(),
@@ -40,11 +41,12 @@ async def register_quality(
 
 @router.delete("/{version_id}/quality")
 async def revoke_quality(
-    version_id: UUID, command: QualityRevision, container: Container
+    version_id: UUID, command: QualityRevision, request: Request, container: Container
 ) -> dict:
     """Отзыв не требует подмены отчёта; история решения остаётся у владельца."""
     return await invoke(
         container,
+        request,
         operation="version_quality_revoke",
         example_id=version_id,
         command=command.model_dump(),

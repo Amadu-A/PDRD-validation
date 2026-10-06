@@ -13,6 +13,7 @@ from pdrd_experience_service.application.ports.review import (
 from pdrd_experience_service.application.ports.review_confirmation import (
     ReviewConfirmationCommitter,
 )
+from pdrd_experience_service.core.observability import log_execution_time
 from pdrd_experience_service.domain.review import (
     ApprovedReview,
     Decision,
@@ -79,6 +80,7 @@ class ChangeReview:
     repository: ReviewRepository
     confirmations: ReviewConfirmationCommitter | None = None
 
+    @log_execution_time(operation="review_decide")
     async def decide(
         self,
         *,
@@ -87,6 +89,8 @@ class ChangeReview:
         decision: Decision,
         actor: str,
         expected_revision: int,
+        reason_category: str | None = None,
+        comment: str = "",
     ) -> ReviewSession:
         """Атомарно сохраняет решение и принятые им текущие области замечания."""
         current = await self._require(job_id)
@@ -95,6 +99,8 @@ class ChangeReview:
         updated = current.decide(
             finding_id=finding_id,
             decision=decision,
+            reason_category=reason_category,
+            comment=comment,
             actor=actor,
             at=at,
             expected_revision=expected_revision,
@@ -129,7 +135,7 @@ class ChangeReview:
         actor: str,
         expected_revision: int,
     ) -> ReviewSession:
-        """Persist a correction and invalidate previous export approval."""
+        """Сохраняет правку и отменяет прежнее утверждение экспорта."""
         current = await self._require(job_id)
 
         updated = current.edit(
@@ -162,7 +168,7 @@ class ChangeReview:
         actor: str,
         expected_revision: int,
     ) -> ReviewSession:
-        """Persist Gold geometry and source metadata on an approved page."""
+        """Сохраняет геометрию Gold и происхождение на проверенной странице."""
         current = await self._require(job_id)
 
         updated = current.add_manual(
@@ -267,7 +273,7 @@ class ChangeReview:
         *,
         job_id: UUID,
     ) -> ApprovedReview:
-        """Read only a fully approved revision to be passed to PDF writer."""
+        """Читает полностью утверждённую редакцию для формирования PDF."""
         current = await self._require(job_id)
 
         return current.accepted_for_pdf()
@@ -276,7 +282,7 @@ class ChangeReview:
         self,
         job_id: UUID,
     ) -> ReviewSession:
-        """Resolve session without creating one implicitly on a write."""
+        """Находит существующее ревью; запись не создаёт его неявно."""
         current = await self.repository.load(job_id)
 
         if current is None:

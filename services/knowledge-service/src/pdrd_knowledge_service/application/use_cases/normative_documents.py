@@ -1,10 +1,10 @@
 # services/knowledge-service/src/pdrd_knowledge_service/application/use_cases/normative_documents.py
 
-"""Use cases документов managed catalog."""
+"""Прикладные сценарии документов управляемого каталога."""
 
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import (
     UTC,
     datetime,
@@ -36,6 +36,10 @@ from pdrd_knowledge_service.application.ports.document_storage import (
 from pdrd_knowledge_service.application.ports.persistence import (
     NormativeCatalogUnitOfWork,
     NormativeCatalogUnitOfWorkFactory,
+)
+from pdrd_knowledge_service.application.ports.section_locks import (
+    CatalogSectionLocks,
+    InMemoryCatalogSectionLocks,
 )
 from pdrd_knowledge_service.application.ports.vector_store import (
     VectorStore,
@@ -83,11 +87,11 @@ _DELETE_BLOCKED_STATUSES = frozenset(
 
 
 class NormativeDocumentNotFoundError(LookupError):
-    """Запрошенный managed документ не найден."""
+    """Запрошенный документ каталога не найден."""
 
 
 class NormativeDocumentUploadError(ValueError):
-    """Некорректный загружаемый managed документ."""
+    """Некорректный загружаемый документ каталога."""
 
 
 class NormativeDocumentCategoryError(ValueError):
@@ -114,7 +118,7 @@ class NormativeDocumentContent:
 
 
 def utc_now() -> datetime:
-    """Возвращает текущее timezone-aware UTC время."""
+    """Возвращает текущее время UTC с часовым поясом."""
     return datetime.now(
         UTC,
     )
@@ -129,7 +133,7 @@ async def _require_section(
         section_id,
     )
 
-    if section is None:
+    if section is None or section.deleting:
         raise NormativeSectionNotFoundError(
             f"Раздел нормативной базы {section_id} не найден.",
         )
@@ -139,7 +143,7 @@ async def _require_document(
     unit_of_work: NormativeCatalogUnitOfWork,
     document_id: UUID,
 ) -> NormativeDocument:
-    """Возвращает managed документ либо application error."""
+    """Возвращает документ каталога либо прикладную ошибку."""
     document = await unit_of_work.documents.get(
         document_id,
     )
@@ -158,8 +162,9 @@ async def _validate_category(
     section_id: UUID,
     category_id: UUID | None,
     area: CatalogArea,
+    owner_user_id: UUID | None = None,
 ) -> None:
-    """Проверяет section и area категории документа."""
+    """Проверяет раздел и область категории документа."""
     if category_id is None:
         return
 
@@ -176,6 +181,9 @@ async def _validate_category(
         raise NormativeDocumentCategoryError(
             "Категория документа принадлежит другому разделу.",
         )
+
+    if category.owner_user_id != owner_user_id:
+        raise NormativeDocumentCategoryError("Категория принадлежит другому владельцу.")
 
     if category.area is not area:
         raise NormativeDocumentCategoryError(
@@ -255,7 +263,7 @@ def _validate_pdf_content(
 def _validate_doc_content(
     content: bytes,
 ) -> None:
-    """Проверяет Compound File Binary signature старого DOC."""
+    """Проверяет сигнатуру составного двоичного файла старого DOC."""
     if not content.startswith(
         _DOC_SIGNATURE,
     ):
@@ -354,7 +362,7 @@ def _validate_document_content(
 
 @dataclass(frozen=True, slots=True)
 class ListNormativeDocuments:
-    """Возвращает документы одной catalog area раздела."""
+    """Возвращает документы одной области каталога раздела."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -363,11 +371,12 @@ class ListNormativeDocuments:
         *,
         section_id: UUID,
         area: CatalogArea = CatalogArea.NORMATIVE,
+        owner_user_id: UUID | None = None,
     ) -> tuple[
         NormativeDocument,
         ...,
     ]:
-        """Возвращает documents вместе с indexing status."""
+        """Возвращает документы вместе с статусом индексации."""
         async with self.unit_of_work_factory() as unit_of_work:
             await _require_section(
                 unit_of_work,
@@ -378,12 +387,17 @@ class ListNormativeDocuments:
                 section_id,
             )
 
-        return tuple(document for document in documents if document.area is area)
+        return tuple(
+            document
+            for document in documents
+            if document.area is area
+            and (owner_user_id is None or document.owner_user_id == owner_user_id)
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class GetNormativeDocument:
-    """Возвращает metadata одного managed документа."""
+    """Возвращает метаданные одного managed документа."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -392,7 +406,7 @@ class GetNormativeDocument:
         *,
         document_id: UUID,
     ) -> NormativeDocument:
-        """Загружает document по UUID."""
+        """Загружает документ по UUID."""
         async with self.unit_of_work_factory() as unit_of_work:
             return await _require_document(
                 unit_of_work,
@@ -402,13 +416,17 @@ class GetNormativeDocument:
 
 @dataclass(frozen=True, slots=True)
 class UploadNormativeDocument:
-    """Сохраняет managed документ и metadata."""
+    """Сохраняет документ каталога и метаданные."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
     storage: NormativeDocumentStorage
 
     max_upload_bytes: int
+
+    section_locks: CatalogSectionLocks = field(
+        default_factory=InMemoryCatalogSectionLocks
+    )
 
     clock: Clock = utc_now
 
@@ -422,8 +440,30 @@ class UploadNormativeDocument:
         original_name: str,
         content: bytes,
         area: CatalogArea = CatalogArea.NORMATIVE,
+        owner_user_id: UUID | None = None,
     ) -> NormativeDocument:
-        """Валидирует документ и регистрирует metadata."""
+        """Не допускает удаления раздела между записью файла и SQL commit."""
+        async with self.section_locks.shared(section_id):
+            return await self._execute(
+                section_id=section_id,
+                category_id=category_id,
+                original_name=original_name,
+                content=content,
+                area=area,
+                owner_user_id=owner_user_id,
+            )
+
+    async def _execute(
+        self,
+        *,
+        section_id: UUID,
+        category_id: UUID | None,
+        original_name: str,
+        content: bytes,
+        area: CatalogArea = CatalogArea.NORMATIVE,
+        owner_user_id: UUID | None = None,
+    ) -> NormativeDocument:
+        """Валидирует документ и регистрирует метаданные."""
         (
             normalized_name,
             extension,
@@ -449,6 +489,7 @@ class UploadNormativeDocument:
                 section_id=section_id,
                 category_id=category_id,
                 area=area,
+                owner_user_id=owner_user_id,
             )
 
         document_id = self.identifier_factory()
@@ -476,6 +517,7 @@ class UploadNormativeDocument:
             created_at=created_at,
             updated_at=created_at,
             area=area,
+            owner_user_id=owner_user_id,
         )
 
         await self.storage.save(
@@ -506,7 +548,7 @@ class UploadNormativeDocument:
 
 @dataclass(frozen=True, slots=True)
 class GetNormativeDocumentContent:
-    """Возвращает browser-viewable содержимое managed документа."""
+    """Возвращает доступное для просмотра в браузере содержимое managed документа."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -517,7 +559,7 @@ class GetNormativeDocumentContent:
         *,
         document_id: UUID,
     ) -> NormativeDocumentContent:
-        """Для Word возвращает ready PDF-preview."""
+        """Для Word возвращает готовый предпросмотр PDF."""
         async with self.unit_of_work_factory() as unit_of_work:
             document = await _require_document(
                 unit_of_work,
@@ -555,7 +597,7 @@ class GetNormativeDocumentContent:
 
 @dataclass(frozen=True, slots=True)
 class MoveNormativeDocument:
-    """Перемещает документ между категориями той же catalog area."""
+    """Перемещает документ между категориями той же области каталога."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -571,7 +613,7 @@ class MoveNormativeDocument:
         document_id: UUID,
         category_id: UUID | None,
     ) -> NormativeDocument:
-        """Синхронизирует category в PostgreSQL и Qdrant payload."""
+        """Синхронизирует категорию в PostgreSQL и данных Qdrant."""
         async with self.unit_of_work_factory() as unit_of_work:
             document = await unit_of_work.documents.get_for_update(
                 document_id,
@@ -593,6 +635,7 @@ class MoveNormativeDocument:
                 section_id=document.section_id,
                 category_id=category_id,
                 area=document.area,
+                owner_user_id=document.owner_user_id,
             )
 
             if document.category_id == category_id:
@@ -661,7 +704,7 @@ class MoveNormativeDocument:
 
 @dataclass(frozen=True, slots=True)
 class DeleteNormativeDocument:
-    """Идемпотентно удаляет document из всех managed storages."""
+    """Идемпотентно удаляет документ из всех хранилищ каталога."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -678,7 +721,7 @@ class DeleteNormativeDocument:
         *,
         document_id: UUID,
     ) -> UUID:
-        """Удаляет Qdrant, original/preview files и SQL metadata."""
+        """Удаляет векторы Qdrant, исходный файл, предпросмотр и метаданные SQL."""
         async with self.unit_of_work_factory() as unit_of_work:
             document = await unit_of_work.documents.get_for_update(
                 document_id,
@@ -738,7 +781,7 @@ class DeleteNormativeDocument:
 
 @dataclass(frozen=True, slots=True)
 class NormativeDocumentUseCases:
-    """Группирует operations managed документов."""
+    """Группирует операции документов каталога."""
 
     list_documents: ListNormativeDocuments
 

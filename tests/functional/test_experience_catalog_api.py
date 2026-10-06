@@ -135,6 +135,7 @@ async def test_direct_rejection_preserves_original_regions_without_confirmation(
                 finding_id="vlm:1",
                 action="decide",
                 decision="rejected",
+                reason_category="false_positive",
             )
         ).status_code == 200
         assert (
@@ -446,3 +447,52 @@ async def test_revoked_area_immediately_marks_saved_example_inactive(catalog_flo
         assert repeated["created"] == 0
         entry = (await browser.get(f"/api/v1/experience/{wise['id']}")).json()
         assert not entry["source_current"] and not entry["training_eligible"]
+
+
+async def test_rejection_reason_survives_capture_and_zip_export(catalog_flow):
+    """Review → crop → JSONB-контракт → ZIP сохраняет объяснение и защищает CSV от формул."""
+    flow = catalog_flow
+    comment = "=Это резервный насос, значение корректно"
+    async with client(flow) as browser:
+        await browser.post(flow.endpoint + "/open")
+        for revision, finding, decision in (
+            (0, "vlm:1", "rejected"),
+            (1, "vlm:2", "accepted"),
+        ):
+            feedback = (
+                {"reason_category": "false_positive", "comment": comment}
+                if decision == "rejected"
+                else {}
+            )
+            response = await command(
+                browser,
+                flow,
+                revision,
+                action="decide",
+                finding_id=finding,
+                decision=decision,
+                **feedback,
+            )
+            assert response.status_code == 200, response.text
+        response = await command(browser, flow, 2, action="approve")
+        assert response.status_code == 200, response.text
+        row = (await listed(browser, tag="bad"))["items"][0]
+        assert row["source"]["reason_category"] == "false_positive"
+        assert row["source"]["comment"] == comment
+        assert row["training_eligible"]
+        exported = await browser.get("/api/v1/experience/export", params={"tag": "bad"})
+        assert exported.status_code == 200, exported.text
+        with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
+            manifest = json.loads(archive.read("manifest.json"))["examples"][0]
+            assert manifest["reason_category"] == "false_positive"
+            assert manifest["comment"] == comment
+            assert manifest["source"]["comment"] == comment
+            import csv
+
+            rows = list(
+                csv.DictReader(
+                    io.StringIO(archive.read("examples.csv").decode("utf-8-sig"))
+                )
+            )
+            assert rows[0]["reason_category"] == "false_positive"
+            assert rows[0]["comment"] == "'" + comment

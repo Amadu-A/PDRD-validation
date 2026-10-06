@@ -1,6 +1,6 @@
 # services/analysis-service/tests/integration/test_stage_batch_concurrency_http.py
 
-"""Integration tests bounded concurrent shared-vlm PDF stages."""
+"""Интеграционные тесты ограниченной параллельности PDF-этапов с общим VLM."""
 
 import asyncio
 import base64
@@ -133,7 +133,7 @@ class ConcurrentPageVisionModel:
 
 
 class RecordingProgressProbe:
-    """Fake durable cancellation probe."""
+    """Имитирует проверку отмены долговечного задания."""
 
     def __init__(
         self,
@@ -404,3 +404,43 @@ async def test_cancellation_stops_new_items_but_allows_inflight_calls_to_finish(
             _,
         ) in progress_probe.calls
     )
+
+
+async def test_two_hundred_page_stage_is_allowed_and_does_not_increase_concurrency() -> (
+    None
+):
+    """Предел 200 проходит настоящий HTTP-этап, сохраняя параллельность четырёх VLM-вызовов."""
+    model = ConcurrentPageVisionModel()
+    app = _build_app(
+        model=model, progress_probe=RecordingProgressProbe(), concurrency=4
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/v1/stages/understand-pages",
+            json=_request_payload(document_id=uuid4(), pages=200),
+        )
+    assert response.status_code == 200
+    assert [row["page_number"] for row in response.json()["items"]] == list(
+        range(1, 201)
+    )
+    assert sorted(model.page_calls) == list(range(1, 201))
+    assert model.max_active == 4
+
+
+async def test_over_limit_stage_is_rejected_before_any_vlm_call() -> None:
+    """Защита внутри Analysis Service не начинает дорогостоящие вызовы для 201 страницы."""
+    model = ConcurrentPageVisionModel()
+    app = _build_app(
+        model=model, progress_probe=RecordingProgressProbe(), concurrency=4
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/v1/stages/understand-pages",
+            json=_request_payload(document_id=uuid4(), pages=201),
+        )
+    assert response.status_code == 413
+    assert model.page_calls == []

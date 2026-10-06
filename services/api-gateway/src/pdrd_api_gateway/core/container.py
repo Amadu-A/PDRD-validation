@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/core/container.py
 
-"""Composition root микросервиса API Gateway."""
+"""Собирает зависимости микросервиса API Gateway."""
 
 from collections.abc import (
     Awaitable,
@@ -48,6 +48,9 @@ from pdrd_api_gateway.application.use_cases.get_analysis_visualization import (
 )
 from pdrd_api_gateway.application.use_cases.get_review_source import GetReviewSource
 from pdrd_api_gateway.application.use_cases.get_reviewed_pdf import GetReviewedPdf
+from pdrd_api_gateway.application.use_cases.list_analysis_history import (
+    ListAnalysisHistory,
+)
 from pdrd_api_gateway.application.use_cases.manage_experience import ManageExperience
 from pdrd_api_gateway.application.use_cases.manage_normative_catalog import (
     NormativeCatalogFacade,
@@ -90,6 +93,8 @@ from pdrd_api_gateway.infrastructure.experience import (
     ControlledExperienceContext,
     HttpExperienceService,
 )
+from pdrd_api_gateway.infrastructure.experience_authors import HttpExperienceAuthors
+from pdrd_api_gateway.infrastructure.identity_proxy import IdentityProxy
 from pdrd_api_gateway.infrastructure.knowledge.normative_catalog import (
     HttpNormativeCatalogReader,
 )
@@ -109,6 +114,7 @@ from pdrd_api_gateway.infrastructure.messaging.broker import (
     RabbitMqReadinessProbe,
     build_broker_url,
 )
+from pdrd_api_gateway.infrastructure.pdf_selection import HttpPdfSelectionValidator
 from pdrd_api_gateway.infrastructure.project_context_preflight import (
     HttpProjectContextPreflightCoordinator,
 )
@@ -139,7 +145,7 @@ ShutdownCallback = Callable[
 
 @dataclass(frozen=True, slots=True)
 class ApplicationContainer:
-    """Хранит runtime dependencies API Gateway."""
+    """Хранит зависимости работающего API Gateway."""
 
     settings: Settings
 
@@ -150,6 +156,7 @@ class ApplicationContainer:
     create_analysis_job: CreateAnalysisJob | None = None
 
     get_analysis_job: GetAnalysisJob | None = None
+    list_analysis_history: ListAnalysisHistory | None = None
 
     manage_review: ManageReview | None = None
     get_review_source: GetReviewSource | None = None
@@ -182,6 +189,8 @@ class ApplicationContainer:
 
     project_context_preflight: ProjectContextPreflightCoordinator | None = None
 
+    identity_proxy: IdentityProxy | None = None
+
     async def close(
         self,
     ) -> None:
@@ -190,7 +199,7 @@ class ApplicationContainer:
 
 
 def build_container() -> ApplicationContainer:
-    """Собирает production dependencies API Gateway."""
+    """Собирает рабочие зависимости API Gateway."""
     settings = get_settings()
 
     engine = build_async_engine(
@@ -305,6 +314,7 @@ def build_container() -> ApplicationContainer:
         artifact_store=artifact_store,
         create_analysis_job=create_analysis_job,
         resolve_normative_snapshot=(resolve_normative_snapshot),
+        pdf_selection=HttpPdfSelectionValidator(settings.document_service),
     )
 
     get_analysis_result = GetAnalysisResult(
@@ -375,11 +385,23 @@ def build_container() -> ApplicationContainer:
         manage_experience = ManageExperience(
             contexts=ControlledExperienceContext(settings.review.actor.strip()),
             access=ControlledExperienceAccess(
-                settings.review.actor.strip(), manage_review.access
+                ""
+                if settings.identity_proxy.authorization_enabled
+                else settings.review.actor.strip(),
+                manage_review.access,
             ),
             service=HttpExperienceService(
                 base_url=settings.review.base_url,
                 internal_key=settings.review.internal_key.get_secret_value(),
+            ),
+            author_profiles=(
+                HttpExperienceAuthors(
+                    base_url=settings.identity_proxy.user_service_url,
+                    internal_key=settings.identity_proxy.user_service_internal_key.get_secret_value(),
+                    timeout_seconds=settings.identity_proxy.timeout_seconds,
+                )
+                if settings.identity_proxy.authorization_enabled
+                else None
             ),
         )
         get_reviewed_pdf = GetReviewedPdf(
@@ -398,6 +420,18 @@ def build_container() -> ApplicationContainer:
         shutdown_callback=(_shutdown_database),
         create_analysis_job=(create_analysis_job),
         get_analysis_job=(get_analysis_job),
+        list_analysis_history=ListAnalysisHistory(
+            unit_of_work_factory=unit_of_work_factory,
+            artifacts=artifact_store,
+            sections=normative_catalog_manager,
+            reviews=HttpReviewService(
+                base_url=settings.review.base_url,
+                internal_key=settings.review.internal_key.get_secret_value(),
+                timeout_seconds=5,
+            )
+            if settings.review.enabled
+            else None,
+        ),
         manage_review=manage_review,
         get_review_source=get_review_source,
         get_reviewed_pdf=get_reviewed_pdf,
@@ -414,4 +448,9 @@ def build_container() -> ApplicationContainer:
         technical_assignment_content_reader=(technical_assignment_content_reader),
         technical_assignment_index_coordinator=(technical_assignment_index_coordinator),
         project_context_preflight=(project_context_preflight),
+        identity_proxy=(
+            IdentityProxy(settings.identity_proxy)
+            if settings.identity_proxy.enabled
+            else None
+        ),
     )

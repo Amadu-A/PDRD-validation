@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/application/ports/normative_catalog.py
 
-"""Application port чтения managed normative catalog."""
+"""Порт чтения управляемого нормативного каталога."""
 
 from dataclasses import dataclass
 from typing import Protocol
@@ -23,6 +23,7 @@ class NormativeSectionRecord:
 
     system_prompt: str
     name: str = ""
+    deleting: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,14 +37,14 @@ class NormativeDocumentRecord:
 
 
 class NormativeCatalogReader(Protocol):
-    """Контракт чтения normative catalog через Knowledge Service."""
+    """Контракт чтения нормативного каталога через Knowledge Service."""
 
     async def get_section(
         self,
         *,
         section_id: UUID,
     ) -> NormativeSectionRecord:
-        """Возвращает section и сохранённый system prompt."""
+        """Возвращает раздел и сохранённый системный промпт."""
         ...
 
     async def list_documents(

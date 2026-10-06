@@ -1037,3 +1037,21 @@
     min-height: 62vh;
   }
 }
+/* Ограниченные пользователи читают каталог, но не видят редакторы. */
+.page[data-can-write-normative="false"] [data-normative-section-create],
+.page[data-can-write-normative="false"] [data-normative-section-rename],
+.page[data-can-write-normative="false"] [data-normative-category-create],
+.page[data-can-write-normative="false"] [data-normative-upload-zone],
+.page[data-can-write-normative="false"] [data-normative-tree] .normative-sidebar__category-actions,
+.page[data-can-write-normative="false"] [data-normative-tree] .normative-sidebar__document-actions button:not([data-normative-delete]) {
+  display: none;
+}
+.page [data-user-packages-block][aria-disabled="true"] {
+  opacity: .55;
+}
+
+/* Удаление нормативных объектов требует отдельного серверного права. */
+.page[data-can-delete-normative="false"] [data-normative-section-delete],
+.page[data-can-delete-normative="false"] [data-normative-delete] {
+  display: none;
+}

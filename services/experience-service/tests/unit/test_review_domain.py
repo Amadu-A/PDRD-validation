@@ -1,6 +1,6 @@
 # services/experience-service/tests/unit/test_review_domain.py
 
-"""Business invariants for accepted PDF snapshots and Experience provenance."""
+"""Доменные правила принятого PDF и происхождения данных Experience."""
 
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -26,7 +26,7 @@ CALLOUT = Rectangle(500, 300, 750, 480)
 
 
 def opened() -> ReviewSession:
-    """Model two authoritative findings, one of which may be unlocated."""
+    """Создаёт два доверенных замечания, включая нелокализованное."""
     return ReviewSession.open(
         job_id=JOB,
         document_id=DOC,
@@ -56,10 +56,11 @@ def decide(
     finding_id: str,
     decision: Decision,
 ) -> ReviewSession:
-    """Apply one decision using current revision."""
+    """Применяет решение по текущей редакции."""
     return session.decide(
         finding_id=finding_id,
         decision=decision,
+        reason_category="false_positive" if decision is Decision.REJECTED else None,
         actor="engineer:1",
         at=NOW,
         expected_revision=session.revision,
@@ -70,7 +71,7 @@ def manual(
     session: ReviewSession,
     page: int = 1,
 ) -> ReviewSession:
-    """Add a Gold finding with real page geometry."""
+    """Добавляет Gold с реальной геометрией страницы."""
     return session.add_manual(
         finding_id=f"manual:{uuid4()}",
         page_number=page,
@@ -85,7 +86,7 @@ def manual(
 
 
 def test_authoritative_vlm_findings_start_pending_including_unlocated() -> None:
-    """A client cannot silently skip a finding that has no visual callout."""
+    """Клиент не может пропустить замечание без визуальной карточки."""
     session = opened()
 
     assert len(session.findings) == 2
@@ -102,7 +103,7 @@ def test_authoritative_vlm_findings_start_pending_including_unlocated() -> None:
 
 
 def test_explicit_approval_exports_only_accepted_findings() -> None:
-    """Rejected examples remain for training but never enter reviewed PDF."""
+    """Отклонённые примеры остаются для обучения и исключаются из итогового PDF."""
     session = decide(
         opened(),
         "vlm:1",
@@ -134,7 +135,7 @@ def test_explicit_approval_exports_only_accepted_findings() -> None:
 
 
 def test_edited_vlm_is_never_gold_and_edit_invalidates_approval() -> None:
-    """Edited source is immutable VLM provenance regardless of later decision."""
+    """Исправление сохраняет источник VLM при любом последующем решении."""
     session = decide(
         opened(),
         "vlm:1",
@@ -189,7 +190,7 @@ def test_edited_vlm_is_never_gold_and_edit_invalidates_approval() -> None:
 
 
 def test_manual_gold_keeps_tag_and_both_rectangles_in_approved_snapshot() -> None:
-    """Gold preserves provenance and page geometry through edit and approval."""
+    """Правка и утверждение сохраняют источник Gold и геометрию страницы."""
     session = manual(opened(), 2)
     gold = session.findings[-1]
 
@@ -233,7 +234,7 @@ def test_manual_gold_keeps_tag_and_both_rectangles_in_approved_snapshot() -> Non
 
 
 def test_manual_page_and_coordinates_must_match_verified_rendered_page() -> None:
-    """Never trust browser-supplied physical page or out-of-range geometry."""
+    """Отсекает неверные номера страниц и координаты из браузера."""
     session = opened()
 
     with pytest.raises(ReviewError, match="rendered"):
@@ -262,7 +263,7 @@ def test_manual_page_and_coordinates_must_match_verified_rendered_page() -> None
 
 
 def test_optimistic_revision_blocks_stale_mutation() -> None:
-    """A stale tab cannot overwrite decisions with an old revision."""
+    """Устаревшая вкладка не перезаписывает решения по старой редакции."""
     session = decide(
         opened(),
         "vlm:1",
@@ -273,6 +274,7 @@ def test_optimistic_revision_blocks_stale_mutation() -> None:
         session.decide(
             finding_id="vlm:2",
             decision=Decision.REJECTED,
+            reason_category="false_positive",
             actor="engineer:1",
             at=NOW,
             expected_revision=0,
@@ -289,7 +291,7 @@ def test_optimistic_revision_blocks_stale_mutation() -> None:
 
 
 def test_edit_reversion_resets_tag_to_original_with_reapproval_required() -> None:
-    """Correcting back to the original VLM wording is not Edited forever."""
+    """Возврат исходного текста VLM сбрасывает признак исправления."""
     session = opened().edit(
         finding_id="vlm:1",
         text="Ошибка VLM",
@@ -326,7 +328,7 @@ def test_edit_reversion_resets_tag_to_original_with_reapproval_required() -> Non
 
 
 def test_empty_report_requires_explicit_approval_even_without_findings() -> None:
-    """No findings is not implicit permission for final PDF export."""
+    """Пустой отчёт тоже требует явного утверждения для экспорта PDF."""
     session = ReviewSession.open(
         job_id=JOB,
         document_id=DOC,
@@ -351,7 +353,7 @@ def test_empty_report_requires_explicit_approval_even_without_findings() -> None
 
 
 def test_reject_unknown_identity_duplicate_sources_and_naive_audit_time() -> None:
-    """Fail closed for guessed IDs, duplicate originals and untrusted actor metadata."""
+    """Отсекает придуманные идентификаторы, дубликаты оригиналов и неверные данные аудита."""
     session = opened()
 
     with pytest.raises(ReviewError, match="Unknown"):

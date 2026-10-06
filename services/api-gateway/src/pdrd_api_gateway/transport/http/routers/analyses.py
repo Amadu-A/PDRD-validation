@@ -15,15 +15,22 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
+    Request,
     UploadFile,
     status,
 )
+from sqlalchemy.exc import SQLAlchemyError
 
 from pdrd_api_gateway.application.ports.normative_catalog import (
     NormativeCatalogReadError,
 )
 from pdrd_api_gateway.application.ports.normative_catalog_management import (
     NormativeCatalogUnavailableError,
+)
+from pdrd_api_gateway.application.ports.pdf_selection import (
+    InvalidPdfSelectionError,
+    PdfSelectionUnavailableError,
 )
 from pdrd_api_gateway.application.use_cases.get_analysis_job import (
     GetAnalysisJob,
@@ -62,6 +69,9 @@ from pdrd_api_gateway.domain.normative_snapshot import (
 )
 from pdrd_api_gateway.domain.technical_assignment import (
     InvalidTechnicalAssignmentSnapshotError,
+)
+from pdrd_api_gateway.domain.technical_assignment_access import (
+    TechnicalAssignmentCapability,
 )
 from pdrd_api_gateway.transport.http.dependencies import (
     get_container,
@@ -268,7 +278,7 @@ def parse_user_package_document_ids(
 def build_technical_assignment_response(
     snapshot: NormativeAnalysisSnapshot | None,
 ) -> TechnicalAssignmentSnapshotResponse | None:
-    """Преобразует domain snapshot ТЗ в HTTP schema."""
+    """Преобразует доменный снимок ТЗ в HTTP-схему."""
     if snapshot is None or snapshot.technical_assignment is None:
         return None
 
@@ -285,12 +295,43 @@ def build_technical_assignment_response(
     )
 
 
+@router.get("/history")
+async def list_analysis_history(
+    request: Request,
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+    limit: Annotated[int, Query(ge=1, le=20)] = 20,
+    offset: Annotated[int, Query(ge=0, le=100000)] = 0,
+) -> dict[str, object]:
+    """UUID владельца берётся только из проверенной сервером сессии."""
+    owner = getattr(request.state, "identity_user_id", None)
+    if not isinstance(owner, UUID):
+        raise HTTPException(
+            401,
+            "Войдите, чтобы открыть историю проверок.",
+            headers={"Cache-Control": "no-store"},
+        )
+    if container.list_analysis_history is None:
+        raise HTTPException(503, "История проверок временно недоступна.")
+    identity = getattr(request.state, "verified_identity", None)
+    try:
+        return await container.list_analysis_history.execute(
+            owner_user_id=owner,
+            limit=limit,
+            offset=offset,
+            can_download_reviewed_pdf="review.pdf.download"
+            in getattr(identity, "permissions", ()),
+        )
+    except (SQLAlchemyError, OSError, TimeoutError, ValueError) as error:
+        raise HTTPException(503, "История проверок временно недоступна.") from error
+
+
 @router.post(
     "",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=AnalysisAcceptedResponse,
 )
 async def create_analysis(
+    request: Request,
     container: Annotated[
         ApplicationContainer,
         Depends(
@@ -353,8 +394,58 @@ async def create_analysis(
         UUID | None,
         Form(),
     ] = None,
+    technical_assignment_access_token: Annotated[
+        str | None,
+        Form(),
+    ] = None,
 ) -> AnalysisAcceptedResponse:
     """Принимает документы и создаёт asynchronous analysis job."""
+    parsed_user_package_document_ids = (
+        parse_user_package_document_ids(
+            user_package_document_ids,
+        )
+        or None
+    )
+    authorizer = request.app.state.identity_authorizer
+    owner_user_id = None
+    if authorizer is not None:
+        owner_user_id = getattr(request.state, "identity_user_id", None)
+        if owner_user_id is not None and not isinstance(owner_user_id, UUID):
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Не удалось проверить владельца анализа.",
+            )
+        if request.cookies.get("pdrd_session") and owner_user_id is None:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED, "Требуется повторный вход."
+            )
+        if parsed_user_package_document_ids:
+            denial = await authorizer.require(request, ("user_documents.own.read",))
+            if denial is not None:
+                return denial
+        if technical_assignment_id is not None:
+            capability = TechnicalAssignmentCapability(
+                container.settings.identity_proxy.technical_assignment_access_key.get_secret_value()
+            )
+            if not capability.verify(
+                technical_assignment_id, technical_assignment_access_token
+            ):
+                raise HTTPException(
+                    status.HTTP_404_NOT_FOUND,
+                    "Подготовленное техническое задание не найдено.",
+                    headers={"Cache-Control": "no-store"},
+                )
+        elif technical_assignment_access_token is not None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Ключ ТЗ передан без подготовленного технического задания.",
+            )
+
+    if authorizer is not None and normative_section_id is not None:
+        denial = await authorizer.require_section(request, normative_section_id)
+        if denial is not None:
+            return denial
+
     max_upload_bytes = container.settings.storage.max_upload_bytes
 
     (
@@ -385,9 +476,12 @@ async def create_analysis(
         normative_document_ids,
     )
 
-    parsed_user_package_document_ids = parse_user_package_document_ids(
-        user_package_document_ids,
-    )
+    if authorizer is not None and normative_prompt_override_enabled:
+        denial = await authorizer.require(
+            request, ("working_prompt.use", "system_prompt.manage")
+        )
+        if denial is not None:
+            return denial
 
     use_case = require_submit_analysis(
         container,
@@ -411,6 +505,10 @@ async def create_analysis(
         "normative_prompt_override_enabled": (normative_prompt_override_enabled),
         "normative_prompt_override": (normative_prompt_override),
     }
+
+    if authorizer is not None:
+        execute_kwargs["owner_user_id"] = owner_user_id
+        execute_kwargs["guest_access"] = owner_user_id is None
 
     if technical_assignment_content is not None:
         execute_kwargs["technical_assignment_content"] = technical_assignment_content
@@ -442,6 +540,7 @@ async def create_analysis(
 
     except (
         InvalidAnalysisSubmissionError,
+        InvalidPdfSelectionError,
         InvalidNormativeSelectionError,
         InvalidNormativeAnalysisSnapshotError,
         InvalidTechnicalAssignmentSnapshotError,
@@ -462,6 +561,7 @@ async def create_analysis(
         ) from error
 
     except (
+        PdfSelectionUnavailableError,
         NormativeCatalogReadError,
         NormativeCatalogUnavailableError,
         NormativeSnapshotResolverNotConfiguredError,
@@ -485,7 +585,9 @@ async def create_analysis(
         job_id=job.id,
         document_id=job.document_id,
         status=job.status,
-        status_url=(f"/api/v1/analyses/{job.id}"),
+        status_url=f"/api/v1/analyses/{job.id}",
+        access_token=job.guest_access_token,
+        access_expires_at=job.guest_access_expires_at,
         normative_section_id=(snapshot.section_id if snapshot is not None else None),
         normative_document_ids=(
             list(

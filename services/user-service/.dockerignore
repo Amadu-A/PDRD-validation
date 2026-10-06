@@ -1,0 +1,12 @@
+# services/user-service/.dockerignore
+# В Docker context передаются только исходники, миграции и метаданные.
+
+.env
+.env.*
+.venv/
+.venv-dev/
+tests/
+**/__pycache__/
+**/.pytest_cache/
+**/*.pyc
+.codex-test-temp/

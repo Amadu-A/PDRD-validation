@@ -3,13 +3,25 @@
 /** Настоящий каталог серверного Review и явно обозначенная локальная демонстрация. */
 import { createExperienceApi } from "./api.js";
 import { mountExperienceCatalog } from "./server-page.js";
+import { hasPermission, isAdmin } from "../auth/access.js";
+import { refreshSession } from "../auth/session.js";
 
 const api = createExperienceApi();
 const notice = document.querySelector("[data-experience-notice]");
 try {
   const config = await api.config();
   if (typeof config?.enabled !== "boolean") throw new Error("Сервер не подтвердил режим каталога. Обновите страницу.");
-  if (config.enabled) await mountExperienceCatalog({ api });
+  if (config.enabled) {
+    const session = await refreshSession();
+    if (!hasPermission(session, "experience.catalog.read")) {
+      document.querySelector(".experience-page").dataset.accessDenied = "true";
+      if (notice) notice.textContent = "Каталог Experience доступен руководителю отдела и администратору PDRD.";
+    } else {
+      const canManage = isAdmin(session);
+      document.querySelectorAll?.("[data-experience-admin-only]").forEach((node) => { node.hidden = !canManage; });
+      await mountExperienceCatalog({ api, canCurate: canManage, canManageVersions: canManage });
+    }
+  }
   else {
     document.querySelectorAll?.("[data-experience-server-only]").forEach((node) => { node.hidden = true; });
     const save = document.querySelector("[data-experience-edit-save]");
@@ -20,5 +32,6 @@ try {
     await import("./demo-page.js");
   }
 } catch (error) {
+  document.querySelector(".experience-page").dataset.accessDenied = "true";
   if (notice) { notice.textContent = error.detail ?? error.message; notice.setAttribute("role", "alert"); }
 }

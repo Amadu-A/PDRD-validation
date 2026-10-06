@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/transport/http/routers/normative_catalog.py
 
-"""Public HTTP API managed normative catalog."""
+"""Публичное HTTP API нормативного каталога."""
 
 from typing import Annotated
 from uuid import UUID
@@ -11,10 +11,12 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     Response,
     UploadFile,
     status,
 )
+from fastapi.responses import JSONResponse
 
 from pdrd_api_gateway.application.ports.normative_catalog_management import (
     NormativeCatalogConflictError,
@@ -32,6 +34,9 @@ from pdrd_api_gateway.core.container import (
 from pdrd_api_gateway.transport.http.dependencies import (
     get_container,
 )
+from pdrd_api_gateway.transport.http.identity_authorization import (
+    SectionAccessUnavailable,
+)
 from pdrd_api_gateway.transport.http.schemas.normative_catalog import (
     CreateNormativeCategoryRequest,
     CreateNormativeSectionRequest,
@@ -45,10 +50,14 @@ from pdrd_api_gateway.transport.http.schemas.normative_catalog import (
     UpdateNormativeCategoryRequest,
     UpdateNormativeSectionRequest,
 )
+from pdrd_api_gateway.transport.http.section_access import (
+    enforce_normative_section_access,
+)
 
 router = APIRouter(
     prefix="/api/v1/normative",
     tags=["normative-catalog"],
+    dependencies=[Depends(enforce_normative_section_access)],
 )
 
 ContainerDependency = Annotated[
@@ -61,10 +70,24 @@ ContainerDependency = Annotated[
 _UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 
+def _visible_section(
+    section: NormativeSectionResponse, request: Request
+) -> NormativeSectionResponse:
+    """Оставляет системный промпт только администратору с серверным правом."""
+    if request.app.state.identity_authorizer is None:
+        return section
+    identity = getattr(request.state, "verified_identity", None)
+    if identity is not None and bool(
+        {"system_prompt.manage", "system_prompt.read"} & identity.permissions
+    ):
+        return section
+    return section.model_copy(update={"system_prompt": ""})
+
+
 def _require_facade(
     container: ApplicationContainer,
 ) -> NormativeCatalogFacade:
-    """Возвращает configured normative catalog facade."""
+    """Возвращает настроенный фасад нормативного каталога."""
     facade = container.normative_catalog
 
     if facade is None:
@@ -79,7 +102,7 @@ def _require_facade(
 def _translate_error(
     error: Exception,
 ) -> HTTPException:
-    """Преобразует application error в public HTTP status."""
+    """Преобразует прикладную ошибку в публичный HTTP-статус."""
     if isinstance(
         error,
         NormativeCatalogNotFoundError,
@@ -177,6 +200,7 @@ async def _read_upload(
     response_model=list[NormativeSectionResponse],
 )
 async def list_normative_sections(
+    http_request: Request,
     container: ContainerDependency,
 ) -> list[NormativeSectionResponse]:
     """Возвращает нормативные разделы."""
@@ -186,6 +210,21 @@ async def list_normative_sections(
 
     try:
         sections = await facade.list_sections()
+        authorizer = http_request.app.state.identity_authorizer
+        if authorizer is not None:
+            try:
+                allowed = await authorizer.allowed_sections(http_request)
+            except SectionAccessUnavailable as error:
+                raise HTTPException(
+                    503, "Проверка доступа к разделам недоступна"
+                ) from error
+            if allowed is not None:
+                sections = tuple(
+                    section for section in sections if section.section_id in allowed
+                )
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         raise _translate_error(
@@ -193,9 +232,7 @@ async def list_normative_sections(
         ) from error
 
     return [
-        NormativeSectionResponse.from_view(
-            section,
-        )
+        _visible_section(NormativeSectionResponse.from_view(section), http_request)
         for section in sections
     ]
 
@@ -207,9 +244,10 @@ async def list_normative_sections(
 )
 async def create_normative_section(
     request: CreateNormativeSectionRequest,
+    http_request: Request,
     container: ContainerDependency,
-) -> NormativeSectionResponse:
-    """Создаёт нормативный раздел."""
+) -> NormativeSectionResponse | JSONResponse:
+    """Создаёт раздел и выдаёт его действующим проектировщикам и руководителям."""
     facade = _require_facade(
         container,
     )
@@ -219,14 +257,22 @@ async def create_normative_section(
             name=request.name,
         )
 
+    except HTTPException:
+        raise
+
     except Exception as error:
         raise _translate_error(
             error,
         ) from error
 
-    return NormativeSectionResponse.from_view(
-        section,
-    )
+    authorizer = http_request.app.state.identity_authorizer
+    if authorizer is not None:
+        denial = await authorizer.distribute_created_section(
+            http_request, section.section_id
+        )
+        if denial is not None:
+            return denial
+    return _visible_section(NormativeSectionResponse.from_view(section), http_request)
 
 
 @router.get(
@@ -235,9 +281,10 @@ async def create_normative_section(
 )
 async def get_normative_section(
     section_id: UUID,
+    http_request: Request,
     container: ContainerDependency,
 ) -> NormativeSectionResponse:
-    """Возвращает section с system prompt."""
+    """Возвращает раздел с системным промптом."""
     facade = _require_facade(
         container,
     )
@@ -247,14 +294,15 @@ async def get_normative_section(
             section_id=section_id,
         )
 
+    except HTTPException:
+        raise
+
     except Exception as error:
         raise _translate_error(
             error,
         ) from error
 
-    return NormativeSectionResponse.from_view(
-        section,
-    )
+    return _visible_section(NormativeSectionResponse.from_view(section), http_request)
 
 
 @router.patch(
@@ -264,9 +312,10 @@ async def get_normative_section(
 async def update_normative_section(
     section_id: UUID,
     request: UpdateNormativeSectionRequest,
+    http_request: Request,
     container: ContainerDependency,
 ) -> NormativeSectionResponse:
-    """Переименовывает section или сохраняет system prompt."""
+    """Переименовывает раздел или сохраняет системный промпт."""
     facade = _require_facade(
         container,
     )
@@ -279,14 +328,15 @@ async def update_normative_section(
             ),
         )
 
+    except HTTPException:
+        raise
+
     except Exception as error:
         raise _translate_error(
             error,
         ) from error
 
-    return NormativeSectionResponse.from_view(
-        section,
-    )
+    return _visible_section(NormativeSectionResponse.from_view(section), http_request)
 
 
 @router.delete(
@@ -297,7 +347,7 @@ async def delete_normative_section(
     section_id: UUID,
     container: ContainerDependency,
 ) -> DeleteNormativeSectionResponse:
-    """Удаляет пустой section."""
+    """Повторяемо удаляет раздел и его документы из всех хранилищ."""
     facade = _require_facade(
         container,
     )
@@ -306,6 +356,9 @@ async def delete_normative_section(
         deleted_id = await facade.delete_section(
             section_id=section_id,
         )
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         raise _translate_error(
@@ -325,7 +378,7 @@ async def list_normative_categories(
     section_id: UUID,
     container: ContainerDependency,
 ) -> list[NormativeCategoryResponse]:
-    """Возвращает категории section."""
+    """Возвращает категории раздела."""
     facade = _require_facade(
         container,
     )
@@ -334,6 +387,9 @@ async def list_normative_categories(
         categories = await facade.list_categories(
             section_id=section_id,
         )
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         raise _translate_error(
@@ -358,7 +414,7 @@ async def create_normative_category(
     request: CreateNormativeCategoryRequest,
     container: ContainerDependency,
 ) -> NormativeCategoryResponse:
-    """Создаёт category."""
+    """Создаёт категорию."""
     facade = _require_facade(
         container,
     )
@@ -369,6 +425,9 @@ async def create_normative_category(
             name=request.name,
             parent_id=request.parent_id,
         )
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         raise _translate_error(
@@ -388,7 +447,7 @@ async def get_normative_category(
     category_id: UUID,
     container: ContainerDependency,
 ) -> NormativeCategoryResponse:
-    """Возвращает category."""
+    """Возвращает категорию."""
     facade = _require_facade(
         container,
     )
@@ -397,6 +456,9 @@ async def get_normative_category(
         category = await facade.get_category(
             category_id=category_id,
         )
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         raise _translate_error(
@@ -417,7 +479,7 @@ async def update_normative_category(
     request: UpdateNormativeCategoryRequest,
     container: ContainerDependency,
 ) -> NormativeCategoryResponse:
-    """Переименовывает или перемещает category."""
+    """Переименовывает или перемещает категорию."""
     facade = _require_facade(
         container,
     )
@@ -429,6 +491,9 @@ async def update_normative_category(
                 exclude_unset=True,
             ),
         )
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         raise _translate_error(
@@ -448,7 +513,7 @@ async def delete_normative_category(
     category_id: UUID,
     container: ContainerDependency,
 ) -> DeleteNormativeCategoryResponse:
-    """Удаляет category."""
+    """Удаляет категорию."""
     facade = _require_facade(
         container,
     )
@@ -457,6 +522,9 @@ async def delete_normative_category(
         deleted_id = await facade.delete_category(
             category_id=category_id,
         )
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         raise _translate_error(
@@ -476,7 +544,7 @@ async def list_normative_documents(
     section_id: UUID,
     container: ContainerDependency,
 ) -> list[NormativeDocumentResponse]:
-    """Возвращает документы section."""
+    """Возвращает документы раздела."""
     facade = _require_facade(
         container,
     )
@@ -485,6 +553,9 @@ async def list_normative_documents(
         documents = await facade.list_documents(
             section_id=section_id,
         )
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         raise _translate_error(
@@ -516,7 +587,7 @@ async def upload_normative_document(
         Form(),
     ] = None,
 ) -> NormativeDocumentResponse:
-    """Загружает normative PDF через Gateway."""
+    """Загружает нормативный PDF через Gateway."""
     facade = _require_facade(
         container,
     )
@@ -559,7 +630,7 @@ async def get_normative_document(
     document_id: UUID,
     container: ContainerDependency,
 ) -> NormativeDocumentResponse:
-    """Возвращает document metadata."""
+    """Возвращает документ метаданные."""
     facade = _require_facade(
         container,
     )
@@ -568,6 +639,9 @@ async def get_normative_document(
         document = await facade.get_document(
             document_id=document_id,
         )
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         raise _translate_error(
@@ -588,7 +662,7 @@ async def move_normative_document(
     request: MoveNormativeDocumentRequest,
     container: ContainerDependency,
 ) -> NormativeDocumentResponse:
-    """Перемещает document."""
+    """Перемещает документ."""
     facade = _require_facade(
         container,
     )
@@ -598,6 +672,9 @@ async def move_normative_document(
             document_id=document_id,
             category_id=request.category_id,
         )
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         raise _translate_error(
@@ -617,7 +694,7 @@ async def delete_normative_document(
     document_id: UUID,
     container: ContainerDependency,
 ) -> DeleteNormativeDocumentResponse:
-    """Удаляет document по managed lifecycle."""
+    """Удаляет документ согласно жизненному циклу каталога."""
     facade = _require_facade(
         container,
     )
@@ -626,6 +703,9 @@ async def delete_normative_document(
         deleted_id = await facade.delete_document(
             document_id=document_id,
         )
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         raise _translate_error(
@@ -646,7 +726,7 @@ async def queue_normative_document(
     document_id: UUID,
     container: ContainerDependency,
 ) -> NormativeDocumentResponse:
-    """Запускает durable indexing document."""
+    """Запускает индексацию документа через устойчивую очередь."""
     facade = _require_facade(
         container,
     )
@@ -655,6 +735,9 @@ async def queue_normative_document(
         document = await facade.queue_document(
             document_id=document_id,
         )
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         raise _translate_error(
@@ -673,7 +756,7 @@ async def get_normative_document_content(
     document_id: UUID,
     container: ContainerDependency,
 ) -> Response:
-    """Возвращает normative PDF inline."""
+    """Возвращает нормативный PDF для просмотра в браузере."""
     facade = _require_facade(
         container,
     )
@@ -682,6 +765,9 @@ async def get_normative_document_content(
         result = await facade.get_document_content(
             document_id=document_id,
         )
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         raise _translate_error(

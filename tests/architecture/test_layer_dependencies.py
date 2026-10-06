@@ -30,6 +30,14 @@ BACKEND_PACKAGES = (
         "analysis-service",
         "pdrd_analysis_service",
     ),
+    (
+        "user-service",
+        "pdrd_user_service",
+    ),
+    (
+        "auth-service",
+        "pdrd_auth_service",
+    ),
 )
 
 FRAMEWORK_IMPORTS = (
@@ -39,6 +47,7 @@ FRAMEWORK_IMPORTS = (
     "fastapi",
     "fitz",
     "httpx",
+    "ldap3",
     "PIL",
     "pydantic",
     "sqlalchemy",

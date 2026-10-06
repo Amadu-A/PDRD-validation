@@ -17,7 +17,7 @@ from uuid import UUID
 
 
 class NormativeCatalogError(ValueError):
-    """Нарушение бизнес-инварианта managed catalog."""
+    """Нарушение бизнес-инварианта управляемого каталога."""
 
 
 class CatalogArea(StrEnum):
@@ -87,6 +87,16 @@ _SHA256_PATTERN = re.compile(
 )
 
 
+def _validate_catalog_owner(area: CatalogArea, owner_user_id: UUID | None) -> None:
+    """Не допускает владельца у общего норматива или невалидный UUID личного пакета."""
+    if owner_user_id is not None and (
+        not isinstance(owner_user_id, UUID) or area is not CatalogArea.USER_PACKAGE
+    ):
+        raise NormativeCatalogError(
+            "Владелец допустим только для личного пакета и должен быть UUID."
+        )
+
+
 def _validate_non_blank(
     value: str,
     *,
@@ -108,7 +118,7 @@ def _validate_non_blank(
 def _validate_prompt(
     value: str,
 ) -> None:
-    """Проверяет сохраняемый system prompt раздела."""
+    """Проверяет сохраняемый системный промпт раздела."""
     if not isinstance(
         value,
         str,
@@ -128,7 +138,7 @@ def _validate_aware_datetime(
     *,
     field_name: str,
 ) -> None:
-    """Требует timezone-aware datetime."""
+    """Требует дату и время с часовым поясом."""
     if value.tzinfo is None or value.utcoffset() is None:
         raise NormativeCatalogError(
             f"{field_name} должен содержать timezone.",
@@ -140,7 +150,7 @@ def _validate_entity_timestamps(
     created_at: datetime,
     updated_at: datetime,
 ) -> None:
-    """Проверяет временные границы domain entity."""
+    """Проверяет временные границы доменной сущности."""
     _validate_aware_datetime(
         created_at,
         field_name="created_at",
@@ -162,7 +172,7 @@ def _validate_change_time(
     changed_at: datetime,
     current_updated_at: datetime,
 ) -> None:
-    """Не позволяет domain entity перемещаться назад во времени."""
+    """Не позволяет доменной сущности перемещаться назад во времени."""
     _validate_aware_datetime(
         changed_at,
         field_name="changed_at",
@@ -176,7 +186,7 @@ def _validate_change_time(
 
 @dataclass(frozen=True, slots=True)
 class NormativeSection:
-    """Раздел managed catalog со своим системным prompt."""
+    """Раздел управляемого каталога со своим системным промптом."""
 
     section_id: UUID
 
@@ -187,6 +197,8 @@ class NormativeSection:
     created_at: datetime
 
     updated_at: datetime
+
+    deleting: bool = False
 
     def __post_init__(
         self,
@@ -230,7 +242,7 @@ class NormativeSection:
         system_prompt: str,
         changed_at: datetime,
     ) -> "NormativeSection":
-        """Возвращает раздел с новым сохранённым system prompt."""
+        """Возвращает раздел с новым сохранённым системный промпт."""
         _validate_change_time(
             changed_at=changed_at,
             current_updated_at=self.updated_at,
@@ -245,7 +257,7 @@ class NormativeSection:
 
 @dataclass(frozen=True, slots=True)
 class NormativeCategory:
-    """Категория документов внутри раздела и одной catalog area."""
+    """Категория документов внутри раздела и одной области каталога."""
 
     category_id: UUID
 
@@ -261,10 +273,13 @@ class NormativeCategory:
 
     area: CatalogArea = CatalogArea.NORMATIVE
 
+    owner_user_id: UUID | None = None
+
     def __post_init__(
         self,
     ) -> None:
         """Проверяет инварианты категории."""
+        _validate_catalog_owner(self.area, self.owner_user_id)
         _validate_non_blank(
             self.name,
             field_name="Название категории",
@@ -304,7 +319,7 @@ class NormativeCategory:
         parent_id: UUID | None,
         changed_at: datetime,
     ) -> "NormativeCategory":
-        """Возвращает категорию с новым parent category."""
+        """Возвращает категорию с новым родительской категорией."""
         _validate_change_time(
             changed_at=changed_at,
             current_updated_at=self.updated_at,
@@ -319,7 +334,7 @@ class NormativeCategory:
 
 @dataclass(frozen=True, slots=True)
 class NormativeDocument:
-    """Метаданные managed PDF/DOC/DOCX документа."""
+    """Метаданные документа PDF/DOC/DOCX."""
 
     document_id: UUID
 
@@ -349,10 +364,13 @@ class NormativeDocument:
 
     area: CatalogArea = CatalogArea.NORMATIVE
 
+    owner_user_id: UUID | None = None
+
     def __post_init__(
         self,
     ) -> None:
         """Проверяет инварианты managed документа."""
+        _validate_catalog_owner(self.area, self.owner_user_id)
         _validate_non_blank(
             self.original_name,
             field_name="Имя документа",
@@ -419,7 +437,7 @@ class NormativeDocument:
         changed_at: datetime,
         error: str | None = None,
     ) -> "NormativeDocument":
-        """Переводит документ в допустимое состояние indexing lifecycle."""
+        """Переводит документ в допустимое состояние жизненного цикла индексации."""
         _validate_change_time(
             changed_at=changed_at,
             current_updated_at=self.updated_at,
@@ -467,7 +485,7 @@ class NormativeDocument:
     def _validate_index_state(
         self,
     ) -> None:
-        """Проверяет согласованность status, error и indexed timestamp."""
+        """Проверяет согласованность статуса, ошибки и времени индексации."""
         if self.index_status is IndexingStatus.FAILED:
             if self.index_error is None:
                 raise NormativeCatalogError(

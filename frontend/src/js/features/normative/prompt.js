@@ -1,8 +1,11 @@
 // frontend/src/js/features/normative/prompt.js
 
 /**
- * Working/system prompt editor normative section.
+ * Редактирует рабочий промпт анализа отдельно от сохраняемого системного промпта.
  */
+
+import { currentSession } from "../auth/session.js";
+import { hasPermission } from "../auth/access.js";
 
 import {
   requireElementWithin,
@@ -106,13 +109,16 @@ export function createNormativePromptEditor(
   ) {
     textarea.disabled = disabled;
 
-    saveButton.disabled = disabled;
+    const canManage = hasPermission(currentSession(), "system_prompt.manage");
+    saveButton.disabled = disabled || !canManage;
+    saveButton.hidden = !canManage;
 
     restoreButton.disabled = disabled;
 
     dialogTextarea.disabled = disabled;
 
-    dialogSaveButton.disabled = disabled;
+    dialogSaveButton.disabled = disabled || !canManage;
+    dialogSaveButton.hidden = !canManage;
 
     dialogRestoreButton.disabled = disabled;
   }
@@ -433,6 +439,7 @@ export function createNormativePromptEditor(
 
 
   async function saveSystemPrompt() {
+    if (!hasPermission(currentSession(), "system_prompt.manage")) return;
     if (
       !state.sectionId
       || state.readySectionId !== state.sectionId
@@ -674,6 +681,17 @@ export function createNormativePromptEditor(
 
   return {
     getOverride,
+    reset: () => {
+      state.requestToken += 1;
+      state.sectionId = null;
+      state.readySectionId = null;
+      state.workingBySection.clear();
+      state.systemBySection.clear();
+      state.dirtySections.clear();
+      syncPromptValues("");
+      setDisabled(true);
+      closeDialog();
+    },
 
     setSection: async (
       sectionId,

@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/application/ports/user_package_catalog.py
 
-"""Application port управления пользовательскими пакетами."""
+"""Порт управления пользовательскими пакетами."""
 
 from collections.abc import (
     Mapping,
@@ -16,7 +16,11 @@ from pdrd_api_gateway.application.ports.normative_catalog_management import (
 
 
 class UserPackageCatalogManager(Protocol):
-    """Контракт управления user-package областью managed catalog."""
+    """Контракт управления личными пакетами каталога."""
+
+    def for_owner(self, owner_user_id: UUID) -> "UserPackageCatalogManager":
+        """Создаёт изолированный от других запросов каталог указанного владельца."""
+        ...
 
     async def list_categories(
         self,
@@ -75,7 +79,7 @@ class UserPackageCatalogManager(Protocol):
         NormativeDocumentView,
         ...,
     ]:
-        """Возвращает user-package documents раздела."""
+        """Возвращает документ личного пакетаs раздела."""
         ...
 
     async def upload_document(
@@ -87,7 +91,7 @@ class UserPackageCatalogManager(Protocol):
         content: bytes,
         content_type: str,
     ) -> NormativeDocumentView:
-        """Загружает PDF/DOC/DOCX в user-package area."""
+        """Загружает PDF/DOC/DOCX в область личных пакетов."""
         ...
 
     async def get_document(
@@ -95,7 +99,7 @@ class UserPackageCatalogManager(Protocol):
         *,
         document_id: UUID,
     ) -> NormativeDocumentView:
-        """Возвращает package document."""
+        """Возвращает документ личного пакета."""
         ...
 
     async def move_document(
@@ -104,7 +108,7 @@ class UserPackageCatalogManager(Protocol):
         document_id: UUID,
         category_id: UUID | None,
     ) -> NormativeDocumentView:
-        """Перемещает package document."""
+        """Перемещает документ личного пакета."""
         ...
 
     async def delete_document(
@@ -112,7 +116,7 @@ class UserPackageCatalogManager(Protocol):
         *,
         document_id: UUID,
     ) -> UUID:
-        """Удаляет package document."""
+        """Удаляет документ личного пакета."""
         ...
 
     async def queue_document(
@@ -120,7 +124,7 @@ class UserPackageCatalogManager(Protocol):
         *,
         document_id: UUID,
     ) -> NormativeDocumentView:
-        """Ставит package document в indexing queue."""
+        """Ставит документ личного пакета в очередь индексации."""
         ...
 
     async def get_document_content(
@@ -128,5 +132,5 @@ class UserPackageCatalogManager(Protocol):
         *,
         document_id: UUID,
     ) -> NormativeDocumentContent:
-        """Возвращает browser-viewable document content."""
+        """Возвращает содержимое документа для просмотра в браузере."""
         ...

@@ -1,6 +1,6 @@
 # services/document-service/src/pdrd_document_service/transport/http/routers/pdf.py
 
-"""Internal HTTP API PDF extraction."""
+"""Внутренний HTTP API проверки выбора и извлечения PDF-страниц."""
 
 import base64
 from typing import Annotated
@@ -228,3 +228,28 @@ async def extract_pdf(
             )
         ),
     )
+
+
+@router.post("/inspect")
+async def inspect_pdf(
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+    file: Annotated[UploadFile, File(...)],
+    pages: Annotated[str | None, Form()] = None,
+) -> dict[str, object]:
+    """Возвращает проверенный выбор до запуска очереди анализа, без рендеринга."""
+    try:
+        content = await file.read(container.settings.pdf.max_upload_bytes + 1)
+        selection = container.extract_pdf.inspect(content=content, page_spec=pages)
+    except PdfTooLargeError as error:
+        raise HTTPException(413, str(error)) from error
+    except InvalidPageSelectionError as error:
+        raise HTTPException(422, str(error)) from error
+    except (EmptyPdfError, PdfProcessingError) as error:
+        raise HTTPException(400, str(error)) from error
+    finally:
+        await file.close()
+    return {
+        "total_pages": selection.total_pages,
+        "selected_pages": list(selection.selected_pages),
+        "max_analysis_pages": container.settings.pdf.max_analysis_pages,
+    }

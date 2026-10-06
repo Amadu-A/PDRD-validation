@@ -17,6 +17,8 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
+from pdrd_api_gateway.core.identity_proxy_settings import IdentityProxySettings
+
 EnvironmentName = Literal[
     "local",
     "dev",
@@ -139,7 +141,7 @@ class BrokerSettings(BaseModel):
 
 
 class OutboxSettings(BaseModel):
-    """Transactional outbox dispatcher."""
+    """Публикация транзакционного журнала исходящих событий."""
 
     poll_interval_seconds: float = Field(
         default=1.0,
@@ -252,8 +254,16 @@ class AnalysisLifecycleSettings(BaseModel):
         return self
 
 
+class AnalysisRetentionSettings(BaseModel):
+    """Периодическая очистка по фиксированным срокам 30/7 дней."""
+
+    internal_key: SecretStr = SecretStr("")
+    interval_seconds: int = Field(default=3600, ge=60, le=86400)
+    batch_size: int = Field(default=100, ge=1, le=1000)
+
+
 class StorageSettings(BaseModel):
-    """Temporary analysis storage."""
+    """Файловое хранилище результатов и исходников анализа."""
 
     root_path: str = "/data/analyses"
 
@@ -303,7 +313,7 @@ class TechnicalAssignmentSettings(
 
 
 class OrchestrationSettings(BaseModel):
-    """Published PDRD n8n workflows."""
+    """Настройки опубликованных сценариев PDRD в n8n."""
 
     base_url: str = "http://n8n:5678"
 
@@ -327,7 +337,7 @@ class OrchestrationSettings(BaseModel):
 
 
 class KnowledgeServiceSettings(BaseModel):
-    """Internal API Knowledge Service."""
+    """Подключение к внутреннему API Knowledge Service."""
 
     base_url: str = "http://pdrd-knowledge-service:8401"
 
@@ -353,12 +363,12 @@ class KnowledgeServiceSettings(BaseModel):
     def max_upload_bytes(
         self,
     ) -> int:
-        """Gateway limit managed upload."""
+        """Ограничение размера загрузки управляемых документов в Gateway."""
         return self.max_upload_mb * 1024 * 1024
 
 
 class ProjectContextCleanupSettings(BaseModel):
-    """Best-effort Project Context cleanup."""
+    """Очистка временного контекста проекта с обработкой отказов."""
 
     base_url: str = "http://pdrd-knowledge-service:8401"
 
@@ -463,7 +473,7 @@ class ReviewSettings(BaseModel):
 
 
 class Settings(BaseSettings):
-    """Runtime settings API Gateway."""
+    """Настройки работающего API Gateway."""
 
     model_config = SettingsConfigDict(
         env_file=(
@@ -508,6 +518,10 @@ class Settings(BaseSettings):
         default_factory=AnalysisLifecycleSettings,
     )
 
+    retention: AnalysisRetentionSettings = Field(
+        default_factory=AnalysisRetentionSettings
+    )
+
     storage: StorageSettings = Field(
         default_factory=StorageSettings,
     )
@@ -542,10 +556,16 @@ class Settings(BaseSettings):
 
     review: ReviewSettings = Field(default_factory=ReviewSettings)
 
+    identity_proxy: IdentityProxySettings = Field(default_factory=IdentityProxySettings)
+
     @model_validator(mode="after")
     def check_review_environment(self) -> "Settings":
         """Не позволяет использовать временный контекст вместо production-авторизации."""
-        if self.environment == "prod" and self.review.enabled:
+        if (
+            self.environment == "prod"
+            and self.review.enabled
+            and not self.identity_proxy.authorization_enabled
+        ):
             raise ValueError(
                 "Закрытый режим Review не заменяет авторизацию production."
             )

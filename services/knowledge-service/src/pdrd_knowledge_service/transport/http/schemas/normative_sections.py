@@ -90,23 +90,26 @@ class NormativeSectionResponse(BaseModel):
 
     updated_at: datetime
 
+    deleting: bool = False
+
     @classmethod
     def from_domain(
         cls,
         section: NormativeSection,
     ) -> "NormativeSectionResponse":
-        """Создаёт transport response из Domain entity."""
+        """Создаёт HTTP-ответ из доменного объекта."""
         return cls(
             section_id=section.section_id,
             name=section.name,
             system_prompt=section.system_prompt,
             created_at=section.created_at,
             updated_at=section.updated_at,
+            deleting=section.deleting,
         )
 
 
 class DeleteNormativeSectionResponse(BaseModel):
-    """Результат удаления пустого раздела."""
+    """Результат каскадного удаления раздела."""
 
     model_config = ConfigDict(
         frozen=True,

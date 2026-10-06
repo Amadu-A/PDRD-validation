@@ -1,6 +1,6 @@
 # tests/architecture/test_large_document_resilience.py
 
-"""Architecture guards large-document resilience with shared vLLM."""
+"""Архитектурные проверки устойчивости больших документов с общим vLLM."""
 
 import json
 from pathlib import Path
@@ -279,7 +279,7 @@ def test_one_hour_runtime_hierarchy_is_committed() -> None:
 
     assert "ANALYSIS_SERVICE_VLM__REQUEST_TIMEOUT_SECONDS=600" in source
 
-    assert "ANALYSIS_SERVICE_PIPELINE__MAX_STAGE_PAGES=50" in source
+    assert "ANALYSIS_SERVICE_PIPELINE__MAX_STAGE_PAGES=200" in source
 
     assert "ANALYSIS_SERVICE_PIPELINE__VLM_STAGE_CONCURRENCY=4" in source
 

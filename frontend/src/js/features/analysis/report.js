@@ -16,6 +16,7 @@ import {
 import {
   appendAnalysisVisualization,
 } from "./visualization.js";
+import { openTechnicalAssignmentCitation } from "../technical_assignment/citation.js";
 
 
 const CATEGORY_LABELS = {
@@ -339,7 +340,7 @@ function managedCitationUrl(
 }
 
 
-function technicalAssignmentCitationUrl(
+function technicalAssignmentCitationTarget(
   source,
 ) {
   const technicalAssignmentId = (
@@ -360,11 +361,7 @@ function technicalAssignmentCitationUrl(
     return null;
   }
 
-  return (
-    "/api/v1/normative/technical-assignments/"
-    + `${encodeURIComponent(technicalAssignmentId)}`
-    + `/content#page=${page}`
-  );
+  return { id: technicalAssignmentId, page };
 }
 
 
@@ -471,11 +468,11 @@ function createTechnicalAssignmentCitation(
       : `${fileName}, стр. ${page}`
   );
 
-  const url = technicalAssignmentCitationUrl(
+  const target = technicalAssignmentCitationTarget(
     source,
   );
 
-  if (!url) {
+  if (!target) {
     return createElement(
       "span",
       "analysis-result__source-text",
@@ -489,9 +486,16 @@ function createTechnicalAssignmentCitation(
     label,
   );
 
-  link.href = url;
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
+  link.href = "#";
+  link.addEventListener("click", async (event) => {
+    event.preventDefault();
+    try {
+      await openTechnicalAssignmentCitation(target.id, target.page);
+    } catch (error) {
+      link.textContent = `${label} · не удалось открыть ТЗ`;
+      link.title = error.detail ?? error.message ?? "Не удалось открыть ТЗ.";
+    }
+  });
 
   link.dataset.technicalAssignmentCitation = "";
   link.dataset.technicalAssignmentId = (

@@ -4,6 +4,8 @@
 
 from pathlib import Path
 
+import yaml
+
 ROOT = (
     Path(
         __file__,
@@ -16,12 +18,28 @@ UP_SCRIPT = ROOT / "scripts" / "up.sh"
 
 CHECK_STACK_SCRIPT = ROOT / "scripts" / "check-stack.sh"
 
+STACK_PROFILES_HELPER = ROOT / "scripts" / "lib" / "stack-profiles.sh"
+
+SHARED_INFRASTRUCTURE_HELPER = ROOT / "scripts" / "lib" / "shared-infrastructure.sh"
+
 EMBEDDING_MIGRATION_SCRIPT = ROOT / "scripts" / "migrate-embedding-indexes.sh"
+
+USER_TEST_COMPOSE = ROOT / "ops" / "compose.user-test.yaml"
 
 
 def test_one_command_startup_script_exists() -> None:
     """Repository содержит единый startup entrypoint."""
     assert UP_SCRIPT.is_file()
+
+
+def test_operational_scripts_load_baseline_before_private_overrides() -> None:
+    """Команды запуска используют общий baseline и затем sparse private override."""
+    for path in (UP_SCRIPT, CHECK_STACK_SCRIPT, EMBEDDING_MIGRATION_SCRIPT):
+        source = path.read_text(encoding="utf-8")
+        baseline = source.index('source ".env.example"')
+        private_override = source.index('source ".env"')
+
+        assert baseline < private_override
 
 
 def test_embedding_cutover_script_exists() -> None:
@@ -67,7 +85,7 @@ def test_startup_knows_real_shared_repository_locations() -> None:
 
 
 def test_startup_runs_shared_bootstrap_and_database_migrations() -> None:
-    """One-command startup поднимает shared stack и применяет migrations."""
+    """One-command startup поднимает shared stack и применяет core migrations."""
     source = UP_SCRIPT.read_text(
         encoding="utf-8",
     )
@@ -86,6 +104,162 @@ def test_startup_runs_shared_bootstrap_and_database_migrations() -> None:
     assert "knowledge-service" in source
 
     assert "bash scripts/check-stack.sh" in source
+
+
+def test_optional_experience_profiles_use_the_one_command_startup() -> None:
+    """Review и индексатор подключаются только при явном выборе Compose profiles."""
+    startup = UP_SCRIPT.read_text(encoding="utf-8")
+    stack_check = CHECK_STACK_SCRIPT.read_text(encoding="utf-8")
+    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+
+    assert "experience-migrate" in compose
+    assert "service_completed_successfully" in compose
+    assert "docker compose up -d --remove-orphans" in startup
+    helper = STACK_PROFILES_HELPER.read_text(encoding="utf-8")
+    assert "COMPOSE_PROFILES" in startup and "COMPOSE_PROFILES" in helper
+    assert 'profile_enabled "experience-index"' in startup
+    assert "PDRD_STARTUP_TIMEOUT_SECONDS:-1200" in startup
+    assert "COMPOSE_PROFILES=experience-index требует также review" in startup
+
+    review_checks = stack_check.split("if (( review_active )); then", 1)[1].split(
+        "\nfi", 1
+    )[0]
+    assert 'check_service_state "experience-service" "review"' in review_checks
+    assert (
+        'check_migrations_current "experience-service" "review" "Experience Service"'
+        in review_checks
+    )
+    assert 'check_service_state "review-frontend" "review"' in review_checks
+    index_checks = stack_check.split("if (( experience_index_active )); then", 1)[
+        1
+    ].split("\nfi", 1)[0]
+    assert 'check_service_state "experience-indexer" "experience-index"' in index_checks
+    assert '"Review frontend -> API Gateway proxy"' in stack_check
+    assert 'ok "Experience Service ready (internal)"' in stack_check
+    assert "docker compose --profile review ps --all --quiet review-frontend" in startup
+    assert "    docker compose --profile review up" in startup
+
+
+def test_identity_profile_runs_private_user_service_after_its_migrations() -> None:
+    """User Service запускается явно, после миграции и без публикации HTTP-порта."""
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    services = compose["services"]
+    migrator = services["user-migrate"]
+    user_service = services["user-service"]
+
+    assert migrator["profiles"] == ["identity"]
+    assert user_service["profiles"] == ["identity"]
+    assert migrator["build"]["context"] == "./services/user-service"
+    assert user_service["build"]["context"] == "./services/user-service"
+    assert migrator["command"] == [
+        "python",
+        "-m",
+        "alembic",
+        "-c",
+        "alembic.ini",
+        "upgrade",
+        "head",
+    ]
+    assert migrator["depends_on"]["postgres"]["condition"] == "service_healthy"
+    assert (
+        user_service["depends_on"]["user-migrate"]["condition"]
+        == "service_completed_successfully"
+    )
+    assert "ports" not in migrator and "ports" not in user_service
+    assert "env_file" not in migrator
+    assert migrator["networks"] == ["app-net"]
+    assert user_service["networks"] == ["app-net"]
+    assert user_service["environment"]["USER_SERVICE_ENABLED"] == "true"
+    assert "USER_SERVICE_INTERNAL_KEY" not in migrator["environment"]
+    assert (
+        user_service["environment"]["USER_SERVICE_INTERNAL_KEY"]
+        == "${USER_SERVICE_INTERNAL_KEY:-}"
+    )
+    assert "USER_SERVICE_DATABASE__PASSWORD" in user_service["environment"]
+    assert "/health/ready" in " ".join(user_service["healthcheck"]["test"])
+
+
+def test_identity_profile_is_checked_by_one_command_scripts() -> None:
+    """Запуск требует секрет и проверяет миграции и внутреннюю готовность сервиса."""
+    startup = UP_SCRIPT.read_text(encoding="utf-8")
+    stack_check = CHECK_STACK_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'if profile_enabled "identity"; then' in startup
+    assert 'validate_secret "USER_SERVICE_INTERNAL_KEY"' in startup
+    assert "${#USER_SERVICE_INTERNAL_KEY} < 32" in startup
+    assert "log_services+=(user-migrate user-service)" in startup
+    assert "--profile identity" not in startup
+    identity_checks = stack_check.split("if (( identity_active )); then", 1)[1].split(
+        "\nfi", 1
+    )[0]
+    assert 'check_service_state "user-service" "identity"' in identity_checks
+    assert (
+        'check_migrations_current "user-service" "identity" "User Service"'
+        in identity_checks
+    )
+    assert "User Service ready (internal)" in stack_check
+    assert "docker compose --profile identity exec" in stack_check
+
+
+def test_background_gateway_processes_disable_browser_identity_proxy() -> None:
+    """Worker/outbox не получают browser identity boundary и его служебные секреты."""
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    services = compose["services"]
+
+    for service_name in (
+        "api-gateway-outbox",
+        "api-gateway-worker",
+        "api-gateway-tests",
+    ):
+        environment = services[service_name]["environment"]
+        assert environment["API_GATEWAY_IDENTITY_PROXY__ENABLED"] == "false"
+        assert (
+            environment["API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED"] == "false"
+        )
+
+
+def test_stack_check_reports_running_optional_services_without_profile_flag() -> None:
+    """Проверка замечает уже запущенные Review и Identity контейнеры."""
+    stack_check = CHECK_STACK_SCRIPT.read_text(encoding="utf-8")
+    helper = STACK_PROFILES_HELPER.read_text(encoding="utf-8")
+
+    assert 'source "${REPO_DIR}/scripts/lib/stack-profiles.sh"' in stack_check
+    assert 'optional_profile_active "review"' in stack_check
+    assert 'optional_profile_active "identity"' in stack_check
+    assert 'optional_profile_active "experience-index"' in stack_check
+    assert "docker compose --profile review exec" in stack_check
+    assert "docker compose --profile identity exec" in stack_check
+    assert "docker compose --profile" in helper
+    assert "ps \\" in helper
+    assert "--all --quiet" in helper
+    assert "[SKIP] identity" in stack_check
+
+
+def test_user_database_runner_is_isolated_from_project_state() -> None:
+    """Интеграционные проверки используют временную БД и отдельную сеть."""
+    compose = yaml.safe_load(USER_TEST_COMPOSE.read_text(encoding="utf-8"))
+    services = compose["services"]
+    database = services["user-test-postgres"]
+    runner = services["user-test-runner"]
+
+    assert compose["name"] == "pdrd-user-service-test"
+    assert set(services) == {"user-test-postgres", "user-test-runner"}
+    assert compose["networks"]["user-test-only"]["internal"] is True
+    assert "/var/lib/postgresql/data" in database["tmpfs"]
+    assert "volumes" not in compose
+    for service in services.values():
+        assert "ports" not in service
+        assert "env_file" not in service
+        assert service["networks"] == ["user-test-only"]
+    assert runner["build"]["dockerfile"] == "ops/Dockerfile.quality"
+    assert runner["environment"]["PDRD_RUN_DATABASE_TESTS"] == "1"
+    assert (
+        "user-test-postgres" in runner["environment"]["USER_SERVICE_TEST_DATABASE_URL"]
+    )
+    commands = "\n".join(runner["command"])
+    assert "alembic -c alembic.ini upgrade head" in commands
+    assert "alembic -c alembic.ini current --check-heads" in commands
+    assert "services/user-service/tests/integration" in commands
 
 
 def test_startup_does_not_destroy_persistent_state() -> None:
@@ -209,6 +383,8 @@ def test_operational_shell_scripts_have_real_shebang() -> None:
     for path in (
         UP_SCRIPT,
         CHECK_STACK_SCRIPT,
+        STACK_PROFILES_HELPER,
+        SHARED_INFRASTRUCTURE_HELPER,
         EMBEDDING_MIGRATION_SCRIPT,
     ):
         first_line = path.read_text(
@@ -232,3 +408,17 @@ def test_operational_shell_scripts_avoid_invalid_multiline_if_subshells() -> Non
         assert "\n    if (\n" not in source
 
         assert "\n        if (\n" not in source
+
+
+def test_shared_compose_boundary_is_separate_and_checks_contamination_first() -> None:
+    """Общий namespace изолируется до запуска и при обращении к RabbitMQ."""
+    source = UP_SCRIPT.read_text(encoding="utf-8")
+    assert 'source "${REPO_DIR}/scripts/lib/shared-infrastructure.sh"' in source
+    assert source.count("isolate_shared_compose_environment") == 2
+    guard = source.index("require_separate_shared_namespace")
+    startup = source.index("bash scripts/bootstrap.sh")
+    assert guard < startup
+    helper = SHARED_INFRASTRUCTURE_HELPER.read_text(encoding="utf-8")
+    assert "docker ps --all --quiet" in helper
+    assert "docker rm" not in helper
+    assert "docker volume rm" not in helper

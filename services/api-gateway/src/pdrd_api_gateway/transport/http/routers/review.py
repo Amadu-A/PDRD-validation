@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pdrd_api_gateway.application.ports.review import ReviewRequestError
 from pdrd_api_gateway.core.container import ApplicationContainer
 from pdrd_api_gateway.transport.http.dependencies import get_container
+from pdrd_api_gateway.transport.http.request_actor import authenticated_actor
 from pdrd_api_gateway.transport.http.schemas.review import ReviewCommand, StrictCommand
 
 router = APIRouter(prefix="/api/v1", tags=["review"])
@@ -45,7 +46,12 @@ def require_review_channel(
     if request.headers.get("sec-fetch-site") == "cross-site":
         raise HTTPException(403, "Запрос с другого сайта запрещён.")
     origin = request.headers.get("origin")
-    if origin and origin != f"{request.url.scheme}://{request.headers.get('host', '')}":
+    expected_origin = (
+        container.settings.identity_proxy.public_origin
+        if container.settings.identity_proxy.authorization_enabled
+        else f"{request.url.scheme}://{request.headers.get('host', '')}"
+    )
+    if origin and origin != expected_origin:
         raise HTTPException(403, "Источник запроса не соответствует закрытому фронту.")
     if container.manage_review is None:
         raise HTTPException(503, "Review не подключён.")
@@ -62,12 +68,17 @@ async def review_config(
 
 
 async def invoke(
-    container: ApplicationContainer, job_id: UUID, operation: str, command=None
+    container: ApplicationContainer,
+    job_id: UUID,
+    operation: str,
+    command=None,
+    *,
+    actor: str | None = None,
 ) -> dict:
     """Переводит ожидаемые application ошибки в HTTP."""
     try:
         return await container.manage_review.execute(
-            job_id=job_id, operation=operation, command=command
+            job_id=job_id, operation=operation, command=command, actor=actor
         )
     except ReviewRequestError as error:
         raise HTTPException(error.status_code, error.detail) from error
@@ -76,34 +87,44 @@ async def invoke(
 @router.post("/analyses/{job_id}/review/open")
 async def open_review(
     job_id: UUID,
+    request: Request,
     container: Annotated[ApplicationContainer, Depends(require_review_channel)],
 ) -> dict:
     """Открывает или восстанавливает Review завершённого задания."""
-    return await invoke(container, job_id, "open")
+    return await invoke(container, job_id, "open", actor=authenticated_actor(request))
 
 
 @router.get("/analyses/{job_id}/review")
 async def get_review(
     job_id: UUID,
+    request: Request,
     container: Annotated[ApplicationContainer, Depends(require_review_channel)],
 ) -> dict:
     """Читает актуальную ревизию для восстановления и обработки конфликта."""
-    return await invoke(container, job_id, "read")
+    return await invoke(container, job_id, "read", actor=authenticated_actor(request))
 
 
 @router.post("/analyses/{job_id}/review/commands")
 async def command_review(
     job_id: UUID,
+    request: Request,
     command: ReviewCommand,
     container: Annotated[ApplicationContainer, Depends(require_review_channel)],
 ) -> dict:
     """Передаёт строгую команду отдельно от доверенной серверной идентичности."""
-    return await invoke(container, job_id, "command", command.model_dump())
+    return await invoke(
+        container,
+        job_id,
+        "command",
+        command.model_dump(),
+        actor=authenticated_actor(request),
+    )
 
 
 @router.post("/analyses/{job_id}/reviewed-pdf")
 async def reviewed_pdf(
     job_id: UUID,
+    request: Request,
     command: StrictCommand,
     container: Annotated[ApplicationContainer, Depends(require_review_channel)],
 ) -> Response:
@@ -114,6 +135,7 @@ async def reviewed_pdf(
         document = await container.get_reviewed_pdf.execute(
             job_id=job_id,
             expected_revision=command.expected_revision,
+            actor=authenticated_actor(request),
         )
     except ReviewRequestError as error:
         raise HTTPException(error.status_code, error.detail) from error

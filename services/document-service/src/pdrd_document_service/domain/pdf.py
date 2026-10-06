@@ -94,6 +94,14 @@ class PdfPage:
 
 
 @dataclass(frozen=True, slots=True)
+class PdfSelection:
+    """Число страниц и проверенный выбор без рендеринга PDF."""
+
+    total_pages: int
+    selected_pages: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class PdfDocument:
     """Результат подготовки выбранных PDF-страниц."""
 
@@ -320,5 +328,7 @@ def _validate_page_limit(
     raise InvalidPageSelectionError(
         "Выбрано слишком много PDF-страниц: "
         f"{len(selected_pages)}. "
-        f"Максимум: {max_selected_pages}.",
+        f"За одну проверку можно обработать не более {max_selected_pages} страниц. "
+        f"Укажите диапазон в поле «Страницы PDF», например 1-{max_selected_pages}, "
+        "и проверьте остальные страницы отдельным заданием.",
     )

@@ -130,6 +130,15 @@ class GetAnalysisVisualization:
                 "Completed analysis job не содержит document_id.",
             )
 
+        if getattr(job, "source_artifacts_deleted_at", None) is not None:
+            return {
+                "job_id": str(job_id),
+                "document_id": str(job.document_id),
+                "pages": [],
+                "source_artifacts_expired": True,
+                "message": "Изображения удалены по сроку хранения 30 дней.",
+            }
+
         try:
             artifacts = await self.artifact_store.load_request(
                 document_id=job.document_id,

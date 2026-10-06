@@ -6,6 +6,7 @@
  * Сетевой адаптер подключается снаружи через onChange/hydrate.
  */
 
+import { createRejectionEditor } from "./rejection-editor.js";
 import { createReviewControls } from "./controls.js";
 import { createManualAnnotationController } from "./manual.js";
 import { createManualTextList } from "./manual-list.js";
@@ -87,7 +88,12 @@ function createEditor(onSave) {
 }
 
 /** Связывает существующую визуализацию с ручным review и текстовым отчётом. */
-export function createReviewController({ onChange = () => {} } = {}) {
+export function createReviewController({
+  onChange = () => {},
+  capabilities = { canCreateGold: true, canDecide: true },
+} = {}) {
+  const canCreateGold = capabilities.canCreateGold !== false;
+  const canDecide = capabilities.canDecide !== false;
   let locked = false;
   let persistent = false;
   let syncMessage = "";
@@ -97,6 +103,8 @@ export function createReviewController({ onChange = () => {} } = {}) {
   let preview = null;
   let editor = null;
   let activeFindingId = null;
+  let rejectionEditor = null;
+  let activeRejection = null;
   let reportRoot = null;
   let manualRecords = createManualRecords();
   let emptyMessages = new Map();
@@ -134,7 +142,7 @@ export function createReviewController({ onChange = () => {} } = {}) {
   }
 
   const manual = createManualAnnotationController({
-    isEnabled: () => !locked,
+    isEnabled: () => !locked && canCreateGold,
     onInteractionStart: () => automatic.cancelActive(),
     onCreate(note) {
       const entry = state.register(note.findingId, note.text, {
@@ -146,6 +154,7 @@ export function createReviewController({ onChange = () => {} } = {}) {
     },
 
     onUpdate(findingId, text, normativeSection) {
+      if (!canCreateGold) throw new Error("Недостаточно прав для Gold-замечания.");
       if (locked) throw new Error("Дождитесь восстановления Review.");
       const entry = state.edit(
         findingId,
@@ -174,7 +183,9 @@ export function createReviewController({ onChange = () => {} } = {}) {
     onRemove(note) {
       if (persistent) {
         // Undo добавления остаётся аудируемым отклонением сохранённой Gold-записи.
-        const entry = state.decide(note.findingId, REVIEW_DECISIONS.REJECTED);
+        const entry = state.decide(note.findingId, REVIEW_DECISIONS.REJECTED, {
+          reasonCategory: "other", comment: "Пользователь отменил создание ручного замечания.",
+        });
         refresh(note.findingId);
         return entry;
       }
@@ -193,7 +204,7 @@ export function createReviewController({ onChange = () => {} } = {}) {
   });
 
   const automatic = createAutomaticReview({
-    isEnabled: () => !locked,
+    isEnabled: () => !locked && canDecide,
     onGeometry(findingIds) {
       for (const findingId of findingIds) {
         state.invalidate(findingId);
@@ -279,7 +290,11 @@ export function createReviewController({ onChange = () => {} } = {}) {
         "aria-pressed",
         String(entry.edited),
       );
-      for (const key of ["accept", "reject", "edit"]) view.controls[key].disabled = locked;
+      for (const key of ["accept", "reject"]) {
+        view.controls[key].disabled = locked || !canDecide;
+      }
+      view.controls.edit.disabled = locked || !(entry.origin === REVIEW_ORIGINS.MANUAL
+        ? canCreateGold : canDecide);
     }
 
     manualList.sync(entry);
@@ -294,16 +309,21 @@ export function createReviewController({ onChange = () => {} } = {}) {
   }
 
   /** Решение и его Undo сохраняют текст, источник, области и независимый тег. */
-  function decide(findingId, decision, pageNumber) {
-    if (locked) return;
-    const previous = state.get(findingId).decision;
-    if (previous === decision) return;
+  function decide(findingId, decision, pageNumber, feedback = {}) {
+    if (locked || !canDecide) return;
+    const previous = state.get(findingId);
     manual.cancelActive();
     automatic.cancelActive();
-    state.decide(findingId, decision);
+    const changed = state.decide(findingId, decision, feedback);
+    if (changed.revision === previous.revision) return;
     refresh(findingId);
     manual.recordAction(pageNumber, "решение по замечанию", () => {
-      state.restoreDecision(findingId, previous);
+      if (previous.decision === REVIEW_DECISIONS.REJECTED && !previous.reasonCategory) {
+        activeRejection = { findingId, pageNumber };
+        rejectionEditor.open(previous);
+        return;
+      }
+      state.restoreDecision(findingId, previous.decision, previous);
       refresh(findingId);
     });
   }
@@ -318,7 +338,9 @@ export function createReviewController({ onChange = () => {} } = {}) {
       },
 
       onReject() {
-        decide(findingId, REVIEW_DECISIONS.REJECTED, pageNumber);
+        if (locked || !canDecide) return;
+        activeRejection = { findingId, pageNumber };
+        rejectionEditor.open(state.get(findingId));
       },
 
       onEdit() {
@@ -334,6 +356,10 @@ export function createReviewController({ onChange = () => {} } = {}) {
         }
       },
     });
+
+    controls.accept.hidden = !canDecide;
+    controls.reject.hidden = !canDecide;
+    controls.edit.hidden = note ? !canCreateGold : !canDecide;
 
     item.prepend(controls.element);
 
@@ -355,6 +381,10 @@ export function createReviewController({ onChange = () => {} } = {}) {
   function mount(root) {
     automatic.dispose();
     manual.dispose();
+    editor?.dialog.remove();
+    rejectionEditor?.dialog.remove();
+    rejectionEditor = null;
+    activeRejection = null;
     state = createReviewState();
     views = new Map();
     manualRecords = createManualRecords();
@@ -403,7 +433,14 @@ export function createReviewController({ onChange = () => {} } = {}) {
       }
     });
 
-    root.append(editor.dialog);
+    rejectionEditor?.dialog.remove();
+    activeRejection = null;
+    rejectionEditor = createRejectionEditor((feedback) => {
+      if (locked || !canDecide || !activeRejection) throw new Error("Изменение Review сейчас недоступно.");
+      decide(activeRejection.findingId, REVIEW_DECISIONS.REJECTED, activeRejection.pageNumber, feedback);
+      activeRejection = null;
+    });
+    root.append(editor.dialog, rejectionEditor.dialog);
 
     const textItems = root.querySelectorAll(".analysis-result__finding[data-finding-id]");
     for (const item of [...textItems, ...items]) {
@@ -438,6 +475,7 @@ export function createReviewController({ onChange = () => {} } = {}) {
 
     if (!views.size && !manualPages) {
       editor.dialog.remove();
+      rejectionEditor.dialog.remove();
       return;
     }
 
@@ -485,17 +523,19 @@ export function createReviewController({ onChange = () => {} } = {}) {
     syncMessage = message;
     if (locked) { manual.cancelActive(); automatic.cancelActive(); }
     for (const rows of views.values()) for (const view of rows) {
-      for (const key of ["accept", "reject", "edit"]) view.controls[key].disabled = locked;
+      for (const key of ["accept", "reject"]) view.controls[key].disabled = locked || !canDecide;
+      view.controls.edit.disabled = locked || !(view.item.dataset.reviewOrigin === REVIEW_ORIGINS.MANUAL
+        ? canCreateGold : canDecide);
     }
     for (const button of reportRoot?.querySelectorAll("[data-review-page-add], [data-review-page-undo]") ?? []) {
       if (button.dataset.reviewPageUndo !== undefined) continue;
-      button.disabled = locked;
+      button.disabled = locked || !canCreateGold;
     }
     updatePreview();
   }
 
   return {
     mount, getManualSnapshot, getReviewSnapshot, hydrate, setConnection,
-    dispose() { manual.dispose(); automatic.dispose(); editor?.dialog.remove(); },
+    dispose() { manual.dispose(); automatic.dispose(); editor?.dialog.remove(); rejectionEditor?.dialog.remove(); },
   };
 }

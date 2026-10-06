@@ -27,7 +27,7 @@ test("неизменённый вывод VLM имеет wise или bad пос�
   );
 
   assert.equal(
-    model.decide("f1", REVIEW_DECISIONS.REJECTED).experienceTag,
+    model.decide("f1", REVIEW_DECISIONS.REJECTED, { reasonCategory: "false_positive" }).experienceTag,
     "bad",
   );
 });
@@ -47,7 +47,7 @@ test("исправленный пользователем вывод VLM все�
   assert.equal(entry.decision, REVIEW_DECISIONS.PENDING);
 
   assert.equal(
-    model.decide("f1", REVIEW_DECISIONS.REJECTED).experienceTag,
+    model.decide("f1", REVIEW_DECISIONS.REJECTED, { reasonCategory: "false_positive" }).experienceTag,
     "edited",
   );
 
@@ -90,7 +90,7 @@ test("ручная находка остаётся gold после редакт�
   assert.equal(edited.normativeSection, "СП 2");
 
   assert.equal(
-    model.decide("manual:x", REVIEW_DECISIONS.REJECTED).experienceTag,
+    model.decide("manual:x", REVIEW_DECISIONS.REJECTED, { reasonCategory: "false_positive" }).experienceTag,
     "gold",
   );
 });

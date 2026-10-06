@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/transport/http/routers/normative_documents.py
 
-"""Internal HTTP API managed документов."""
+"""Внутреннее HTTP API документов управляемого каталога."""
 
 from typing import Annotated
 from uuid import UUID
@@ -10,6 +10,7 @@ from fastapi import (
     Depends,
     File,
     Form,
+    Header,
     HTTPException,
     Response,
     UploadFile,
@@ -37,6 +38,9 @@ from pdrd_knowledge_service.application.use_cases.normative_indexing_queue impor
 from pdrd_knowledge_service.application.use_cases.normative_sections import (
     NormativeSectionNotFoundError,
 )
+from pdrd_knowledge_service.application.use_cases.package_access import (
+    require_catalog_owner,
+)
 from pdrd_knowledge_service.core.container import (
     ApplicationContainer,
 )
@@ -51,6 +55,8 @@ from pdrd_knowledge_service.transport.http.schemas.normative_documents import (
     MoveNormativeDocumentRequest,
     NormativeDocumentResponse,
 )
+
+PackageOwner = Annotated[UUID | None, Header(alias="X-PDRD-Package-Owner")]
 
 router = APIRouter(
     prefix="/internal/v1/normative",
@@ -70,7 +76,7 @@ _UPLOAD_CHUNK_SIZE = 1024 * 1024
 def _require_use_cases(
     container: ApplicationContainer,
 ) -> NormativeDocumentUseCases:
-    """Возвращает настроенные document use cases."""
+    """Возвращает настроенные сценарии работы с документами."""
     use_cases = container.normative_documents
 
     if use_cases is None:
@@ -85,7 +91,7 @@ def _require_use_cases(
 def _require_queue_use_case(
     container: ApplicationContainer,
 ) -> QueueNormativeDocument:
-    """Возвращает use case постановки документа в indexing queue."""
+    """Возвращает use case постановки документа в очередь индексации."""
     use_case = container.queue_normative_document
 
     if use_case is None:
@@ -100,7 +106,7 @@ def _require_queue_use_case(
 def _not_found(
     error: Exception,
 ) -> HTTPException:
-    """Преобразует application not-found в HTTP 404."""
+    """Преобразует ошибку отсутствия ресурса в HTTP 404."""
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail=str(
@@ -190,9 +196,15 @@ async def _read_upload_content(
 async def list_normative_documents(
     section_id: UUID,
     container: ContainerDependency,
+    package_owner: PackageOwner = None,
     area: CatalogArea = CatalogArea.NORMATIVE,
+    owner_user_id: UUID | None = None,
 ) -> list[NormativeDocumentResponse]:
     """Возвращает документы выбранной области и состояния индексации."""
+    if area is CatalogArea.USER_PACKAGE and package_owner is None:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "Требуется владелец личного каталога"
+        )
     use_cases = _require_use_cases(
         container,
     )
@@ -201,6 +213,7 @@ async def list_normative_documents(
         documents = await use_cases.list_documents.execute(
             section_id=section_id,
             area=area,
+            owner_user_id=package_owner if area is CatalogArea.USER_PACKAGE else None,
         )
 
     except NormativeSectionNotFoundError as error:
@@ -228,6 +241,8 @@ async def upload_normative_document(
         File(),
     ],
     container: ContainerDependency,
+    package_owner: PackageOwner = None,
+    owner_user_id: Annotated[UUID | None, Form()] = None,
     category_id: Annotated[
         UUID | None,
         Form(),
@@ -237,7 +252,14 @@ async def upload_normative_document(
         Form(),
     ] = CatalogArea.NORMATIVE,
 ) -> NormativeDocumentResponse:
-    """Загружает managed PDF/DOC/DOCX в выбранную область каталога."""
+    """Загружает PDF/DOC/DOCX в выбранную область каталога."""
+    if owner_user_id != package_owner or (
+        area is CatalogArea.USER_PACKAGE and package_owner is None
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Требуется проверенный владелец пакета.",
+        )
     use_cases = _require_use_cases(
         container,
     )
@@ -254,6 +276,7 @@ async def upload_normative_document(
             original_name=file.filename or "",
             content=content,
             area=area,
+            owner_user_id=package_owner if area is CatalogArea.USER_PACKAGE else None,
         )
 
     except NormativeSectionNotFoundError as error:
@@ -289,8 +312,17 @@ async def upload_normative_document(
 async def get_normative_document(
     document_id: UUID,
     container: ContainerDependency,
+    package_owner: PackageOwner = None,
 ) -> NormativeDocumentResponse:
-    """Возвращает metadata managed документа."""
+    """Возвращает метаданные документа каталога."""
+    try:
+        owned_resource = await _require_use_cases(container).get_document.execute(
+            document_id=document_id
+        )
+        require_catalog_owner(owned_resource, package_owner)
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+
     use_cases = _require_use_cases(
         container,
     )
@@ -318,8 +350,17 @@ async def move_normative_document(
     document_id: UUID,
     request: MoveNormativeDocumentRequest,
     container: ContainerDependency,
+    package_owner: PackageOwner = None,
 ) -> NormativeDocumentResponse:
-    """Перемещает документ в category или корень section."""
+    """Перемещает документ в категорию или корень раздела."""
+    try:
+        owned_resource = await _require_use_cases(container).get_document.execute(
+            document_id=document_id
+        )
+        require_catalog_owner(owned_resource, package_owner)
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+
     use_cases = _require_use_cases(
         container,
     )
@@ -362,8 +403,17 @@ async def move_normative_document(
 async def delete_normative_document(
     document_id: UUID,
     container: ContainerDependency,
+    package_owner: PackageOwner = None,
 ) -> DeleteNormativeDocumentResponse:
-    """Идемпотентно удаляет document из Qdrant, storage и SQL."""
+    """Идемпотентно удаляет документ из Qdrant, файлового хранилища и SQL."""
+    try:
+        owned_resource = await _require_use_cases(container).get_document.execute(
+            document_id=document_id
+        )
+        require_catalog_owner(owned_resource, package_owner)
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+
     use_cases = _require_use_cases(
         container,
     )
@@ -399,8 +449,17 @@ async def delete_normative_document(
 async def queue_normative_document(
     document_id: UUID,
     container: ContainerDependency,
+    package_owner: PackageOwner = None,
 ) -> NormativeDocumentResponse:
-    """Ставит document в durable очередь managed индексации."""
+    """Ставит документ в устойчивую очередь индексации каталога."""
+    try:
+        owned_resource = await _require_use_cases(container).get_document.execute(
+            document_id=document_id
+        )
+        require_catalog_owner(owned_resource, package_owner)
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+
     use_case = _require_queue_use_case(
         container,
     )
@@ -431,8 +490,17 @@ async def queue_normative_document(
 async def get_normative_document_content(
     document_id: UUID,
     container: ContainerDependency,
+    package_owner: PackageOwner = None,
 ) -> Response:
-    """Возвращает browser-viewable PDF managed документа."""
+    """Возвращает доступное для просмотра в браузере PDF managed документа."""
+    try:
+        owned_resource = await _require_use_cases(container).get_document.execute(
+            document_id=document_id
+        )
+        require_catalog_owner(owned_resource, package_owner)
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+
     use_cases = _require_use_cases(
         container,
     )

@@ -1,11 +1,12 @@
 # services/knowledge-service/src/pdrd_knowledge_service/infrastructure/database/models.py
 
-"""SQLAlchemy persistence models managed catalog."""
+"""Модели SQLAlchemy для хранения управляемого каталога."""
 
 from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -30,7 +31,7 @@ from pdrd_knowledge_service.infrastructure.database.base import (
 
 
 class NormativeSectionModel(Base):
-    """ORM-представление раздела managed catalog."""
+    """ORM-представление раздела управляемого каталога."""
 
     __tablename__ = "normative_sections"
 
@@ -58,6 +59,10 @@ class NormativeSectionModel(Base):
         nullable=False,
     )
 
+    deleting: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+
     system_prompt: Mapped[str] = mapped_column(
         Text,
         nullable=False,
@@ -77,7 +82,7 @@ class NormativeSectionModel(Base):
 
 
 class NormativeCategoryModel(Base):
-    """ORM-представление категории managed catalog."""
+    """ORM-представление категории управляемого каталога."""
 
     __tablename__ = "normative_categories"
 
@@ -94,6 +99,11 @@ class NormativeCategoryModel(Base):
             "catalog_area IN ('normative', 'user_package')",
             name="ck_normative_categories_catalog_area",
         ),
+        CheckConstraint(
+            "catalog_area = 'user_package' OR owner_user_id IS NULL",
+            name="ck_normative_categories_normative_owner",
+        ),
+        Index("ix_normative_categories_owner_section", "owner_user_id", "section_id"),
         Index(
             "ix_normative_categories_section_id",
             "section_id",
@@ -140,6 +150,10 @@ class NormativeCategoryModel(Base):
         nullable=False,
     )
 
+    owner_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True
+    )
+
     catalog_area: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
@@ -162,7 +176,7 @@ class NormativeCategoryModel(Base):
 
 
 class NormativeDocumentModel(Base):
-    """ORM-представление managed PDF/DOC/DOCX документа."""
+    """ORM-представление документа PDF/DOC/DOCX."""
 
     __tablename__ = "normative_documents"
 
@@ -191,6 +205,11 @@ class NormativeDocumentModel(Base):
             "catalog_area IN ('normative', 'user_package')",
             name="ck_normative_documents_catalog_area",
         ),
+        CheckConstraint(
+            "catalog_area = 'user_package' OR owner_user_id IS NULL",
+            name="ck_normative_documents_normative_owner",
+        ),
+        Index("ix_normative_documents_owner_section", "owner_user_id", "section_id"),
         CheckConstraint(
             "index_status IN ("
             "'uploaded', "
@@ -299,6 +318,10 @@ class NormativeDocumentModel(Base):
     sha256: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
+    )
+
+    owner_user_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True
     )
 
     catalog_area: Mapped[str] = mapped_column(

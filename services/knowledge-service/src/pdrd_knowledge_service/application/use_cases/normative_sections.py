@@ -3,21 +3,36 @@
 """Use cases разделов управляемой нормативной базы."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import (
     UTC,
     datetime,
 )
+from pathlib import PurePosixPath
 from uuid import (
     UUID,
     uuid4,
 )
 
+from pdrd_knowledge_service.application.normative_document_formats import (
+    preview_storage_key,
+)
+from pdrd_knowledge_service.application.ports.document_storage import (
+    NormativeDocumentStorage,
+    NormativeDocumentStorageError,
+)
 from pdrd_knowledge_service.application.ports.persistence import (
     NormativeCatalogUnitOfWork,
     NormativeCatalogUnitOfWorkFactory,
 )
+from pdrd_knowledge_service.application.ports.section_locks import (
+    CatalogSectionLocks,
+    InMemoryCatalogSectionLocks,
+)
+from pdrd_knowledge_service.application.ports.vector_store import VectorStore
+from pdrd_knowledge_service.core.observability import log_execution_time
 from pdrd_knowledge_service.domain.normative_catalog import (
+    IndexingStatus,
     NormativeSection,
 )
 
@@ -45,7 +60,7 @@ class NormativeSectionUpdateError(ValueError):
 
 
 def utc_now() -> datetime:
-    """Возвращает текущее timezone-aware UTC время."""
+    """Возвращает текущее время UTC с часовым поясом."""
     return datetime.now(
         UTC,
     )
@@ -54,13 +69,15 @@ def utc_now() -> datetime:
 async def _require_section(
     unit_of_work: NormativeCatalogUnitOfWork,
     section_id: UUID,
+    *,
+    allow_deleting: bool = False,
 ) -> NormativeSection:
     """Возвращает раздел или формирует application error."""
     section = await unit_of_work.sections.get(
         section_id,
     )
 
-    if section is None:
+    if section is None or (section.deleting and not allow_deleting):
         raise NormativeSectionNotFoundError(
             f"Раздел нормативной базы {section_id} не найден.",
         )
@@ -105,12 +122,13 @@ class GetNormativeSection:
             return await _require_section(
                 unit_of_work,
                 section_id,
+                allow_deleting=True,
             )
 
 
 @dataclass(frozen=True, slots=True)
 class CreateNormativeSection:
-    """Создаёт раздел с default system prompt."""
+    """Создаёт раздел с системным промптом по умолчанию."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
@@ -152,9 +170,26 @@ class UpdateNormativeSection:
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
 
+    section_locks: CatalogSectionLocks = field(
+        default_factory=InMemoryCatalogSectionLocks
+    )
+
     clock: Clock = utc_now
 
     async def execute(
+        self,
+        *,
+        section_id: UUID,
+        name: str | None = None,
+        system_prompt: str | None = None,
+    ) -> NormativeSection:
+        """Согласует обновление с каскадным удалением раздела."""
+        async with self.section_locks.shared(section_id):
+            return await self._execute(
+                section_id=section_id, name=name, system_prompt=system_prompt
+            )
+
+    async def _execute(
         self,
         *,
         section_id: UUID,
@@ -198,47 +233,79 @@ class UpdateNormativeSection:
 
 @dataclass(frozen=True, slots=True)
 class DeleteNormativeSection:
-    """Удаляет только пустой раздел нормативной базы."""
+    """Повторяемо удаляет раздел и обе области каталога из всех хранилищ."""
 
     unit_of_work_factory: NormativeCatalogUnitOfWorkFactory
+    storage: NormativeDocumentStorage
+    vector_store: VectorStore
+    collection: str
+    section_locks: CatalogSectionLocks = field(
+        default_factory=InMemoryCatalogSectionLocks
+    )
+    clock: Clock = utc_now
 
-    async def execute(
-        self,
-        *,
-        section_id: UUID,
-    ) -> UUID:
-        """Удаляет раздел, если в нём нет категорий и документов."""
-        async with self.unit_of_work_factory() as unit_of_work:
-            await _require_section(
-                unit_of_work,
-                section_id,
-            )
+    @log_execution_time(operation="normative_section_delete")
+    async def execute(self, *, section_id: UUID) -> UUID:
+        """Ждёт индексаторы, сохраняет отметку удаления и очищает только этот UUID."""
+        async with self.section_locks.exclusive(section_id):
+            async with self.unit_of_work_factory() as unit_of_work:
+                section = await unit_of_work.sections.get(section_id)
+                if section is None:
+                    return section_id
+                if not section.deleting:
+                    await unit_of_work.sections.update(replace(section, deleting=True))
+                    await unit_of_work.commit()
+                documents = await unit_of_work.documents.list_by_section(section_id)
 
-            categories = await unit_of_work.categories.list_by_section(
-                section_id,
-            )
-
-            documents = await unit_of_work.documents.list_by_section(
-                section_id,
-            )
-
-            if categories or documents:
-                raise NormativeSectionNotEmptyError(
-                    "Нельзя удалить непустой раздел нормативной базы.",
+            # SQL сохраняет storage_key до завершения внешней очистки, поэтому retry
+            # повторяет идемпотентные операции и не теряет оставшиеся оригиналы.
+            for candidate in documents:
+                async with self.unit_of_work_factory() as unit_of_work:
+                    document = await unit_of_work.documents.get_for_update(
+                        candidate.document_id
+                    )
+                    if document is None:
+                        continue
+                    if document.index_status is not IndexingStatus.DELETING:
+                        document = document.transition_indexing(
+                            target_status=IndexingStatus.DELETING,
+                            changed_at=self.clock(),
+                        )
+                        await unit_of_work.documents.update(document)
+                        await unit_of_work.commit()
+                if PurePosixPath(document.storage_key).parts[0] != str(section_id):
+                    raise NormativeDocumentStorageError(
+                        "Файл документа находится вне папки удаляемого раздела."
+                    )
+                await self.vector_store.delete_by_filter(
+                    collection=self.collection,
+                    key="document_id",
+                    value=str(document.document_id),
                 )
+                await self.storage.delete(storage_key=document.storage_key)
+                # Удаление отсутствующего preview безопасно и очищает старые артефакты
+                # после конверсии независимо от текущего MIME документа.
+                await self.storage.delete(
+                    storage_key=preview_storage_key(document.storage_key)
+                )
+                async with self.unit_of_work_factory() as unit_of_work:
+                    await unit_of_work.documents.delete(document.document_id)
+                    await unit_of_work.commit()
 
-            await unit_of_work.sections.delete(
-                section_id,
+            # Убираем также осиротевшие points раздела; общую collection не удаляем.
+            await self.vector_store.delete_by_filter(
+                collection=self.collection, key="section_id", value=str(section_id)
             )
-
-            await unit_of_work.commit()
-
+            await self.storage.delete_section(section_id=section_id)
+            async with self.unit_of_work_factory() as unit_of_work:
+                await unit_of_work.sections.delete(section_id)
+                await unit_of_work.commit()
         return section_id
 
 
 @dataclass(frozen=True, slots=True)
 class NormativeSectionUseCases:
-    """Группирует application operations одного bounded context."""
+    """Группирует прикладные операции управления разделами."""
 
     list_sections: ListNormativeSections
 

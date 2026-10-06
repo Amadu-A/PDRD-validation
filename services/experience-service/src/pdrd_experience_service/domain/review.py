@@ -13,28 +13,30 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import UUID
 
+from pdrd_experience_service.domain.rejection_feedback import validate_feedback
+
 
 class ReviewError(ValueError):
-    """Invalid review command, identity or geometry."""
+    """Ошибка команды ревью, идентичности или геометрии."""
 
 
 class ReviewConflictError(ReviewError):
-    """Review revision does not match the caller's revision."""
+    """Редакция ревью отличается от ожидаемой клиентом."""
 
 
 class ReviewNotReadyError(ReviewError):
-    """Human review is incomplete or has not been approved."""
+    """Ревью не завершено или ещё не утверждено."""
 
 
 class Origin(StrEnum):
-    """Source of the original finding."""
+    """Источник первоначального замечания."""
 
     VLM = "vlm"
     MANUAL = "manual"
 
 
 class Decision(StrEnum):
-    """Explicit human review decision, separate from finding provenance."""
+    """Явное решение проверяющего, независимое от происхождения замечания."""
 
     PENDING = "pending"
     ACCEPTED = "accepted"
@@ -42,7 +44,7 @@ class Decision(StrEnum):
 
 
 class Action(StrEnum):
-    """Audited review operation."""
+    """Операция ревью, сохраняемая в аудите."""
 
     OPENED = "opened"
     ADDED = "added"
@@ -54,7 +56,7 @@ class Action(StrEnum):
 
 
 def _text(value: str, *, limit: int = 10000, required: bool = True) -> str:
-    """Validate human-authored text without silently truncating it."""
+    """Проверяет пользовательский текст без скрытого усечения."""
     result = value.strip() if isinstance(value, str) else ""
     if (required and not result) or len(result) > limit:
         raise ReviewError(
@@ -66,12 +68,12 @@ def _text(value: str, *, limit: int = 10000, required: bool = True) -> str:
 
 
 def _actor(value: str) -> str:
-    """Require a trusted actor supplied by the server-side identity adapter."""
+    """Требует доверенного актёра из серверного адаптера идентичности."""
     return _text(value, limit=128)
 
 
 def _time(value: datetime) -> datetime:
-    """Store only offset-aware timestamps in UTC."""
+    """Сохраняет только время с часовым поясом в UTC."""
     if value.tzinfo is None or value.utcoffset() is None:
         raise ReviewError("Audit time must be timezone-aware.")
     return value.astimezone(UTC)
@@ -79,7 +81,7 @@ def _time(value: datetime) -> datetime:
 
 @dataclass(frozen=True, slots=True)
 class Rectangle:
-    """Normalized rectangle of a single PDF page, 0..1000 in both axes."""
+    """Прямоугольник одной страницы PDF в координатах 0..1000 по обеим осям."""
 
     x_min: float
     y_min: float
@@ -87,7 +89,7 @@ class Rectangle:
     y_max: float
 
     def __post_init__(self) -> None:
-        """Reject invalid or degenerate user-drawn regions."""
+        """Отсекает неверные и вырожденные пользовательские области."""
         values = (self.x_min, self.y_min, self.x_max, self.y_max)
         if (
             not all(math.isfinite(value) for value in values)
@@ -124,7 +126,7 @@ class ProposedRegion:
 
 @dataclass(frozen=True, slots=True)
 class OriginalFinding:
-    """Authoritative, non-hypothesis finding from the completed analysis."""
+    """Доверенное замечание завершённого анализа, исключающее гипотезы."""
 
     finding_id: str
     page_number: int
@@ -133,7 +135,7 @@ class OriginalFinding:
     proposed_regions: tuple[ProposedRegion, ...] = ()
 
     def __post_init__(self) -> None:
-        """Validate original source data before opening a review."""
+        """Проверяет первоначальные данные перед открытием ревью."""
         _text(self.finding_id, limit=256)
 
         if self.finding_id != self.finding_id.strip():
@@ -153,7 +155,7 @@ class OriginalFinding:
 
 @dataclass(frozen=True, slots=True)
 class ReviewedFinding:
-    """Current version; immutable original content is retained for training."""
+    """Текущая редакция с неизменным оригиналом для обучения."""
 
     finding_id: str
     origin: Origin
@@ -174,10 +176,20 @@ class ReviewedFinding:
 
     # Правки отображения инженером не повышают координаты до подтверждённых.
     display_regions: tuple[Rectangle, ...] | None = None
+    reason_category: str | None = None
+    comment: str = ""
+
+    def __post_init__(self) -> None:
+        """Проверяет разметку отклонения, допускает отсутствие причины у старых записей."""
+        validate_feedback(
+            rejected=self.decision is Decision.REJECTED,
+            reason_category=self.reason_category,
+            comment=self.comment,
+        )
 
     @property
     def experience_tag(self) -> str | None:
-        """Represent the finding's source and correction, not its decision."""
+        """Отражает источник и правку замечания независимо от решения."""
         if self.origin is Origin.MANUAL:
             return "gold"
 
@@ -198,7 +210,7 @@ class ReviewedFinding:
 
 @dataclass(frozen=True, slots=True)
 class ReviewEvent:
-    """Immutable change history including before/after content and actor."""
+    """Неизменная история с актёром и содержимым до и после действия."""
 
     action: Action
     actor: str
@@ -210,7 +222,7 @@ class ReviewEvent:
 
 @dataclass(frozen=True, slots=True)
 class ApprovedReview:
-    """Exact accepted revision to pass to the future PDF rendering adapter."""
+    """Точная принятая редакция для адаптера формирования PDF."""
 
     job_id: UUID
     revision: int
@@ -219,7 +231,7 @@ class ApprovedReview:
 
 @dataclass(frozen=True, slots=True)
 class ReviewSession:
-    """One review per completed job; returns new states for optimistic CAS persistence."""
+    """Одно ревью завершённого задания с неизменяемыми состояниями для CAS-записи."""
 
     job_id: UUID
     document_id: UUID
@@ -246,7 +258,7 @@ class ReviewSession:
         actor: str,
         at: datetime,
     ) -> "ReviewSession":
-        """Initialize every authoritative VLM finding as pending, even if unlocated."""
+        """Открывает каждое доверенное замечание VLM без решения, включая нелокализованные."""
         actor = _actor(actor)
         at = _time(at)
         source_filename = _text(source_filename, limit=512)
@@ -310,18 +322,18 @@ class ReviewSession:
 
     @property
     def pending_count(self) -> int:
-        """Include all authoritative VLM findings and all user-added Gold findings."""
+        """Учитывает все доверенные замечания VLM и пользовательские Gold."""
         return sum(item.decision is Decision.PENDING for item in self.findings)
 
     def _expect(self, revision: int) -> None:
-        """Reject stale writes before modifying the immutable state."""
+        """Отсекает устаревшую запись до изменения состояния."""
         if revision != self.revision:
             raise ReviewConflictError(
                 f"Stale review revision {revision}; current revision {self.revision}."
             )
 
     def _item(self, finding_id: str) -> ReviewedFinding:
-        """Find an existing review entry without accepting client-invented VLM IDs."""
+        """Находит запись ревью, не принимая придуманные клиентом идентификаторы VLM."""
         item = next(
             (item for item in self.findings if item.finding_id == finding_id),
             None,
@@ -341,7 +353,7 @@ class ReviewSession:
         actor: str,
         at: datetime,
     ) -> "ReviewSession":
-        """Replace one record and append an immutable audit event."""
+        """Заменяет одну запись и добавляет неизменное событие аудита."""
         next_revision = self.revision + 1
 
         return replace(
@@ -378,7 +390,7 @@ class ReviewSession:
         at: datetime,
         expected_revision: int,
     ) -> "ReviewSession":
-        """Add Gold only on a source-verified rendered PDF page."""
+        """Добавляет Gold только на проверенную отрисованную страницу PDF."""
         self._expect(expected_revision)
         actor = _actor(actor)
         at = _time(at)
@@ -459,7 +471,7 @@ class ReviewSession:
         at: datetime,
         expected_revision: int,
     ) -> "ReviewSession":
-        """Change text/basis and invalidate any earlier approval."""
+        """Меняет текст или нормативное основание и отменяет прежнее утверждение."""
         self._expect(expected_revision)
         actor = _actor(actor)
         at = _time(at)
@@ -480,6 +492,8 @@ class ReviewSession:
             text=text,
             normative_basis=normative_basis,
             decision=Decision.PENDING,
+            reason_category=None,
+            comment="",
             updated_by=actor,
             updated_at=at,
             revision=record.revision + 1,
@@ -501,8 +515,10 @@ class ReviewSession:
         actor: str,
         at: datetime,
         expected_revision: int,
+        reason_category: str | None = None,
+        comment: str = "",
     ) -> "ReviewSession":
-        """Apply an explicit accept/reject to one finding only."""
+        """Сохраняет решение и объяснение отказа, оставляя прежнюю версию в аудите."""
         self._expect(expected_revision)
         actor = _actor(actor)
         at = _time(at)
@@ -513,14 +529,29 @@ class ReviewSession:
         ):
             raise ReviewError("A human decision must be accepted or rejected.")
 
+        try:
+            reason_category, comment = validate_feedback(
+                rejected=decision is Decision.REJECTED,
+                reason_category=reason_category,
+                comment=comment,
+                require_reason=True,
+            )
+        except ValueError as error:
+            raise ReviewError(str(error)) from error
         record = self._item(finding_id)
 
-        if record.decision == decision:
+        if (record.decision, record.reason_category, record.comment) == (
+            decision,
+            reason_category,
+            comment,
+        ):
             return self
 
         updated = replace(
             record,
             decision=decision,
+            reason_category=reason_category,
+            comment=comment,
             updated_by=actor,
             updated_at=at,
             revision=record.revision + 1,
@@ -551,6 +582,8 @@ class ReviewSession:
         updated = replace(
             record,
             decision=Decision.PENDING,
+            reason_category=None,
+            comment="",
             updated_by=actor,
             updated_at=at,
             revision=record.revision + 1,
@@ -615,6 +648,8 @@ class ReviewSession:
             display_regions=regions if record.origin is Origin.VLM else None,
             callout_box=callout_box,
             decision=Decision.PENDING,
+            reason_category=None,
+            comment="",
             updated_by=actor,
             updated_at=at,
             revision=record.revision + 1,
@@ -634,7 +669,7 @@ class ReviewSession:
         at: datetime,
         expected_revision: int,
     ) -> "ReviewSession":
-        """Seal one reviewed revision only after every finding receives a decision."""
+        """Утверждает редакцию после решения по каждому замечанию."""
         self._expect(expected_revision)
         actor = _actor(actor)
         at = _time(at)
@@ -665,7 +700,7 @@ class ReviewSession:
         )
 
     def accepted_for_pdf(self) -> ApprovedReview:
-        """Return only current accepted entries; rejected entries remain in audit/Experience."""
+        """Возвращает принятые записи; отклонённые остаются в аудите и Experience."""
         if self.approved_revision != self.revision or self.pending_count:
             raise ReviewNotReadyError(
                 "Current review revision must be fully approved before PDF export."

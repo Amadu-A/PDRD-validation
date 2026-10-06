@@ -9,6 +9,7 @@
 
 .venv/
 .venv-dev/
+.codex-test-temp/
 
 **/__pycache__/
 **/*.py[cod]
@@ -17,6 +18,7 @@
 
 # Нормативные PDF и другие runtime data не нужны для статических/unit tests.
 data/
+ops/certificates/
 
 # Удалённый legacy service не должен попадать в quality image.
 services/pdf-service/

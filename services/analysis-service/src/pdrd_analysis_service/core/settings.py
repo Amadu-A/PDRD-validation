@@ -1,6 +1,6 @@
 # services/analysis-service/src/pdrd_analysis_service/core/settings.py
 
-"""Pydantic Settings Analysis Service."""
+"""Конфигурация Analysis Service с проверкой ограничений."""
 
 from functools import lru_cache
 from pathlib import Path
@@ -92,7 +92,7 @@ class VllmSettings(BaseModel):
 
 
 class AnalysisProgressSettings(BaseModel):
-    """Best-effort durable cancellation probe API."""
+    """Проверка отмены долговечного задания без остановки при сбое связи."""
 
     base_url: str = "http://api-gateway:8000"
 
@@ -203,7 +203,7 @@ class PipelineSettings(BaseModel):
     )
 
     max_stage_pages: int = Field(
-        default=50,
+        default=200,
         ge=1,
         le=200,
     )
@@ -256,7 +256,7 @@ class ProjectContextSettings(BaseModel):
 
 
 class Settings(BaseSettings):
-    """Runtime settings Analysis Service."""
+    """Настройки рабочего процесса Analysis Service."""
 
     model_config = SettingsConfigDict(
         env_file=(

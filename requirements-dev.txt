@@ -13,3 +13,6 @@ ruff>=0.12,<1.0
 -e ./services/analysis-service[test]
 -e ./services/multimodal-embedding-service[test]
 -e ./services/experience-service
+-e ./services/user-service[test]
+-e ./services/auth-service[test]
+-e ./services/admin-service[test]

@@ -3,9 +3,9 @@
 /**
  * Управляет контейнером результата анализа.
  *
- * Progress/error показываются как обычный текст.
+ * Ход проверки и ошибки показываются как обычный текст.
  * Финальный отчёт передаётся как безопасно построенный DOM fragment.
- * При завершении рендера вызывает подключённый feature-hook.
+ * При завершении рендера вызывает подключённый обработчик.
  */
 
 export function createResultView(
@@ -50,11 +50,13 @@ export function createResultView(
   ) {
     onReportCleared();
     const message = (
-      error instanceof Error
-        ? error.message
-        : String(
-          error,
-        )
+      typeof error?.detail === "string"
+        ? error.detail
+        : error instanceof Error
+          ? error.message
+          : String(
+            error,
+          )
     );
 
     const node = document.createElement(

@@ -1,0 +1,55 @@
+# ops/compose.auth-test.yaml
+# Изолированная проверка миграции и PostgreSQL-сессий Auth Service.
+# Нет подключения к рабочим сетям, данным, AD или секретам PDRD.
+
+name: pdrd-auth-service-test
+
+services:
+  auth-test-postgres:
+    image: postgres:16-alpine
+    restart: "no"
+    environment:
+      POSTGRES_DB: pdrd_auth_test
+      POSTGRES_USER: auth_test
+      POSTGRES_PASSWORD: auth-test-only
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth_test -d pdrd_auth_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks: [auth-test-only]
+
+  auth-test-runner:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.quality
+    restart: "no"
+    depends_on:
+      auth-test-postgres:
+        condition: service_healthy
+    environment:
+      PDRD_RUN_DATABASE_TESTS: "1"
+      AUTH_SERVICE_ENVIRONMENT: test
+      AUTH_SERVICE_ENABLED: "false"
+      AUTH_SERVICE_TEST_DATABASE_URL: postgresql+asyncpg://auth_test:auth-test-only@auth-test-postgres:5432/pdrd_auth_test
+      AUTH_SERVICE_DATABASE__HOST: auth-test-postgres
+      AUTH_SERVICE_DATABASE__PORT: 5432
+      AUTH_SERVICE_DATABASE__NAME: pdrd_auth_test
+      AUTH_SERVICE_DATABASE__USER: auth_test
+      AUTH_SERVICE_DATABASE__PASSWORD: auth-test-only
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        set -eu
+        cd /workspace/services/auth-service
+        python -m alembic -c alembic.ini upgrade head
+        python -m alembic -c alembic.ini current --check-heads --verbose
+        cd /workspace
+        python -m pytest -q services/auth-service/tests/integration
+    networks: [auth-test-only]
+
+networks:
+  auth-test-only:
+    internal: true

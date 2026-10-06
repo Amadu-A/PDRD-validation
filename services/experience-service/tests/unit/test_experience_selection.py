@@ -1,6 +1,6 @@
 # services/experience-service/tests/unit/test_experience_selection.py
 
-"""Regression: only located, verified and explicitly reviewed Experience data."""
+"""Регрессии отбора локализованных, проверенных и явно рассмотренных данных Experience."""
 
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -32,7 +32,7 @@ CALLOUT = Rectangle(600, 400, 900, 650)
 
 
 def opened() -> ReviewSession:
-    """Create source-owned VLM findings, including a visually unlocated one."""
+    """Создаёт доверенные замечания VLM, включая нелокализованное."""
     return ReviewSession.open(
         job_id=JOB,
         document_id=DOC,
@@ -63,10 +63,11 @@ def decide(
     finding_id: str,
     decision: Decision,
 ) -> ReviewSession:
-    """Apply a decision and advance the review revision."""
+    """Принимает решение и обновляет редакцию ревью."""
     return session.decide(
         finding_id=finding_id,
         decision=decision,
+        reason_category="false_positive" if decision is Decision.REJECTED else None,
         actor="engineer:1",
         at=NOW,
         expected_revision=session.revision,
@@ -76,7 +77,7 @@ def decide(
 def sealed(
     first: Decision = Decision.ACCEPTED,
 ) -> ReviewSession:
-    """Seal a review with two fully reviewed VLM findings."""
+    """Утверждает ревью двух рассмотренных замечаний VLM."""
     session = opened()
 
     session = decide(
@@ -102,7 +103,7 @@ def confirmed(
     finding_id: str = "vlm:1",
     **changes: object,
 ) -> ConfirmedFindingArea:
-    """A reviewer confirmed the area, not merely an automatic locator."""
+    """Создаёт подтверждение области проверяющим."""
     params = {
         "job_id": JOB,
         "finding_id": finding_id,
@@ -117,7 +118,7 @@ def confirmed(
 
 
 def test_accepted_vlm_without_verified_area_is_not_experience() -> None:
-    """Review approval is not proof that an automatic visual location is correct."""
+    """Утверждение ревью не подтверждает автоматически выбранную область."""
     session = sealed()
 
     assert session.findings[0].issue_box is None
@@ -139,7 +140,7 @@ def test_accepted_vlm_without_verified_area_is_not_experience() -> None:
 
 
 def test_accepted_and_rejected_located_vlm_have_independent_labels() -> None:
-    """Wise and Bad share the same geometry requirements but not labels."""
+    """Wise и Bad имеют общие требования к геометрии и отдельные метки."""
     session = sealed(
         Decision.REJECTED,
     )
@@ -171,7 +172,7 @@ def test_edited_vlm_preserves_original_and_review_decision(
     decision: Decision,
     learning_use: LearningUse,
 ) -> None:
-    """Edited+Bad is saved but cannot automatically become a trusted label."""
+    """Исправленный отказ сохраняется и требует отдельной оценки для обучения."""
     session = opened().edit(
         finding_id="vlm:1",
         text="Исправленный пользователем текст",
@@ -214,7 +215,7 @@ def test_edited_vlm_preserves_original_and_review_decision(
 
 
 def test_manual_accepted_gold_has_both_rectangles_and_source_provenance() -> None:
-    """Gold uses its real user-selected region and retains callout geometry."""
+    """Gold использует выбранную пользователем область и сохраняет геометрию карточки."""
     session = opened().add_manual(
         finding_id=f"manual:{UUID(int=77)}",
         page_number=2,
@@ -258,7 +259,7 @@ def test_manual_accepted_gold_has_both_rectangles_and_source_provenance() -> Non
 
 
 def test_rejected_manual_remains_in_audit_not_training_candidates() -> None:
-    """Do not turn a rejected user-drawn annotation into positive Gold data."""
+    """Отклонённое ручное замечание не становится положительным примером Gold."""
     session = opened().add_manual(
         finding_id=f"manual:{UUID(int=88)}",
         page_number=2,
@@ -291,7 +292,7 @@ def test_rejected_manual_remains_in_audit_not_training_candidates() -> None:
 
 
 def test_foreign_stale_or_duplicate_confirmations_fail_closed() -> None:
-    """Cross-job, wrong-page and duplicate region evidence cannot be mixed."""
+    """Подтверждения чужого задания, неверной страницы и дубликаты отклоняются."""
     session = sealed()
 
     for suspect in (
@@ -319,7 +320,7 @@ def test_foreign_stale_or_duplicate_confirmations_fail_closed() -> None:
 
 
 def test_example_key_is_stable_but_changes_after_region_correction() -> None:
-    """Region corrections must not silently reuse previously saved image crops."""
+    """Правка областей требует обновления сохранённых изображений."""
     session = sealed()
 
     first = select_experience_candidates(
@@ -353,7 +354,7 @@ def test_example_key_is_stable_but_changes_after_region_correction() -> None:
 
 
 def test_confirmation_requires_actual_geometry_and_auditable_actor() -> None:
-    """An unlocated finding or a synthetic status flag is not confirmed evidence."""
+    """Нелокализованное замечание и искусственный флаг не подтверждают область."""
     for invalid in (
         {"regions": ()},
         {"confirmed_by": " "},
@@ -365,7 +366,7 @@ def test_confirmation_requires_actual_geometry_and_auditable_actor() -> None:
 
 
 def test_unapproved_review_cannot_produce_experience() -> None:
-    """Only a complete, explicitly approved version is selectable."""
+    """Отбирается только завершённая и явно утверждённая редакция."""
     with pytest.raises(ReviewNotReadyError):
         select_experience_candidates(
             session=opened(),
@@ -374,20 +375,20 @@ def test_unapproved_review_cannot_produce_experience() -> None:
 
 
 class FakeReviews:
-    """Only a minimal ReviewRepository method is needed for this query."""
+    """Минимальный порт чтения ревью для запроса отбора."""
 
     def __init__(
         self,
         session: ReviewSession | None,
     ) -> None:
-        """Keep one immutable session."""
+        """Хранит один неизменяемый сеанс."""
         self.session = session
 
     async def load(
         self,
         job_id: UUID,
     ) -> ReviewSession | None:
-        """Return the matching job only."""
+        """Возвращает только совпадающее задание."""
         if self.session and self.session.job_id == job_id:
             return self.session
 
@@ -395,10 +396,10 @@ class FakeReviews:
 
 
 class FakeAreas:
-    """Server-owned confirmation port stub, never a frontend payload."""
+    """Тестовый серверный порт подтверждений областей."""
 
     def __init__(self) -> None:
-        """Track potentially expensive server lookups."""
+        """Учитывает обращения к серверному порту."""
         self.calls = 0
 
     async def load_confirmed(
@@ -406,7 +407,7 @@ class FakeAreas:
         *,
         job_id: UUID,
     ) -> tuple[ConfirmedFindingArea, ...]:
-        """Supply exactly one confirmed location for the requested job."""
+        """Возвращает одну подтверждённую область запрошенного задания."""
         self.calls += 1
 
         assert job_id == JOB
@@ -416,7 +417,7 @@ class FakeAreas:
 
 @pytest.mark.asyncio
 async def test_application_port_selects_without_writing_review() -> None:
-    """Selection reads approved state and trusted areas without DB mutation."""
+    """Отбор читает утверждённое состояние и доверенные области без изменения БД."""
     areas = FakeAreas()
 
     selected = await SelectExperience(
@@ -435,7 +436,7 @@ async def test_application_port_selects_without_writing_review() -> None:
 async def test_application_does_not_fetch_areas_before_approval_or_unknown_job() -> (
     None
 ):
-    """Never select evidence for unknown or unfinished review."""
+    """Не читает подтверждения неизвестного или незавершённого ревью."""
     areas = FakeAreas()
 
     with pytest.raises(ReviewNotReadyError):

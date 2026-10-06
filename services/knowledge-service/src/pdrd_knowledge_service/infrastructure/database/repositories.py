@@ -27,7 +27,7 @@ from pdrd_knowledge_service.infrastructure.database.models import (
 def _catalog_area_from_model(
     value: str | None,
 ) -> CatalogArea:
-    """Восстанавливает catalog area с legacy default для transient ORM model."""
+    """Восстанавливает область каталога со старым значением для несохранённой ORM-модели."""
     if value is None:
         return CatalogArea.NORMATIVE
 
@@ -37,13 +37,13 @@ def _catalog_area_from_model(
 
 
 class SqlAlchemyNormativeSectionRepository:
-    """SQLAlchemy repository разделов нормативной базы."""
+    """Репозиторий SQLAlchemy разделов нормативной базы."""
 
     def __init__(
         self,
         session: AsyncSession,
     ) -> None:
-        """Сохраняет session текущего Unit of Work."""
+        """Сохраняет сеанс текущей транзакции."""
         self._session = session
 
     async def add(
@@ -56,6 +56,7 @@ class SqlAlchemyNormativeSectionRepository:
                 id=section.section_id,
                 name=section.name,
                 system_prompt=section.system_prompt,
+                deleting=section.deleting,
                 created_at=section.created_at,
                 updated_at=section.updated_at,
             )
@@ -104,7 +105,7 @@ class SqlAlchemyNormativeSectionRepository:
         self,
         section: NormativeSection,
     ) -> None:
-        """Обновляет persistence model раздела."""
+        """Обновляет модель хранения раздела."""
         model = await self._session.get(
             NormativeSectionModel,
             section.section_id,
@@ -118,6 +119,7 @@ class SqlAlchemyNormativeSectionRepository:
         model.name = section.name
         model.system_prompt = section.system_prompt
         model.updated_at = section.updated_at
+        model.deleting = section.deleting
 
     async def delete(
         self,
@@ -136,24 +138,25 @@ class SqlAlchemyNormativeSectionRepository:
     def _to_domain(
         model: NormativeSectionModel,
     ) -> NormativeSection:
-        """Преобразует ORM model в domain entity."""
+        """Преобразует ORM-модель в доменную сущность."""
         return NormativeSection(
             section_id=model.id,
             name=model.name,
             system_prompt=model.system_prompt,
+            deleting=bool(model.deleting),
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
 
 
 class SqlAlchemyNormativeCategoryRepository:
-    """SQLAlchemy repository категорий нормативов."""
+    """Репозиторий SQLAlchemy категорий нормативов."""
 
     def __init__(
         self,
         session: AsyncSession,
     ) -> None:
-        """Сохраняет session текущего Unit of Work."""
+        """Сохраняет сеанс текущей транзакции."""
         self._session = session
 
     async def add(
@@ -168,6 +171,7 @@ class SqlAlchemyNormativeCategoryRepository:
                 parent_id=category.parent_id,
                 name=category.name,
                 catalog_area=category.area.value,
+                owner_user_id=category.owner_user_id,
                 created_at=category.created_at,
                 updated_at=category.updated_at,
             )
@@ -221,7 +225,7 @@ class SqlAlchemyNormativeCategoryRepository:
         self,
         category: NormativeCategory,
     ) -> None:
-        """Обновляет persistence model категории."""
+        """Обновляет модель хранения категории."""
         model = await self._session.get(
             NormativeCategoryModel,
             category.category_id,
@@ -255,7 +259,7 @@ class SqlAlchemyNormativeCategoryRepository:
     def _to_domain(
         model: NormativeCategoryModel,
     ) -> NormativeCategory:
-        """Преобразует ORM model в domain entity."""
+        """Преобразует ORM-модель в доменную сущность."""
         return NormativeCategory(
             category_id=model.id,
             section_id=model.section_id,
@@ -263,6 +267,7 @@ class SqlAlchemyNormativeCategoryRepository:
             name=model.name,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            owner_user_id=model.owner_user_id,
             area=_catalog_area_from_model(
                 model.catalog_area,
             ),
@@ -270,20 +275,20 @@ class SqlAlchemyNormativeCategoryRepository:
 
 
 class SqlAlchemyNormativeDocumentRepository:
-    """SQLAlchemy repository нормативных документов."""
+    """Репозиторий SQLAlchemy нормативных документов."""
 
     def __init__(
         self,
         session: AsyncSession,
     ) -> None:
-        """Сохраняет session текущего Unit of Work."""
+        """Сохраняет сеанс текущей транзакции."""
         self._session = session
 
     async def add(
         self,
         document: NormativeDocument,
     ) -> None:
-        """Добавляет metadata документа и flush-ит внутри transaction."""
+        """Добавляет метаданные и отправляет SQL без завершения транзакции."""
         self._session.add(
             NormativeDocumentModel(
                 id=document.document_id,
@@ -295,6 +300,7 @@ class SqlAlchemyNormativeDocumentRepository:
                 size_bytes=document.size_bytes,
                 sha256=document.sha256,
                 catalog_area=document.area.value,
+                owner_user_id=document.owner_user_id,
                 index_status=document.index_status.value,
                 index_error=document.index_error,
                 indexed_at=document.indexed_at,
@@ -371,7 +377,7 @@ class SqlAlchemyNormativeDocumentRepository:
             ...,
         ],
     ) -> list[NormativeDocument]:
-        """Возвращает документы по набору UUID одним SQL query."""
+        """Возвращает документы по набору UUID одним SQL-запросом."""
         if not document_ids:
             return []
 
@@ -421,7 +427,7 @@ class SqlAlchemyNormativeDocumentRepository:
         self,
         document: NormativeDocument,
     ) -> None:
-        """Обновляет metadata документа."""
+        """Обновляет метаданные документа."""
         model = await self._session.get(
             NormativeDocumentModel,
             document.document_id,
@@ -449,7 +455,7 @@ class SqlAlchemyNormativeDocumentRepository:
         self,
         document_id: UUID,
     ) -> None:
-        """Удаляет metadata документа."""
+        """Удаляет метаданные документа."""
         await self._session.execute(
             delete(
                 NormativeDocumentModel,
@@ -462,7 +468,7 @@ class SqlAlchemyNormativeDocumentRepository:
     def _to_domain(
         model: NormativeDocumentModel,
     ) -> NormativeDocument:
-        """Преобразует ORM model в domain entity."""
+        """Преобразует ORM-модель в доменную сущность."""
         return NormativeDocument(
             document_id=model.id,
             section_id=model.section_id,
@@ -479,6 +485,7 @@ class SqlAlchemyNormativeDocumentRepository:
             indexed_at=model.indexed_at,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            owner_user_id=model.owner_user_id,
             area=_catalog_area_from_model(
                 model.catalog_area,
             ),

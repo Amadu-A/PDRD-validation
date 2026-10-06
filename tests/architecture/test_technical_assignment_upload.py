@@ -76,7 +76,13 @@ def test_frontend_serializes_optional_technical_assignment() -> None:
         encoding="utf-8",
     )
 
-    assert '"technical_assignment"' in form
+    payload = (
+        FRONTEND_ROOT / "js" / "features" / "technical_assignment" / "form-payload.js"
+    ).read_text(encoding="utf-8")
+
+    assert "appendTechnicalAssignmentPayload" in form
+    assert '"technical_assignment"' in payload
+    assert '"technical_assignment_access_token"' in payload
 
     assert "technicalAssignmentInput" in form
 

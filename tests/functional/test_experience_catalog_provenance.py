@@ -111,6 +111,7 @@ async def test_second_finding_keeps_both_original_regions_on_second_page(
                 action="decide",
                 finding_id=finding_id,
                 decision=decision,
+                reason_category="false_positive" if decision == "rejected" else None,
             )
             assert response.status_code == 200, response.text
             revision = response.json()["revision"]
@@ -194,6 +195,9 @@ async def test_bad_keeps_vlm_source_and_engineer_geometry_separately(
                 action="decide",
                 finding_id=finding,
                 decision="rejected" if finding == target else "accepted",
+                reason_category="false_positive"
+                if ("rejected" if finding == target else "accepted") == "rejected"
+                else None,
             )
             assert result.status_code == 200, result.text
             revision = result.json()["revision"]
@@ -237,7 +241,12 @@ async def test_undone_rejection_is_not_in_final_catalog(catalog_flow):
         await browser.post(f.endpoint + "/open")
         revision = 0
         for body in (
-            {"action": "decide", "finding_id": "vlm:1", "decision": "rejected"},
+            {
+                "action": "decide",
+                "finding_id": "vlm:1",
+                "decision": "rejected",
+                "reason_category": "false_positive",
+            },
             {"action": "reset", "finding_id": "vlm:1"},
             {"action": "decide", "finding_id": "vlm:1", "decision": "accepted"},
             {"action": "decide", "finding_id": "vlm:2", "decision": "accepted"},
@@ -271,7 +280,12 @@ async def test_rejected_gold_is_saved_in_catalog_without_automatic_training(
                 "issue_box": BOX,
                 "callout_box": {**BOX, "x_min": 400.0, "x_max": 800.0},
             },
-            {"action": "decide", "finding_id": manual_id, "decision": "rejected"},
+            {
+                "action": "decide",
+                "finding_id": manual_id,
+                "decision": "rejected",
+                "reason_category": "false_positive",
+            },
             {"action": "approve"},
         ):
             result = await command(browser, f, revision, **body)

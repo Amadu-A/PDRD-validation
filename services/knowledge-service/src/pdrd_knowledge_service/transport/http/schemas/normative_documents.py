@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/transport/http/schemas/normative_documents.py
 
-"""HTTP schemas managed документов каталога."""
+"""HTTP-схемы документов каталога каталога."""
 
 from datetime import datetime
 from uuid import UUID
@@ -18,7 +18,7 @@ from pdrd_knowledge_service.domain.normative_catalog import (
 
 
 class MoveNormativeDocumentRequest(BaseModel):
-    """Запрос перемещения document в category или root."""
+    """Запрос перемещения документ в категорию или root."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -28,7 +28,7 @@ class MoveNormativeDocumentRequest(BaseModel):
 
 
 class NormativeDocumentResponse(BaseModel):
-    """Безопасная metadata managed документа для API."""
+    """Безопасная метаданные документа каталога для API."""
 
     model_config = ConfigDict(
         frozen=True,
@@ -45,6 +45,8 @@ class NormativeDocumentResponse(BaseModel):
     mime_type: str
 
     size_bytes: int
+
+    owner_user_id: UUID | None = None
 
     area: CatalogArea
 
@@ -65,7 +67,7 @@ class NormativeDocumentResponse(BaseModel):
         cls,
         document: NormativeDocument,
     ) -> "NormativeDocumentResponse":
-        """Создаёт HTTP response без внутренних storage metadata."""
+        """Создаёт HTTP-ответ без внутренних метаданных хранения."""
         return cls(
             document_id=document.document_id,
             section_id=document.section_id,
@@ -74,6 +76,7 @@ class NormativeDocumentResponse(BaseModel):
             mime_type=document.mime_type,
             size_bytes=document.size_bytes,
             area=document.area,
+            owner_user_id=document.owner_user_id,
             index_status=document.index_status,
             index_error=document.index_error,
             indexed_at=document.indexed_at,
@@ -84,7 +87,7 @@ class NormativeDocumentResponse(BaseModel):
 
 
 class DeleteNormativeDocumentResponse(BaseModel):
-    """Результат идемпотентного удаления document."""
+    """Результат идемпотентного удаления документ."""
 
     model_config = ConfigDict(
         frozen=True,

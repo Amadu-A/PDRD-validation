@@ -2,6 +2,7 @@
 
 """Domain-модель асинхронного задания анализа документа."""
 
+import secrets
 from dataclasses import (
     dataclass,
     field,
@@ -9,8 +10,10 @@ from dataclasses import (
 from datetime import (
     UTC,
     datetime,
+    timedelta,
 )
 from enum import StrEnum
+from hashlib import sha256
 from typing import ClassVar
 from uuid import (
     UUID,
@@ -149,6 +152,17 @@ class AnalysisJob:
 
     document_id: UUID | None = None
 
+    owner_user_id: UUID | None = None
+
+    source_artifacts_deleted_at: datetime | None = None
+
+    guest_access_token_hash: str | None = None
+
+    guest_access_expires_at: datetime | None = None
+
+    # Открытый токен существует только при создании и не попадает в БД.
+    guest_access_token: str | None = field(default=None, repr=False)
+
     normative_snapshot: NormativeAnalysisSnapshot | None = None
 
     status: AnalysisJobStatus = AnalysisJobStatus.PENDING
@@ -174,12 +188,25 @@ class AnalysisJob:
         *,
         document_id: UUID | None = None,
         normative_snapshot: NormativeAnalysisSnapshot | None = None,
+        owner_user_id: UUID | None = None,
+        guest_access: bool = False,
     ) -> "AnalysisJob":
-        """Создаёт новое задание в состоянии pending."""
+        """Создаёт job владельца или ограниченную гостевую ссылку."""
+        if owner_user_id is not None and guest_access:
+            raise ValueError("Гостевая ссылка не нужна заданию пользователя.")
+        token = secrets.token_urlsafe(32) if guest_access else None
         return cls(
             id=uuid4(),
             document_id=document_id,
             normative_snapshot=normative_snapshot,
+            owner_user_id=owner_user_id,
+            guest_access_token_hash=(
+                sha256(token.encode("ascii")).hexdigest() if token else None
+            ),
+            guest_access_expires_at=(
+                utc_now() + timedelta(hours=24) if token else None
+            ),
+            guest_access_token=token,
         )
 
     def mark_queued(

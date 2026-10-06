@@ -3,6 +3,7 @@
 
 .env
 .env.review-*
+.env.origin-*
 
 .idea/
 .vscode/
@@ -18,6 +19,10 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .codex-test-temp/
+
+# Сертификаты конкретного окружения доставляются на сервер отдельно.
+ops/certificates/*
+!ops/certificates/README.md
 
 
 .coverage

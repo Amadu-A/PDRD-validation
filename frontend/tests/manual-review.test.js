@@ -8,6 +8,7 @@ import { createReviewController } from "../src/js/features/review/controller.js"
 import { registerVisualizationReview, reviewCalloutBox } from "../src/js/features/analysis/visualization-review.js";
 
 import { FakeElement } from "./helpers/fake-dom.js";
+import { submitRejection } from "./helpers/rejection.js";
 
 globalThis.document = {
   createElement(tag) {
@@ -590,8 +591,11 @@ test("красный крест скрывает Gold, сохраняя rejected
   const before = controller.getManualSnapshot()[0];
   const textCard = findings.children.find((node) => node.dataset.manualFindingId);
   control(textCard, "reject").click();
+  submitRejection(root, "wrong_normative_basis", "Применён неверный норматив");
   const rejected = controller.getManualSnapshot()[0];
   assert.equal(rejected.decision, "rejected");
+  assert.equal(rejected.reason_category, "wrong_normative_basis");
+  assert.equal(rejected.comment, "Применён неверный норматив");
   assert.equal(rejected.experience_tag, "gold");
   assert.equal(rejected.text, before.text);
   assert.deepEqual(rejected.issue_box, before.issue_box);
@@ -602,6 +606,8 @@ test("красный крест скрывает Gold, сохраняя rejected
   pageAction(pages[0], "reviewPageUndo").click();
   const restored = controller.getManualSnapshot()[0];
   assert.equal(restored.decision, "accepted");
+  assert.equal(restored.reason_category, null);
+  assert.equal(restored.comment, "");
   assert.ok(restored.revision > rejected.revision);
   assert.equal(card.classList.contains("is-hidden"), false);
   assert.equal(textCard.classList.contains("is-hidden"), false);
@@ -660,6 +666,7 @@ test("отклонение VLM скрывает только её рамку, л
   control(article, "accept").click();
   assert.match(first.item.querySelector("[data-review-status]").textContent, /принято/);
   control(first.item, "reject").click();
+  submitRejection(root);
   assert.equal(article.classList.contains("is-hidden"), true);
   assert.equal(first.bboxEntries[0].node.classList.contains("is-hidden"), true);
   assert.equal(first.connectorEntries[0].polyline.classList.contains("is-hidden"), true);
@@ -671,6 +678,7 @@ test("отклонение VLM скрывает только её рамку, л
   assert.equal(entry.visualizations[0].proposed_issue_boxes.length, 1);
   assert.equal(pageAction(pages[1], "reviewPageUndo").disabled, true);
   control(records[1].item, "reject").click();
+  submitRejection(root);
   assert.equal(callout.classList.contains("is-hidden"), true);
   pageAction(pages[0], "reviewPageUndo").click();
   assert.equal(callout.classList.contains("is-hidden"), false);
@@ -725,6 +733,7 @@ test("исправленная VLM при отклонении остаётся 
   dialog.children.find((node) => node.tagName === "TEXTAREA").value = "Уточнённая формулировка инженера";
   dialog.children.find((node) => node.className === "review-editor__actions").children[1].click();
   control(records[0].item, "reject").click();
+  submitRejection(root);
   const record = controller.getReviewSnapshot()[0];
   assert.equal(record.experienceTag, "edited");
   assert.equal(record.decision, "rejected");

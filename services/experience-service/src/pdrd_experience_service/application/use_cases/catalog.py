@@ -26,6 +26,11 @@ class ManageCatalog:
         """Пагинацию и фильтрацию выполняет репозиторий на сервере."""
         return await self.repository.list(criteria)
 
+    @log_execution_time(operation="experience_authors")
+    async def authors(self, *, offset: int, limit: int) -> tuple[tuple[str, ...], int]:
+        """Справочник содержит авторов неудалённых замечаний, включая исторических операторов."""
+        return await self.repository.authors(offset=offset, limit=limit)
+
     async def get(self, example_id: UUID) -> CatalogEntry:
         """Отсутствующий пример имеет самостоятельную ожидаемую ошибку."""
         entry = await self.repository.get(example_id)

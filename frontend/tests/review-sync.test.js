@@ -70,7 +70,7 @@ test("409 сохраняет локальную очередь и не повт�
   let calls = 0;
   const f = fixture({ api: { command: async () => { calls += 1; throw Object.assign(new Error("Stale"), { status: 409 }); } } });
   await f.sync.start();
-  f.change({ decision: "rejected" });
+  f.change({ decision: "rejected", reason_category: "false_positive", comment: "Ошибка" });
   await f.sync.settled();
   await f.sync.retry();
   assert.equal(calls, 1);

@@ -8,7 +8,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictCommand(BaseModel):
@@ -39,6 +39,30 @@ class DecideCommand(FindingCommand):
 
     action: Literal["decide"]
     decision: Literal["accepted", "rejected"]
+    reason_category: (
+        Literal[
+            "false_positive",
+            "wrong_location",
+            "wrong_normative_basis",
+            "duplicate",
+            "misunderstood_drawing",
+            "not_applicable",
+            "other",
+        ]
+        | None
+    ) = None
+    comment: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="after")
+    def require_rejection_feedback(self) -> "DecideCommand":
+        """Новые отказы требуют причины; принятие не допускает разметку отказа."""
+        if self.decision == "rejected" and self.reason_category is None:
+            raise ValueError("Выберите причину отклонения замечания.")
+        if self.decision == "accepted" and (
+            self.reason_category is not None or self.comment.strip()
+        ):
+            raise ValueError("Причина и комментарий доступны только при отклонении.")
+        return self
 
 
 class ResetCommand(FindingCommand):

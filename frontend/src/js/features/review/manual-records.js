@@ -68,6 +68,8 @@ export function createManualRecords() {
     record.text = review.text;
     record.normative_section = review.normativeSection;
     record.decision = review.decision;
+    record.reason_category = review.reasonCategory ?? null;
+    record.comment = review.comment ?? "";
     record.revision = review.revision;
   }
 

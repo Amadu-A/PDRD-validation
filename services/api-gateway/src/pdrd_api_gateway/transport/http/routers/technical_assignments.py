@@ -1,7 +1,8 @@
 # services/api-gateway/src/pdrd_api_gateway/transport/http/routers/technical_assignments.py
 
-"""Public T preparation/content API."""
+"""Публичный API подготовки и просмотра технического задания."""
 
+from datetime import datetime
 from typing import Annotated
 from uuid import (
     UUID,
@@ -14,6 +15,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     Response,
     UploadFile,
     status,
@@ -22,6 +24,7 @@ from pydantic import BaseModel
 
 from pdrd_api_gateway.application.ports.technical_assignment_content import (
     TechnicalAssignmentContentError,
+    TechnicalAssignmentContentExpiredError,
     TechnicalAssignmentContentNotFoundError,
     TechnicalAssignmentContentReader,
 )
@@ -35,6 +38,9 @@ from pdrd_api_gateway.core.container import (
 from pdrd_api_gateway.domain.technical_assignment import (
     InvalidTechnicalAssignmentSnapshotError,
     TechnicalAssignmentSnapshot,
+)
+from pdrd_api_gateway.domain.technical_assignment_access import (
+    TechnicalAssignmentCapability,
 )
 from pdrd_api_gateway.transport.http.dependencies import (
     get_container,
@@ -71,6 +77,10 @@ class TechnicalAssignmentPreparationResponse(
 
     index_error: str | None
 
+    access_token: str | None = None
+
+    access_expires_at: datetime | None = None
+
 
 class TechnicalAssignmentStatusResponse(
     BaseModel,
@@ -82,6 +92,30 @@ class TechnicalAssignmentStatusResponse(
     index_status: str
 
     index_error: str | None
+
+
+def _capability(request: Request) -> TechnicalAssignmentCapability | None:
+    """Возвращает отдельный HMAC-ключ только во включённом auth-контуре."""
+    if request.app.state.identity_authorizer is None:
+        return None
+    secret = request.app.state.container.settings.identity_proxy.technical_assignment_access_key
+    return TechnicalAssignmentCapability(secret.get_secret_value())
+
+
+def require_technical_assignment_access(
+    request: Request, technical_assignment_id: UUID
+) -> None:
+    """Закрывает status/content по UUID без действующего HMAC capability."""
+    capability = _capability(request)
+    if capability is None:
+        return
+    token = request.headers.get("x-pdrd-technical-assignment-access")
+    if not capability.verify(technical_assignment_id, token):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Техническое задание не найдено.",
+            headers={"Cache-Control": "no-store"},
+        )
 
 
 def _require_reader(
@@ -120,6 +154,8 @@ def _require_index_coordinator(
     response_model=TechnicalAssignmentPreparationResponse,
 )
 async def prepare_technical_assignment(
+    request: Request,
+    response: Response,
     container: Annotated[
         ApplicationContainer,
         Depends(
@@ -192,6 +228,10 @@ async def prepare_technical_assignment(
             ),
         ) from error
 
+    capability = _capability(request)
+    grant = capability.issue(snapshot.technical_assignment_id) if capability else None
+    if capability is not None:
+        response.headers["Cache-Control"] = "no-store"
     return TechnicalAssignmentPreparationResponse(
         technical_assignment_id=(snapshot.technical_assignment_id),
         analysis_document_id=(snapshot.analysis_document_id),
@@ -202,6 +242,8 @@ async def prepare_technical_assignment(
         sha256=snapshot.sha256,
         index_status=state.index_status,
         index_error=state.index_error,
+        access_token=grant.token if grant else None,
+        access_expires_at=grant.expires_at if grant else None,
     )
 
 
@@ -211,6 +253,8 @@ async def prepare_technical_assignment(
 )
 async def get_technical_assignment_status(
     technical_assignment_id: UUID,
+    request: Request,
+    response: Response,
     container: Annotated[
         ApplicationContainer,
         Depends(
@@ -219,6 +263,9 @@ async def get_technical_assignment_status(
     ],
 ) -> TechnicalAssignmentStatusResponse:
     """Проксирует актуальный T-index lifecycle."""
+    require_technical_assignment_access(request, technical_assignment_id)
+    if request.app.state.identity_authorizer is not None:
+        response.headers["Cache-Control"] = "no-store"
     coordinator = _require_index_coordinator(
         container,
     )
@@ -248,6 +295,7 @@ async def get_technical_assignment_status(
 )
 async def get_technical_assignment_content(
     technical_assignment_id: UUID,
+    request: Request,
     container: Annotated[
         ApplicationContainer,
         Depends(
@@ -256,6 +304,7 @@ async def get_technical_assignment_content(
     ],
 ) -> Response:
     """Возвращает T PDF-preview через Gateway."""
+    require_technical_assignment_access(request, technical_assignment_id)
     reader = _require_reader(
         container,
     )
@@ -273,6 +322,9 @@ async def get_technical_assignment_content(
             ),
         ) from error
 
+    except TechnicalAssignmentContentExpiredError as error:
+        raise HTTPException(410, str(error)) from error
+
     except TechnicalAssignmentContentError as error:
         raise HTTPException(
             status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
@@ -286,5 +338,6 @@ async def get_technical_assignment_content(
         media_type=content.mime_type,
         headers={
             "Content-Disposition": "inline",
+            "Cache-Control": "no-store",
         },
     )

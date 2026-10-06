@@ -5,8 +5,10 @@
 from dataclasses import dataclass, replace
 from uuid import UUID
 
+from pdrd_api_gateway.application.experience_authors import enrich_authors
 from pdrd_api_gateway.application.ports.experience import (
     ExperienceAccessPolicy,
+    ExperienceAuthorProfiles,
     ExperienceContextProvider,
     ExperienceOperation,
     ExperienceService,
@@ -22,6 +24,7 @@ class ManageExperience:
     contexts: ExperienceContextProvider
     access: ExperienceAccessPolicy
     service: ExperienceService
+    author_profiles: ExperienceAuthorProfiles | None = None
 
     @log_execution_time(operation="experience_request")
     async def execute(
@@ -33,11 +36,14 @@ class ManageExperience:
         query: dict | None = None,
         command: dict | None = None,
         index: int | None = None,
+        actor: str | None = None,
     ) -> dict | bytes:
         """При объектной операции получает задание из неизменяемого источника записи."""
         context = self.contexts.resolve(
             operation=operation, job_id=job_id, example_id=example_id
         )
+        if actor is not None:
+            context = replace(context, actor=actor)
         if (
             context.operation != operation
             or context.job_id != job_id
@@ -112,7 +118,20 @@ class ManageExperience:
             context = replace(context, job_id=resource_job)
             await self.access.require(context)
             if operation == "read":
-                return record
-        return await self.service.execute(
+                return await self._enrich(
+                    record, operation=operation, actor=context.actor
+                )
+        result = await self.service.execute(
             context=context, query=query, command=command, index=index
+        )
+        return await self._enrich(result, operation=operation, actor=context.actor)
+
+    async def _enrich(
+        self, result: dict | bytes, *, operation: str, actor: str
+    ) -> dict | bytes:
+        """Файлы, версии и исторический закрытый режим не требуют профилей User Service."""
+        if self.author_profiles is None or not isinstance(result, dict):
+            return result
+        return await enrich_authors(
+            result, operation=operation, actor=actor, profiles=self.author_profiles
         )

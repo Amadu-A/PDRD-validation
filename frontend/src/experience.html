@@ -27,7 +27,7 @@
         <p class="experience-page__description">
           Замечания с решениями инженера. Для обучения нужны пригодные области.
         </p>
-        <section class="experience-active" data-experience-server-only aria-label="Текущая конфигурация анализа">
+        <section class="experience-active" data-experience-admin-only data-experience-server-only aria-label="Текущая конфигурация анализа">
           <h2 class="experience-active__title">Для текущей работы и анализа</h2>
           <p>Здесь хранятся рабочие назначения проверенных версий. Выбор для просмотра таблицы ниже их не меняет.</p>
           <p class="experience-active__availability">Векторная версия применяется к своему нормативному разделу после допуска качества. Рабочее использование E включается отдельно в конфигурации анализа. Подготовка набора не запускает обучение и не переключает VLM.</p>
@@ -41,12 +41,12 @@
       </div>
       <div class="experience-versions__toolbar">
         <label data-experience-server-only>Просмотр
-          <select data-experience-version-kind><option value="vector">Векторные базы</option><option value="fine_tune">Наборы дообучения</option></select>
+          <select data-experience-version-kind data-experience-admin-only><option value="vector">Векторные базы</option><option value="fine_tune">Наборы дообучения</option></select>
         </label>
-        <label data-experience-server-only>Модель <select data-experience-version-model></select></label>
-        <label data-experience-server-only>Версия <select data-experience-version><option value="">Все замечания</option></select></label>
-        <button type="button" class="experience-table__icon" data-experience-version-rename data-experience-server-only title="Переименовать версию" aria-label="Переименовать версию" disabled>✎</button>
-        <button type="button" class="experience-table__icon" data-experience-version-delete data-experience-server-only title="Удалить версию" aria-label="Удалить версию" disabled>⌫</button>
+        <label data-experience-server-only>Модель <select data-experience-version-model data-experience-admin-only></select></label>
+        <label data-experience-server-only>Версия <select data-experience-version data-experience-admin-only><option value="">Все замечания</option></select></label>
+        <button type="button" class="experience-table__icon" data-experience-version-rename data-experience-admin-only data-experience-server-only title="Переименовать версию" aria-label="Переименовать версию" disabled>✎</button>
+        <button type="button" class="experience-table__icon" data-experience-version-delete data-experience-admin-only data-experience-server-only title="Удалить версию" aria-label="Удалить версию" disabled>⌫</button>
       <button class="experience-page__export" type="button" disabled data-experience-export
         title="ZIP с полными текстами и изображениями всех примеров по выбранным фильтрам">
         Выгрузить замечания
@@ -54,7 +54,7 @@
       </div>
     </header>
 
-    <section class="experience-version-status" data-experience-version-status data-experience-server-only hidden aria-live="polite" aria-labelledby="experienceVersionStatusTitle">
+    <section class="experience-version-status" data-experience-version-status data-experience-admin-only data-experience-server-only hidden aria-live="polite" aria-labelledby="experienceVersionStatusTitle">
       <h2 id="experienceVersionStatusTitle" class="experience-version-status__title" data-experience-version-status-title>Просматриваемая версия</h2>
       <p data-experience-version-build-status></p>
       <p data-experience-version-quality-status></p>
@@ -127,6 +127,10 @@
         <input name="section_id" maxlength="128" placeholder="Например: СП 484.1311500.2020:6.3">
       </label>
       <label class="experience-filter__field" data-experience-server-only>
+        <span>Автор</span>
+        <select name="author" data-experience-author-filter><option value="">Все авторы</option></select>
+      </label>
+      <label class="experience-filter__field" data-experience-server-only>
         <span>Задание обработки</span>
         <input name="job_id" type="text" maxlength="36" placeholder="UUID задания или пустое поле">
       </label>
@@ -137,13 +141,13 @@
       <button type="button" data-experience-previous>← Назад</button>
       <button type="button" data-experience-next>Далее →</button>
       <button type="button" data-experience-refresh>Обновить</button>
-      <button type="button" data-experience-delete-selection disabled>Удалить выбранное</button>
-      <button type="button" class="experience-table__icon" data-experience-select-all title="Выбрать все по фильтрам (до 1000)" aria-label="Выбрать все замечания по фильтрам">☑</button>
-      <button type="button" class="experience-table__icon" data-experience-clear-selection title="Очистить выбор" aria-label="Очистить выбор замечаний">☐</button>
-      <button type="button" data-experience-select-missing disabled>Выбрать отсутствующие в версии</button>
-      <span data-experience-selected-count role="status">Выбрано: 0</span>
-      <button type="button" data-experience-build-version disabled title="Создать новую коллекцию Qdrant из выбранных замечаний">Запустить индексацию выбранных замечаний</button>
-      <button type="button" data-experience-prepare-fine-tune disabled title="Сохранить фиксированный набор выбранных примеров без запуска обучения">Подготовить набор для дообучения</button>
+      <button type="button" data-experience-delete-selection data-experience-admin-only disabled>Удалить выбранное</button>
+      <button type="button" class="experience-table__icon" data-experience-select-all data-experience-admin-only title="Выбрать все по фильтрам (до 1000)" aria-label="Выбрать все замечания по фильтрам">☑</button>
+      <button type="button" class="experience-table__icon" data-experience-clear-selection data-experience-admin-only title="Очистить выбор" aria-label="Очистить выбор замечаний">☐</button>
+      <button type="button" data-experience-select-missing data-experience-admin-only disabled>Выбрать отсутствующие в версии</button>
+      <span data-experience-selected-count data-experience-admin-only role="status">Выбрано: 0</span>
+      <button type="button" data-experience-build-version data-experience-admin-only disabled title="Создать новую коллекцию Qdrant из выбранных замечаний">Запустить индексацию выбранных замечаний</button>
+      <button type="button" data-experience-prepare-fine-tune data-experience-admin-only disabled title="Сохранить фиксированный набор выбранных примеров без запуска обучения">Подготовить набор для дообучения</button>
     </nav>
 
     <div class="experience-page__table-wrap">
@@ -151,7 +155,7 @@
         <caption data-experience-caption>Примеры Experience</caption>
         <thead>
           <tr>
-            <th scope="col" data-experience-server-only>Выбор</th>
+            <th scope="col" data-experience-admin-only data-experience-server-only>Выбор</th>
             <th scope="col">Область</th>
             <th scope="col">Документ и лист</th>
             <th scope="col">Замечание и норматив</th>

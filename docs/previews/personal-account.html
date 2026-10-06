@@ -1,0 +1,357 @@
+<!-- docs/previews/personal-account.html -->
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Личный кабинет — визуальный макет PDRD</title>
+  <!-- Автономный макет хранится в docs и не подключается к production frontend. -->
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, sans-serif;
+      --ink: #18233a;
+      --muted: #5c687b;
+      --line: #dce3ed;
+      --paper: #ffffff;
+      --background: #f2f5fa;
+      --blue: #2457a7;
+      --blue-soft: #eaf1fc;
+      --green: #176846;
+      --green-soft: #eaf7ef;
+      --orange: #80520c;
+      --orange-soft: #fff5dd;
+      --sidebar: #172b47;
+      --shadow: 0 15px 40px rgb(24 35 58 / 6%);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--background); color: var(--ink); }
+    a { color: inherit; }
+    a:focus-visible, input:focus-visible { outline: 3px solid #e99435; outline-offset: 3px; }
+
+    .preview-banner {
+      padding: 10px 24px;
+      background: #fff3d5;
+      color: #5d4214;
+      border-bottom: 1px solid #e9d297;
+      font-size: 13px;
+      line-height: 1.5;
+      text-align: center;
+    }
+
+    .account-shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: calc(100vh - 42px); }
+    .account-nav { background: var(--sidebar); color: #eaf0f8; padding: 30px 18px; }
+    .account-nav__brand { display: flex; align-items: center; gap: 11px; padding: 0 12px 30px; text-decoration: none; }
+    .account-nav__mark { display: grid; place-items: center; width: 37px; height: 37px; border-radius: 11px; background: #76b5f0; color: #122744; font-size: 13px; font-weight: 800; }
+    .account-nav__name { font-size: 15px; font-weight: 700; letter-spacing: .02em; }
+    .account-nav__caption { display: block; margin-top: 2px; color: #b8c7d9; font-size: 11px; font-weight: 400; }
+    .account-nav__heading { padding: 0 12px; margin: 9px 0 10px; color: #a9bcd3; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .account-nav__list { display: grid; gap: 5px; list-style: none; padding: 0; margin: 0; }
+    .account-nav__link { display: flex; align-items: center; min-height: 40px; padding: 10px 12px; border-radius: 9px; color: #d3dfed; font-size: 14px; text-decoration: none; }
+    .account-nav__link:hover, .account-nav__link:focus-visible { background: #294769; color: white; }
+    .account-nav__link--current { background: #315787; color: white; font-weight: 700; }
+    .account-nav__footer { margin: 30px 12px 0; color: #a9bcd3; font-size: 12px; line-height: 1.55; }
+
+    .account-main { min-width: 0; width: min(1320px, 100%); padding: 36px clamp(20px, 4vw, 58px) 68px; }
+    .account-main__top { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 30px; }
+    .account-main__breadcrumb { color: var(--muted); font-size: 13px; }
+    .account-main__environment { border: 1px solid #bfd2ed; border-radius: 999px; padding: 7px 11px; background: var(--blue-soft); color: var(--blue); font-size: 12px; font-weight: 700; }
+    .account-main__eyebrow { margin: 0 0 11px; color: var(--blue); font-size: 12px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+    .account-main__title { margin: 0; font-size: clamp(29px, 3.5vw, 42px); letter-spacing: -.04em; line-height: 1.1; }
+    .account-main__intro { max-width: 760px; margin: 13px 0 25px; color: var(--muted); font-size: 15px; line-height: 1.6; }
+
+    .persona-picker { margin: 0 0 27px; padding: 0; border: 0; }
+    .persona-picker__legend { margin: 0 0 10px; font-size: 13px; font-weight: 700; }
+    .persona-picker__choices { display: flex; flex-wrap: wrap; gap: 8px; }
+    .persona-picker__choice { display: inline-flex; align-items: center; gap: 8px; min-height: 39px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: var(--muted); font-size: 13px; cursor: pointer; }
+    .persona-picker__choice input { margin: 0; accent-color: var(--blue); }
+    .persona-picker__choice:has(input:checked) { border-color: #89a8d8; background: var(--blue-soft); color: var(--blue); font-weight: 700; }
+
+    .account-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr); gap: 18px; }
+    .account-card { min-width: 0; padding: 23px; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); box-shadow: var(--shadow); }
+    .account-card--hero { display: flex; flex-direction: column; justify-content: space-between; min-height: 234px; background: linear-gradient(123deg, #fff 0%, #fff 65%, #eaf1fc 100%); }
+    .account-card__overline { margin: 0 0 10px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .account-card__title { margin: 0; font-size: 18px; letter-spacing: -.015em; }
+    .account-card__description { margin: 11px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .account-card__hero-title { max-width: 560px; margin: 0 0 12px; font-size: clamp(23px, 2.6vw, 31px); line-height: 1.2; }
+    .account-card__hero-description { max-width: 620px; margin: 0; color: #42536c; font-size: 14px; line-height: 1.55; }
+    .account-card__hero-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 11px; margin-top: 23px; }
+    .account-card__status { display: inline-flex; align-items: center; min-height: 29px; padding: 6px 10px; border-radius: 999px; background: var(--orange-soft); color: var(--orange); font-size: 12px; font-weight: 700; }
+    .account-card__status[data-tone="active"] { background: var(--green-soft); color: var(--green); }
+    .account-card__meta { color: var(--muted); font-size: 12px; }
+
+    .profile-list { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 16px; margin: 22px 0 0; }
+    .profile-list__item { min-width: 0; }
+    .profile-list__label { margin: 0 0 5px; color: var(--muted); font-size: 12px; }
+    .profile-list__value { overflow-wrap: anywhere; margin: 0; font-size: 14px; font-weight: 700; }
+    .profile-list__note { margin: 20px 0 0; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+    .capabilities { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 18px; }
+    .capabilities__column { min-width: 0; }
+    .capabilities__heading { display: flex; align-items: center; gap: 8px; margin: 0 0 15px; font-size: 14px; }
+    .capabilities__symbol { display: grid; place-items: center; width: 23px; height: 23px; border-radius: 7px; background: var(--green-soft); color: var(--green); font-weight: 800; }
+    .capabilities__symbol--locked { background: #edf0f4; color: #586578; }
+    .capabilities__list { display: grid; gap: 11px; padding: 0; margin: 0; list-style: none; }
+    .capabilities__item { position: relative; padding-left: 19px; color: #35425a; font-size: 13px; line-height: 1.45; }
+    .capabilities__item::before { position: absolute; left: 0; top: 1px; color: var(--green); content: "✓"; font-weight: 800; }
+    .capabilities__list--locked .capabilities__item::before { color: #758296; content: "–"; }
+
+    .security-card { margin-top: 18px; }
+    .security-card__body { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-top: 16px; padding: 17px; border: 1px dashed #c7d4e5; border-radius: 11px; background: #f9fbff; }
+    .security-card__state { margin: 0; font-weight: 700; font-size: 14px; }
+    .security-card__detail { max-width: 780px; margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .security-card__tag { flex: none; color: var(--blue); font-size: 12px; font-weight: 700; }
+    .account-main__footnote { margin: 20px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+
+    @media (max-width: 1000px) {
+      .account-shell { grid-template-columns: 1fr; }
+      .account-nav { padding: 14px 18px; }
+      .account-nav__brand { padding: 0 0 12px; }
+      .account-nav__heading, .account-nav__footer { display: none; }
+      .account-nav__list { display: flex; gap: 5px; overflow-x: auto; }
+      .account-nav__link { white-space: nowrap; }
+      .account-main { margin: 0 auto; }
+    }
+
+    @media (max-width: 700px) {
+      .account-grid, .capabilities { grid-template-columns: 1fr; }
+      .account-main { padding-top: 25px; }
+      .account-card { padding: 19px; }
+      .account-card--hero { min-height: 190px; }
+      .persona-picker__choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .persona-picker__choice { width: 100%; }
+      .security-card__body { display: block; }
+      .security-card__tag { display: inline-block; margin-top: 13px; }
+    }
+
+    @media (max-width: 430px) {
+      .profile-list { grid-template-columns: 1fr; gap: 14px; }
+      .persona-picker__choices { grid-template-columns: 1fr; }
+      .account-main__environment { font-size: 11px; }
+    }
+  </style>
+  <script type="module">
+    // Все значения являются демонстрационными; скрипт не обращается к сети и storage.
+    const states = {
+      guest: {
+        name: "Гостевой анализ без учётной записи",
+        description: "Загрузите исходные документы, получите автозамечания и скачайте результат. Временная ссылка действует ограниченное время.",
+        status: "Гость",
+        tone: "guest",
+        meta: "Данные не сохраняются в базу Review и Experience",
+        profile: ["Без учётной записи", "—", "—", "—"],
+        note: "Профиль появится после регистрации или корпоративного входа.",
+        security: "Сессии нет",
+        securityDetail: "Вход и управление устройствами появятся после подключения auth-service.",
+        allowed: ["Загрузка PDF/CAD, ТЗ и пояснительной записки", "Автоматический анализ", "Скачивание результата по временной ссылке", "Чтение доступной нормативной базы"],
+        locked: ["Пользовательские документы и ручной Review", "Сохранение замечаний в базу и Experience", "Изменение нормативной базы", "Системный промпт и админка"],
+      },
+      external: {
+        name: "Личный кабинет внешнего пользователя",
+        description: "Подтверждённый email даёт личный профиль. Бесплатный анализ остаётся таким же, как у гостя; рабочая роль не выдаётся автоматически.",
+        status: "Email подтверждён · бесплатно",
+        tone: "active",
+        meta: "Учётная запись не означает оплаченный доступ",
+        profile: ["Внешний пользователь (пример)", "demo.user@example.test", "—", "Бесплатный аккаунт"],
+        note: "Адрес example.test вымышленный. Изменение профиля появится с безопасным публичным API.",
+        security: "Серверные сессии — следующий этап",
+        securityDetail: "Список устройств, выход и восстановление доступа требуют auth-service и подтверждённого email.",
+        allowed: ["Загрузка PDF/CAD, ТЗ и пояснительной записки", "Автоматический анализ", "Скачивание результата по временной ссылке", "Чтение доступной нормативной базы"],
+        locked: ["Пользовательские документы и ручной Review", "Сохранение замечаний в базу и Experience", "Изменение нормативной базы", "Системный промпт и админка"],
+      },
+      designer: {
+        name: "Рабочее место проектировщика",
+        description: "Собственные документы и замечания доступны в рамках выданной роли. Решение и утверждение Review остаются за руководителем.",
+        status: "Проектировщик",
+        tone: "active",
+        meta: "Корпоративная учётная запись · данные AD только для чтения",
+        profile: ["Сотрудник PDRD (пример)", "—", "designer.demo", "Проектный отдел (пример)"],
+        note: "Отдел показан как будущий элемент интерфейса; нынешний внутренний UserResponse его не возвращает.",
+        security: "Сессии управляются auth-service",
+        securityDetail: "Здесь будут текущая сессия, выход и выход со всех устройств после появления серверного API.",
+        allowed: ["Анализ и скачивание результата", "Собственные пользовательские документы", "Чтение собственного Review", "Создание Gold-замечаний"],
+        locked: ["Принятие, отклонение и утверждение Review", "Внесение Review в Experience", "Изменение нормативной базы", "Системный промпт и админка"],
+      },
+      head: {
+        name: "Рабочее место руководителя",
+        description: "Руководитель принимает решения по Review. Перед внесением результата в Experience требуется явное утверждение.",
+        status: "Руководитель отдела",
+        tone: "active",
+        meta: "Полномочия ограничены назначенной областью",
+        profile: ["Руководитель PDRD (пример)", "—", "head.demo", "Проектный отдел (пример)"],
+        note: "Область видимости документов и замечаний проверяет сервер, а не эта страница.",
+        security: "Сессии управляются auth-service",
+        securityDetail: "Здесь будут текущая сессия, выход и выход со всех устройств после появления серверного API.",
+        allowed: ["Анализ, документы и Review в своей области", "Принятие и отклонение замечаний", "Явное утверждение Review и внесение в Experience", "Изменение нормативки в своей области"],
+        locked: ["Системный промпт", "Управление пользователями и ролями", "Административные отчёты", "Доступ к чужой организации"],
+      },
+      admin: {
+        name: "Кабинет администратора PDRD",
+        description: "Из кабинета будет переход в отдельную админку. Каждое административное действие проходит серверную проверку и аудит.",
+        status: "Администратор",
+        tone: "active",
+        meta: "Все предусмотренные операции, с аудитом и ограничениями",
+        profile: ["Администратор PDRD (пример)", "—", "admin.demo", "Платформа PDRD (пример)"],
+        note: "Админская роль выдаётся защищённой однократной bootstrap-командой или подтверждённой админской операцией.",
+        security: "Сессии управляются auth-service",
+        securityDetail: "Администратор сможет отзывать сессии через отдельный защищённый API с аудитом.",
+        allowed: ["Рабочие операции PDRD", "Управление пользователями и ролями", "Административные отчёты и аудит", "Отзыв сессий предусмотренным API"],
+        locked: ["Прямое редактирование таблиц других сервисов", "Произвольное выполнение SQL", "Обход аудита и проверок конкретного ресурса"],
+      },
+    };
+
+    const fields = {
+      name: document.querySelector("[data-name]"),
+      description: document.querySelector("[data-description]"),
+      status: document.querySelector("[data-status]"),
+      meta: document.querySelector("[data-meta]"),
+      note: document.querySelector("[data-profile-note]"),
+      security: document.querySelector("[data-security]"),
+      securityDetail: document.querySelector("[data-security-detail]"),
+      allowed: document.querySelector("[data-allowed]"),
+      locked: document.querySelector("[data-locked]"),
+      announcement: document.querySelector("[data-announcement]"),
+    };
+    const profileFields = Array.from(document.querySelectorAll("[data-profile-value]"));
+
+    function renderList(container, values) {
+      const items = values.map((value) => {
+        const item = document.createElement("li");
+        item.className = "capabilities__item";
+        item.textContent = value;
+        return item;
+      });
+      container.replaceChildren(...items);
+    }
+
+    function render(persona) {
+      const state = states[persona];
+      if (!state) return;
+      fields.name.textContent = state.name;
+      fields.description.textContent = state.description;
+      fields.status.textContent = state.status;
+      fields.status.dataset.tone = state.tone;
+      fields.meta.textContent = state.meta;
+      fields.note.textContent = state.note;
+      fields.security.textContent = state.security;
+      fields.securityDetail.textContent = state.securityDetail;
+      profileFields.forEach((field, index) => { field.textContent = state.profile[index]; });
+      renderList(fields.allowed, state.allowed);
+      renderList(fields.locked, state.locked);
+      fields.announcement.textContent = `Показан пример: ${state.status}.`;
+    }
+
+    document.querySelectorAll('input[name="persona"]').forEach((input) => {
+      input.addEventListener("change", () => {
+        if (input.checked) render(input.value);
+      });
+    });
+    render(document.querySelector('input[name="persona"]:checked')?.value ?? "guest");
+  </script>
+</head>
+<body>
+  <p class="preview-banner" id="previewWarning">
+    Концепт для визуального ревью. Все профили вымышлены; вход, сессии и права здесь не проверяются.
+  </p>
+
+  <div class="account-shell">
+    <aside class="account-nav" aria-label="Навигация макета">
+      <a class="account-nav__brand" href="#overview" aria-label="PDRD, к обзору кабинета">
+        <span class="account-nav__mark" aria-hidden="true">P</span>
+        <span class="account-nav__name">PDRD<span class="account-nav__caption">Личный кабинет</span></span>
+      </a>
+      <p class="account-nav__heading">Разделы</p>
+      <nav aria-label="Разделы кабинета">
+        <ul class="account-nav__list">
+          <li><a class="account-nav__link account-nav__link--current" href="#overview">Обзор</a></li>
+          <li><a class="account-nav__link" href="#profile">Профиль</a></li>
+          <li><a class="account-nav__link" href="#rights">Мой доступ</a></li>
+          <li><a class="account-nav__link" href="#security">Безопасность</a></li>
+        </ul>
+      </nav>
+      <p class="account-nav__footer">Рабочий анализ и административный раздел остаются отдельными страницами.</p>
+    </aside>
+
+    <main class="account-main" id="overview">
+      <div class="account-main__top">
+        <span class="account-main__breadcrumb">PDRD / Личный кабинет</span>
+        <span class="account-main__environment">Визуальный макет</span>
+      </div>
+      <header>
+        <p class="account-main__eyebrow">Профиль и возможности</p>
+        <h1 class="account-main__title">Личный кабинет</h1>
+        <p class="account-main__intro">Один экран для профиля, доступных действий и безопасности. Выберите роль ниже, чтобы проверить будущие состояния интерфейса.</p>
+      </header>
+
+      <fieldset class="persona-picker" aria-describedby="previewWarning">
+        <legend class="persona-picker__legend">Показать состояние</legend>
+        <div class="persona-picker__choices">
+          <label class="persona-picker__choice"><input name="persona" type="radio" value="guest" checked><span>Гость</span></label>
+          <label class="persona-picker__choice"><input name="persona" type="radio" value="external"><span>Внешний · бесплатно</span></label>
+          <label class="persona-picker__choice"><input name="persona" type="radio" value="designer"><span>Проектировщик</span></label>
+          <label class="persona-picker__choice"><input name="persona" type="radio" value="head"><span>Руководитель</span></label>
+          <label class="persona-picker__choice"><input name="persona" type="radio" value="admin"><span>Администратор</span></label>
+        </div>
+      </fieldset>
+      <p class="account-main__eyebrow" data-announcement role="status" aria-live="polite">Показан пример: Гость.</p>
+
+      <div class="account-grid">
+        <section class="account-card account-card--hero" aria-labelledby="accountHeroTitle">
+          <div>
+            <p class="account-card__overline">Текущий уровень</p>
+            <h2 class="account-card__hero-title" id="accountHeroTitle" data-name>Гостевой анализ без учётной записи</h2>
+            <p class="account-card__hero-description" data-description>Загрузите исходные документы, получите автозамечания и скачайте результат. Временная ссылка действует ограниченное время.</p>
+          </div>
+          <div class="account-card__hero-footer">
+            <span class="account-card__status" data-status data-tone="guest">Гость</span>
+            <span class="account-card__meta" data-meta>Данные не сохраняются в базу Review и Experience</span>
+          </div>
+        </section>
+
+        <section class="account-card" id="profile" aria-labelledby="profileTitle">
+          <p class="account-card__overline">Учётная запись</p>
+          <h2 class="account-card__title" id="profileTitle">Профиль</h2>
+          <dl class="profile-list">
+            <div class="profile-list__item"><dt class="profile-list__label">Имя</dt><dd class="profile-list__value" data-profile-value>Без учётной записи</dd></div>
+            <div class="profile-list__item"><dt class="profile-list__label">Email</dt><dd class="profile-list__value" data-profile-value>—</dd></div>
+            <div class="profile-list__item"><dt class="profile-list__label">Логин AD</dt><dd class="profile-list__value" data-profile-value>—</dd></div>
+            <div class="profile-list__item"><dt class="profile-list__label">Отдел / уровень</dt><dd class="profile-list__value" data-profile-value>—</dd></div>
+          </dl>
+          <p class="profile-list__note" data-profile-note>Профиль появится после регистрации или корпоративного входа.</p>
+        </section>
+      </div>
+
+      <section class="account-card security-card" id="rights" aria-labelledby="rightsTitle">
+        <p class="account-card__overline">Полномочия</p>
+        <h2 class="account-card__title" id="rightsTitle">Что доступно</h2>
+        <p class="account-card__description">Это пояснение будущего интерфейса. Фактический доступ обязан проверить сервер для каждого действия и документа.</p>
+        <div class="capabilities">
+          <div class="capabilities__column">
+            <h3 class="capabilities__heading"><span class="capabilities__symbol" aria-hidden="true">✓</span> Доступно</h3>
+            <ul class="capabilities__list" data-allowed></ul>
+          </div>
+          <div class="capabilities__column">
+            <h3 class="capabilities__heading"><span class="capabilities__symbol capabilities__symbol--locked" aria-hidden="true">–</span> Ограничено</h3>
+            <ul class="capabilities__list capabilities__list--locked" data-locked></ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="account-card security-card" id="security" aria-labelledby="securityTitle">
+        <p class="account-card__overline">Учётная запись</p>
+        <h2 class="account-card__title" id="securityTitle">Безопасность и устройства</h2>
+        <div class="security-card__body">
+          <div>
+            <p class="security-card__state" data-security>Сессии нет</p>
+            <p class="security-card__detail" data-security-detail>Вход и управление устройствами появятся после подключения auth-service.</p>
+          </div>
+          <span class="security-card__tag">В разработке</span>
+        </div>
+      </section>
+      <p class="account-main__footnote">При реализации кабинет получит данные только через проверенную серверную сессию и публичный API Gateway. Этот файл не отправляет запросы и не сохраняет данные.</p>
+    </main>
+  </div>
+</body>
+</html>

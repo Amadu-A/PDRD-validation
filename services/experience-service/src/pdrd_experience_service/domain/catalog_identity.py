@@ -22,6 +22,8 @@ def content_key(source: ExperienceCandidate) -> str:
             "origin": source.origin.value,
             "tag": source.tag,
             "decision": source.decision.value,
+            "reason_category": source.reason_category,
+            "comment": source.comment,
             "original_text": source.original_text,
             "text": source.text,
             "normative_basis": source.normative_basis,
@@ -87,6 +89,9 @@ def snapshot_content_key(source: dict) -> str:
         payload["original_regions"] = original
     if display is not None and coordinates(display) != payload["issue_regions"]:
         payload["display_regions"] = coordinates(display)
+    if source.get("reason_category") is not None:
+        payload["reason_category"] = source["reason_category"]
+        payload["comment"] = source.get("comment", "")
     canonical = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )

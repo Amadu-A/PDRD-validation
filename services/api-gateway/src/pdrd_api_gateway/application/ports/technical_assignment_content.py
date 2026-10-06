@@ -40,3 +40,7 @@ class TechnicalAssignmentContentReader(
     ) -> TechnicalAssignmentContent:
         """Возвращает browser-viewable содержимое."""
         ...
+
+
+class TechnicalAssignmentContentExpiredError(RuntimeError):
+    """Исходное ТЗ удалено по сроку хранения."""

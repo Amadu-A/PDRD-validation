@@ -1,13 +1,13 @@
 // frontend/src/js/features/experience/server-page.js
 
 /** Серверные фильтры и пагинация: поздний ответ не заменяет более новый запрос. */
-import { experienceRow } from "./rows.js";
+import { authorLabel, element, experienceRow } from "./rows.js";
 import { mountExperienceDialogs } from "./dialogs.js";
 import { createExperienceSelection } from "./selection.js";
 import { mountExperienceVersions } from "./versions.js";
 import { downloadReviewedPdf as downloadFile } from "../review/download.js";
 
-export async function mountExperienceCatalog({ api, document: dom = document, download = downloadFile }) {
+export async function mountExperienceCatalog({ api, document: dom = document, download = downloadFile, canCurate = true, canManageVersions = true }) {
   const find = (key) => dom.querySelector(`[data-experience-${key}]`);
   const filter = find("filter");
   const rows = find("rows");
@@ -35,16 +35,16 @@ export async function mountExperienceCatalog({ api, document: dom = document, do
     rows.replaceChildren(...page.map((example) => experienceRow(example,
       { api, onImage: dialogs.openImage, onEdit: dialogs.edit, onHistory: dialogs.history,
         onDelete: selection.remove, onSelect: selection.toggle, selected: selection.selected.has(example.id),
-        memberRevision: selection.memberRevision(example.id) })));
+        memberRevision: selection.memberRevision(example.id), canCurate, canSelect: canManageVersions })));
   }
   const selection = createExperienceSelection({ api, criteria, onChanged: () => {
     // Обновляем чекбоксы на месте: keyboard focus не теряется при выборе строки.
     for (const row of rows.children) row.children[0].children[0].checked = selection.selected.has(row.dataset.experienceId);
-  }, onSaved: () => load(), notice, document: dom });
-  const versions = mountExperienceVersions({ api, selection, notice, download, document: dom, onViewed: async (version) => {
+  }, onSaved: () => load(), notice, document: dom, canDelete: canCurate, canManageVersions });
+  const versions = canManageVersions ? mountExperienceVersions({ api, selection, notice, download, document: dom, onViewed: async (version) => {
     filter.elements.namedItem("section_id").value = version?.section_id ?? "";
     await load(true, true);
-  } });
+  } }) : { reload: async () => {} };
   selection.changed();
 
   async function load(reset = false, preserveSelection = false) {
@@ -64,7 +64,10 @@ export async function mountExperienceCatalog({ api, document: dom = document, do
       }
       page = result.items; render();
       count.textContent = total ? `Показано ${offset + 1}–${offset + result.items.length} из ${total}.` : "Сохранённых примеров по этим фильтрам нет.";
-      notice.textContent = "Правки сохраняются с историей. Bad использует исходную область VLM; записи без области остаются текстовыми. Индексация запускается только для выбранных замечаний.";
+      notice.textContent = canCurate
+        ? "Правки сохраняются с историей. Bad использует исходную область VLM; записи без области остаются текстовыми. Индексация запускается только для выбранных замечаний."
+        : "Просмотр сохранённых замечаний. Правки и управление версиями доступны администратору.";
+      if (result.authors_unavailable) notice.textContent += " Профили авторов временно недоступны; показаны сохранённые идентификаторы.";
       exportButton.disabled = exporting;
       previous.disabled = offset === 0;
       next.disabled = offset + limit >= total;
@@ -87,6 +90,23 @@ export async function mountExperienceCatalog({ api, document: dom = document, do
     finally { exporting = false; exportButton.disabled = false; }
   });
   await load();
+  const authorFilter = find("author-filter");
+  if (authorFilter && api.authors) {
+    authorFilter.disabled = true;
+    try {
+      const options = [element("option", "", "Все авторы")]; options[0].value = "";
+      for (let offset = 0; ; offset += 100) {
+        const result = await api.authors({ offset, limit: 100 });
+        if (!Array.isArray(result.items) || !Number.isSafeInteger(result.total)) throw new Error("Некорректный справочник авторов.");
+        for (const item of result.items) {
+          const option = element("option", "", authorLabel(item.author)); option.value = item.id; options.push(option);
+        }
+        if (offset + result.items.length >= result.total) break;
+        if (!result.items.length) throw new Error("Справочник авторов изменился; обновите страницу.");
+      }
+      authorFilter.replaceChildren(...options); authorFilter.disabled = false;
+    } catch (error) { notice.textContent += ` Фильтр авторов недоступен: ${error.detail ?? error.message}`; }
+  }
   try { await versions.reload(); } catch (error) { notice.textContent = error.detail ?? error.message; }
   return { load, selection };
 }

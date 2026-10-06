@@ -19,6 +19,12 @@ QUALITY_DOCKERFILE = REPOSITORY_ROOT / "ops" / "Dockerfile.quality"
 
 QUALITY_DOCKERIGNORE = REPOSITORY_ROOT / "ops" / "Dockerfile.quality.dockerignore"
 
+USER_SERVICE_DOCKERFILE = REPOSITORY_ROOT / "services" / "user-service" / "Dockerfile"
+
+USER_SERVICE_DOCKERIGNORE = (
+    REPOSITORY_ROOT / "services" / "user-service" / ".dockerignore"
+)
+
 REQUIRED_CONTEXT_PATHS = {
     "frontend/",
     "n8n/",
@@ -93,3 +99,27 @@ def test_quality_context_ignores_runtime_data() -> None:
     ignore_patterns = read_ignore_patterns()
 
     assert "data/" in ignore_patterns
+    assert ".codex-test-temp/" in ignore_patterns
+
+
+def test_user_service_image_packages_migrations_and_runs_unprivileged() -> None:
+    """Runtime image содержит свой Alembic и не запускает приложение от root."""
+    content = USER_SERVICE_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "COPY pyproject.toml alembic.ini /app/" in content
+    assert "COPY alembic /app/alembic" in content
+    assert "COPY src /app/src" in content
+    assert "pip install --no-cache-dir ." in content
+    assert "USER app" in content
+    assert "pdrd_user_service.main:app" in content
+
+
+def test_user_service_build_context_excludes_secrets_and_test_artifacts() -> None:
+    """Сервисный Docker build не отправляет локальные секреты и тестовые данные."""
+    patterns = {
+        line.strip()
+        for line in USER_SERVICE_DOCKERIGNORE.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+
+    assert {".env", ".env.*", "tests/", ".codex-test-temp/"} <= patterns

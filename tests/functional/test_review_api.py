@@ -293,7 +293,13 @@ async def test_restore_edit_reject_undo_and_gold_through_both_services(flow):
         )
         assert edited.status_code == 200
         rejected = await command(
-            browser, flow, 1, action="decide", finding_id="vlm:1", decision="rejected"
+            browser,
+            flow,
+            1,
+            action="decide",
+            finding_id="vlm:1",
+            decision="rejected",
+            reason_category="false_positive",
         )
         assert rejected.json()["findings"][0]["experience_tag"] == "edited"
         assert (
@@ -468,6 +474,7 @@ async def test_conflict_incomplete_job_and_unknown_job(flow):
                 action="decide",
                 finding_id="vlm:1",
                 decision="rejected",
+                reason_category="false_positive",
             )
         ).status_code == 409
         assert (
@@ -485,7 +492,13 @@ async def test_vlm_geometry_remains_unconfirmed_and_approval_is_invalidated(flow
             browser, flow, 0, action="decide", finding_id="vlm:1", decision="accepted"
         )
         await command(
-            browser, flow, 1, action="decide", finding_id="vlm:2", decision="rejected"
+            browser,
+            flow,
+            1,
+            action="decide",
+            finding_id="vlm:2",
+            decision="rejected",
+            reason_category="false_positive",
         )
         approved = await command(browser, flow, 2, action="approve")
         assert approved.json()["approved_revision"] == 3
@@ -548,3 +561,58 @@ def test_controlled_headers_and_nginx_keys_reject_invalid_characters(field, valu
     settings[field] = value
     with pytest.raises(ValueError):
         GatewaySettings(_env_file=None, review=settings)
+
+
+@pytest.mark.parametrize(
+    "feedback",
+    [
+        {},
+        {"reason_category": "unknown"},
+        {"reason_category": True},
+        {"reason_category": "other", "comment": "я" * 2001},
+        {"reason_category": "other", "comment": 123},
+    ],
+)
+async def test_rejection_requires_valid_feedback_before_private_write(flow, feedback):
+    """Gateway отклоняет невалидный отказ до изменения приватного Review."""
+    async with client(flow) as browser:
+        assert (await browser.post(flow.endpoint + "/open")).status_code == 200
+        response = await command(
+            browser,
+            flow,
+            0,
+            action="decide",
+            finding_id="vlm:1",
+            decision="rejected",
+            **feedback,
+        )
+        assert response.status_code == 422
+        snapshot = (await browser.get(flow.endpoint)).json()
+        assert snapshot["revision"] == 0
+        assert snapshot["findings"][0]["decision"] == "pending"
+
+
+async def test_feedback_survives_both_http_services_and_reset_audit(flow):
+    """Причина, комментарий и доверенный актёр восстанавливаются после чтения и Undo."""
+    async with client(flow) as browser:
+        await browser.post(flow.endpoint + "/open")
+        response = await command(
+            browser,
+            flow,
+            0,
+            action="decide",
+            finding_id="vlm:1",
+            decision="rejected",
+            reason_category="misunderstood_drawing",
+            comment="Это резервный насос",
+        )
+        assert response.status_code == 200, response.text
+        restored = (await browser.get(flow.endpoint)).json()
+        row = restored["findings"][0]
+        assert row["reason_category"] == "misunderstood_drawing"
+        assert row["comment"] == "Это резервный насос"
+        response = await command(browser, flow, 1, action="reset", finding_id="vlm:1")
+        assert response.status_code == 200, response.text
+        session = await flow.reviews.load(flow.job_id)
+        assert session.findings[0].reason_category is None
+        assert session.history[-1].before.comment == "Это резервный насос"

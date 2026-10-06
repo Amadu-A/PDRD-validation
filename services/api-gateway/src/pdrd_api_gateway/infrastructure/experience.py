@@ -44,7 +44,7 @@ class ControlledExperienceAccess:
 
     async def require(self, context: ExperienceContext) -> None:
         """Новая политика прав сможет заменить адаптер без изменения бизнес-API."""
-        if not context.actor or context.actor != self.operator:
+        if not context.actor or (self.operator and context.actor != self.operator):
             raise ReviewRequestError(403, "Нет доверенного контекста каталога.")
         if context.job_id is not None:
             await self.reviews.require(
@@ -68,12 +68,13 @@ class HttpExperienceService:
         command: dict | None,
         index: int | None,
     ) -> dict | bytes:
-        """Actor приходит из сервера Gateway; browser headers не пересылаются."""
+        """Актёр определяется сервером Gateway; браузерные заголовки не пересылаются."""
         base = f"{self.base_url.rstrip('/')}/internal/v1/experience"
         example = str(context.example_id)
         operation = context.operation
         method, suffix = {
             "list": ("GET", ""),
+            "authors": ("GET", "/authors"),
             "export": ("GET", "/export"),
             "capture": ("POST", f"/capture/{context.job_id}"),
             "read": ("GET", f"/{example}"),
@@ -97,7 +98,10 @@ class HttpExperienceService:
             base = f"{self.base_url.rstrip('/')}/internal/v1/experience-versions"
         try:
             async with httpx.AsyncClient(
-                timeout=300, follow_redirects=False, transport=self.transport
+                timeout=300,
+                follow_redirects=False,
+                trust_env=False,
+                transport=self.transport,
             ) as client:
                 response = await client.request(
                     method,

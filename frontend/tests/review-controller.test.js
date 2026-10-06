@@ -7,6 +7,7 @@ import test from "node:test";
 import { createReviewController } from "../src/js/features/review/controller.js";
 
 import { FakeElement } from "./helpers/fake-dom.js";
+import { submitRejection } from "./helpers/rejection.js";
 
 globalThis.document = {
   createElement(tag) { return new FakeElement(tag); },
@@ -52,6 +53,7 @@ test("монтирует контролы для обычного и сгруп�
   assert.equal(visualization.children[0].dataset.reviewPreview, "");
   action(items[0].item, "accept").click();
   action(items[1].item, "reject").click();
+  submitRejection(root);
   assert.equal(items[0].item.dataset.reviewDecision, "accepted");
   assert.equal(items[1].item.dataset.reviewDecision, "rejected");
   assert.equal(action(items[0].item, "accept").getAttribute("aria-pressed"), "true");
@@ -113,4 +115,27 @@ test("при отсутствии визуальных замечаний не �
   const { root } = fixture([]);
   createReviewController().mount(root);
   assert.equal(root.children.length, 0);
+});
+
+test("диалог отказа не меняет замечание до подтверждения и не сохраняет отмену", () => {
+  const { root, items } = fixture([["one", "Исходный текст"]]);
+  let changes = 0;
+  const controller = createReviewController({ onChange: () => { changes += 1; } });
+  controller.mount(root);
+  const initial = changes;
+  action(items[0].item, "reject").click();
+  assert.equal(items[0].item.dataset.reviewDecision, "pending");
+  root.querySelector("[data-review-rejection-cancel]").click();
+  assert.equal(changes, initial);
+  action(items[0].item, "reject").click();
+  submitRejection(root, "misunderstood_drawing", "Это резервный насос");
+  assert.equal(controller.getReviewSnapshot()[0].comment, "Это резервный насос");
+  assert.equal(items[0].item.dataset.reviewDecision, "rejected");
+  assert.equal(changes, initial + 1);
+  action(items[0].item, "accept").click();
+  assert.equal(controller.getReviewSnapshot()[0].reasonCategory, null);
+  assert.equal(controller.getReviewSnapshot()[0].comment, "");
+  const accepted = changes;
+  action(items[0].item, "accept").click();
+  assert.equal(changes, accepted);
 });

@@ -5,6 +5,8 @@
  * пользователя независимы: edited никогда не становится gold.
  */
 
+import { rejectionFeedback } from "./rejection-reasons.js";
+
 export const REVIEW_DECISIONS = Object.freeze({
   PENDING: "pending",
   ACCEPTED: "accepted",
@@ -100,6 +102,7 @@ export function createReviewState() {
       text: normalizedText,
       normativeSection: normalizedNormative,
       decision: REVIEW_DECISIONS.PENDING,
+      reasonCategory: null, comment: "",
       edited: false,
       revision: 0,
     });
@@ -107,7 +110,7 @@ export function createReviewState() {
     return get(id);
   }
 
-  function decide(findingId, decision) {
+  function decide(findingId, decision, feedback = {}) {
     if (![REVIEW_DECISIONS.ACCEPTED, REVIEW_DECISIONS.REJECTED]
       .includes(decision)) {
       throw new Error("Недопустимое решение пользователя.");
@@ -115,8 +118,13 @@ export function createReviewState() {
 
     const entry = requireEntry(findingId);
 
-    if (entry.decision !== decision) {
+    const explanation = decision === REVIEW_DECISIONS.REJECTED
+      ? rejectionFeedback(feedback.reasonCategory, feedback.comment ?? "")
+      : { reasonCategory: null, comment: "" };
+    if (entry.decision !== decision || entry.reasonCategory !== explanation.reasonCategory
+        || entry.comment !== explanation.comment) {
       entry.decision = decision;
+      Object.assign(entry, explanation);
       entry.revision += 1;
     }
 
@@ -139,6 +147,7 @@ export function createReviewState() {
         || nextNormative !== entry.originalNormativeSection;
 
       entry.decision = REVIEW_DECISIONS.PENDING;
+      entry.reasonCategory = null; entry.comment = "";
       entry.revision += 1;
     }
 
@@ -169,18 +178,23 @@ export function createReviewState() {
   function invalidate(findingId) {
     const entry = requireEntry(findingId);
     entry.decision = REVIEW_DECISIONS.PENDING;
+    entry.reasonCategory = null; entry.comment = "";
     entry.revision += 1;
     return get(findingId);
   }
 
   /** Undo решения сохраняет запись и увеличивает ревизию истории. */
-  function restoreDecision(findingId, decision) {
+  function restoreDecision(findingId, decision, feedback = {}) {
     if (!Object.values(REVIEW_DECISIONS).includes(decision)) {
       throw new Error("Недопустимое решение пользователя.");
     }
     const entry = requireEntry(findingId);
-    if (entry.decision !== decision) {
+    const explanation = decision === REVIEW_DECISIONS.REJECTED
+      ? rejectionFeedback(feedback.reasonCategory, feedback.comment ?? "", { legacy: true })
+      : { reasonCategory: null, comment: "" };
+    if (entry.decision !== decision || entry.reasonCategory !== explanation.reasonCategory || entry.comment !== explanation.comment) {
       entry.decision = decision;
+      Object.assign(entry, explanation);
       entry.revision += 1;
     }
     return get(findingId);
@@ -232,6 +246,9 @@ export function createReviewState() {
         throw new Error("Сервер вернул неизвестное решение.");
       }
       entry.decision = row.decision;
+      Object.assign(entry, row.decision === REVIEW_DECISIONS.REJECTED
+        ? rejectionFeedback(row.reason_category, row.comment ?? "", { legacy: true })
+        : { reasonCategory: null, comment: "" });
       entry.revision = row.revision;
       entry.edited = entry.text !== entry.originalText
         || entry.normativeSection !== entry.originalNormativeSection;

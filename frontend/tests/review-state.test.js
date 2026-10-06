@@ -38,7 +38,7 @@ test("редактирование принятого замечания тре�
   assert.equal(changed.text, "Стало");
   assert.equal(changed.edited, true);
   assert.equal(changed.decision, REVIEW_DECISIONS.PENDING);
-  state.decide("A", REVIEW_DECISIONS.REJECTED);
+  state.decide("A", REVIEW_DECISIONS.REJECTED, { reasonCategory: "false_positive" });
   assert.equal(state.get("A").edited, true);
   assert.equal(state.get("A").revision, 3);
 });
@@ -86,7 +86,7 @@ test("отмена создания удаляет только локально
   assert.equal(pending.decision, "pending");
   assert.equal(pending.experienceTag, "gold");
   assert.equal(pending.revision, 2);
-  state.decide("manual:one", "rejected");
+  state.decide("manual:one", "rejected", { reasonCategory: "false_positive" });
   const snapshot = state.removeManual("manual:one");
   assert.equal(state.summary().total, 1);
   assert.throws(() => state.get("manual:one"));
@@ -105,7 +105,7 @@ test("Undo отклонения сохраняет edited, исходный ра
   state.edit("A", "Исправленная формулировка");
   state.decide("A", "accepted");
   const previous = state.get("A");
-  state.decide("A", "rejected");
+  state.decide("A", "rejected", { reasonCategory: "false_positive" });
   assert.equal(state.snapshot()[0].experienceTag, "edited");
   const undone = state.restoreDecision("A", previous.decision);
   assert.equal(undone.experienceTag, "edited");

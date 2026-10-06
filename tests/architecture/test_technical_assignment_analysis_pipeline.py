@@ -111,7 +111,7 @@ def test_public_t_content_route_exists() -> None:
 
 
 def test_frontend_renders_clickable_t_citation() -> None:
-    """Report содержит отдельный clickable T-source."""
+    """Report открывает ТЗ через Blob с ключом в заголовке, а не в URL."""
     report = (
         ROOT / "frontend" / "src" / "js" / "features" / "analysis" / "report.js"
     ).read_text(
@@ -120,8 +120,19 @@ def test_frontend_renders_clickable_t_citation() -> None:
 
     assert "technical_assignment_basis_sources" in report
 
-    assert "technicalAssignmentCitationUrl" in report
+    citation = (
+        ROOT
+        / "frontend"
+        / "src"
+        / "js"
+        / "features"
+        / "technical_assignment"
+        / "citation.js"
+    ).read_text(encoding="utf-8")
 
-    assert "/api/v1/normative/technical-assignments/" in report
-
+    assert "openTechnicalAssignmentCitation" in report
     assert "technicalAssignmentCitation" in report
+    assert "technicalAssignmentAccessHeaders(id)" in citation
+    assert 'cache: "no-store"' in citation
+    assert "URL.createObjectURL(blob)" in citation
+    assert "access_token=" not in citation

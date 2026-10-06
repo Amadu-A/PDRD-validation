@@ -8,6 +8,7 @@ line-length = 88
 extend-exclude = [
     ".venv",
     ".venv-dev",
+    ".codex-test-temp",
     "data",
 
     # Standalone scripts подготовки/индексации данных не входят
@@ -68,6 +69,9 @@ testpaths = [
     "services/analysis-service/tests",
     "services/multimodal-embedding-service/tests",
     "services/experience-service/tests",
+    "services/user-service/tests",
+    "services/auth-service/tests",
+    "services/admin-service/tests",
 ]
 
 markers = [

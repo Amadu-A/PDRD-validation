@@ -183,6 +183,7 @@ def test_final_download_uses_closed_review_dependency_and_revision_only_request(
         "self",
         "job_id",
         "expected_revision",
+        "actor",
     }
     with pytest.raises(ValidationError):
         StrictCommand.model_validate(

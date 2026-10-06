@@ -82,7 +82,12 @@ async def execute_command(
             **arguments, text=command.text, normative_basis=command.normative_basis
         )
     if isinstance(command, DecideCommand):
-        return await use_case.decide(**arguments, decision=Decision(command.decision))
+        return await use_case.decide(
+            **arguments,
+            decision=Decision(command.decision),
+            reason_category=command.reason_category,
+            comment=command.comment,
+        )
     if isinstance(command, ResetCommand):
         return await use_case.reset_decision(**arguments)
     if isinstance(command, GeometryCommand):

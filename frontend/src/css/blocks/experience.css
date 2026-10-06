@@ -237,3 +237,6 @@
   padding-bottom: var(--space-4);
   overflow-wrap: anywhere;
 }
+/* Отказ доступа скрывает каталог; руководитель читает его без административных действий. */
+.experience-page [hidden] { display: none; }
+.experience-page[data-access-denied="true"] > :not(.experience-page__navigation):not(.experience-page__notice) { display: none; }

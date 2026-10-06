@@ -17,6 +17,7 @@ x-app-env-files: &app-env-files
   - .env
 
 x-api-gateway-environment: &api-gateway-environment
+  API_GATEWAY_RETENTION__INTERNAL_KEY: ${PDRD_RETENTION_INTERNAL_KEY:-}
   API_GATEWAY_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
   API_GATEWAY_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
   API_GATEWAY_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
@@ -28,6 +29,7 @@ x-api-gateway-environment: &api-gateway-environment
   API_GATEWAY_BROKER__VIRTUAL_HOST: ${PDRD_RABBITMQ_VHOST:-pdrd-validation}
 
 x-knowledge-service-environment: &knowledge-service-environment
+  KNOWLEDGE_SERVICE_TECHNICAL_ASSIGNMENT__RETENTION_INTERNAL_KEY: ${PDRD_RETENTION_INTERNAL_KEY:-}
   KNOWLEDGE_SERVICE_EXPERIENCE__KEY: ${PDRD_EXPERIENCE_INDEX_KEY:-}
   KNOWLEDGE_SERVICE_DATABASE__HOST: postgres
   KNOWLEDGE_SERVICE_DATABASE__PORT: 5432
@@ -54,6 +56,20 @@ x-experience-environment: &experience-environment
   EXPERIENCE_SERVICE_REVIEW_API_ENABLED: ${API_GATEWAY_REVIEW__ENABLED:-false}
   EXPERIENCE_SERVICE_INTERNAL_KEY: ${API_GATEWAY_REVIEW__INTERNAL_KEY:-}
 
+x-user-service-database-environment: &user-service-database-environment
+  USER_SERVICE_DATABASE__HOST: postgres
+  USER_SERVICE_DATABASE__PORT: 5432
+  USER_SERVICE_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
+  USER_SERVICE_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
+  USER_SERVICE_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+
+x-auth-service-database-environment: &auth-service-database-environment
+  AUTH_SERVICE_DATABASE__HOST: postgres
+  AUTH_SERVICE_DATABASE__PORT: 5432
+  AUTH_SERVICE_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
+  AUTH_SERVICE_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
+  AUTH_SERVICE_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+
 services:
   postgres:
     image: postgres:${PDRD_POSTGRES_VERSION:-16-alpine}
@@ -66,7 +82,7 @@ services:
       POSTGRES_INITDB_ARGS: --data-checksums
 
     ports:
-      - "${PDRD_POSTGRES_BIND_IP:-0.0.0.0}:${PDRD_POSTGRES_HOST_PORT:-5432}:5432"
+      - "${PDRD_POSTGRES_BIND_IP:-127.0.0.1}:${PDRD_POSTGRES_HOST_PORT:-5432}:5432"
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -92,8 +108,8 @@ services:
     restart: unless-stopped
 
     ports:
-      - "${QDRANT_HTTP_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
+      - "${QDRANT_BIND_IP:-127.0.0.1}:${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_BIND_IP:-127.0.0.1}:${QDRANT_GRPC_PORT:-6334}:6334"
 
     volumes:
       - qdrant_data:/qdrant/storage
@@ -120,7 +136,19 @@ services:
 
     env_file: *app-env-files
 
-    environment: *api-gateway-environment
+    environment:
+      <<: *api-gateway-environment
+      API_GATEWAY_IDENTITY_PROXY__ENABLED: ${API_GATEWAY_IDENTITY_PROXY__ENABLED:-false}
+      API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED: ${API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED:-false}
+      API_GATEWAY_IDENTITY_PROXY__AUTH_INTERNAL_KEY: ${AUTH_SERVICE_HTTP__INTERNAL_KEY:-}
+      API_GATEWAY_IDENTITY_PROXY__USER_SERVICE_INTERNAL_KEY: ${USER_SERVICE_INTERNAL_KEY:-}
+      API_GATEWAY_IDENTITY_PROXY__PUBLIC_ORIGIN: ${AUTH_SERVICE_HTTP__PUBLIC_ORIGIN:-}
+      API_GATEWAY_IDENTITY_PROXY__TRUSTED_PROXY_KEY: ${PDRD_FRONTEND_PROXY_KEY:-}
+      API_GATEWAY_IDENTITY_PROXY__TECHNICAL_ASSIGNMENT_ACCESS_KEY: ${PDRD_TECHNICAL_ASSIGNMENT_ACCESS_KEY:-}
+      API_GATEWAY_IDENTITY_PROXY__AUTH_BASE_URL: http://auth-service:8000
+      API_GATEWAY_IDENTITY_PROXY__USER_SERVICE_URL: http://user-service:8000
+      API_GATEWAY_IDENTITY_PROXY__ADMIN_BASE_URL: http://admin-service:8000
+      API_GATEWAY_IDENTITY_PROXY__TIMEOUT_SECONDS: ${API_GATEWAY_IDENTITY_PROXY__TIMEOUT_SECONDS:-10}
 
     volumes:
       - analysis_artifacts:/data/analyses
@@ -160,7 +188,10 @@ services:
 
     env_file: *app-env-files
 
-    environment: *api-gateway-environment
+    environment:
+      <<: *api-gateway-environment
+      API_GATEWAY_IDENTITY_PROXY__ENABLED: "false"
+      API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED: "false"
 
     command:
       [
@@ -168,6 +199,9 @@ services:
         "-m",
         "pdrd_api_gateway.infrastructure.messaging.dispatcher"
       ]
+
+    volumes:
+      - analysis_artifacts:/data/analyses
 
     depends_on:
       postgres:
@@ -188,7 +222,10 @@ services:
 
     env_file: *app-env-files
 
-    environment: *api-gateway-environment
+    environment:
+      <<: *api-gateway-environment
+      API_GATEWAY_IDENTITY_PROXY__ENABLED: "false"
+      API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED: "false"
 
     command:
       [
@@ -243,6 +280,8 @@ services:
     environment:
       <<: *api-gateway-environment
       API_GATEWAY_ENVIRONMENT: test
+      API_GATEWAY_IDENTITY_PROXY__ENABLED: "false"
+      API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED: "false"
       PDRD_RUN_DATABASE_TESTS: "1"
       PDRD_RUN_BROKER_TESTS: "1"
 
@@ -620,6 +659,125 @@ services:
       - app-net
       - ai-shared
 
+  user-migrate:
+    build:
+      context: ./services/user-service
+      target: runtime
+    profiles: [identity]
+    restart: "no"
+    environment: *user-service-database-environment
+    command: ["python", "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+    networks: [app-net]
+
+  user-service:
+    build:
+      context: ./services/user-service
+      target: runtime
+    profiles: [identity]
+    restart: unless-stopped
+    env_file: *app-env-files
+    environment:
+      <<: *user-service-database-environment
+      USER_SERVICE_ENABLED: "true"
+      USER_SERVICE_INTERNAL_KEY: ${USER_SERVICE_INTERNAL_KEY:-}
+      USER_SERVICE_KNOWLEDGE_SERVICE_URL: ${USER_SERVICE_KNOWLEDGE_SERVICE_URL:-http://knowledge-service:8401}
+      USER_SERVICE_KNOWLEDGE_TIMEOUT_SECONDS: ${USER_SERVICE_KNOWLEDGE_TIMEOUT_SECONDS:-10}
+    depends_on:
+      user-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *default-logging
+    networks: [app-net]
+
+  auth-migrate:
+    build:
+      context: ./services/auth-service
+      target: runtime
+    profiles: [auth]
+    restart: "no"
+    environment: *auth-service-database-environment
+    command: ["python", "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+    networks: [app-net]
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+      target: runtime
+    profiles: [auth]
+    restart: unless-stopped
+    env_file: *app-env-files
+    environment:
+      <<: *auth-service-database-environment
+      AUTH_SERVICE_ENVIRONMENT: stage
+      AUTH_SERVICE_ENABLED: ${AUTH_SERVICE_ENABLED:-false}
+      AUTH_SERVICE_AD__CA_BUNDLE_PATH: /run/pdrd-auth-certificates/ad-ca.pem
+      AUTH_SERVICE_HTTP__ENABLED: "true"
+      AUTH_SERVICE_HTTP__PUBLIC_ORIGIN: ${AUTH_SERVICE_HTTP__PUBLIC_ORIGIN:-}
+      AUTH_SERVICE_HTTP__COOKIE_SECURE: "true"
+      AUTH_SERVICE_HTTP__INTERNAL_KEY: ${AUTH_SERVICE_HTTP__INTERNAL_KEY:-}
+      AUTH_SERVICE_HTTP__CSRF_KEY: ${AUTH_SERVICE_HTTP__CSRF_KEY:-}
+      AUTH_SERVICE_HTTP__USER_SERVICE_URL: http://user-service:8000
+      AUTH_SERVICE_HTTP__USER_SERVICE_INTERNAL_KEY: ${USER_SERVICE_INTERNAL_KEY:-}
+      AUTH_SERVICE_EMAIL__ENABLED: "true"
+      AUTH_SERVICE_EMAIL__PUBLIC_BASE_URL: ${AUTH_SERVICE_EMAIL__PUBLIC_BASE_URL:-}
+    depends_on:
+      auth-migrate:
+        condition: service_completed_successfully
+      user-service:
+        condition: service_healthy
+    volumes:
+      - ./ops/certificates:/run/pdrd-auth-certificates:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *default-logging
+    networks: [app-net]
+
+  admin-service:
+    build:
+      context: ./services/admin-service
+      target: runtime
+    profiles: [auth]
+    restart: unless-stopped
+    env_file: *app-env-files
+    environment:
+      ADMIN_SERVICE_ENVIRONMENT: stage
+      ADMIN_SERVICE_ENABLED: "true"
+      ADMIN_SERVICE_AUTH_SERVICE_URL: http://auth-service:8000
+      ADMIN_SERVICE_AUTH_SERVICE_INTERNAL_KEY: ${AUTH_SERVICE_HTTP__INTERNAL_KEY:-}
+      ADMIN_SERVICE_KNOWLEDGE_SERVICE_URL: ${ADMIN_SERVICE_KNOWLEDGE_SERVICE_URL:-http://knowledge-service:8401}
+      ADMIN_SERVICE_USER_SERVICE_URL: http://user-service:8000
+      ADMIN_SERVICE_USER_SERVICE_INTERNAL_KEY: ${USER_SERVICE_INTERNAL_KEY:-}
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *default-logging
+    networks: [app-net]
+
   experience-migrate:
     build:
       context: ./services/experience-service
@@ -663,6 +821,7 @@ services:
     restart: unless-stopped
     environment:
       PDRD_REVIEW_PROXY_KEY: ${API_GATEWAY_REVIEW__UI_KEY:-}
+      PDRD_FRONTEND_PROXY_KEY: ${PDRD_FRONTEND_PROXY_KEY:-}
     ports:
       - "127.0.0.1:${REVIEW_FRONTEND_PORT:-8081}:80"
     depends_on:
@@ -706,11 +865,12 @@ services:
     restart: unless-stopped
 
     ports:
-      - "${FRONTEND_PORT:-8080}:80"
+      - "${FRONTEND_BIND_IP:-127.0.0.1}:${FRONTEND_PORT:-8080}:80"
 
     environment:
       # Серверный Review работает на основном фронте; ключ не передаётся браузеру.
       PDRD_REVIEW_PROXY_KEY: ${API_GATEWAY_REVIEW__UI_KEY:-}
+      PDRD_FRONTEND_PROXY_KEY: ${PDRD_FRONTEND_PROXY_KEY:-}
 
     logging: *default-logging
 

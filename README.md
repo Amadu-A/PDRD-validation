@@ -1,16 +1,25 @@
 <!-- README.md -->
 
-# PDRD Validation — Drawing Validation AI
+# PDRD Validation — проверка чертежей с помощью ИИ
 
 PDRD Validation — локальный сервис проверки проектной и рабочей документации по нормативной базе, техническому заданию, пользовательским пакетам документов, контексту проекта и Базе Опыта.
 
 Пользователь загружает PDF, DXF/DWG или PDF вместе с соответствующим CAD-файлом, при необходимости прикладывает Техническое задание и выбирает нормативный раздел/пользовательские документы. Система извлекает текст и геометрию, формирует машинный контекст листа, выполняет semantic retrieval по источникам разных типов, запускает локальный VLM-анализ и возвращает структурированные замечания с разделённой доказательной базой `N/T/U/E`.
 
+Открыть проект: **[https://pdrd.itcneoterm.local/](https://pdrd.itcneoterm.local/)**. Корпоративный вход и регистрация работают только через HTTPS.
+
+Обычный PDF/CAD можно проверить без нормативного раздела — как гостю, так и авторизованному пользователю. Для нормативного поиска, промпта раздела и личных пакетов учитываются назначенные пользователю разделы и владелец документов.
+
 Тяжёлые GPU-задачи выполняются с общим cross-process GPU lease. Analysis VLM и unified embedding runtime не должны одновременно загружать несовместимые тяжёлые модели в одну GPU без предварительной проверки VRAM.
 
 ## Возможности
 
-- PDF-only и multi-page PDF;
+- PDF-only и многостраничный PDF: до **200 анализируемых страниц**, включая выбор диапазона из большего документа;
+- корпоративный вход через LDAPS, локальный суперпользователь и регистрация внешних пользователей с подтверждением email;
+- личный кабинет, собственная история проверок и восстановление результата по `job_id` без повторного VLM-анализа;
+- админка: роли, доступ к нескольким нормативным разделам, отдельные права Review и удаления нормативной базы;
+- серверные сессии: 24 часа бездействия, максимум 30 дней от входа;
+- автоматическая очистка исходников/визуализаций через 30 дней у владельца, гостевых анализов через 7 дней;
 - DXF-only и DWG -> DXF normalization;
 - PDF + CAD как два представления одного листа;
 - Техническое задание как отдельный project/customer source;
@@ -31,7 +40,7 @@ PDRD Validation — локальный сервис проверки проек�
 - Human Review в браузере: Wise/Bad/Edited/Gold, выделение Gold на листе и синхронизация с текстовым списком;
 - серверная доменная модель Human Review, утверждение ревизий и отбор подтверждённых областей для будущей Базы Опыта;
 - итоговый PDF актуального утверждённого Human Review: принятые замечания, проверенные области VLM и жёлтый Gold на листе и в текстовом списке;
-- База Опыта (достоверное сохранение, HTTP и E indexing вводятся поэтапно; поиск E отключён до завершения контура);
+- постоянный каталог Базы Опыта: авторы из User Service, фильтры, причины отклонения, история правок, версии индекса и подготовка обучающих наборов; поиск E выключен до оценки качества;
 - единая embedding model для N/T/U/E/PZ;
 - blue/green переиндексация Qdrant при смене embedding identity;
 - cross-process GPU lease и RAM/VRAM admission;
@@ -91,30 +100,26 @@ experience_sources                  = E
 
 # Архитектура
 
-Bounded contexts:
+Сервисы разделяют ответственность и обращаются к данным соседнего сервиса через API.
 
-- **API Gateway** — публичный API, job state, immutable analysis snapshot, Outbox, Celery, analysis artifacts и public content proxy для managed sources.
-- **Document Service** — PDF/CAD extraction, render, DWG -> DXF.
-- **Knowledge Service** — managed catalog, ТЗ lifecycle, PostgreSQL metadata, Qdrant, N/T/U/E retrieval и Project Context.
-- **Experience Service** — отдельный bounded context: Human Review, решения и аудит, проверенные области, закрытый HTTP API, PostgreSQL-каталог и собственное хранилище PNG. Оригинал для crop получает через Gateway, вырезание выполняет Document Service. Рабочее развёртывание каждой новой версии проверяется отдельно.
-- **Shared Embedding Runtime** — общий external endpoint `shared-embedding`; локальный каталог `multimodal-embedding-service` сохраняется в репозитории как legacy/test code, но не поднимает второй runtime в Compose.
-- **Analysis Service** — VLM page understanding, requirement check, N/T/U policy и finalization.
-- **n8n** — orchestration внутренних вызовов.
-- **Frontend** — Browser -> API Gateway; прямого доступа к n8n и внутренним сервисам нет.
+| Микросервис | Ответственность | Собственное хранение | Профиль Compose |
+|---|---|---|---|
+| **API Gateway** | Публичный API, проверка прав/владельца, история, задания, неизменяемый снимок N/T/U, Outbox и артефакты | PostgreSQL `public.analysis_jobs`, `public.outbox_messages`; `/data/analyses` | Основной стек |
+| **Document Service** | Проверка числа PDF-страниц, извлечение PDF/CAD, DWG → DXF, изображения, crop, автоматический и Reviewed PDF | Собственной БД нет; обрабатывает переданные файлы | Основной стек |
+| **Knowledge Service** | Каталог N/U, промпты разделов, личные пакеты, lifecycle ТЗ, индексация, поиск и временный контекст проекта | PostgreSQL `knowledge`, Qdrant, `/data/normative`, `/data/technical-assignments` | Основной стек |
+| **Analysis Service** | VLM-анализ листа, проверка требований, правила доказательной базы N/T/U/E, финализация | Собственной БД нет; технический VLM-кеш `/data/vlm-cache` | Основной стек |
+| **User Service** | Профили, внешние идентичности, роли, назначения разделов, права Review/удаления и аудит | PostgreSQL `users`; без паролей | `identity` |
+| **Auth Service** | Локальная/email-аутентификация, LDAPS, подтверждение email, серверные сессии, CSRF и ограничение попыток | PostgreSQL `auth`; хеши только собственных паролей и токенов | `auth` вместе с `identity` |
+| **Admin Service** | Административный API: проверка сессии, роли, разделы и отдельные права пользователя | Собственной БД нет; API Auth/User/Knowledge | `auth` |
+| **Experience Service** | Human Review, решения и аудит, подтверждённые области, каталог примеров, версии индекса и обучающих наборов | PostgreSQL `experience`; собственные PNG в `/data/experience/crops` | `review` |
 
-Shared infrastructure (самостоятельный lifecycle, сеть `ai-shared`):
+Дополнительные процессы используют данные своего сервиса: Gateway worker/outbox, Knowledge outbox и индексаторы N/U/T/E. Они не создают отдельные базы. `experience-indexer` запускается профилем `experience-index`, который требует `review`. Контейнеры `user-migrate`, `auth-migrate`, `experience-migrate` выполняют независимые миграции.
 
-- `shared-vlm` (vLLM);
-- `shared-embedding` (vLLM);
-- RabbitMQ;
-- n8n.
+**Frontend** — статические страницы и Nginx; браузер обращается только к API Gateway. `review-frontend` — дополнительный интерфейс на loopback `127.0.0.1:8081`, без собственной БД. Основной интерфейс доступен через корпоративный HTTPS-прокси. Прямого браузерного доступа к внутренним API, n8n, PostgreSQL и Qdrant нет.
 
-Project infrastructure:
+**Shared infrastructure** имеет самостоятельный жизненный цикл в сети `ai-shared`: `shared-vlm`, `shared-embedding`, RabbitMQ и n8n. Проект не поднимает второй GPU runtime. Каталог `services/multimodal-embedding-service` сохранён как прежняя реализация для совместимости и тестов; в текущем Compose он не запускается. Вызовы идут в общий OpenAI-совместимый embedding endpoint.
 
-- PostgreSQL (`analysis_jobs`/`knowledge` и отдельная схема Experience после миграции);
-- Qdrant и проектные application services;
-- analysis/document/knowledge volumes;
-- Experience Service запускается профилем `review`, без копирования shared GPU runtimes.
+**Инфраструктура проекта:** PostgreSQL с независимыми схемами `public`/`knowledge`/`users`/`auth`/`experience`, Qdrant и постоянные тома файлов. Сервисы не читают чужие схемы SQL напрямую; межсервисные UUID являются логическими ссылками, без внешних ключей между схемами.
 
 Направление зависимостей backend:
 
@@ -136,8 +141,14 @@ Infrastructure ──implements──> Application ports
 
 ```mermaid
 flowchart TD
-    U["Пользователь"] --> FE["Frontend :8080"]
+    U["Пользователь"] --> TLS["HTTPS pdrd.itcneoterm.local:443"]
+    TLS --> FE["Frontend / Nginx: HTTP upstream :8080"]
     FE --> GW["API Gateway :8200"]
+    GW --> AUTH["Auth Service: проверка действующей сессии"]
+    AUTH --> US["User Service: профиль и права"]
+    GW --> ADMIN["Admin Service"]
+    ADMIN --> US
+    ADMIN --> AUTH
     GW --> FS["Analysis Artifact Store"]
     GW --> KS["Knowledge Service"]
     KS --> RESOLVE["Immutable N/T/U selection"]
@@ -159,13 +170,13 @@ flowchart TD
     FE --> POLL["Status / result / visualization polling"]
     POLL --> GW
     GW --> DS2["Document Service: automatic and reviewed PDF renderer"]
-    FE -->|Human Review: основной UI 8080| GW
+    FE -->|Human Review: основной HTTPS UI| GW
     GW --> EXP["Experience Service: профиль review"]
     EXP --> RP[("PostgreSQL: схема experience")]
     EXP -->|approved Review manifest| GW
 ```
 
-Точки и модели shared-inference задаются logical endpoints/переменными окружения, а не физическими ID модели в коде проекта. Experience формирует утверждённую проекцию Review, Gateway передаёт её PDF-рендереру Document Service. Review сохраняется через Gateway на основном фронте 8080. Утверждение и скачивание PDF автоматически сохраняют подходящие примеры Experience. Действующий `annotated-pdf` остаётся **автоматической исходной версией**.
+Точки и модели shared-inference задаются logical endpoints/переменными окружения, а не физическими ID модели в коде проекта. Experience формирует утверждённую проекцию Review, Gateway передаёт её PDF-рендереру Document Service. Review сохраняется через Gateway на основном HTTPS-фронте. История читает существующее задание и результат, без повторного запуска n8n/VLM. Утверждение и скачивание PDF автоматически сохраняют подходящие примеры Experience. Действующий `annotated-pdf` остаётся **автоматической исходной версией**.
 
 ## 2. Managed N/U catalog и индексация
 
@@ -281,29 +292,57 @@ flowchart TD
 
 Shared runtimes управляют собственным размещением GPU и residency; приложение использует stable logical endpoints. Проектный lock `/var/lock/pdrd-gpu/gpu.lock` остаётся контрактом только для операций, действительно использующих project-side GPU lease; **его нельзя представлять как lock, который гарантированно управляет shared vLLM из другого стека**. Конкретные GPU/TP/DP/model IDs берутся из конфигурации shared infrastructure.
 
-## 6. PostgreSQL — таблицы и связи
+## 6. Базы данных и связи каждого микросервиса
 
-Один project PostgreSQL instance; сервисы владеют независимыми bounded contexts. У Experience собственная схема `experience` и отдельная таблица Alembic `experience.alembic_version_experience`, не изменяющая цепочки миграций Gateway/Knowledge. Миграцию Experience следует выполнять только после отдельной проверки подключения и backup; **наличие миграции в Git не означает, что она применена на рабочем сервере**.
+Один экземпляр PostgreSQL обслуживает независимые схемы. Внешние ключи действуют внутри схемы владельца. Межсервисные `user_id`, `owner_user_id`, `job_id`, `section_id` и UUID документов проверяются через API, а не через SQL JOIN чужих таблиц.
+
+| Владелец | Схема | Таблица версии миграций |
+|---|---|---|
+| API Gateway | `public` | `public.alembic_version` |
+| Knowledge Service | `knowledge` | `public.alembic_version_knowledge` |
+| User Service | `users` | `users.alembic_version_users` |
+| Auth Service | `auth` | `auth.alembic_version_auth` |
+| Experience Service | `experience` | `experience.alembic_version_experience` |
+
+Общая схема логических связей: пунктир обозначает ссылку по UUID/контракту API, **не внешний ключ PostgreSQL**.
+
+```mermaid
+flowchart LR
+    USERS[("User: users.accounts")] -. user_id .-> AUTH[("Auth: auth.sessions и credentials")]
+    USERS -. owner_user_id .-> GW[("Gateway: public.analysis_jobs")]
+    USERS -. owner_user_id личного пакета .-> KS[("Knowledge: knowledge.normative_documents")]
+    KS -. section_id .-> ACCESS[("User: users.section_access")]
+    KS -. immutable snapshot N/T/U .-> GW
+    GW -. job_id и document_id .-> EXP[("Experience: review_sessions и catalog_examples")]
+    USERS -. автор через API .-> EXP
+```
+
+### 6.1. API Gateway: задания, история и Outbox
 
 ```mermaid
 erDiagram
-    ANALYSIS_JOBS ||--o{ OUTBOX_MESSAGES : publishes
-    ANALYSIS_JOBS ||..o| EXPERIENCE_REVIEW_SESSIONS : "logical job_id, no cross-schema FK"
-    EXPERIENCE_REVIEW_SESSIONS ||--o{ EXPERIENCE_REVIEW_EVENTS : audits
-    EXPERIENCE_REVIEW_SESSIONS ||--o{ CONFIRMED_AREAS : "versioned explicit confirmation"
-    EXPERIENCE_REVIEW_SESSIONS ||..o{ EXPERIENCE_CANDIDATES : "planned verified selection"
-    NORMATIVE_SECTIONS ||--o{ NORMATIVE_CATEGORIES : contains
-    NORMATIVE_SECTIONS ||--o{ NORMATIVE_DOCUMENTS : contains
-    NORMATIVE_CATEGORIES ||--o{ NORMATIVE_CATEGORIES : parent
-    NORMATIVE_CATEGORIES ||--o{ NORMATIVE_DOCUMENTS : groups
-    NORMATIVE_DOCUMENTS ||--o{ NORMATIVE_OUTBOX_MESSAGES : indexes
-    NORMATIVE_SECTIONS ||--o{ TECHNICAL_ASSIGNMENTS : scopes
-    TECHNICAL_ASSIGNMENTS ||--o{ TECHNICAL_ASSIGNMENT_OUTBOX_MESSAGES : indexes
+    analysis_jobs ||--o{ outbox_messages : "FK aggregate_id; CASCADE"
+    analysis_jobs {
+        uuid id PK
+        uuid document_id
+        uuid owner_user_id "логическая ссылка users; NULL у гостя"
+        string status
+        jsonb normative_snapshot "неизменяемый снимок N/T/U и промпта"
+        string guest_access_token_hash
+        datetime guest_access_expires_at
+        datetime created_at
+        datetime updated_at
+        datetime source_artifacts_deleted_at
+    }
+    outbox_messages {
+        uuid id PK
+        uuid aggregate_id FK
+        jsonb payload
+        datetime published_at
+    }
 ```
 
-### API Gateway
-
-`analysis_jobs` — lifecycle задания; `normative_snapshot` является immutable JSONB. Изменение frontend после запуска не модифицирует существующий job.
+`analysis_jobs` хранит состояние задания; `outbox_messages` публикуется после SQL commit. История фильтруется по `owner_user_id` в PostgreSQL **до пагинации**. Строки без владельца не присваиваются новому пользователю. Файлы результата лежат отдельно в `/data/analyses/<document_id>`.
 
 Snapshot содержит независимо:
 
@@ -311,8 +350,8 @@ Snapshot содержит независимо:
 {
   "section_id": "<uuid>",
   "document_ids": ["<normative-uuid>"],
-  "user_package_document_ids": ["<user-package-uuid>"],
-  "system_prompt": "<exact resolved prompt>",
+  "user_package_document_ids": ["<owned-user-package-uuid>"],
+  "system_prompt": "<resolved-prompt>",
   "technical_assignment": {
     "technical_assignment_id": "<uuid>",
     "analysis_document_id": "<uuid>",
@@ -321,29 +360,437 @@ Snapshot содержит независимо:
 }
 ```
 
-`technical_assignment` отсутствует без ТЗ. `outbox_messages` — transactional outbox анализа, публикуемый только после SQL commit.
+`technical_assignment` отсутствует без ТЗ. Для обычного анализа без личных документов frontend **не отправляет** `user_package_document_ids`; пустой список на Gateway также означает отсутствие выбора и не вызывает `403`. Изменение каталога или формы после запуска не переписывает snapshot существующего задания.
 
-### Knowledge Service
+### 6.2. Knowledge Service: разделы, N/U и ТЗ
 
-- `knowledge.normative_sections` — разделы и system prompt;
-- `knowledge.normative_categories` — дерево N/U (`parent_id`, `catalog_area`);
-- `knowledge.normative_documents` — metadata, storage key, durable index statuses;
-- `knowledge.normative_outbox_messages` — события N/U indexing;
-- `knowledge.technical_assignments` — metadata и lifecycle T;
-- `knowledge.technical_assignment_outbox_messages` — отдельная durable T queue;
-- `alembic_version_knowledge` — собственная цепочка миграций.
+Все таблицы следующей схемы находятся в `knowledge`. N и U разделены значением `catalog_area`; личные категории и документы U дополнительно имеют `owner_user_id`.
 
-### Experience Service
+```mermaid
+erDiagram
+    normative_sections ||--o{ normative_categories : "FK section_id"
+    normative_sections ||--o{ normative_documents : "FK section_id"
+    normative_categories o|--o{ normative_categories : "FK parent_id; SET NULL"
+    normative_categories o|--o{ normative_documents : "FK category_id; SET NULL"
+    normative_documents ||--o{ normative_outbox_messages : "FK aggregate_id; CASCADE"
+    normative_sections ||--o{ technical_assignments : "FK section_id; RESTRICT"
+    technical_assignments ||--o{ technical_assignment_outbox_messages : "FK aggregate_id; CASCADE"
+    normative_sections {
+        uuid id PK
+        string name
+        string system_prompt
+        boolean deleting
+    }
+    normative_categories {
+        uuid id PK
+        uuid section_id FK
+        uuid parent_id FK
+        string catalog_area
+        uuid owner_user_id "без FK в users"
+    }
+    normative_documents {
+        uuid id PK
+        uuid section_id FK
+        uuid category_id FK
+        string catalog_area
+        uuid owner_user_id "без FK в users"
+        string storage_key
+        string index_status
+        string sha256
+    }
+    normative_outbox_messages {
+        uuid id PK
+        uuid aggregate_id FK
+        jsonb payload
+    }
+    technical_assignments {
+        uuid id PK
+        uuid section_id FK
+        string index_status
+        datetime source_removed_at
+    }
+    technical_assignment_outbox_messages {
+        uuid id PK
+        uuid aggregate_id FK
+        jsonb payload
+    }
+```
 
-**Контракт текущего этапа:** `experience.review_sessions` хранит последний JSONB-снимок одного `job_id` с `revision` и `approved_revision`; `experience.review_events` хранит неизменяемую последовательность действий `(job_id, session_revision)` с before/after и автором. Каждая запись в транзакции проходит optimistic CAS по `expected_revision`. В `ReviewSession` хранятся также замечания без координат — для полного аудита и итогового **текстового** PDF. Отбор обучающих примеров — отдельная операция, **не** копия всей таблицы Review. Предложенные визуализацией области VLM переносятся как `proposed_regions` с источником и уверенностью; `issue_box` VLM не заполняется автоматически, подтверждения хранятся отдельно. Старые JSONB-снимки без `proposed_regions` продолжают читаться.
+```mermaid
+flowchart LR
+    KS["Knowledge Service"] --> SQL[("PostgreSQL: knowledge")]
+    KS --> NFILES["/data/normative: PDF/DOC/DOCX N и личных U"]
+    KS --> TFILES["/data/technical-assignments: источники ТЗ"]
+    SQL --> OUT["Outbox N/U и ТЗ"]
+    OUT --> QUEUE["RabbitMQ: отдельные очереди"]
+    QUEUE --> IDX["Knowledge / T indexer"]
+    IDX --> EMB["shared-embedding"]
+    IDX --> QD[("Qdrant: aliases N/U и T")]
+    KS --> QD
+    EIDX["Experience indexer: ручные версии"] --> QD
+    KS --> TMP[("Временный Qdrant Project Context")]
+```
 
-**Этап 5:** серверный Review API соединяет Gateway, доверенный источник завершённого анализа, Experience Service и frontend. Восстанавливаются решения, исправления и геометрия VLM/Gold. `display_regions` хранит операционные правки отдельно от подтверждений областей. Предоставленные пользователем логи коммита `c1738fe` подтверждают Windows/Linux quality gate и развёртывание Experience на Linux с миграцией `20260928_0002`. Основной frontend 8080 подключён к серверному Review; дополнительный 8081 остаётся на loopback. Конфигурация и ограничения описаны в [docs/review-api.md](docs/review-api.md).
+Gateway проверяет право на раздел и принадлежность выбранных U; Knowledge повторно ограничивает каталог/поиск допустимыми UUID и владельцем. Администратор не получает чужие личные пакеты автоматически. Разделы являются единым справочником: админка читает их из Knowledge, а User хранит назначения; отдельный справочник отделов для этой функции не создаётся.
 
-**Этап 6:** реализованы явное подтверждение/отзыв областей VLM и Reviewed PDF из актуальной утверждённой редакции. Experience готовит проекцию, Gateway проверяет доступ, источник и кеш, Document Service рисует PDF. Полный текст всех accepted включается в приложение; аннотации на листах требуют проверенной области, Gold сохраняет жёлтое оформление и заданную карточку. Rejected исключены. Логи коммита `e0e9762` подтверждают Windows/Linux — 965 passed и изолированный PostgreSQL — 14 passed. Итоговый PDF доступен на основном frontend 8080 после рассмотрения всех замечаний и сохранения решений.
+Удаление нормативного документа или раздела — повторяемый сценарий Knowledge: отметка удаления, очистка связанных файлов/записей и точек Qdrant, затем завершение SQL-операции. Общие векторные коллекции и соседние документы не удаляются; служебные связи ТЗ учитываются до удаления раздела. Снимки уже выполненных анализов остаются историческими.
 
-**Этап 7:** реализованы постоянные примеры с PNG, серверные фильтры, история правок, деактивация и ZIP-экспорт. Утверждение Review запускает сохранение проверенных примеров; отдельная кнопка позволяет повторить его после сбоя. Edited + Rejected требует причины и выбора отрицательной формулировки. Контракт и запуск: [docs/experience-catalog.md](docs/experience-catalog.md). Обновление этого этапа на Linux проверяется отдельно.
+### 6.3. User Service: профили, роли и назначения разделов
 
-**Следующие этапы:** контролируемая индексация E и отдельный эксперимент обучения. План 0–9: [docs/experience-roadmap.md](docs/experience-roadmap.md).
+Все таблицы находятся в `users`. Строка `accounts` содержит `authorization_version`, `review_access_enabled` и `normative_access_enabled`; любое административное изменение проверяет актуальную версию и полномочия автора. Пароли здесь отсутствуют.
+
+```mermaid
+erDiagram
+    accounts ||--o{ external_identities : "FK user_id"
+    accounts ||--o{ memberships : "FK user_id"
+    organizations ||--o{ departments : "FK organization_id"
+    organizations ||--o{ memberships : "FK organization_id"
+    accounts ||--o{ role_assignments : "FK user_id"
+    organizations o|--o{ role_assignments : "FK organization_id"
+    role_assignments ||--o{ role_assignment_events : "FK assignment_id"
+    accounts o|--o{ role_assignment_events : "FK actor_user_id"
+    accounts ||--o| admin_bootstrap : "FK user_id; singleton"
+    role_assignments ||--o| admin_bootstrap : "FK assignment_id"
+    accounts {
+        uuid user_id PK
+        string login
+        string display_name
+        string email
+        string kind
+        string status
+        integer authorization_version
+        boolean review_access_enabled
+        boolean normative_access_enabled
+    }
+    external_identities {
+        string provider_id PK
+        string namespace PK
+        string subject PK "AD objectGUID либо локальный subject"
+        uuid user_id FK
+    }
+    memberships {
+        uuid membership_id PK
+        uuid user_id FK
+        uuid organization_id FK
+        uuid department_id "логический UUID без FK"
+    }
+    organizations {
+        uuid organization_id PK
+        string name
+    }
+    departments {
+        uuid department_id PK
+        uuid organization_id FK
+        string name
+    }
+    role_assignments {
+        uuid assignment_id PK
+        uuid user_id FK
+        string role
+        string scope_kind
+        uuid organization_id FK
+        uuid department_id "логический UUID без FK"
+    }
+    role_assignment_events {
+        uuid event_id PK
+        uuid assignment_id FK
+        uuid actor_user_id FK
+    }
+    admin_bootstrap {
+        integer singleton_id PK
+        uuid user_id FK
+        uuid assignment_id FK
+    }
+```
+
+Модель организаций/отделов сохраняется для совместимости старых назначений; новые назначения руководителя используют `scope.kind=sections` и несколько разделов Knowledge. `department_id` в членстве/ролях не объявлен SQL FK — схема отражает это явно.
+
+```mermaid
+erDiagram
+    accounts ||--o{ section_access : "FK user_id"
+    accounts ||--o{ section_access_events : "FK user_id и actor_user_id"
+    accounts ||--o{ review_access_events : "FK user_id и actor_user_id"
+    accounts ||--o{ normative_access_events : "FK user_id и actor_user_id"
+    accounts ||--o{ catalog_section_distributions : "FK actor_user_id"
+    accounts {
+        uuid user_id PK
+        integer authorization_version
+    }
+    section_access {
+        uuid user_id PK,FK
+        uuid section_id PK "Knowledge UUID без FK"
+    }
+    section_access_events {
+        uuid event_id PK
+        uuid user_id FK
+        uuid actor_user_id FK
+        string section_ids "сериализованный набор UUID"
+        integer authorization_version
+    }
+    review_access_events {
+        uuid event_id PK
+        uuid user_id FK
+        uuid actor_user_id FK
+        boolean enabled
+    }
+    normative_access_events {
+        uuid event_id PK
+        uuid user_id FK
+        uuid actor_user_id FK
+        boolean enabled
+    }
+    catalog_section_distributions {
+        uuid section_id PK "Knowledge UUID без FK"
+        uuid actor_user_id FK
+    }
+```
+
+При первом успешном AD-входе или подтверждении внешнего email пользователь получает роль **Проектировщик** (`designer`), уровень `member` и все текущие разделы. Повторный вход не возвращает вручную снятые назначения. Новый раздел автоматически выдаётся всем активным проектировщикам и руководителям; `catalog_section_distributions` делает повтор выдачи безопасным. Администратор имеет все нормативные разделы по политике.
+
+| Операция | Проектировщик | Руководитель | Администратор |
+|---|---|---|---|
+| Создать/переименовать нормативный раздел | Нет | Да | Да |
+| Удалить нормативный документ/раздел | При отдельном разрешении | При отдельном разрешении | Да по умолчанию |
+| Изменять Review, решения и сохранять замечания | При отдельном разрешении | Да автоматически | Да автоматически |
+| Открыть Базу Опыта | Нет | Да | Да |
+| Назначать роли, разделы и права другим пользователям | Нет | Нет | Да |
+
+Галочка **«Доступ к изменению нормативного блока»** добавляет удаление и не снимает прежние права руководителя на создание/переименование. **«Доступ к ревью»** не отменяет проверку владельца/области конкретного анализа. Полномочия вычисляются сервером; скрытая кнопка в UI не является защитой API.
+
+Подробности: [User Service](docs/identity-user-service.md), [разделы и авторы Experience](docs/identity-catalog-experience.md), [доступ к Review](docs/identity-review-access.md).
+
+### 6.4. Auth Service: пароли собственных аккаунтов и сессии
+
+Таблицы находятся в `auth`. Между ними нет SQL FK на пользователей: `user_id` связывается с User Service по API. Пунктир на схеме ниже обозначает эту логическую связь. `rate_limits` — самостоятельные счётчики по хешированному ключу.
+
+```mermaid
+erDiagram
+    USER_PROFILE ||..o{ sessions : "user_id через User API; без FK"
+    USER_PROFILE o|..o| local_credentials : "user_id через User API; без FK"
+    USER_PROFILE o|..o| external_credentials : "user_id после подтверждения; без FK"
+    USER_PROFILE {
+        uuid user_id "профиль в users; не таблица auth"
+    }
+    sessions {
+        uuid session_id PK
+        uuid user_id
+        string token_hash UK
+        integer authorization_version
+        datetime created_at
+        datetime last_seen_at
+        datetime idle_expires_at
+        datetime absolute_expires_at
+        datetime revoked_at
+    }
+    local_credentials {
+        uuid subject PK
+        string username UK
+        uuid user_id UK
+        string password_hash "scrypt"
+    }
+    external_credentials {
+        uuid subject PK
+        string email UK
+        uuid user_id UK
+        string password_hash "scrypt"
+        string verification_token_hash
+        datetime verification_expires_at
+        datetime verified_at
+    }
+    rate_limits {
+        string key_hash PK
+        datetime window_started_at
+        integer attempts
+    }
+```
+
+Auth сначала узнаёт профиль/источник входа в User Service: локальный пароль проверяется в `auth.local_credentials`, email-пароль — в `auth.external_credentials`, корпоративный — LDAPS bind в AD. После положительного AD-ответа профиль создаётся/обновляется идемпотентно по `(provider_id, namespace, objectGUID)`. Пароль AD не сохраняется **даже в виде хеша**; новая полная аутентификация всегда проверяет его в AD.
+
+Сессия содержит только SHA-256 непрозрачного токена, метаданные и версию прав. Cookie — `Secure`, `HttpOnly`, `SameSite=Lax`; CSRF и точная проверка Origin обязательны. Обычные запросы продлевают `idle_expires_at` до 24 часов, но не дальше `created_at + 30 дней`. После 24 часов простоя или 30 дней от входа нужен пароль; для корпоративной записи — повторная проверка AD. Старые сессии не получают новый абсолютный срок задним числом.
+
+Подробнее: [Auth Service](docs/identity-auth-service.md), [история и политика сессий](docs/analysis-history-and-session-policy.md).
+
+### 6.5. Experience Service: Review, причины отказа, каталог и версии
+
+Все таблицы находятся в `experience`. Review хранится как JSONB-снимок с `revision`/`approved_revision`; решения, предложенные области и причины отказа являются частью снимка. Изменения проходят CAS по `expected_revision`, журнал `experience.review_events` сохраняет автора и детали перехода. `ConfirmedFindingArea` имеет собственную ревизию и историю; область не придумывается при отсутствии координат.
+
+```mermaid
+erDiagram
+    review_sessions ||--o{ review_events : "FK job_id; CASCADE"
+    review_sessions ||--o{ confirmed_areas : "FK job_id; CASCADE"
+    confirmed_areas ||--o{ area_confirmation_events : "FK job_id и finding_id; CASCADE"
+    review_sessions {
+        uuid job_id PK "логическая ссылка Gateway"
+        uuid document_id
+        integer revision
+        integer approved_revision
+        jsonb snapshot "решения и причины отклонения"
+    }
+    review_events {
+        uuid job_id PK,FK
+        integer session_revision PK
+        string actor
+        jsonb details
+    }
+    confirmed_areas {
+        uuid job_id PK,FK
+        string finding_id PK
+        integer revision
+        jsonb regions
+        string content_signature
+        boolean active
+    }
+    area_confirmation_events {
+        uuid job_id PK,FK
+        string finding_id PK,FK
+        integer revision PK
+        string actor
+        jsonb details
+    }
+```
+
+```mermaid
+erDiagram
+    catalog_examples ||--o{ catalog_occurrences : "FK example_id; CASCADE"
+    catalog_examples ||--o{ catalog_events : "FK example_id; CASCADE"
+    catalog_examples ||--o{ artifact_members : "FK example_id"
+    artifact_versions ||--o{ artifact_members : "FK version_id"
+    artifact_versions ||--o{ artifact_events : "FK version_id"
+    artifact_versions ||--o{ applied_artifacts : "FK version_id"
+    catalog_examples {
+        uuid id PK
+        uuid job_id "логическая ссылка; не FK Review"
+        string finding_id
+        integer approved_revision
+        integer revision
+        string section_id "Knowledge UUID без FK"
+        string decision
+        jsonb snapshot "содержимое, автор и причина"
+        string content_key
+        boolean active
+        boolean deleted
+    }
+    catalog_occurrences {
+        uuid example_id PK,FK
+        uuid job_id PK
+        string finding_id PK
+        integer approved_revision PK
+        string actor
+        jsonb snapshot
+    }
+    catalog_events {
+        uuid example_id PK,FK
+        integer revision PK
+        string actor
+        jsonb snapshot
+    }
+    artifact_versions {
+        uuid id PK
+        string kind "индекс либо обучающий набор"
+        string section_id
+        integer revision
+        string status
+        jsonb snapshot
+    }
+    artifact_members {
+        uuid version_id PK,FK
+        uuid example_id PK,FK
+        integer example_revision
+        jsonb snapshot
+    }
+    artifact_events {
+        uuid id PK
+        uuid version_id FK
+        string actor
+        jsonb snapshot
+    }
+    applied_artifacts {
+        string kind PK
+        string section_id PK
+        uuid version_id FK
+        string actor
+    }
+```
+
+Постоянный каталог Experience, crop, CRUD и экспорт примеров реализованы. Утверждение Review сохраняет подходящие примеры; изображения вырезает Document Service из проверенного оригинала через Gateway, а Experience хранит их в своём томе независимо от срока жизни оригинала. `catalog_occurrences` сохраняет повторные появления без размножения одинаковых примеров, `catalog_events` — историю правок. Автор отображается как логин, имя и фамилия, роль из User Service; доступна серверная фильтрация по автору. Прямого чтения схемы `users` из Experience нет.
+
+При отклонении сохраняются `decision=rejected`, `reason_category` и комментарий:
+
+| Значение | Причина в UI |
+|---|---|
+| `false_positive` | Замечание ошибочное |
+| `duplicate` | Дублируется |
+| `misunderstood_drawing` | Неверно определён объект |
+| `wrong_location` | Неверно определено место |
+| `wrong_normative_basis` | Неверно применён норматив |
+| `not_applicable` | Требование неприменимо |
+| `other` | Другая причина |
+
+Причина и комментарий проходят через Review, аудит, каталог и экспорт обучающих данных. Исторические записи без причины остаются читаемыми. Rejected не включаются в Reviewed PDF; `Edited · Bad` требует разрешения `needs_adjudication` и выбора `negative_target=original|revised|both` перед использованием в обучении.
+
+Ручные версии индекса и наборов фиксируют состав/ревизии примеров; подготовка набора не запускает обучение и не меняет веса VLM. Рабочий поиск E остаётся выключенным (`KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_ENABLED=false`) до отложенной оценки качества.
+
+Документы: [каталог Experience](docs/experience-catalog.md), [версии](docs/experience-versions.md), [индексация](docs/experience-index.md), [причины отказа](docs/normative-access-rejection-feedback.md), [план обучения](docs/experience-roadmap.md).
+
+### 6.6. Admin Service: данные через API, без собственной БД
+
+```mermaid
+flowchart TD
+    UI["Админка в основном HTTPS UI"] --> GW["API Gateway"]
+    GW --> ADMIN["Admin Service: проверка полномочий"]
+    ADMIN --> AUTH["Auth API: действующая сессия"]
+    AUTH --> ADB[("auth.sessions")]
+    ADMIN --> USER["User API: профили, роли, разделы, галочки"]
+    USER --> UDB[("users: accounts, назначения и аудит")]
+    ADMIN --> KNOW["Knowledge API: живой справочник разделов"]
+    KNOW --> KDB[("knowledge.normative_sections")]
+```
+
+Admin не хранит таблиц и не пишет SQL соседних сервисов. Изменения и аудит фиксирует User Service после повторной проверки автора и `authorization_version`. Управление самим нормативным каталогом выполняется через Gateway → Knowledge с проверкой соответствующих permissions.
+
+### 6.7. Document Service: файлы по запросу, без собственной БД
+
+```mermaid
+flowchart LR
+    GW["Gateway: PDF/CAD, inspect, crop, экспорт"] --> DS["Document Service"]
+    N8N["n8n: extraction/render"] --> DS
+    DS --> PDF["PyMuPDF: страницы, текст, PNG, PDF"]
+    DS --> CAD["ezdxf / LibreDWG: геометрия CAD"]
+    DS --> RESPONSE["JSON или файл ответа"]
+    RESPONSE --> OWNER["Хранит вызывающий сервис: Gateway либо Experience"]
+    OWNER --> FILES["analysis_artifacts либо experience_crops"]
+```
+
+Document не владеет PostgreSQL/Qdrant и не создаёт связи таблиц. До создания задания `/internal/v1/pdf/inspect` проверяет количество выбранных страниц: максимум 200. Превышение даёт понятный `422`; большой PDF можно анализировать диапазонами. PDF+CAD остаётся анализом одного выбранного листа.
+
+### 6.8. Analysis Service: VLM и технический кеш, без собственной БД
+
+```mermaid
+flowchart LR
+    N8N["n8n: контекст листа и N/T/U/E"] --> AS["Analysis Service"]
+    AS --> VLM["shared-vlm:8000/v1"]
+    VLM --> AS
+    AS --> CACHE["analysis_vlm_cache: /data/vlm-cache"]
+    AS --> RESULT["Структурированный результат"]
+    RESULT --> GW["Gateway worker"]
+    GW --> SQL[("public.analysis_jobs: состояние")]
+    GW --> JSON["analysis_artifacts: result.json"]
+```
+
+Analysis не владеет SQL-таблицами или Qdrant. Итог и история принадлежат Gateway; кеш VLM не является пользовательской историей. Лимит `MAX_STAGE_PAGES=200` согласован с Document Service.
+
+### 6.9. Общий embedding runtime и прежний multimodal-embedding-service
+
+```mermaid
+flowchart LR
+    KS["Knowledge: N/T/U/E и контекст проекта"] --> EMB["Shared embedding API: shared-embedding:8000/v1"]
+    EMB --> VEC["Векторы: единая embedding identity, 4096 измерений"]
+    VEC --> IDX["Индексаторы Knowledge"]
+    IDX --> QD[("Проектный Qdrant")]
+    LEGACY["multimodal-embedding-service: код совместимости и тесты"] -. не запускается в Compose .-> EMB
+```
+
+Runtime не хранит прикладных таблиц проекта; Qdrant и метаданные индекса принадлежат Knowledge. Веса моделей и хранение shared runtime управляются отдельным стеком shared infrastructure.
 
 ## 7. Qdrant — stable aliases и physical collections
 
@@ -443,7 +890,7 @@ PDRD_EMBEDDING_SCHEMA_VERSION=2
 
 ### Experience payload
 
-Текущий domain `ExperienceCandidate` описывает **подготовку записи**, но действующая E-коллекция пока не пополняется из Human Review. Планируемый payload после сохранения изображения и проверки прав:
+Domain `ExperienceCandidate` описывает отбор из утверждённого Review. Примеры сохраняются в постоянный каталог; выбранные примеры индексируются отдельным worker в ручную версию E. Рабочий retrieval выключен до оценки качества. Состав данных примера после проверки прав и сохранения изображения:
 
 ```json
 {
@@ -466,7 +913,7 @@ PDRD_EMBEDDING_SCHEMA_VERSION=2
 }
 ```
 
-`tag=edited` и `decision=rejected` показываются как **Edited · Bad**; они не становятся автоматически положительными/отрицательными обучающими примерами (`needs_adjudication`). `E` не нормативный basis. Pending и записи без подтверждённой области не индексируются. `KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_ENABLED=false` остаётся до завершения индексации и слепой оценки.
+`tag=edited` и `decision=rejected` показываются как **Edited · Bad**; они не становятся автоматически положительными/отрицательными обучающими примерами (`needs_adjudication`). `E` не нормативный basis. Pending и записи без подтверждённой области не индексируются. `KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_ENABLED=false` остаётся до слепой оценки и подключения проверенных рабочих версий.
 
 ### Project Context
 
@@ -533,30 +980,37 @@ Source documents не восстанавливаются из старых vecto
 
 ```mermaid
 flowchart TD
-    PG[("Project PostgreSQL")] --> PGV["postgres_data"]
+    PG[("PostgreSQL проекта")] --> PGV["postgres_data"]
     QD[("Project Qdrant")] --> QDV["qdrant_data"]
     GW["API Gateway / worker"] --> AV["analysis_artifacts"]
     KS["Knowledge Service / indexer"] --> NV["normative_documents"]
     TIDX["T indexer"] --> TV["technical_assignment_documents"]
-    EX["Experience metadata and review"] --> PGV
-    EX --> CROP["Immutable SHA-256 PNG storage: experience_crops volume"]
+    EX["Experience: каталог и Review"] --> PGV
+    EX --> CROP["PNG по SHA-256: experience_crops"]
+    CROP --> CP["/data/experience/crops"]
+    USER["User Service"] --> PGV
+    AUTH["Auth Service"] --> PGV
+    AS["Analysis Service"] --> VC["analysis_vlm_cache: /data/vlm-cache"]
+    EIDX["Experience indexer"] --> EQ["experience_index_quality: /data/experience-quality"]
     PGV --> PGP["/var/lib/postgresql/data"]
     QDV --> QDP["/qdrant/storage"]
     AV --> AP["/data/analyses"]
     NV --> NP["/data/normative"]
     TV --> TP["/data/technical-assignments"]
-    VLM["shared-vlm/shared-embedding"] --> SHARED["Shared runtime storage: separate stack"]
+    VLM["shared-vlm/shared-embedding"] --> SHARED["Хранилище shared runtime: отдельный стек"]
 ```
 
 | Данные | Docker volume / owner | Путь |
 |---|---|---|
-| PostgreSQL (включая будущую `experience` schema) | `postgres_data` | `/var/lib/postgresql/data` |
+| PostgreSQL: `public`, `knowledge`, `users`, `auth`, `experience` | `postgres_data` | `/var/lib/postgresql/data` |
 | Qdrant | `qdrant_data` | `/qdrant/storage` |
 | Analysis artifacts | `analysis_artifacts` | `/data/analyses` |
 | Managed N/U files | `normative_documents` | `/data/normative` |
 | T files | `technical_assignment_documents` | `/data/technical-assignments` |
 | Shared vLLM/embedding weights | `shared-infrastructure` | Не является volume проекта |
-| Experience image crops | собственный volume `experience_crops` | `/data/experience/crops/<sha256-prefix>/<sha256>.png` |
+| Изображения примеров Experience | `experience_crops` | `/data/experience/crops/<sha256-prefix>/<sha256>.png` |
+| Технический кеш VLM | `analysis_vlm_cache` | `/data/vlm-cache` |
+| Отчёты проверки индекса Experience | `experience_index_quality` | `/data/experience-quality` |
 
 Не использовать `docker compose down -v` в обычном деплое: он уничтожает постоянные данные.
 
@@ -671,7 +1125,7 @@ flowchart TD
     STORE --> INDEX["Инженер выбирает раздел и состав; Knowledge строит ручную версию"]
 ```
 
-Замечание без подтверждённой области **может присутствовать в операционном Review и утверждённом текстовом PDF**, но **не** попадает в обучающую Experience DB независимо от принятия. Отредактированный VLM имеет `tag=edited`, даже при `decision=rejected`; отдельный `edited-bad` как значение поля не требуется.
+Замечание без подтверждённой области может сохраняться в операционном Review и каталоге Experience; принятое включается в утверждённый текстовый PDF. Для обучающего набора требуется актуальная подтверждённая область, поэтому запись без неё в набор не попадает. Отредактированный VLM имеет `tag=edited`, даже при `decision=rejected`; отдельный `edited-bad` как значение поля не требуется.
 
 В каталоге `edited + rejected` остаётся `needs_adjudication`, пока инженер
 не задаст причину и `negative_target=original|revised|both`. Уточнение сохраняется
@@ -708,6 +1162,69 @@ flowchart TD
 на лист и в список с одинаковым номером. Отклонённые замечания сохраняются
 в операционном аудите, но исключаются из итогового PDF. Подтверждение/отзыв
 области меняет ключ кеша независимо от ревизии Review.
+
+## 15. Вход, профиль и серверная сессия
+
+```mermaid
+flowchart TD
+    B["Браузер: https://pdrd.itcneoterm.local"] --> GW["Nginx → Gateway: доверенный proxy-заголовок"]
+    GW --> CHECK["Auth: точный Origin, CSRF, лимит попыток"]
+    CHECK --> LOOKUP["User API: профиль и источник аутентификации"]
+    LOOKUP --> KIND{"Тип записи"}
+    KIND -->|локальный| LOCAL["Auth: scrypt локального пароля"]
+    KIND -->|внешний email| EMAIL["Auth: подтверждённый email и scrypt"]
+    KIND -->|корпоративный или новый логин| AD["LDAPS: проверка пароля и objectGUID"]
+    AD --> PROFILE["User: идемпотентный профиль AD"]
+    PROFILE --> FIRST["Первый вход: designer и все текущие разделы"]
+    FIRST --> SESSION["Auth: хеш токена и серверная сессия"]
+    LOCAL --> SESSION
+    EMAIL --> SESSION
+    SESSION --> COOKIE["Secure / HttpOnly / SameSite=Lax cookie"]
+    COOKIE --> REQUEST["Следующий запрос: сессия и актуальные права"]
+    REQUEST --> TIME{"Простой менее 24 ч и возраст менее 30 дней?"}
+    TIME -->|да| SLIDE["Продлить idle срок до минимума: сейчас + 24 ч, исходный предел 30 дней"]
+    TIME -->|нет| LOGIN["Повторный полный вход"]
+```
+
+Неверный пароль не создаёт сессию. Внешняя регистрация подтверждает email до выдачи рабочих прав. Пароль AD используется только для текущего LDAPS-вызова; вместо повторной передачи пароля действующая сессия предъявляет непрозрачный токен.
+
+## 16. История проверок и восстановление результата
+
+```mermaid
+flowchart TD
+    UI["Личный кабинет / блок истории на главной"] --> GW["GET /api/v1/analyses/history"]
+    GW --> AUTH["Auth и User: действующий владелец"]
+    AUTH --> SQL[("analysis_jobs: WHERE owner_user_id, затем пагинация")]
+    SQL --> SUMMARY["history.json: название, страницы, замечания"]
+    SUMMARY --> REVIEW["Текущий статус Review без открытия новой редакции"]
+    REVIEW --> LIST["Список собственных проверок"]
+    LIST --> OPEN["Открыть ?job_id=..."]
+    OPEN --> RESULT["Существующие статус и result.json"]
+    RESULT --> EXPIRED{"Исходники уже очищены?"}
+    EXPIRED -->|нет| FULL["Отчёт, визуализации, PDF и разрешённый Review"]
+    EXPIRED -->|да| TEXT["Текстовый результат и сохранённый Review; пояснение о сроке хранения"]
+```
+
+История главной показывает последние пять проверок: под «Базой опыта», а у проектировщика — на её месте. Кабинет показывает собственную историю с пагинацией. Открытие не создаёт новый job и не запускает n8n/VLM. Итоговый Reviewed PDF требует актуальной утверждённой ревизии и права Review.
+
+## 17. Очистка анализов по политике хранения
+
+```mermaid
+flowchart TD
+    TIMER["api-gateway-outbox: старт и каждый час"] --> SQL[("Завершённые analysis_jobs: пакет до 100")]
+    SQL --> LOCK["Повторная проверка владельца и состояния под блокировкой строки"]
+    LOCK --> OWNER{"Есть owner_user_id?"}
+    OWNER -->|да, прошло 30 дней| KEEP["Сохранить метаданные, request/result/history JSON"]
+    KEEP --> REMOVE["Удалить PDF/CAD/ТЗ, visualization PNG и производные PDF"]
+    OWNER -->|нет, прошло 7 дней| GUEST["Удалить каталог артефактов гостевого анализа"]
+    REMOVE --> T["Knowledge retention API: проверить UUID/SHA256 и другие ссылки на ТЗ"]
+    GUEST --> T
+    T --> COMMIT["После успешной очистки: отметить владельца либо удалить гостевой job и Outbox"]
+    T -->|сбой| RETRY["Повторить в следующем проходе"]
+    REVIEW["Review / Experience и собственные crop"] -. сохраняются бессрочно .-> KEEP
+```
+
+Доступ по гостевой ссылке заканчивается через 24 часа независимо от времени фоновой очистки. Очистка не обрабатывает pending/queued/processing и не удаляет нормативную базу, личные пакеты или изображения Experience.
 
 # Как работает retrieval
 
@@ -1015,7 +1532,7 @@ flowchart TD
 
 Project Context помогает понять проект, но не становится N/T/U evidence.
 
-# Managed catalog
+# Управляемый каталог
 
 ## Lifecycle N/U документа
 
@@ -1060,11 +1577,14 @@ Transient working prompt применяется к конкретному ана
 
 # Пользовательские пакеты документов
 
-Пакеты относятся к нормативному section, но имеют:
+Личные пакеты принадлежат авторизованному пользователю (`owner_user_id`) и связаны с назначенным ему нормативным разделом. Для категорий и документов используется:
 
 ```text
 catalog_area=user_package
+owner_user_id=<UUID текущего пользователя из проверенной сессии>
 ```
+
+Gateway определяет владельца по сессии, проверяет область доступа и передаёт Knowledge только допустимые UUID. Поле владельца от браузера не принимается как доказательство прав. Гостю личные пакеты недоступны; чужие пакеты не открываются даже по известному UUID.
 
 Frontend позволяет:
 
@@ -1079,18 +1599,19 @@ Frontend позволяет:
 - выбирать все READY package docs;
 - очищать selection.
 
-# Public API
+# Публичный API
 
-## Analysis
+## Анализ
 
 ```text
 POST /api/v1/analyses
+GET  /api/v1/analyses/history                 # собственная история с пагинацией
 GET  /api/v1/analyses/{job_id}
 GET  /api/v1/analyses/{job_id}/result
 GET  /api/v1/analyses/{job_id}/progress
 POST /api/v1/analyses/{job_id}/cancel
 GET  /api/v1/analyses/{job_id}/visualization
-GET  /api/v1/analyses/{job_id}/annotated-pdf  # automatic, not reviewed
+GET  /api/v1/analyses/{job_id}/annotated-pdf  # PDF с автоматическими замечаниями
 POST /api/v1/analyses/{job_id}/reviewed-pdf  # закрытый Review frontend, JSON: expected_revision
 ```
 
@@ -1113,7 +1634,31 @@ technical_assignment
 
 Точная форма T upload определяется public analysis schema/frontend contract; внутри immutable snapshot сохраняется `technical_assignment_id`.
 
-## Managed normative catalog
+## Вход, личный кабинет и админка
+
+```text
+GET    /api/v1/auth/session
+POST   /api/v1/auth/login
+POST   /api/v1/auth/register
+POST   /api/v1/auth/verify-email
+POST   /api/v1/auth/logout
+POST   /api/v1/auth/logout-all
+GET    /api/v1/auth/sessions
+DELETE /api/v1/auth/sessions/{session_id}
+GET    /api/v1/users/me
+
+GET    /api/v1/admin/users
+GET    /api/v1/admin/users/section-catalog
+GET    /api/v1/admin/users/{user_id}/section-access
+GET    /api/v1/admin/users/{user_id}/roles
+PATCH  /api/v1/admin/users/{user_id}/role
+PATCH  /api/v1/admin/users/{user_id}/review-access
+PATCH  /api/v1/admin/users/{user_id}/normative-access
+```
+
+Gateway проксирует только разрешённые действия. Изменения требуют действующей сессии, CSRF/Origin и соответствующих permissions; `authorization_version` защищает административные правки от перезаписи. Внутренний `/internal/v1/*` API сервисов не публикуется в браузер.
+
+## Управляемый нормативный каталог
 
 ```text
 GET    /api/v1/normative/sections
@@ -1138,7 +1683,7 @@ POST   /api/v1/normative/documents/{document_id}/index
 GET    /api/v1/normative/documents/{document_id}/content
 ```
 
-## User packages
+## Личные пакеты
 
 ```text
 GET    /api/v1/normative/sections/{section_id}/user-packages/categories
@@ -1159,7 +1704,7 @@ POST   /api/v1/normative/user-packages/documents/{document_id}/index
 GET    /api/v1/normative/user-packages/documents/{document_id}/content
 ```
 
-## Technical Assignment content
+## Просмотр ТЗ
 
 Кликабельный T-source открывается через Gateway:
 
@@ -1167,9 +1712,9 @@ GET    /api/v1/normative/user-packages/documents/{document_id}/content
 GET /api/v1/normative/technical-assignments/{technical_assignment_id}/content
 ```
 
-Browser не обращается к internal Knowledge/Experience API напрямую. Закрытый Review API доступен через Gateway на приватном frontend; Reviewed PDF доступен только для текущей утверждённой редакции. Постоянный каталог Experience, crop, CRUD и экспорт примеров реализованы через закрытый Gateway API. Примеры с отозванным подтверждением или изменённым Review сохраняются для аудита, но становятся неактуальными и исключаются из пригодного для обучения набора.
+Browser не обращается к internal Knowledge/Experience API напрямую. Закрытый Review API доступен через Gateway на основном HTTPS-фронте с проверкой сессии, права Review и владельца/области; Reviewed PDF доступен только для текущей утверждённой редакции. Постоянный каталог Experience, crop, CRUD и экспорт примеров реализованы через закрытый Gateway API. Примеры с отозванным подтверждением или изменённым Review сохраняются для аудита, но становятся неактуальными и исключаются из пригодного для обучения набора.
 
-# n8n workflows
+# Рабочие процессы n8n
 
 Repository:
 
@@ -1214,82 +1759,100 @@ Transient HTTP errors на GPU-dependent retrieval nodes должны иметь
 
 Workflow обновляются и публикуются вручную через n8n UI.
 
+# Политика хранения файлов и результатов
+
+Основное хранилище анализа — **`/data/analyses/<document_id>`** в томе `analysis_artifacts`. Владелец определяется сохранённым `owner_user_id`, а не наличием cookie у читателя.
+
+| Данные | Авторизованный анализ с владельцем | Гостевой анализ без владельца |
+|---|---|---|
+| Метаданные задания и неизменяемый снимок нормативов | Бессрочно | 7 дней |
+| `request.json`, `result.json`, `history.json` | Бессрочно | 7 дней |
+| Human Review и история изменений | Бессрочно | Новым гостям Review недоступен; ранее сохранённые данные не очищаются |
+| Experience, примеры, версии и собственные crop PNG | Бессрочно | Ранее сохранённые записи Experience не затрагиваются |
+| Исходные PDF/CAD/ТЗ (`pdf.bin`, `cad.bin`, `technical_assignment.bin`) | 30 дней | 7 дней |
+| Визуализации PNG и кеши производных PDF, включая Reviewed PDF | 30 дней | 7 дней |
+| Доступ по гостевой ссылке | Не используется | 24 часа |
+
+Срок считается от `analysis_jobs.created_at` в UTC, включая точную границу 30/7 дней. Старые записи без `owner_user_id` считаются гостевыми. Незавершённые `pending`, `queued`, `processing` сохраняются независимо от возраста. Истечение гостевой ссылки проверяется API: хранение файла ещё шесть дней не продлевает доступ.
+
+Очистка выполняется существующим `api-gateway-outbox` сразу при старте и затем раз в час, пакетами по 100; публикация очереди продолжает работать независимо. Под блокировкой строки повторно проверяются состояние и владелец. Сначала удаляются файлы, затем фиксируется `source_artifacts_deleted_at` либо удаляется гостевой job с каскадным Outbox. Частичный сбой оставляет задание для повторного прохода; удаление идемпотентно. Миграции добавляют отметки и **не удаляют файлы при применении**.
+
+Копия ТЗ в `/data/technical-assignments` очищается через закрытый Knowledge API с отдельным `PDRD_RETENTION_INTERNAL_KEY`, проверкой UUID/SHA256 и ссылок других анализов. Активное или свежее задание сохраняет общий источник. У владельца сохраняются метаданные и индексированные требования ТЗ; у последнего гостевого задания без ссылок владельцев удаляются также метаданные и точки этого ТЗ. Общая коллекция Qdrant не удаляется. ТЗ, загруженное без созданного анализа, относится к отдельному процессу.
+
+После 30 дней пользователь по-прежнему открывает историю, текст результата и существующий Human Review **без повторного VLM-анализа**. UI объясняет удаление исходников и скрывает PDF-кнопки; недоступный экспорт/источник ТЗ возвращает ожидаемый `410`. Создать новый Review или новые crop без исходного PDF нельзя. Каталог нормативов/личных пакетов и самостоятельное хранилище Experience не входят в автоматическую очистку анализов.
+
+Технический VLM-кеш, отчёты качества индексов, архивы и резервные копии не являются артефактами анализа и регулируются отдельно. Эта политика описывает рабочие данные, не срок жизни backup. Подробности и тестовые сценарии: [docs/analysis-retention.md](docs/analysis-retention.md).
+
 # Структура проекта
+
+Показаны основные каталоги и действующие точки запуска; внутри backend сохраняется разделение `transport → application → domain`, адаптеры находятся в `infrastructure`.
 
 ```text
 PDRD-validation/
 ├── frontend/
 │   ├── Dockerfile
-│   ├── nginx.conf
-│   └── src/
-│       ├── index.html
-│       ├── css/
-│       └── js/
-│           ├── app.js
-│           ├── config.js
-│           ├── components/
-│           └── features/
-│               ├── analysis/
-│               ├── normative/
-│               └── review/     # Wise/Bad/Edited/Gold + manual geometry/text list
-│
+│   ├── nginx.conf                     # маршруты Gateway и серверные proxy-заголовки
+│   ├── src/
+│   │   ├── index.html                 # анализ, нормативы, пакеты, история и Review
+│   │   ├── account.html               # профиль, сессии и история проверок
+│   │   ├── admin.html                 # пользователи, роли, разделы и права
+│   │   ├── experience.html            # каталог, индексные версии и обучающие наборы
+│   │   ├── css/
+│   │   └── js/
+│   │       ├── app.js
+│   │       ├── config.js
+│   │       ├── components/
+│   │       └── features/
+│   │           ├── account/
+│   │           ├── admin/
+│   │           ├── analysis/
+│   │           ├── auth/
+│   │           ├── experience/
+│   │           ├── normative/
+│   │           ├── portal/
+│   │           ├── review/
+│   │           └── technical_assignment/
+│   └── tests/                         # функциональные проверки интерфейса через Node
 ├── services/
-│   ├── api-gateway/
-│   │   ├── alembic/
-│   │   ├── src/pdrd_api_gateway/
-│   │   └── tests/
-│   ├── document-service/
-│   ├── knowledge-service/
-│   │   ├── alembic/
-│   │   ├── src/pdrd_knowledge_service/
-│   │   │   ├── application/
-│   │   │   ├── domain/
-│   │   │   └── infrastructure/
-│   │   │       ├── database/
-│   │   │       ├── embedding/
-│   │   │       ├── messaging/
-│   │   │       ├── migration/
-│   │   │       └── vector_store/
-│   │   └── tests/
-│   ├── analysis-service/
-│   │   ├── src/pdrd_analysis_service/
-│   │   │   ├── application/ports/gpu.py
-│   │   │   └── infrastructure/
-│   │   │       ├── gpu_coordination.py
-│   │   │       └── ollama.py
-│   │   └── tests/
-│   ├── multimodal-embedding-service/  # legacy/test code; not a Compose runtime
-│   └── experience-service/
-│       ├── alembic/             # Experience-only PostgreSQL revisions
-│       ├── src/pdrd_experience_service/
-│       │   ├── domain/          # ReviewSession, ExperienceCandidate
-│       │   ├── application/     # open/change/select ports and use cases
-│       │   └── infrastructure/  # PostgreSQL persistence (current stage)
-│       └── tests/
-│
-├── n8n/
-│   └── workflows/
-│       ├── analysis-v2-pdf.json
-│       ├── analysis-v2-cad.json
-│       └── analysis-v2-pdf-cad.json
-│
-├── data/
-│   └── knowledge/
-│       └── experience/
-│           └── cases/
-│
+│   ├── api-gateway/                   # public: задания, история, Outbox, очистка
+│   ├── document-service/              # извлечение/рендеринг PDF/CAD; без SQL
+│   ├── knowledge-service/             # knowledge: N/U/T, Qdrant и индексаторы
+│   ├── analysis-service/              # VLM pipeline и кеш; без SQL
+│   ├── user-service/                  # users: профили, роли, разделы и аудит
+│   ├── auth-service/                  # auth: LDAPS, локальные пароли и сессии
+│   ├── admin-service/                 # административные сценарии через API; без SQL
+│   ├── experience-service/            # experience: Review, каталог и версии
+│   └── multimodal-embedding-service/  # прежний код для совместимости и тестов
+│       # у каждого сервиса: src/<пакет>/ и tests/
+│       # у владельцев PostgreSQL: alembic/ и alembic.ini
+├── n8n/workflows/
+│   ├── analysis-v2-pdf.json
+│   ├── analysis-v2-cad.json
+│   └── analysis-v2-pdf-cad.json
+├── data/knowledge/experience/cases/   # исходные наборы примеров
+├── docs/                             # подробные контракты и приёмка подсистем
 ├── ops/
+│   ├── certificates/                 # CA bundle AD и локальные файлы сертификатов
+│   ├── check-quality.ps1             # общий Windows quality gate
+│   ├── Dockerfile.quality
+│   ├── compose.user-test.yaml         # изолированные PostgreSQL-проверки
+│   ├── compose.auth-test.yaml
+│   ├── compose.gateway-test.yaml
+│   ├── compose.knowledge-test.yaml    # PostgreSQL и Qdrant проверки
+│   └── compose.experience-test.yaml
 ├── scripts/
+│   ├── up.sh                         # сборка, миграции и запуск выбранных профилей
+│   ├── check-stack.sh                # готовность, конфигурация и актуальность миграций
+│   ├── create-superuser.sh            # интерактивный локальный администратор
+│   ├── check_auth_runtime.py          # проверка корпоративного входа
+│   ├── configure_auth_origin.py       # согласование публичного HTTPS Origin
+│   ├── migrate-embedding-indexes.sh   # смена embedding identity
 │   ├── build_experience_cases.py
-│   ├── check-stack.sh
-│   ├── kb_common.py
-│   ├── kb_search.py
-│   └── kb_sync.py
+│   └── lib/                          # проверки общей инфраструктуры
 ├── tests/
 │   ├── architecture/
 │   └── runtime/
-│       └── test_gpu_coordination_runtime.py
-├── .env.example
+├── .env.example                      # полный каталог настроек без рабочих секретов
 ├── compose.yaml
 ├── pyproject.toml
 ├── requirements-dev.txt
@@ -1298,16 +1861,74 @@ PDRD-validation/
 
 # Конфигурация
 
-`.env.example` — committed baseline и полный каталог ordinary runtime settings.
+`.env.example` — версионируемый полный каталог настроек и значений по умолчанию. `.env` — закрытые **секреты и необходимые переопределения окружения**, не копия `.env.example`. Рабочие секреты и закрытые ключи сертификатов не коммитятся. Приоритет: `.env.example` → `.env` → окружение процесса; Compose дополнительно задаёт межсервисные адреса и связанные ключи в `environment`.
 
-`.env` — sparse private override. В обычном deployment в нём достаточно секретов:
+## Обязательные секреты в `.env`
 
-```dotenv
-PDRD_POSTGRES_PASSWORD=replace-me
-PDRD_RABBITMQ_PASSWORD=replace-me
+Для текущего рабочего контура с `identity,auth,review` нужны общие секреты и все строки соответствующих профилей. Не оставлять пустые значения или `change-me`/`replace-me`.
+
+| Переменная | Когда обязательна | Назначение |
+|---|---|---|
+| `PDRD_POSTGRES_PASSWORD` | Всегда | Пароль PostgreSQL проекта; Compose передаёт его каждому владельцу схемы |
+| `PDRD_RABBITMQ_PASSWORD` | Всегда | Пароль уже существующего пользователя RabbitMQ в shared infrastructure |
+| `PDRD_RETENTION_INTERNAL_KEY` | Всегда при `scripts/up.sh` | Отдельный ключ Gateway → Knowledge для очистки копии ТЗ |
+| `USER_SERVICE_INTERNAL_KEY` | `identity` | Закрытый API профилей, ролей, разделов и аудита |
+| `AUTH_SERVICE_HTTP__INTERNAL_KEY` | `auth` | Закрытая проверка сессий Auth из Gateway/Admin |
+| `AUTH_SERVICE_HTTP__CSRF_KEY` | `auth` | Защита CSRF в браузерной аутентификации |
+| `PDRD_FRONTEND_PROXY_KEY` | `auth` | Подтверждение доверенного frontend-прокси в Gateway |
+| `PDRD_TECHNICAL_ASSIGNMENT_ACCESS_KEY` | `auth` | Защита служебного доступа к ТЗ |
+| `AUTH_SERVICE_EMAIL__SMTP_USER` | `auth` | Учётная запись отправителя подтверждения email |
+| `AUTH_SERVICE_EMAIL__SMTP_PASSWORD` | `auth` | Пароль SMTP, для Yandex — пароль приложения |
+| `API_GATEWAY_REVIEW__UI_KEY` | `review` | Канал Nginx → Gateway для закрытых Review/Experience маршрутов |
+| `API_GATEWAY_REVIEW__INTERNAL_KEY` | `review` | Отдельный канал Gateway → Experience |
+| `PDRD_EXPERIENCE_INDEX_KEY` | `experience-index` / ручная индексация | Закрытый канал Knowledge indexer → Experience |
+
+Служебные ключи генерировать независимо, длиной не менее 32 символов. Два ключа Review **обязательно различаются** и допускают только `A–Z`, `a–z`, `0–9`, `_`, `-` при длине 32–256. `secrets.token_urlsafe(48)` подходит; запускать отдельно для каждого ключа и сохранять результат только в закрытый `.env`:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-`.env` не должен быть копией `.env.example`.
+На Linux та же команда выполняется через `python3`. Рабочие ключи не публикуются в JS, ответах API, Git или логах. AD-пароль не является параметром `.env`: он вводится пользователем при полном входе и не сохраняется в PDRD. Пароль локального администратора задаётся интерактивно, не через переменную окружения.
+
+Не нужно дублировать ключи под всеми именами сервисов: Compose уже передаёт `USER_SERVICE_INTERNAL_KEY` в Auth/Admin, `AUTH_SERVICE_HTTP__INTERNAL_KEY` в Gateway/Admin, Review internal key в Experience, `PDRD_EXPERIENCE_INDEX_KEY` в индексатор и Experience, `PDRD_RETENTION_INTERNAL_KEY` в Gateway/Knowledge. Сервисные `*_DATABASE__PASSWORD` и `*_BROKER__PASSWORD` получают общие пароли проекта.
+
+## Обязательные параметры окружения, не являющиеся секретами
+
+Для основного контура:
+
+```dotenv
+COMPOSE_PROFILES=identity,auth,review
+API_GATEWAY_IDENTITY_PROXY__ENABLED=true
+API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED=true
+AUTH_SERVICE_HTTP__PUBLIC_ORIGIN=https://pdrd.itcneoterm.local
+AUTH_SERVICE_EMAIL__PUBLIC_BASE_URL=https://pdrd.itcneoterm.local
+AUTH_SERVICE_EMAIL__FROM_EMAIL=<реальный-адрес-отправителя>
+API_GATEWAY_REVIEW__ENABLED=true
+API_GATEWAY_REVIEW__CONTROLLED_ACCESS=true
+API_GATEWAY_REVIEW__ACTOR=pdrd-operator
+```
+
+`API_GATEWAY_REVIEW__ACTOR` — серверный идентификатор совместимости закрытого канала, не пароль и не роль посетителя. При включённой авторизации автор берётся из подтверждённой сессии. Допускается 1–128 символов `A–Z`, `a–z`, `0–9`, `:`, `@`, `.`, `_`, `-`.
+
+Для корпоративного входа дополнительно `AUTH_SERVICE_ENABLED=true` и доверенный публичный CA bundle в `ops/certificates/ad-ca.pem`. Имя контроллера, base DN и LDAPS-параметры находятся в `.env.example`. LDAP-соединение проверяет сертификат и имя сервера; системное доверие CA хоста не передаётся контейнеру автоматически. Без AD локальный администратор продолжает использовать собственный пароль. Профиль `auth` требует SMTP-реквизиты: текущий Compose включает email-регистрацию.
+
+Для ручного индексатора добавить `experience-index` в список профилей и задать `PDRD_EXPERIENCE_INDEX_KEY`. Это **не включает** поиск E автоматически. Сохраняется `KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_ENABLED=false` до проверки качества.
+
+Публичный Origin и адрес email-ссылок должны совпадать с HTTPS-адресом браузера. Cookie `Secure` включена в рабочем Compose; CSRF и строгая проверка Origin сохраняются, исключение для HTTP не предусмотрено. Параметры HTTPS-прокси и сертификаты обслуживаются инфраструктурой; `.env` не устанавливает TLS сам по себе.
+
+## Сессии и лимиты страниц
+
+```dotenv
+AUTH_SERVICE_SESSIONS__IDLE_TIMEOUT_SECONDS=86400
+AUTH_SERVICE_SESSIONS__ABSOLUTE_TIMEOUT_SECONDS=2592000
+DOCUMENT_SERVICE_PDF__MAX_ANALYSIS_PAGES=200
+ANALYSIS_SERVICE_PIPELINE__MAX_STAGE_PAGES=200
+```
+
+Эти значения уже заданы в `.env.example`. Если в рабочем `.env` остались прежние переопределения, обновить их: иначе они перекроют новые defaults. Новый срок сессии действует после повторного входа; выбор свыше 200 PDF-страниц отклоняется до создания job понятным ответом `422`.
+
+## Модели и поиск
 
 Единая embedding identity:
 
@@ -1317,154 +1938,147 @@ PDRD_EMBEDDING_DIMENSION=4096
 PDRD_EMBEDDING_SCHEMA_VERSION=2
 ```
 
-Физическая модель и GPU topology управляются shared infrastructure; смена логической model identity, размерности или версии схемы требует контролируемого fingerprint cutover. `.env.example` содержит baseline, `.env` — sparse private overrides, и process/Compose env учитываются по согласованному приоритету.
+Физическая модель и размещение GPU управляются shared infrastructure. Смена логической модели, размерности или версии схемы требует контролируемой переиндексации и переключения fingerprint.
 
-Ключевые Knowledge defaults:
+| Настройка | Значение по умолчанию |
+|---|---|
+| Нормативные и пользовательские файлы | `/data/normative` |
+| Alias Qdrant N/U | `dva_catalog_active` |
+| Alias Qdrant ТЗ | `dva_technical_assignment_active` |
+| Alias Qdrant Experience | `dva_experience_active` |
+| Временный контекст проекта | префикс `pdrd_project_context` |
+| Очередь N/U | `pdrd.knowledge.indexing` |
+| VLM API / логическая модель | `http://shared-vlm:8000/v1` / `shared-vlm` |
+| Embedding API / логическая модель | `http://shared-embedding:8000/v1` / `shared-embedding` |
+| Блокировка GPU, где применяется | `/var/lock/pdrd-gpu/gpu.lock` |
+| Поиск E | Выключен до отложенной оценки качества |
 
-```text
-storage.root_path = /data/normative
-qdrant.normative_collection = dva_catalog_active
-qdrant.multimodal_collection = dva_technical_assignment_active
-qdrant.experience_collection = dva_experience_active
-project_context.collection_prefix = pdrd_project_context
-embedding.model = PDRD_EMBEDDING_MODEL
-broker.queue_name = pdrd.knowledge.indexing
-```
+# Запуск и обновление
 
-Ключевые runtime defaults:
+Требуются Docker Engine и Docker Compose plugin. Shared network `ai-shared` предоставляет RabbitMQ, n8n, `shared-vlm` и `shared-embedding`; их жизненный цикл независим от проекта. Рабочие `.env`, DNS/TLS и доверие CA подготавливаются до запуска. Изменения проверяются общим и изолированными тестами из следующего раздела.
 
-```text
-analysis VLM URL       = http://shared-vlm:8000/v1
-analysis VLM alias     = shared-vlm
-embedding URL          = http://shared-embedding:8000/v1
-embedding alias        = shared-embedding
-project GPU lease path = /var/lock/pdrd-gpu/gpu.lock (where applicable)
-Experience E search    = выключен до отложенной оценки качества
-```
-
-# Запуск
-
-Требуются Docker Engine и Docker Compose plugin.
-
-Shared network `ai-shared` должна предоставлять RabbitMQ, n8n, `shared-vlm` и `shared-embedding`; их lifecycle независим от проекта. Физические checkpoint/model IDs и GPU layout настраиваются в `shared-infrastructure`, а проект использует logical aliases.
-
-Безопасный штатный deploy следует выполнять штатным проектным скриптом после проверки текущей ветки/контейнеров и Compose: `bash scripts/up.sh`. Не перезапускайте shared stack и не удаляйте volume ради разработки Experience.
-
-Experience подключён к Compose только профилем `review`. Сначала общие и изолированные SQL-тесты, затем настройка серверного канала и явная миграция по [docs/review-api.md](docs/review-api.md). Основной frontend 8080 использует серверный Review и каталог Experience. Рабочий адрес — `http://192.168.55.3:8080/`; SSH-туннель не требуется. Ключи остаются между контейнерами; полноценная пользовательская авторизация пока не реализована.
-
-Для подключения ручной индексации после синхронизации ветки:
-`bash ops/deploy-experience-index.sh </dev/null`. Скрипт повторяет общий и SQL gate,
-создаёт отдельный индексный ключ, применяет миграцию `20260929_0004` и запускает
-worker ручной очереди профилем `experience-index`, проверяет выключенный рабочий E.
-Прежний автоматический worker останавливается до обновления. Подробности —
-[docs/experience-index.md](docs/experience-index.md).
-
-Обновление этапа 6 в уже настроенном закрытом окружении после синхронизации
-ветки выполняется одной командой `bash ops/deploy-reviewed-pdf.sh </dev/null`.
-Скрипт проверяет общий набор и изолированный PostgreSQL перед пересозданием
-Gateway, Experience, Document Service и обоих фронтов. Fetch/merge выполняется
-отдельно; shared-сервисы и рабочие volumes не меняются.
-
-При startup `knowledge-embedding-migrator` проверяет embedding fingerprint до старта Knowledge runtime.
-
-Проверка:
+Штатный запуск/пересборка и проверка выполняются существующими скриптами:
 
 ```bash
+cd ~/projects/PDRD-validation || exit 1
+git status --short
+git pull --ff-only
+bash scripts/up.sh
 bash scripts/check-stack.sh
 ```
 
-Frontend:
+Перед pull рабочая копия должна быть чистой; ветка сервера должна соответствовать проверенной опубликованной ветке. `up.sh` читает `.env`, проверяет обязательные параметры/shared infrastructure, собирает сервисы, выполняет миграции и запускает выбранные профили. `check-stack.sh` проверяет готовность и версии миграций Gateway, Knowledge, User, Auth и Experience по включённым профилям. `knowledge-embedding-migrator` проверяет embedding fingerprint до старта Knowledge runtime. Новый отдельный deploy-скрипт для истории/хранения не нужен.
 
-```text
-http://<server>:8080/
+## Адрес проекта и HTTPS
+
+**Открыть [https://pdrd.itcneoterm.local/](https://pdrd.itcneoterm.local/)**.
+
+Внутренний DNS и корпоративный TLS-прокси обеспечивают этот адрес; сертификат веб-сервера выдан для `pdrd.itcneoterm.local`, цепочка корпоративного CA должна быть доверенной на рабочих станциях. Пользователю не нужно подключаться к серверу, создавать SSH-туннель или загружать личный сертификат.
+
+HTTP `192.168.55.3:8080` — адрес upstream существующего frontend для HTTPS-прокси и диагностики, **не адрес входа с паролем**. Публичная схема:
+
+```mermaid
+flowchart LR
+    B["Браузер в корпоративной сети"] -->|HTTPS :443| TLS["pdrd.itcneoterm.local: корпоративный TLS-прокси"]
+    TLS -->|HTTP upstream :8080| FE["Существующий frontend / Nginx"]
+    FE -->|app-net| GW["API Gateway"]
+    GW --> AUTH["Auth / User / Admin"]
+    AUTH -->|LDAPS :636| AD["Active Directory"]
 ```
 
-API Gateway Swagger:
+TLS завершается перед frontend, без изменения ответственности микросервисов. Размещение сертификата/закрытого ключа и конфигурация прокси относятся к инфраструктуре; этот README не утверждает наличие TLS-слушателя в проектном Compose. Auth сохраняет `Secure` cookie, CSRF и точный HTTPS Origin. Для LDAPS используется отдельный CA bundle AD, не закрытый ключ веб-сервера.
 
-```text
-http://127.0.0.1:8200/docs
-```
+## Первый локальный администратор
 
-Knowledge Service Swagger:
-
-```text
-http://127.0.0.1:8401/docs
-```
-
-Обычная остановка:
+После запуска профилей `identity,auth`:
 
 ```bash
-docker compose down
+bash scripts/create-superuser.sh admin
 ```
 
-Не использовать для обычного deploy:
+Скрипт вызывает команду через Docker Compose и интерактивно запрашивает пароль и подтверждение. Можно выбрать другое имя или вызвать без аргумента. Профиль/роль создаются в User, scrypt-хеш — только в Auth; AD для этого не нужен. Повтор создания защищён singleton guard. Дальнейшие назначения администраторов, ролей, разделов и отдельных прав выполняются в админке. Подробнее: [docs/identity-auth-service.md](docs/identity-auth-service.md).
+
+## Диагностика и остановка
+
+Swagger внутренних сервисов доступен с сервера через loopback: Gateway `http://127.0.0.1:8200/docs`, Knowledge `http://127.0.0.1:8401/docs`. Дополнительный Review frontend — `http://127.0.0.1:8081/`; основной пользовательский Review находится на HTTPS-фронте.
 
 ```bash
-docker compose down -v
+bash scripts/check-stack.sh
+docker compose logs --tail=100 api-gateway-outbox
 ```
+
+Обычная остановка — `docker compose down`. **Не использовать `docker compose down -v` для обновления:** он уничтожает постоянные данные. Не пересоздавать shared stack ради обновления проекта.
 
 # Тестирование
 
-Windows quality gate:
+## Windows: общий quality gate
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\ops\check-quality.ps1
 ```
 
-Скрипт проверяет Python и Node, `pip check`, Ruff check/format,
-общий pytest с новым `--basetemp`, все `frontend/tests/*.test.js` через Node
-и `git diff --check`.
-Параметр `-Fix` применяет исправления Ruff перед проверками.
-Для коммита и push после успешной проверки на `feature/experience-base`:
+Скрипт проверяет Python/Node, `pip check`, Ruff check/format, общий pytest с новым `--basetemp`, все `frontend/tests/*.test.js` и `git diff --check`. Параметр `-Fix` применяет исправления Ruff. `ExecutionPolicy Bypass` действует только для этого запуска. Коммит и push выполняет разработчик после проверки diff; документация не требует автоматического коммита всех файлов.
+
+Для изменения только README достаточно при разработке проверить его архитектурные контракты и diff; перед публикацией ветки выполняется общий gate:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\ops\check-quality.ps1 -CommitMessage "feat: export approved human review PDF" -Push
+.\.venv\Scripts\python.exe -m pytest tests/architecture/test_readme_diagrams.py tests/architecture/test_experience_readme.py -q
+git diff --check
+git diff -- README.md
 ```
 
-`-CommitMessage` включает все неигнорируемые изменения рабочей копии;
-`-Push` использует системный OpenSSH и push-адреса `origin`.
-При отдельном remote `neoterm` приватную ветку отправляют командой
-`git push neoterm feature/experience-base` после успешного quality gate.
-Ненулевой код любого шага останавливает скрипт.
-`ExecutionPolicy Bypass` действует только для этого запуска PowerShell.
-
-Docker quality:
+## Linux: общие и изолированные тесты
 
 ```bash
-docker compose --profile test build quality-tests
-docker compose --profile test run --rm --no-deps quality-tests
+docker compose --profile test run --rm --no-deps --build quality-tests
 ```
 
-Review domain/Experience selection и инфраструктурные тесты:
+PostgreSQL-проверки запускаются **в отдельных тестовых проектах** с временными БД; Knowledge дополнительно использует тестовый Qdrant. Они не должны получать рабочие database URL или production volumes.
 
-```powershell
-.\.venv\Scripts\python.exe -m pytest services/experience-service/tests -q
-cd frontend; node --test tests/*.test.js; cd ..
-```
+| Подсистема | Compose-файл | Контейнер с итоговым кодом |
+|---|---|---|
+| User | `ops/compose.user-test.yaml` | `user-test-runner` |
+| Auth | `ops/compose.auth-test.yaml` | `auth-test-runner` |
+| Gateway, история и хранение | `ops/compose.gateway-test.yaml` | `gateway-test-runner` |
+| Knowledge, ТЗ и удаление точек | `ops/compose.knowledge-test.yaml` | `knowledge-test-runner` |
+| Experience, Review и каталог | `ops/compose.experience-test.yaml` | `experience-test-runner` |
 
-PostgreSQL integration Experience выполняется только на отдельной тестовой БД и только после Alembic upgrade с явными `PDRD_RUN_DATABASE_TESTS=1` и `EXPERIENCE_SERVICE_TEST_DATABASE_URL` (не на production DB).
-
-Service integration:
+Пример запуска всех пяти наборов на Linux перед обновлением сервисов:
 
 ```bash
-docker compose --profile test build api-gateway-tests knowledge-service-tests
-docker compose --profile test run --rm api-gateway-tests
-docker compose --profile test run --rm knowledge-service-tests
-```
-
-GPU runtime coordination:
-
-```bash
-docker compose --profile gpu-runtime-test run --rm gpu-runtime-tests
-```
-
-Проверка stack:
-
-```bash
+set -euo pipefail
+for suite in user auth gateway knowledge experience; do
+    docker compose -p "pdrd-${suite}-test" -f "ops/compose.${suite}-test.yaml" up \
+        --build --abort-on-container-exit --exit-code-from "${suite}-test-runner"
+    docker compose -p "pdrd-${suite}-test" -f "ops/compose.${suite}-test.yaml" down --remove-orphans
+done
+bash scripts/up.sh
 bash scripts/check-stack.sh
 ```
 
-# Backup и диагностика
+Если runner завершился с ошибкой, стек не обновлять: сначала исправить причину, затем повторить соответствующий набор. Очистка оставшегося тестового проекта выполняется его `down --remove-orphans`; не подменять это удалением рабочих томов.
+
+Проверка доступного общего VLM runtime запускается отдельно:
+
+```bash
+docker compose --profile vlm-runtime-test run --rm --build vlm-runtime-tests
+```
+
+Общие unit/functional/regression/architecture-тесты без Docker не подтверждают реальные PostgreSQL, Qdrant или VLM. Изолированные наборы проверяют миграции и persistence; runtime-тесты — инфраструктурное взаимодействие.
+
+## Ручная приёмка
+
+- Открыть `https://pdrd.itcneoterm.local/`; проверить локального администратора, AD-вход, выход и повторный вход с тем же `user_id`.
+- Выполнить обычный PDF/CAD **без раздела** гостем и авторизованным пользователем; проверить понятный отказ свыше 200 выбранных страниц и допустимый диапазон большого PDF.
+- Проверить историю в кабинете/на главной, изоляцию двух пользователей и открытие `?job_id=...` без нового VLM-запуска.
+- Проверить назначенные разделы, чтение промпта, собственные пакеты и запрет доступа к чужому UUID.
+- Проверить создание/переименование раздела руководителем, удаление с отдельным разрешением и запрет удаления без него; новый раздел доступен активным проектировщикам/руководителям.
+- Проверить галочки Review/нормативного удаления, фильтр по автору Experience, отклонение с причиной/комментарием и итоговый PDF только из accepted актуальной ревизии.
+- Для проверки сроков хранения использовать тестовые данные/изолированный runner, **не менять даты рабочих заданий**. Старый результат владельца остаётся читаемым после очистки исходников, гостевая ссылка после 24 часов доступа не даёт.
+
+При обновлении только README контейнеры не требуют пересборки.
+
+# Резервное копирование и диагностика
 
 Посмотреть volumes:
 
@@ -1512,12 +2126,6 @@ Qdrant aliases:
 curl -fsS http://127.0.0.1:6333/aliases | python3 -m json.tool
 ```
 
-Embedding runtime:
-
-```bash
-curl -fsS http://127.0.0.1:8601/internal/v1/status | python3 -m json.tool
-```
-
 Shared runtime checks осуществляются через опубликованные health endpoints `shared-vlm` и `shared-embedding` в доверенной LAN/VPN. Их адреса, модельный alias и topology следует проверять по текущему `shared-infrastructure/docs/services.yaml`, а не по локальному Ollama `api/ps`.
 
 # Текущий функциональный контур
@@ -1534,7 +2142,7 @@ Shared runtime checks осуществляются через опубликов
 - T-guided normative retrieval;
 - N/T/U typed evidence;
 - finding-local normative enrichment;
-- Experience search contract присутствует в finalization; реально отключён флагом до проверенной записи Experience;
+- контракт поиска Experience присутствует в finalization; рабочий E выключен до отложенной оценки качества и подключения проверенной версии;
 - shared vLLM vision и embedding logical endpoints, 4096-dimension vector contract;
 - stable Qdrant aliases и model fingerprint;
 - blue/green automatic reindex из durable sources;
@@ -1543,14 +2151,18 @@ Shared runtime checks осуществляются через опубликов
 - кликабельные N/T sources через API Gateway;
 - frontend нормативного каталога, пользовательских пакетов и ТЗ;
 - Human Review frontend: Wise/Bad/Edited/Gold, независимые решения сгруппированных findings, создание Gold с двумя областями и общим текстовым списком;
-- доменная модель `ReviewSession`, журнал редакций, optimistic revisions, подтверждаемая геометрия и `SelectExperience` (пока только подготовка кандидатов);
+- доменная модель `ReviewSession`, журнал редакций, optimistic revisions, подтверждаемая геометрия и `SelectExperience`, постоянный каталог и контролируемая подготовка обучающих наборов;
 - отдельная SQLAlchemy PostgreSQL persistence и Experience Alembic migration, закрытый Review API, серверный источник анализа и mapper предложенных VLM-областей;
 - автоматический PDF и отдельный Reviewed PDF после Human Review; итоговый экспорт требует актуального утверждения и включает только accepted;
-- unit/integration/architecture/runtime test layers.
+- корпоративная и локальная аутентификация, вход по подтверждённому email, User/Auth/Admin API и админка;
+- роли, несколько разделов на пользователя, автоматическое назначение designer и разделов, отдельные права Review/удаления;
+- личная история проверок, восстановление результата без VLM, сессии 24 часа / 30 дней;
+- PDF до 200 выбранных страниц с проверкой до создания задания;
+- политика хранения: бессрочные результаты владельца, исходники 30 дней, гостевые артефакты/метаданные 7 дней, гостевая ссылка 24 часа;
+- unit/functional/regression/integration/architecture/runtime test layers.
 
-**Текущая приёмка:** этапы 5–7 и первый индекс этапа 8 подтверждены логами пользователя.
-Текущее расширение этапа 8 заменяет автоматический обход ручными версиями,
-добавляет нормативные разделы, выбор/удаление и дедупликацию повторных прогонов.
+Каталог и ручные версии Experience поддерживают нормативные разделы,
+выбор/удаление примеров и дедупликацию повторных прогонов.
 Сохранение каталога выполняется при утверждении PDF; отдельной кнопки нет.
 Рабочий E выключен до парной оценки на отложенном наборе и подключения рабочих версий.
 В этапе 9 сейчас реализован реестр/подготовка; фактическое обучение и смена весов впереди.
@@ -1559,7 +2171,8 @@ Shared runtime checks осуществляются через опубликов
 Review и аудит координат фиксируются атомарно. Отдельной кнопки проверки области
 и запроса причины изменения рамки нет. Изменение только геометрии сохраняет Wise,
 правка текста или основания даёт Edited, ручное замечание остаётся Gold.
-Крестик не подтверждает новую область: Bad сохраняется в каталоге и без области,
+При отклонении запрашиваются причина и комментарий. Крестик не подтверждает
+новую область: Bad сохраняется в каталоге и без области,
 но в обучающий набор попадает только с ранее принятой и актуальной областью.
 Замечания без области сохраняются в Review;
 принятые присутствуют в текстовой части итогового PDF, без придуманной рамки.
