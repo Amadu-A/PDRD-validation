@@ -114,6 +114,9 @@ from pdrd_api_gateway.infrastructure.messaging.broker import (
     RabbitMqReadinessProbe,
     build_broker_url,
 )
+from pdrd_api_gateway.infrastructure.orchestration.document_context import (
+    KnowledgeDocumentContextLifecycle,
+)
 from pdrd_api_gateway.infrastructure.pdf_selection import HttpPdfSelectionValidator
 from pdrd_api_gateway.infrastructure.project_context_preflight import (
     HttpProjectContextPreflightCoordinator,
@@ -245,6 +248,10 @@ def build_container() -> ApplicationContainer:
 
     cancel_analysis_job = CancelAnalysisJob(
         unit_of_work_factory=(unit_of_work_factory),
+        document_context_lifecycle=KnowledgeDocumentContextLifecycle(
+            base_url=settings.knowledge_service.base_url,
+            internal_key=settings.retention.internal_key.get_secret_value(),
+        ),
     )
 
     update_analysis_progress = UpdateAnalysisProgress(

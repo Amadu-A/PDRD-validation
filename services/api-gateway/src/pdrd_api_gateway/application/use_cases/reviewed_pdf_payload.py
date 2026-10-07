@@ -15,15 +15,29 @@ def reviewed_payload(manifest: ReviewedPdfManifest):
     """Сохраняет полный текст; не создаёт карточку для замечания без проверенной области."""
     annotations, findings = [], []
     for row in manifest.findings:
+        pages = sorted(
+            {row.page_number, *(location.page for location in row.evidence_locations)}
+        )
+        page_label = ("Страницы " if len(pages) > 1 else "Страница ") + ", ".join(
+            map(str, pages)
+        )
         fields = (
             AnalysisPdfReportField("Замечание", row.text),
             AnalysisPdfReportField(
                 "Нормативное основание", row.normative_basis or "Не указано."
             ),
-            AnalysisPdfReportField("Лист", str(row.page_number)),
+            AnalysisPdfReportField("Листы", ", ".join(map(str, pages))),
+            AnalysisPdfReportField(
+                "Источники",
+                " ".join(f"[{kind}]" for kind in row.source_kinds) or "Инженерное",
+            ),
+            AnalysisPdfReportField(
+                "Контекст проверяемого PDF",
+                "\n".join(row.document_context_basis_sources) or "Не указано.",
+            ),
             AnalysisPdfReportField("Тег", row.experience_tag),
         )
-        title = f"Замечание №{row.number}"
+        title = f"№{row.number} · {page_label}"
         findings.append(
             AnalysisPdfReportFinding(title=title, fields=fields, origin=row.origin)
         )
@@ -38,6 +52,22 @@ def reviewed_payload(manifest: ReviewedPdfManifest):
                     content=content,
                     regions=row.regions,
                     callout_box=row.callout_box,
+                    origin=row.origin,
+                )
+            )
+        for location in row.evidence_locations:
+            if location.page == row.page_number or not location.regions:
+                continue
+            annotations.append(
+                AnalysisPdfAnnotation(
+                    number=row.number,
+                    finding_id=row.finding_id,
+                    page_number=location.page,
+                    title=row.text,
+                    content="\n\n".join(
+                        f"{field.label}: {field.value}" for field in fields
+                    ),
+                    regions=location.regions,
                     origin=row.origin,
                 )
             )

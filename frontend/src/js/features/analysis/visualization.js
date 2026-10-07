@@ -12,6 +12,7 @@
  * Текст и source data вставляются только через textContent.
  */
 
+import { appendSourceBadges } from "./finding-provenance.js";
 import { registerVisualizationReview, reviewCalloutBox } from "./visualization-review.js";
 
 const CALLOUT_MARGIN_PX = 10;
@@ -961,6 +962,8 @@ function createCallout(
       dependencies,
     ),
   );
+
+  appendSourceBadges(header, finding);
 
   callout.append(
     header,
@@ -2103,6 +2106,7 @@ function createGroupedCallout(group, dependencies) {
     row.tabIndex = 0;
     row.dataset.findingId = String(finding.finding_id ?? "");
     row.append(createElement("span", "analysis-result__annotation-number", findingIndex + 1));
+    appendSourceBadges(row, finding);
     row.append(createElement("span", "analysis-result__group-member-text", findingDisplayText(finding)));
     row.append(createFindingDetailControl(finding, findingIndex, dependencies));
     appendNormativeLinks(row, finding, dependencies);
@@ -2261,6 +2265,7 @@ function appendPageVisualization(
           member.findingIndex,
         );
         const memberConnectors = memberBoxes.map(({ node }) => {
+          node.dataset.findingId = String(member.finding.finding_id ?? "");
           imagePane.append(node);
           const polyline = document.createElementNS(
             "http://www.w3.org/2000/svg",
@@ -2277,6 +2282,8 @@ function appendPageVisualization(
         reviewRecords.push({
           findingId: String(member.finding.finding_id ?? "").trim(),
           pageNumber, item: reviewItem, callout,
+          secondaryEvidence: Number(member.finding.page ?? member.finding.page_number) !== pageNumber,
+          documentEvidence: Array.isArray(member.finding.document_context_basis_sources) && member.finding.document_context_basis_sources.length > 0,
           bboxEntries: memberBoxes, connectorEntries: memberConnectors,
         });
         if (isGrouped) {

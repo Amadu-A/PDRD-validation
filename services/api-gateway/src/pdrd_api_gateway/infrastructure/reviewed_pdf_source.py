@@ -18,6 +18,7 @@ from pdrd_api_gateway.application.ports.review import (
     ReviewService,
 )
 from pdrd_api_gateway.application.ports.reviewed_pdf import (
+    ReviewedPdfEvidenceLocation,
     ReviewedPdfFinding,
     ReviewedPdfManifest,
 )
@@ -49,6 +50,40 @@ class _Box(_Contract):
         return AnalysisBoundingBox(**self.model_dump())
 
 
+class _EvidenceLocation(_Contract):
+    """Ограниченная геометрия физической страницы."""
+
+    page: int = Field(ge=1)
+    # Максимум 2400 доказательств по четыре области, независимо от лимита основной рамки.
+    regions: list[_Box] = Field(max_length=9600)
+
+
+class _ProposedRegion(_Contract):
+    """Сохранённая область D с происхождением и уверенностью."""
+
+    bbox: _Box
+    source: str
+    confidence: float = Field(ge=0, le=1)
+    method: str
+
+
+class _DocumentSource(_Contract):
+    """Типизированный снимок доказательства D из серверного Review."""
+
+    source_id: str
+    page: int = Field(ge=1)
+    evidence_text: str = ""
+    text: str = ""
+    fact_id: str | None = None
+    chunk_index: int | None = None
+    score: float = 0.0
+    match_type: str = ""
+    subject: str = ""
+    property: str = ""
+    scope: str = ""
+    visual_regions: list[_ProposedRegion] = Field(default_factory=list, max_length=4)
+
+
 class _Finding(_Contract):
     """Контракт принятого замечания; решение браузер сюда не передаёт."""
 
@@ -59,8 +94,15 @@ class _Finding(_Contract):
     experience_tag: Literal["wise", "edited", "gold"]
     text: str = Field(min_length=1, max_length=10000)
     normative_basis: str = Field(max_length=2000)
-    regions: list[_Box] = Field(max_length=4)
+    regions: list[_Box] = Field(max_length=9600)
     callout_box: _Box | None
+    evidence_locations: list[_EvidenceLocation] = Field(
+        default_factory=list, max_length=200
+    )
+    document_context_basis_sources: list[_DocumentSource] = Field(
+        default_factory=list, max_length=2400
+    )
+    source_kinds: list[Literal["D", "N", "T", "U", "E"]] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def check_origin(self):
@@ -74,6 +116,10 @@ class _Finding(_Contract):
                 raise ValueError("Неполное ручное замечание.")
         elif self.experience_tag == "gold":
             raise ValueError("Неверный источник Gold.")
+        elif len(self.regions) > 4 and not self.document_context_basis_sources:
+            raise ValueError(
+                "Дополнительные рамки требуют сохранённых D-доказательств."
+            )
         return self
 
 
@@ -134,6 +180,18 @@ class HttpReviewedPdfSource:
                     text=row.text,
                     normative_basis=row.normative_basis,
                     regions=tuple(box.to_port() for box in row.regions),
+                    evidence_locations=tuple(
+                        ReviewedPdfEvidenceLocation(
+                            page=item.page,
+                            regions=tuple(box.to_port() for box in item.regions),
+                        )
+                        for item in row.evidence_locations
+                    ),
+                    document_context_basis_sources=tuple(
+                        f"{source.source_id}, стр. {source.page}: {source.evidence_text or source.text}"
+                        for source in row.document_context_basis_sources
+                    ),
+                    source_kinds=tuple(row.source_kinds),
                     callout_box=row.callout_box.to_port() if row.callout_box else None,
                 )
                 for row in data.findings

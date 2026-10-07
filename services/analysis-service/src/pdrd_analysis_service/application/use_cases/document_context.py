@@ -7,11 +7,15 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pdrd_analysis_service.application.ports.vision_model import StructuredVisionModel
-from pdrd_analysis_service.domain.analysis import FindingDraft
+from pdrd_analysis_service.domain.analysis import (
+    DocumentContextSource,
+    FindingDraft,
+    FindingVisualRegion,
+)
 from pdrd_analysis_service.domain.document_context import (
     ConflictGroup,
     DocumentFact,
@@ -48,6 +52,7 @@ class DocumentContextOptions:
     max_evidence_sources_per_finding: int
     validation_batch_size: int
     validation_num_predict: int
+    max_saved_evidence_sources_per_finding: int = 2400
 
 
 def _located(pages: tuple[DocumentPage, ...]) -> tuple[LocatedDocumentFact, ...]:
@@ -64,7 +69,7 @@ def build_page_document_context(
     pages: tuple[DocumentPage, ...],
     semantic_by_page: dict[int, tuple[dict[str, Any], ...]],
     options: DocumentContextOptions,
-) -> dict[int, tuple[dict[str, Any], ...]]:
+) -> dict[int, tuple[DocumentContextSource, ...]]:
     """Соединяет соседние страницы, точные теги и bounded semantic retrieval."""
     by_number = {page.page: page for page in pages}
     by_subject: dict[str, list[LocatedDocumentFact]] = {}
@@ -77,7 +82,7 @@ def build_page_document_context(
         if table_key:
             by_table.setdefault(table_key, []).append(fact)
 
-    result: dict[int, tuple[dict[str, Any], ...]] = {}
+    result: dict[int, tuple[DocumentContextSource, ...]] = {}
     for page in pages:
         sources: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -131,10 +136,18 @@ def build_page_document_context(
                     "fact_id": fact.fact_id,
                     "subject": fact.fact.subject_name,
                     "property": fact.fact.property_name,
-                    "scope": fact.fact.scope_operating_mode,
+                    "scope": "; ".join(
+                        (
+                            fact.fact.scope_system,
+                            fact.fact.scope_location,
+                            fact.fact.scope_segment,
+                            fact.fact.scope_operating_mode,
+                            fact.fact.scope_condition,
+                        )
+                    ),
                     "text": fact_search_text(fact),
                     "evidence_text": fact.fact.evidence_text,
-                    "visual_regions": list(fact.fact.visual_regions),
+                    "visual_regions": _evidence_region(fact, by_number),
                 }
             )
             if sum(
@@ -152,6 +165,8 @@ def build_page_document_context(
             if score < options.semantic_threshold:
                 continue
             chunk = semantic.get("chunk_index")
+            if not isinstance(chunk, int) or isinstance(chunk, bool) or chunk < 0:
+                continue
             source_id = f"D-p{int(source_page):04d}-c{chunk}"
             if source_id in seen:
                 continue
@@ -163,6 +178,7 @@ def build_page_document_context(
                     "match_type": "semantic",
                     "score": score,
                     "fact_id": None,
+                    "chunk_index": int(chunk),
                     "subject": "",
                     "property": "",
                     "scope": "",
@@ -174,7 +190,19 @@ def build_page_document_context(
             text_count += 1
             if text_count >= options.max_text_sources_per_page:
                 break
-        result[page.page] = tuple(sources)
+        result[page.page] = tuple(
+            DocumentContextSource(
+                **{
+                    key: value
+                    for key, value in source.items()
+                    if key != "visual_regions"
+                },
+                visual_regions=tuple(
+                    FindingVisualRegion(**region) for region in source["visual_regions"]
+                ),
+            )
+            for source in sources
+        )
         logger.info(
             "document_context_retrieval page=%s exact_fact_matches=%s "
             "table_matches=%s semantic_text_matches=%s adjacent_sources=%s",
@@ -366,9 +394,9 @@ class CheckCrossPageConsistency:
         for index, group in enumerate(groups, start=1):
             if decisions.get(f"C{index}") != "confirmed":
                 continue
-            selected = _representative_facts(
-                group, self.options.max_evidence_sources_per_finding
-            )
+            selected = group.facts[
+                : self.options.max_saved_evidence_sources_per_finding
+            ]
             evidence_locations = tuple(
                 {
                     "source_id": f"D-{fact.fact_id}",
@@ -383,7 +411,9 @@ class CheckCrossPageConsistency:
             )
             locations = "; ".join(
                 f"стр. {fact.page}: {fact.fact.value_raw} {fact.fact.unit_raw}".strip()
-                for fact in selected
+                for fact in _representative_facts(
+                    group, self.options.max_evidence_sources_per_finding
+                )
             )
             first = selected[0]
             subject = first.fact.subject_name or first.fact.identifier
@@ -414,6 +444,36 @@ class CheckCrossPageConsistency:
                     experience_query="",
                     visual_regions=(),
                     evidence_locations=evidence_locations,
+                    document_context_source_ids=tuple(
+                        item["source_id"] for item in evidence_locations
+                    ),
+                    document_context_basis_sources=tuple(
+                        DocumentContextSource(
+                            source_id=f"D-{fact.fact_id}",
+                            page=fact.page,
+                            fact_id=fact.fact_id,
+                            text=fact_search_text(fact),
+                            evidence_text=fact.fact.evidence_text,
+                            score=1.0,
+                            match_type="conflict",
+                            subject=fact.fact.subject_name,
+                            property=fact.fact.property_name,
+                            scope="; ".join(
+                                (
+                                    fact.fact.scope_system,
+                                    fact.fact.scope_location,
+                                    fact.fact.scope_segment,
+                                    fact.fact.scope_operating_mode,
+                                    fact.fact.scope_condition,
+                                )
+                            ),
+                            visual_regions=tuple(
+                                FindingVisualRegion(**region)
+                                for region in _evidence_region(fact, by_number)
+                            ),
+                        )
+                        for fact in selected
+                    ),
                     object_ref=first.fact.identifier,
                 )
             )
@@ -425,3 +485,65 @@ class CheckCrossPageConsistency:
             sum(value == "needs_review" for value in decisions.values()),
         )
         return tuple(findings)
+
+
+def merge_cross_page_findings(
+    *,
+    page_findings: dict[int, tuple[FindingDraft, ...]],
+    cross_findings: tuple[FindingDraft, ...],
+) -> dict[int, tuple[FindingDraft, ...]]:
+    """Объединяет повтор одного доказанного противоречия, сохраняя все типы оснований."""
+    result = {page: list(findings) for page, findings in page_findings.items()}
+    for cross in cross_findings:
+        source_ids = set(cross.document_context_source_ids)
+        pages = {source.page for source in cross.document_context_basis_sources}
+        duplicates = []
+        for findings in result.values():
+            for finding in tuple(findings):
+                selected = set(finding.document_context_source_ids)
+                if (
+                    finding.category == "document_consistency"
+                    and finding.page in pages
+                    and selected
+                    and selected <= source_ids
+                ):
+                    duplicates.append(finding)
+                    findings.remove(finding)
+        updates = {}
+        for field, id_field in (
+            ("basis_sources", "normative_source_ids"),
+            ("technical_assignment_basis_sources", "technical_assignment_source_ids"),
+            ("user_package_basis_sources", "user_package_source_ids"),
+            ("document_context_basis_sources", "document_context_source_ids"),
+        ):
+            sources = list(getattr(cross, field))
+            for finding in duplicates:
+                for source in getattr(finding, field):
+                    if source in sources or (
+                        field == "document_context_basis_sources"
+                        and any(item.source_id == source.source_id for item in sources)
+                    ):
+                        continue
+                    # N/T/U ID могут быть локальны для страницы; устраняем только коллизию ID.
+                    if any(item.source_id == source.source_id for item in sources):
+                        source = replace(
+                            source,
+                            source_id=f"{source.source_id}-p{finding.page}-m{len(sources)}",
+                        )
+                    sources.append(source)
+            updates[field] = tuple(sources)
+            updates[id_field] = tuple(source.source_id for source in sources)
+        origins = (
+            *cross.origin_assertions,
+            *(origin for finding in duplicates for origin in finding.origin_assertions),
+        )
+        merged = replace(
+            cross,
+            **updates,
+            origin_assertions=origins,
+            basis="\n".join(
+                dict.fromkeys(item.basis for item in (cross, *duplicates) if item.basis)
+            ),
+        )
+        result.setdefault(cross.page, []).append(merged)
+    return {page: tuple(findings) for page, findings in result.items()}

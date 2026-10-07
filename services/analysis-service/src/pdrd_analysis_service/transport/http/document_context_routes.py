@@ -2,6 +2,7 @@
 
 """Закрытые HTTP-этапы D-контекста и межстраничной проверки."""
 
+from dataclasses import asdict
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -14,10 +15,14 @@ from pdrd_analysis_service.application.use_cases.document_context import (
     DocumentContextOptions,
     DocumentPage,
     build_page_document_context,
+    merge_cross_page_findings,
 )
 from pdrd_analysis_service.core.container import ApplicationContainer
 from pdrd_analysis_service.transport.http.dependencies import get_container
+from pdrd_analysis_service.transport.http.routes import _finding_draft_payload
 from pdrd_analysis_service.transport.http.schemas import (
+    CheckNormsResponse,
+    DocumentContextSourcePayload,
     FindingDraftPayload,
     PageFactsPayload,
 )
@@ -58,6 +63,7 @@ class BuildPageContextsRequest(BaseModel):
     """Полный индекс фактов и короткие семантические результаты страниц."""
 
     model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
     pages: list[DocumentPagePayload] = Field(min_length=1, max_length=200)
     semantic: list[SemanticPagePayload] = Field(default_factory=list)
 
@@ -66,20 +72,29 @@ class PageContextPayload(BaseModel):
     """Ограниченный D-контекст одного листа."""
 
     page_number: int
-    sources: list[dict[str, Any]]
+    sources: list[DocumentContextSourcePayload]
 
 
 class BuildPageContextsResponse(BaseModel):
-    """Ordered выдача D-источников всех листов."""
+    """Упорядоченная выдача D-источников всех листов."""
 
     items: list[PageContextPayload]
 
 
+class PageCheckPayload(BaseModel):
+    """Замечания страницы перед объединением межстраничных повторов."""
+
+    page_number: int = Field(ge=1)
+    result: CheckNormsResponse
+
+
 class CheckConsistencyRequest(BaseModel):
-    """Отдельный document-scoped этап после page-local проверки."""
+    """Отдельный этап проверки документа после проверки отдельных страниц."""
 
     model_config = ConfigDict(extra="forbid")
     document_id: UUID
+    page_checks: list[PageCheckPayload] = Field(default_factory=list, max_length=200)
+    enabled: bool = True
     pages: list[DocumentPagePayload] = Field(min_length=1, max_length=200)
 
 
@@ -87,10 +102,11 @@ class CheckConsistencyResponse(BaseModel):
     """Только подтверждённые межстраничные замечания."""
 
     findings: list[FindingDraftPayload]
+    items: list[PageCheckPayload] = Field(default_factory=list)
 
 
 def _options(container: ApplicationContainer) -> DocumentContextOptions:
-    """Собирает typed лимиты из настроек сервиса."""
+    """Собирает типизированные ограничения из настроек сервиса."""
     settings = container.settings.document_context
     return DocumentContextOptions(
         max_related_facts_per_page=settings.max_related_facts_per_page,
@@ -98,6 +114,7 @@ def _options(container: ApplicationContainer) -> DocumentContextOptions:
         semantic_threshold=settings.semantic_threshold,
         max_cross_page_candidates=settings.max_cross_page_candidates,
         max_evidence_sources_per_finding=settings.max_evidence_sources_per_finding,
+        max_saved_evidence_sources_per_finding=settings.max_saved_evidence_sources_per_finding,
         validation_batch_size=settings.validation_batch_size,
         validation_num_predict=settings.validation_num_predict,
     )
@@ -108,8 +125,8 @@ async def build_page_contexts(
     request: BuildPageContextsRequest,
     container: Annotated[ApplicationContainer, Depends(get_container)],
 ) -> BuildPageContextsResponse:
-    """Ищет exact и adjacent D-факты для каждого листа."""
-    if not container.settings.document_context.enabled:
+    """Ищет точные и соседние D-факты для каждого листа."""
+    if not request.enabled or not container.settings.document_context.enabled:
         return BuildPageContextsResponse(
             items=[
                 PageContextPayload(page_number=page.page_number, sources=[])
@@ -125,7 +142,13 @@ async def build_page_contexts(
     )
     return BuildPageContextsResponse(
         items=[
-            PageContextPayload(page_number=page.page, sources=list(sources[page.page]))
+            PageContextPayload(
+                page_number=page.page,
+                sources=[
+                    DocumentContextSourcePayload.model_validate(asdict(source))
+                    for source in sources[page.page]
+                ],
+            )
             for page in pages
         ]
     )
@@ -136,14 +159,14 @@ async def check_cross_page_consistency(
     request: CheckConsistencyRequest,
     container: Annotated[ApplicationContainer, Depends(get_container)],
 ) -> CheckConsistencyResponse:
-    """Проверяет кандидатов без попарного VLM fan-out."""
+    """Проверяет группы кандидатов ограниченными пакетами VLM."""
     use_case = container.check_cross_page_consistency
-    if use_case is None:
-        return CheckConsistencyResponse(findings=[])
+    if use_case is None or not request.enabled:
+        return CheckConsistencyResponse(findings=[], items=request.page_checks)
     probe = container.analysis_progress_probe
 
     async def cancelled() -> bool:
-        """Проверяет durable отмену перед следующим пакетом VLM."""
+        """Проверяет сохранённую отмену перед следующим пакетом VLM."""
         return bool(
             probe is not None
             and await probe.is_cancelled(
@@ -169,7 +192,30 @@ async def check_cross_page_consistency(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(error),
         ) from error
+    merged = merge_cross_page_findings(
+        page_findings={
+            item.page_number: tuple(
+                finding.to_domain() for finding in item.result.findings
+            )
+            for item in request.page_checks
+        },
+        cross_findings=findings,
+    )
     return CheckConsistencyResponse(
+        items=[
+            PageCheckPayload(
+                page_number=item.page_number,
+                result=item.result.model_copy(
+                    update={
+                        "findings": [
+                            _finding_draft_payload(finding)
+                            for finding in merged[item.page_number]
+                        ]
+                    }
+                ),
+            )
+            for item in request.page_checks
+        ],
         findings=[
             FindingDraftPayload.model_validate(
                 {
@@ -189,9 +235,16 @@ async def check_cross_page_consistency(
                     "experience_query": finding.experience_query,
                     "visual_regions": [],
                     "evidence_locations": list(finding.evidence_locations),
+                    "document_context_source_ids": list(
+                        finding.document_context_source_ids
+                    ),
+                    "document_context_basis_sources": [
+                        asdict(source)
+                        for source in finding.document_context_basis_sources
+                    ],
                     "object_ref": finding.object_ref,
                 }
             )
             for finding in findings
-        ]
+        ],
     )

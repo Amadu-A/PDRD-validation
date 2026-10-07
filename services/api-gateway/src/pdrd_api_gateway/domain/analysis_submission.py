@@ -35,6 +35,7 @@ class AnalysisSubmission:
     use_explanatory_note: bool
     note_start_page: int | None
     note_end_page: int | None
+    use_document_context: bool = False
 
     @classmethod
     def create(
@@ -46,6 +47,7 @@ class AnalysisSubmission:
         pdf_file_name: str | None,
         cad_file_name: str | None,
         use_explanatory_note: bool = False,
+        use_document_context: bool = False,
         note_start_page: str | int | None = None,
         note_end_page: str | int | None = None,
     ) -> "AnalysisSubmission":
@@ -71,6 +73,11 @@ class AnalysisSubmission:
             end_page=note_end_page,
         )
 
+        if use_document_context and source_mode is not AnalysisSourceMode.PDF_ONLY:
+            raise InvalidAnalysisSubmissionError(
+                "Контекст всего проекта доступен в режиме PDF-only."
+            )
+
         return cls(
             document_id=uuid4(),
             source_mode=source_mode,
@@ -78,6 +85,7 @@ class AnalysisSubmission:
             pdf_file_name=(pdf_file_name if pdf_present else None),
             cad_file_name=(cad_file_name if cad_present else None),
             use_explanatory_note=normalized_use_note,
+            use_document_context=use_document_context,
             note_start_page=normalized_note_start,
             note_end_page=normalized_note_end,
         )

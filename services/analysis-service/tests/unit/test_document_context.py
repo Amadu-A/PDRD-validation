@@ -138,9 +138,9 @@ def test_page_context_finds_remote_fact_adjacent_and_semantic_sources() -> None:
         },
         options=_options(),
     )
-    kinds = {item["match_type"] for item in result[10]}
+    kinds = {item.match_type for item in result[10]}
     assert kinds == {"adjacent", "exact_identifier", "semantic"}
-    assert {item["page"] for item in result[10]} == {11, 17}
+    assert {item.page for item in result[10]} == {11, 17}
 
 
 class _ConfirmingVision:
@@ -238,7 +238,7 @@ def test_table_identifier_links_nonadjacent_continuation() -> None:
         pages=pages, semantic_by_page={}, options=_options()
     )
     assert any(
-        source["match_type"] == "table_identifier" and source["page"] == 17
+        source.match_type == "table_identifier" and source.page == 17
         for source in result[10]
     )
 
@@ -257,7 +257,11 @@ async def test_evidence_limit_keeps_each_distinct_value() -> None:
         options=replace(_options(), max_evidence_sources_per_finding=2),
     ).execute(pages=pages)
     assert len(findings) == 1
-    assert [location["page"] for location in findings[0].evidence_locations] == [10, 25]
+    assert [location["page"] for location in findings[0].evidence_locations] == [
+        10,
+        17,
+        25,
+    ]
 
 
 @pytest.mark.asyncio

@@ -378,9 +378,23 @@ class GetAnalysisAnnotatedPdf:
                 page_number=page_number,
             )
 
+            pages = sorted(
+                {
+                    page_number,
+                    *(
+                        cls._normalize_page(item.get("page"))
+                        for item in finding.get("evidence_locations", [])
+                        if isinstance(item, dict)
+                        and cls._normalize_page(item.get("page")) is not None
+                    ),
+                }
+            )
+            page_label = ("Страницы " if len(pages) > 1 else "Страница ") + ", ".join(
+                map(str, pages)
+            )
             report_findings.append(
                 AnalysisPdfReportFinding(
-                    title=(f"{index}. Лист/страница {page_number}"),
+                    title=(f"№{index} · {page_label}"),
                     fields=fields,
                 )
             )
@@ -419,7 +433,7 @@ class GetAnalysisAnnotatedPdf:
                     annotations.append(
                         AnalysisPdfAnnotation(
                             number=index,
-                            finding_id=f"{annotation_finding_id}-p{evidence_page}",
+                            finding_id=annotation_finding_id,
                             page_number=evidence_page,
                             title=cls._annotation_card_text(finding),
                             content=cls._annotation_content(fields),
@@ -653,6 +667,30 @@ class GetAnalysisAnnotatedPdf:
     ]:
         """Формирует поля так же раздельно, как browser report."""
         fields: list[AnalysisPdfReportField] = []
+        kinds = [
+            kind
+            for kind, key in (
+                ("D", "document_context_basis_sources"),
+                ("N", "basis_sources"),
+                ("T", "technical_assignment_basis_sources"),
+                ("U", "user_package_basis_sources"),
+                ("E", "experience_sources"),
+            )
+            if finding.get(key)
+        ]
+        cls._append_field(
+            fields, "Источники", " ".join(f"[{kind}]" for kind in kinds) or "Инженерное"
+        )
+        cls._append_field(
+            fields,
+            "Контекст проверяемого PDF",
+            "\n".join(
+                f"{source.get('source_id', '')}, стр. {source.get('page', '')}: "
+                f"{source.get('evidence_text') or source.get('text', '')}"
+                for source in finding.get("document_context_basis_sources", [])
+                if isinstance(source, dict)
+            ),
+        )
 
         cls._append_field(
             fields,

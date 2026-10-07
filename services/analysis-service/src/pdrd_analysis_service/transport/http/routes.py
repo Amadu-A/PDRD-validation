@@ -36,6 +36,7 @@ from pdrd_analysis_service.transport.http.dependencies import (
 from pdrd_analysis_service.transport.http.schemas import (
     CheckNormsRequest,
     CheckNormsResponse,
+    DocumentContextSourcePayload,
     ExperienceSourcePayload,
     FinalFindingPayload,
     FinalizeRequest,
@@ -275,6 +276,11 @@ def _finding_draft_payload(
         origin_assertions=list(finding.origin_assertions),
         object_ref=finding.object_ref,
         evidence_locations=list(finding.evidence_locations),
+        document_context_source_ids=list(finding.document_context_source_ids),
+        document_context_basis_sources=[
+            DocumentContextSourcePayload.model_validate(asdict(source))
+            for source in finding.document_context_basis_sources
+        ],
     )
 
 
@@ -332,6 +338,11 @@ def _final_finding_payload(
         origin_assertions=list(finding.origin_assertions),
         object_ref=finding.object_ref,
         evidence_locations=list(finding.evidence_locations),
+        document_context_source_ids=list(finding.document_context_source_ids),
+        document_context_basis_sources=[
+            DocumentContextSourcePayload.model_validate(asdict(source))
+            for source in finding.document_context_basis_sources
+        ],
     )
 
 
@@ -412,6 +423,7 @@ async def understand_page(
 
     try:
         facts, metrics = await container.understand_page.execute(
+            use_document_context=request.use_document_context,
             page_number=request.page_number,
             heuristic_page_type=(request.heuristic_page_type),
             extracted_text=(request.extracted_text),
@@ -503,7 +515,9 @@ async def check_norms(
             user_package_sources=tuple(
                 source.to_domain() for source in request.user_package_sources
             ),
-            document_context_sources=tuple(request.document_context_sources),
+            document_context_sources=tuple(
+                source.to_domain() for source in request.document_context_sources
+            ),
             image_bytes=image,
             normative_system_prompt=(request.normative_system_prompt),
         )

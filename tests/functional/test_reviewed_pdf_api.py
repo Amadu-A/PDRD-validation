@@ -418,3 +418,190 @@ async def test_parallel_changes_block_pdf_after_render_and_cache_hit(
         response = await pdf(browser, f, revision)
         assert response.status_code == 409
         assert not response.content.startswith(b"%PDF-")
+
+
+@pytest.mark.parametrize("primary_located", [True, False])
+@pytest.mark.parametrize("secondary_count", [1, 6])
+async def test_one_cross_page_review_survives_d_cleanup_and_exports_two_annotations(
+    pdf_flow,
+    primary_located,
+    secondary_count,
+):
+    """После удаления D одно решение даёт две страницы PDF и одну строку приложения."""
+    flow = pdf_flow
+    source = flow.gateway.get_review_source
+    with fitz.open() as document:
+        for page in range(10):
+            document.new_page().insert_text((40, 40), f"PAGE {page + 1}")
+        original = document.tobytes()
+
+    async def request(*, document_id):
+        """Читает сохранённый PDF независимо от временного индекса."""
+        return SimpleNamespace(
+            submission=SimpleNamespace(
+                document_id=document_id, pdf_file_name="Проект.pdf"
+            ),
+            pdf_content=original,
+        )
+
+    d_sources = [
+        {
+            "source_id": f"D-p{page:04d}-f0001",
+            "page": page,
+            "fact_id": f"p{page:04d}-f0001",
+            "evidence_text": f"Б-012 {value} °C",
+            "visual_regions": [{**BOX, "confidence": 0.9}],
+        }
+        for page, value in ((7, "-37"), (10, "-35"))
+    ]
+    if secondary_count > 1:
+        d_sources[0]["visual_regions"] = (
+            [{**BOX, "confidence": 0.9}] if primary_located else []
+        )
+        d_sources[1]["visual_regions"] = [
+            {**BOX, "x_min": 300, "x_max": 330, "confidence": 0.9}
+        ]
+        d_sources.extend(
+            {
+                "source_id": f"D-p0010-f{index + 1:04d}",
+                "page": 10,
+                "fact_id": f"p0010-f{index + 1:04d}",
+                "evidence_text": "Б-012 -35 °C",
+                "visual_regions": [
+                    {
+                        **BOX,
+                        "x_min": 300 + index * 40,
+                        "x_max": 330 + index * 40,
+                        "confidence": 0.9,
+                    }
+                ],
+            }
+            for index in range(1, secondary_count)
+        )
+    finding = {
+        "finding_id": "cross-page-0001",
+        "page": 7,
+        "comment": "Б-012: на странице 7 -37 °C, на странице 10 -35 °C. Требуется согласовать значения.",
+        "status": "confirmed",
+        "category": "document_consistency",
+        "basis": "",
+        "source_kinds": ["D"],
+        "document_context_basis_sources": d_sources,
+        "evidence_locations": [
+            {
+                "source_id": row["source_id"],
+                "page": row["page"],
+                "text": row["evidence_text"],
+                **(
+                    {"visual_regions": row["visual_regions"]}
+                    if secondary_count > 1
+                    else {}
+                ),
+            }
+            for row in d_sources
+        ],
+    }
+
+    async def result(*, document_id):
+        """Возвращает постоянный снимок; D-индекс уже отсутствует."""
+        return {"findings": [finding], "selected_pages": [7, 10]}
+
+    async def visualization(*, job_id):
+        """Доставляет свою область на каждой странице одного ID."""
+        payload = {
+            "job_id": str(job_id),
+            "document_id": str(flow.jobs.job.document_id),
+            "pages": [
+                {
+                    "page_number": page,
+                    "locations": [
+                        {
+                            "finding_id": "cross-page-0001",
+                            "status": "located",
+                            "method": "analysis_vlm",
+                            "regions": [
+                                {
+                                    "bbox": box,
+                                    "source": "analysis_vlm",
+                                    "confidence": 0.9,
+                                }
+                            ],
+                        }
+                    ],
+                }
+                for page, box in (
+                    ((7, BOX), (10, {**BOX, "x_min": 300, "x_max": 400}))
+                    if primary_located
+                    else ((10, {**BOX, "x_min": 300, "x_max": 400}),)
+                )
+            ],
+        }
+
+        if not primary_located:
+            payload["pages"].insert(0, {"page_number": 7, "locations": []})
+        return payload
+
+    source.artifacts.load_request = request
+    source.artifacts.load_result = result
+    source.visualizations.execute = visualization
+    async with client(flow) as browser:
+        opened = await browser.post(flow.endpoint + "/open")
+        assert opened.status_code == 200, opened.text
+        assert (
+            len(opened.json()["findings"]) == 1 and opened.json()["pending_count"] == 1
+        )
+        evidence = opened.json()["findings"][0]["evidence_locations"]
+        assert sorted({row["page"] for row in evidence}) == [7, 10]
+        assert len(evidence) == 1 + secondary_count
+        assert (
+            sum(len(row["proposed_regions"]) for row in evidence if row["page"] == 10)
+            == secondary_count
+        )
+        accepted = await command(
+            browser,
+            flow,
+            0,
+            action="decide",
+            finding_id="cross-page-0001",
+            decision="accepted",
+        )
+        assert accepted.status_code == 200, accepted.text
+        restored = await browser.get(flow.endpoint)
+        assert restored.json()["findings"][0]["decision"] == "accepted"
+        approved = await command(
+            browser, flow, accepted.json()["revision"], action="approve"
+        )
+        assert approved.status_code == 200, approved.text
+        response = await browser.post(
+            flow.pdf_endpoint, json={"expected_revision": approved.json()["revision"]}
+        )
+        assert response.status_code == 200, response.text
+        with fitz.open(stream=response.content, filetype="pdf") as document:
+            assert bool(tuple(document[6].annots() or ())) is primary_located
+            assert len(tuple(document[9].annots() or ())) >= secondary_count
+            report = "\n".join(page.get_text() for page in list(document)[10:])
+            assert "Страницы 7, 10" in report
+            assert report.count("№1") == 1
+        edited = await command(
+            browser,
+            flow,
+            approved.json()["revision"],
+            action="edit",
+            finding_id="cross-page-0001",
+            text="Исправлено на всех страницах",
+            normative_basis="",
+        )
+        assert edited.status_code == 200, edited.text
+        assert (
+            len(edited.json()["findings"]) == 1 and edited.json()["pending_count"] == 1
+        )
+        rejected = await command(
+            browser,
+            flow,
+            edited.json()["revision"],
+            action="decide",
+            finding_id="cross-page-0001",
+            decision="rejected",
+            reason_category="false_positive",
+        )
+        assert rejected.status_code == 200 and rejected.json()["pending_count"] == 0

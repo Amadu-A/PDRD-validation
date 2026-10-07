@@ -125,6 +125,46 @@ class ProposedRegion:
 
 
 @dataclass(frozen=True, slots=True)
+class ReviewEvidenceLocation:
+    """Страница доказательства одного логического замечания."""
+
+    page: int
+    source_id: str = ""
+    text: str = ""
+    proposed_regions: tuple[ProposedRegion, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Проверяет страницу и типы областей до сохранения Review."""
+        if self.page < 1 or any(
+            not isinstance(item, ProposedRegion) for item in self.proposed_regions
+        ):
+            raise ReviewError("Неверная страница доказательства Review.")
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewDocumentSource:
+    """Снимок D-источника, доступный после удаления временного индекса."""
+
+    source_id: str
+    page: int
+    evidence_text: str = ""
+    text: str = ""
+    fact_id: str | None = None
+    chunk_index: int | None = None
+    score: float = 0.0
+    match_type: str = ""
+    subject: str = ""
+    property: str = ""
+    scope: str = ""
+    visual_regions: tuple[ProposedRegion, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Не позволяет сохранить источник без стабильной физической идентичности."""
+        if self.page < 1 or not self.source_id.startswith(f"D-p{self.page:04d}-"):
+            raise ReviewError("Неверная идентичность источника D.")
+
+
+@dataclass(frozen=True, slots=True)
 class OriginalFinding:
     """Доверенное замечание завершённого анализа, исключающее гипотезы."""
 
@@ -133,6 +173,9 @@ class OriginalFinding:
     text: str
     normative_basis: str = ""
     proposed_regions: tuple[ProposedRegion, ...] = ()
+    evidence_locations: tuple[ReviewEvidenceLocation, ...] = ()
+    document_context_basis_sources: tuple[ReviewDocumentSource, ...] = ()
+    source_kinds: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Проверяет первоначальные данные перед открытием ревью."""
@@ -178,6 +221,9 @@ class ReviewedFinding:
     display_regions: tuple[Rectangle, ...] | None = None
     reason_category: str | None = None
     comment: str = ""
+    evidence_locations: tuple[ReviewEvidenceLocation, ...] = ()
+    document_context_basis_sources: tuple[ReviewDocumentSource, ...] = ()
+    source_kinds: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Проверяет разметку отклонения, допускает отсутствие причины у старых записей."""
@@ -286,6 +332,12 @@ class ReviewSession:
             for item in originals
         ):
             raise ReviewError("Область VLM привязана к неотрендеренному листу.")
+        if any(
+            location.proposed_regions and location.page not in rendered_pages
+            for item in originals
+            for location in item.evidence_locations
+        ):
+            raise ReviewError("Доказательство привязано к неотрендеренному листу.")
 
         findings = tuple(
             ReviewedFinding(
@@ -304,6 +356,9 @@ class ReviewSession:
                 updated_by=actor,
                 updated_at=at,
                 proposed_regions=item.proposed_regions,
+                evidence_locations=item.evidence_locations,
+                document_context_basis_sources=item.document_context_basis_sources,
+                source_kinds=item.source_kinds,
             )
             for item in originals
         )

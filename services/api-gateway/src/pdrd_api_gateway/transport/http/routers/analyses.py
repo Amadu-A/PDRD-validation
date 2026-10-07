@@ -354,6 +354,7 @@ async def create_analysis(
         str | None,
         Form(),
     ] = None,
+    use_document_context: Annotated[bool, Form()] = False,
     use_explanatory_note: Annotated[
         bool,
         Form(),
@@ -497,6 +498,7 @@ async def create_analysis(
         "cad_file_name": cad_file_name,
         "pages": pages,
         "use_explanatory_note": (use_explanatory_note),
+        "use_document_context": use_document_context,
         "note_start_page": (note_start_page),
         "note_end_page": (note_end_page),
         "normative_section_id": (normative_section_id),

@@ -12,6 +12,9 @@ from time import monotonic
 from pdrd_api_gateway.application.use_cases.cleanup_analysis_retention import (
     CleanupAnalysisRetention,
 )
+from pdrd_api_gateway.application.use_cases.cleanup_document_contexts import (
+    CleanupDocumentContexts,
+)
 from pdrd_api_gateway.application.use_cases.dispatch_outbox import (
     DispatchOutbox,
 )
@@ -34,6 +37,9 @@ from pdrd_api_gateway.infrastructure.messaging.celery_app import (
 )
 from pdrd_api_gateway.infrastructure.messaging.publisher import (
     CeleryOutboxPublisher,
+)
+from pdrd_api_gateway.infrastructure.orchestration.document_context import (
+    KnowledgeDocumentContextLifecycle,
 )
 from pdrd_api_gateway.infrastructure.storage.analysis_retention import (
     LocalAnalysisRetentionArtifacts,
@@ -95,6 +101,15 @@ async def run_dispatcher() -> None:
             batch_size=settings.retention.batch_size,
         )
     )
+    document_cleanup = CleanupDocumentContexts(
+        unit_of_work_factory=unit_of_work_factory,
+        lifecycle=KnowledgeDocumentContextLifecycle(
+            base_url=settings.knowledge_service.base_url,
+            internal_key=settings.retention.internal_key.get_secret_value(),
+        ),
+        max_runtime_seconds=settings.lifecycle.max_runtime_seconds,
+    )
+    document_cursor = ""
     next_recovery_at = 0.0
 
     try:
@@ -114,6 +129,13 @@ async def run_dispatcher() -> None:
                         recovery_report.failed,
                     )
 
+                try:
+                    document_cursor = await document_cleanup.execute(
+                        limit=settings.lifecycle.recovery_batch_size,
+                        cursor=document_cursor,
+                    )
+                except Exception:
+                    LOGGER.exception("document_context_sweep_failed")
                 next_recovery_at = now + settings.lifecycle.recovery_interval_seconds
 
             report = await use_case.execute(

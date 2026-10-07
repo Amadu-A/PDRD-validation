@@ -220,6 +220,7 @@ def build_normative_check_schema(
         str,
         ...,
     ] = (),
+    document_context_source_ids: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Возвращает компактную schema exhaustive N/T/U candidate check."""
     return {
@@ -292,6 +293,9 @@ def build_normative_check_schema(
                                 technical_assignment_source_ids,
                             )
                         ),
+                        "document_context_source_ids": _source_ids_schema(
+                            document_context_source_ids
+                        ),
                         "user_package_source_ids": (
                             _source_ids_schema(
                                 user_package_source_ids,
@@ -311,6 +315,7 @@ def build_normative_check_schema(
                         "normative_source_ids",
                         "technical_assignment_source_ids",
                         "user_package_source_ids",
+                        "document_context_source_ids",
                     ],
                 },
             },

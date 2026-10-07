@@ -9,7 +9,7 @@
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import UUID
@@ -130,6 +130,15 @@ def content_signature(
         "proposals": proposals,
     }
 
+    if finding.evidence_locations:
+        payload["evidence_locations"] = [
+            asdict(item) for item in finding.evidence_locations
+        ]
+    if finding.document_context_basis_sources:
+        payload["document_context_basis_sources"] = [
+            asdict(item) for item in finding.document_context_basis_sources
+        ]
+
     if finding.display_regions is not None:
         payload["display_regions"] = [
             [float(box.x_min), float(box.y_min), float(box.x_max), float(box.y_max)]
@@ -168,7 +177,16 @@ def build_confirmation(
 
     if (
         not isinstance(regions, tuple)
-        or not 1 <= len(regions) <= 4
+        or len(regions) > 4
+        or (
+            not regions
+            and not (
+                mode is ConfirmationMode.DECISION
+                and any(
+                    location.proposed_regions for location in finding.evidence_locations
+                )
+            )
+        )
         or any(not isinstance(box, Rectangle) for box in regions)
         or len(set(regions)) != len(regions)
     ):

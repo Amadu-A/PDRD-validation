@@ -78,7 +78,7 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
             node: bbox.node, page, label: "Область ошибки VLM",
             bounds: () => adapter.imagePane.getBoundingClientRect(),
             getBox: () => ({ ...entry.boxes[index] }),
-            enabled: () => isEnabled() && !entry.rejected && page.dataset.reviewSelecting !== "true",
+            enabled: () => !record.secondaryEvidence && (!record.documentEvidence || index < 4) && isEnabled() && !entry.rejected && page.dataset.reviewSelecting !== "true",
             onStart() {
               cancelActive();
               onStart();
@@ -121,7 +121,7 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
           minimum: { minWidth: 130, minHeight: 80 },
           bounds: () => adapter.imagePane.getBoundingClientRect(),
           getBox: () => reviewCalloutBox(record.callout) ?? measuredBox(record.callout, adapter.imagePane),
-          enabled: () => isEnabled() && members().length > 0 && page.dataset.reviewSelecting !== "true",
+          enabled: () => !record.secondaryEvidence && isEnabled() && members().length > 0 && page.dataset.reviewSelecting !== "true",
           onStart() {
             cancelActive();
             onStart();
@@ -159,9 +159,9 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
   }
 
   function snapshot(findingId) {
-    return entries.filter((entry) => entry.findingId === findingId).map((entry) => ({
+    return entries.filter((entry) => entry.findingId === findingId && !entry.secondaryEvidence).map((entry) => ({
       page_number: entry.pageNumber,
-      proposed_issue_boxes: entry.boxes.map((box) => ({ ...box })),
+      proposed_issue_boxes: (entry.documentEvidence ? entry.boxes.slice(0, 4) : entry.boxes).map((box) => ({ ...box })),
       callout_box: calloutBoxes.has(entry.callout) ? { ...calloutBoxes.get(entry.callout) } : null,
     }));
   }
@@ -174,17 +174,24 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
   function restore(findings) {
     for (const row of findings) {
       for (const entry of entries.filter((item) => item.findingId === row.finding_id)) {
-        const boxes = row.display_regions ?? row.proposed_regions.map((region) => region.bbox);
-        if (boxes.length !== entry.bboxEntries.length) {
+        const evidence = (row.evidence_locations ?? []).filter((location) => location.page === entry.pageNumber);
+        const boxes = entry.secondaryEvidence
+          ? evidence.flatMap((location) => (location.proposed_regions ?? []).map((region) => region.bbox))
+          : row.display_regions ?? row.proposed_regions.map((region) => region.bbox);
+        const fixedPrimaryEvidence = entry.documentEvidence && !entry.secondaryEvidence
+          && boxes.length <= 4 && boxes.length < entry.bboxEntries.length;
+        if (boxes.length !== entry.bboxEntries.length && !fixedPrimaryEvidence) {
           throw new Error("Геометрия Review не соответствует серверной визуализации.");
         }
-        entry.boxes = boxes.map((box) => ({ ...box }));
+        entry.boxes = fixedPrimaryEvidence
+          ? [...boxes.map((box) => ({ ...box })), ...entry.boxes.slice(boxes.length)]
+          : boxes.map((box) => ({ ...box }));
         entry.bboxEntries.forEach((bbox, index) => {
           const box = entry.boxes[index];
           Object.assign(bbox.box, { xMin: box.x_min, yMin: box.y_min, xMax: box.x_max, yMax: box.y_max });
           positionBox(bbox.node, box);
         });
-        if (row.callout_box) {
+        if (!entry.secondaryEvidence && row.callout_box) {
           calloutBoxes.set(entry.callout, { ...row.callout_box });
           pinReviewCallout(entry.callout, row.callout_box);
           entry.callout.dataset.reviewResized = "true";

@@ -3,8 +3,10 @@
 """Промпты structured VLM pipeline."""
 
 import json
+from dataclasses import asdict
 
 from pdrd_analysis_service.domain.analysis import (
+    DocumentContextSource,
     ExperienceSource,
     FindingDraft,
     NormativeSource,
@@ -678,7 +680,7 @@ def build_normative_check_prompt(
         UserPackageSource,
         ...,
     ] = (),
-    document_context_sources: tuple[dict[str, object], ...] = (),
+    document_context_sources: tuple[DocumentContextSource, ...] = (),
 ) -> str:
     """Формирует prompt инженерной и N/T/U проверки с D-контекстом."""
     facts_payload = {
@@ -795,7 +797,7 @@ def build_normative_check_prompt(
     )
 
     document_json = json.dumps(
-        document_context_sources,
+        [asdict(source) for source in document_context_sources],
         ensure_ascii=False,
         default=list,
     )
@@ -851,6 +853,10 @@ USER PACKAGE SOURCES:
 
 DOCUMENT CONTEXT SOURCES:
 {document_json}
+
+Если замечание основано на D, заполни document_context_source_ids только ID
+из переданного списка. При отсутствии D верни пустой массив. Источники D
+можно сочетать с N/T/U; не придумывай source_kinds.
 
 D-source — факт из этого же проверяемого PDF, а не норматив,
 ТЗ, пользовательский пакет или База Опыта. Используй D для
@@ -1023,6 +1029,10 @@ def build_finalization_prompt(
                     "normative_basis": normative_basis,
                     "technical_assignment_basis": (technical_assignment_basis),
                     "user_package_basis": user_package_basis,
+                    "document_context_basis_sources": [
+                        asdict(source)
+                        for source in finding.document_context_basis_sources[:8]
+                    ],
                 },
                 "experience_examples": experience_examples,
             }

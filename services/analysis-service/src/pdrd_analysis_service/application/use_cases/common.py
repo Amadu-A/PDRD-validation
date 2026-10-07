@@ -23,6 +23,7 @@ _CANDIDATE_SOURCE_ID_FIELDS = (
     "normative_source_ids",
     "technical_assignment_source_ids",
     "user_package_source_ids",
+    "document_context_source_ids",
 )
 
 _STRUCTURED_NUMBER_ANCHOR_RE = re.compile(
@@ -421,6 +422,9 @@ def _origin_assertion(candidate: dict[str, Any], raw_index: int) -> dict[str, An
         "technical_assignment_source_ids": _source_id_list(
             candidate.get("technical_assignment_source_ids")
         ),
+        "document_context_source_ids": list(
+            string_tuple(candidate.get("document_context_source_ids"), limit=2400)
+        ),
         "user_package_source_ids": _source_id_list(
             candidate.get("user_package_source_ids")
         ),
@@ -736,7 +740,7 @@ def _merge_candidate_source_ids(
         Any,
     ],
 ) -> None:
-    """Объединяет N/T/U source IDs duplicate candidates."""
+    """Объединяет ID источников N/T/U/D повторных кандидатов."""
     for field_name in _CANDIDATE_SOURCE_ID_FIELDS:
         merged: list[str] = []
         seen: set[str] = set()

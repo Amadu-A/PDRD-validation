@@ -2,9 +2,11 @@
 
 """Use case отмены задания анализа."""
 
+import logging
 from dataclasses import dataclass
 from uuid import UUID
 
+from pdrd_api_gateway.application.ports.document_context import DocumentContextLifecycle
 from pdrd_api_gateway.application.ports.persistence import (
     UnitOfWorkFactory,
 )
@@ -31,8 +33,23 @@ class CancelAnalysisJob:
     """Отменяет active analysis job под PostgreSQL row lock."""
 
     unit_of_work_factory: UnitOfWorkFactory
+    document_context_lifecycle: DocumentContextLifecycle | None = None
 
-    async def execute(
+    async def execute(self, *, job_id: UUID) -> AnalysisJob:
+        """После фиксации отмены удаляет временный индекс без изменения результата операции."""
+        job = await self._execute(job_id=job_id)
+        if self.document_context_lifecycle is not None and job.document_id is not None:
+            try:
+                await self.document_context_lifecycle.cleanup(
+                    context_id=job.document_id
+                )
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "cancel_document_context_cleanup_failed job_id=%s", job_id
+                )
+        return job
+
+    async def _execute(
         self,
         *,
         job_id: UUID,

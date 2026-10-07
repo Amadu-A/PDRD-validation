@@ -133,3 +133,54 @@ async def test_review_change_between_snapshot_and_areas_is_rejected():
 
     with pytest.raises(ReviewConflictError):
         await ExportReview(Reviews(), Areas()).execute(job_id=review.job_id)
+
+
+def test_full_primary_d_evidence_survives_operational_region_limit_and_revocation():
+    """Шесть доказательств основной страницы сохраняются при лимите четырёх редактируемых рамок."""
+    from pdrd_experience_service.domain.area_confirmation import content_signature
+    from pdrd_experience_service.domain.review import (
+        ProposedRegion,
+        ReviewDocumentSource,
+        ReviewEvidenceLocation,
+    )
+    from pdrd_experience_service.infrastructure.database.codec import (
+        snapshot_from_json,
+        snapshot_to_json,
+    )
+
+    review = approved()
+    boxes = tuple(Rectangle(100 + i * 60, 100, 140 + i * 60, 140) for i in range(6))
+    proofs = tuple(ProposedRegion(box, "vlm", 0.9, "document_context") for box in boxes)
+    row = replace(
+        review.findings[0],
+        proposed_regions=proofs[:4],
+        document_context_basis_sources=tuple(
+            ReviewDocumentSource(
+                f"D-p0001-f{i + 1:04d}",
+                1,
+                fact_id=f"p0001-f{i + 1:04d}",
+                visual_regions=(proof,),
+            )
+            for i, proof in enumerate(proofs)
+        ),
+        evidence_locations=tuple(
+            ReviewEvidenceLocation(
+                1, f"D-p0001-f{i + 1:04d}", "Доказательство", (proof,)
+            )
+            for i, proof in enumerate(proofs)
+        ),
+        source_kinds=("D",),
+    )
+    review = replace(review, findings=(row,))
+    restored = snapshot_from_json(snapshot_to_json(review), review.history)
+    assert restored.findings[0].evidence_locations == row.evidence_locations
+    assert content_signature(restored, restored.findings[0]) == content_signature(
+        review, row
+    )
+    manifest = export_manifest(
+        restored, (AreaStatus(row.finding_id, 1, True, boxes[:4]),)
+    )
+    assert len(manifest["findings"]) == 1
+    assert len(manifest["findings"][0]["regions"]) == 6
+    revoked = export_manifest(restored, (AreaStatus(row.finding_id, 2, False, ()),))
+    assert revoked["findings"][0]["regions"] == []

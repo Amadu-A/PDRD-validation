@@ -898,3 +898,12 @@
 .analysis-result__page-stage:has(.analysis-result__annotation:focus-visible) .analysis-result__connector--active {
   opacity: 1;
 }
+
+/* Подсветка доказательства при переходе из D-источника. */
+.analysis-result__bbox.is-document-evidence-focus {
+  outline: 4px solid #f59e0b;
+  background: rgb(245 158 11 / 20%);
+  z-index: 5;
+}
+.analysis-result__evidence-link { display: block; margin-block: 0.25rem; }
+.analysis-result__source-kind { white-space: nowrap; }

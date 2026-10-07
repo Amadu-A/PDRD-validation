@@ -2,10 +2,12 @@
 
 """Закрытый HTTP-контракт D-контекста проверяемого PDF."""
 
+from datetime import datetime
+from secrets import compare_digest
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from pdrd_knowledge_service.application.ports.embedding import EmbeddingProviderError
@@ -45,12 +47,13 @@ class BuildDocumentContextRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     document_id: UUID
+    enabled: bool = True
     source_sha256: str = Field(min_length=64, max_length=64)
     pages: list[DocumentContextPagePayload] = Field(min_length=1, max_length=200)
 
 
 class BuildDocumentContextResponse(BaseModel):
-    """Идентификатор и размер reusable D-индекса."""
+    """Идентификатор и размер временного D-индекса."""
 
     context_id: UUID
     cache_hit: bool
@@ -64,6 +67,7 @@ class SearchDocumentContextRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     context_id: UUID
     query: str
+    enabled: bool = True
 
 
 class SearchDocumentContextResponse(BaseModel):
@@ -79,7 +83,7 @@ async def build_document_context(
 ) -> BuildDocumentContextResponse:
     """Индексирует текст и факты без изменения каталога N/T/U/E."""
     use_case = container.build_document_context
-    if use_case is None:
+    if use_case is None or not request.enabled:
         return BuildDocumentContextResponse(
             context_id=request.document_id,
             cache_hit=False,
@@ -117,7 +121,7 @@ async def search_document_context(
 ) -> SearchDocumentContextResponse:
     """Ищет релевантные D-chunks только в указанном PDF."""
     use_case = container.search_document_context
-    if use_case is None:
+    if use_case is None or not request.enabled:
         return SearchDocumentContextResponse(sources=[])
     try:
         result = await use_case.execute(
@@ -143,3 +147,55 @@ async def search_document_context(
             for source in result.sources
         ]
     )
+
+
+class StaleDocumentContextsRequest(BaseModel):
+    """Ограниченный просмотр кандидатов, проверяемых Gateway по состоянию задания."""
+
+    before: datetime
+    limit: int = Field(default=100, ge=1, le=200)
+    cursor: str = Field(default="", max_length=200)
+
+
+def _check_cleanup_key(container: ApplicationContainer, key: str | None) -> None:
+    """Проверяет существующий серверный ключ очистки без раскрытия секрета."""
+    expected = container.settings.technical_assignment.retention_internal_key.get_secret_value()
+    if len(expected) < 32 or key is None or not compare_digest(key, expected):
+        raise HTTPException(403, "Недопустимый серверный ключ очистки.")
+
+
+@router.post("/stale")
+async def stale_document_contexts(
+    request: StaleDocumentContextsRequest,
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+    key: Annotated[str | None, Header(alias="X-PDRD-Retention-Key")] = None,
+) -> dict:
+    """Возвращает только идентификаторы старых индексов; ничего не удаляет."""
+    _check_cleanup_key(container, key)
+    if request.before.tzinfo is None:
+        raise HTTPException(422, "Время очистки должно содержать часовой пояс.")
+    if container.document_context_index is None:
+        return {"document_ids": [], "cursor": ""}
+    try:
+        ids, cursor = await container.document_context_index.stale(
+            before=request.before, limit=request.limit, cursor=request.cursor
+        )
+    except VectorStoreError as error:
+        raise HTTPException(503, "Хранилище D временно недоступно.") from error
+    return {"document_ids": [str(value) for value in ids], "cursor": cursor}
+
+
+@router.delete("/{document_id}", status_code=204)
+async def delete_document_context(
+    document_id: UUID,
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+    key: Annotated[str | None, Header(alias="X-PDRD-Retention-Key")] = None,
+) -> Response:
+    """Идемпотентно удаляет временные коллекции одного задания."""
+    _check_cleanup_key(container, key)
+    if container.document_context_index is not None:
+        try:
+            await container.document_context_index.cleanup(context_id=document_id)
+        except VectorStoreError as error:
+            raise HTTPException(503, "Хранилище D временно недоступно.") from error
+    return Response(status_code=204)

@@ -60,3 +60,25 @@ def test_cross_page_stage_is_once_per_document_and_before_finalization() -> None
     assert _next(workflow, "Gate Expand Norm Check Stage") == [
         "Merge Finding Candidates"
     ]
+
+
+def test_document_switch_controls_all_d_stages_and_single_merge():
+    """Workflow передаёт выбор пользователя в каждый затратный D-этап."""
+    nodes = {node["name"]: node for node in _workflow()["nodes"]}
+    for name in (
+        "Create Document Context",
+        "Search Document Context",
+        "Build Page Document Context",
+        "Check Cross-Page Consistency",
+    ):
+        assert "use_document_context" in nodes[name]["parameters"]["body"]
+        assert "enabled:" in nodes[name]["parameters"]["body"]
+    assert (
+        "use_document_context"
+        in nodes["Gate Collect Understanding Stage"]["parameters"]["jsCode"]
+    )
+    assert "page_checks:" in nodes["Check Cross-Page Consistency"]["parameters"]["body"]
+    assert (
+        "Array.isArray($json.items)"
+        in nodes["Merge Cross-Page Checks"]["parameters"]["jsCode"]
+    )

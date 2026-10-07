@@ -266,6 +266,7 @@ class DocumentContextSettings(BaseModel):
     semantic_threshold: float = Field(default=0.45, ge=0.0, le=1.0)
     max_cross_page_candidates: int = Field(default=24, ge=1, le=200)
     max_evidence_sources_per_finding: int = Field(default=8, ge=2, le=50)
+    max_saved_evidence_sources_per_finding: int = Field(default=2400, ge=2400, le=2400)
     validation_batch_size: int = Field(default=8, ge=1, le=30)
     validation_num_predict: int = Field(default=1800, ge=100, le=10000)
 

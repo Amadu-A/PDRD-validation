@@ -8,6 +8,7 @@
  * на физической странице источника.
  */
 
+import { appendSourceBadges, findingPageLabel, focusDocumentEvidence } from "./finding-provenance.js";
 import {
   sourceModeLabel,
   statusLabel,
@@ -748,7 +749,7 @@ function appendFinding(
     createElement(
       "h4",
       "analysis-result__finding-title",
-      `${index + 1}. Лист/страница ${page}`,
+      `№${index + 1} · ${findingPageLabel(finding, page)}`,
     ),
   );
 
@@ -780,6 +781,8 @@ function appendFinding(
       ),
     ),
   );
+
+  appendSourceBadges(badges, finding);
 
   header.append(
     badges,
@@ -827,8 +830,23 @@ function appendFinding(
       link.append(document.createTextNode(
         "Страница " + pageNumber + ": " + String(location.text ?? "")
       ));
+      focusDocumentEvidence(link, finding.finding_id, pageNumber);
       details.append(link);
     });
+    article.append(details);
+  }
+
+  const documentSources = Array.isArray(finding.document_context_basis_sources) ? finding.document_context_basis_sources : [];
+  if (documentSources.length) {
+    const details = createElement("details", "analysis-result__sources");
+    details.append(createElement("summary", "", `Контекст проверяемого PDF [D] (${documentSources.length})`));
+    for (const source of documentSources) {
+      const link = createElement("a", "analysis-result__evidence-link");
+      link.href = `#analysis-page-${source.page}`;
+      link.textContent = `${source.source_id} · Страница ${source.page}: ${source.evidence_text || source.text || ""}`;
+      focusDocumentEvidence(link, finding.finding_id, source.page);
+      details.append(link);
+    }
     article.append(details);
   }
 

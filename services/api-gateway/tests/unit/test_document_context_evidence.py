@@ -86,3 +86,7 @@ def test_pdf_export_marks_both_pages_with_one_report_finding() -> None:
     assert len(report.findings) == 1
     assert [item.page_number for item in annotations] == [10, 17]
     assert all(item.regions for item in annotations)
+
+    assert {item.finding_id for item in annotations} == {"cross-page-0001"}
+    assert {item.number for item in annotations} == {1}
+    assert report.findings[0].title == "№1 · Страницы 10, 17"

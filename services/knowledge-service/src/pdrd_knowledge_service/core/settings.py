@@ -622,7 +622,6 @@ class DocumentContextSettings(BaseModel):
     """Изолированный D-index проверяемого PDF на общем VectorStore."""
 
     enabled: bool = True
-    cache_enabled: bool = True
     chunk_size: int = Field(default=1800, ge=100, le=20000)
     chunk_overlap: int = Field(default=250, ge=0, le=10000)
     top_k: int = Field(default=5, ge=1, le=50)

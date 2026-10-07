@@ -1,6 +1,6 @@
 # services/api-gateway/src/pdrd_api_gateway/application/use_cases/execute_analysis_job.py
 
-"""Use case выполнения queued analysis job."""
+"""Сценарий выполнения задания анализа из очереди."""
 
 import asyncio
 import logging
@@ -15,6 +15,7 @@ from uuid import UUID
 from pdrd_api_gateway.application.ports.artifacts import (
     AnalysisArtifactStore,
 )
+from pdrd_api_gateway.application.ports.document_context import DocumentContextLifecycle
 from pdrd_api_gateway.application.ports.orchestration import (
     AnalysisOrchestrationTransientError,
     AnalysisOrchestrator,
@@ -42,19 +43,19 @@ LOGGER = logging.getLogger(
 class AnalysisJobNotFoundError(
     LookupError,
 ):
-    """Worker получил неизвестный analysis job."""
+    """Обработчик очереди получил неизвестное задание анализа."""
 
 
 class AnalysisJobNotExecutableError(
     RuntimeError,
 ):
-    """Analysis job находится в terminal state."""
+    """Задание анализа находится в терминальном состоянии."""
 
 
 class AnalysisJobCancelledError(
     AnalysisJobNotExecutableError,
 ):
-    """Analysis job был отменён пользователем."""
+    """Задание анализа отменено пользователем."""
 
 
 class AnalysisExecutionError(
@@ -66,12 +67,12 @@ class AnalysisExecutionError(
 class AnalysisTransientExecutionError(
     RuntimeError,
 ):
-    """Временная ошибка, для которой разрешён controlled Celery retry."""
+    """Временная ошибка, для которой разрешена повторная попытка Celery."""
 
 
 @dataclass(frozen=True, slots=True)
 class ExecuteAnalysisJob:
-    """Выполняет одно asynchronous analysis job."""
+    """Выполняет одно асинхронное задание анализа."""
 
     unit_of_work_factory: UnitOfWorkFactory
 
@@ -86,10 +87,33 @@ class ExecuteAnalysisJob:
     min_retry_budget_seconds: int
 
     project_context_cleaner: ProjectContextCleaner | None = None
+    document_context_lifecycle: DocumentContextLifecycle | None = None
 
     technical_assignment_coordinator: TechnicalAssignmentIndexCoordinator | None = None
 
     async def execute(
+        self, *, job_id: UUID, allow_retry: bool, redelivered: bool
+    ) -> dict[str, Any]:
+        """Очищает D на границе worker при любом исходе, включая повторную доставку."""
+        try:
+            return await self._execute(
+                job_id=job_id, allow_retry=allow_retry, redelivered=redelivered
+            )
+        finally:
+            if self.document_context_lifecycle is not None:
+                try:
+                    async with self.unit_of_work_factory() as unit_of_work:
+                        job = await unit_of_work.analysis_jobs.get(job_id)
+                    if job is not None and job.document_id is not None:
+                        await self.document_context_lifecycle.cleanup(
+                            context_id=job.document_id
+                        )
+                except Exception:
+                    LOGGER.exception(
+                        "document_context_cleanup_failed job_id=%s", job_id
+                    )
+
+    async def _execute(
         self,
         *,
         job_id: UUID,
@@ -368,7 +392,7 @@ class ExecuteAnalysisJob:
         *,
         context_id: UUID | None,
     ) -> None:
-        """Best-effort cleanup Project Context."""
+        """Удаляет контекст ПЗ, не скрывая основной результат при ошибке очистки."""
         if context_id is None or self.project_context_cleaner is None:
             return
 

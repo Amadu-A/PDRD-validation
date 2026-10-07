@@ -109,3 +109,63 @@ async def test_old_confirmation_version_remains_visible_after_text_edit(engine):
         assert not (await areas.load_status(review=restored))[0].valid
     finally:
         await cleanup(engine, job)
+
+
+async def test_cross_page_review_provenance_roundtrip_and_export_in_postgresql(engine):
+    """JSONB сохраняет D, обе страницы и единое решение для итогового PDF."""
+    from dataclasses import replace
+
+    from pdrd_experience_service.domain.review import (
+        Decision,
+        ProposedRegion,
+        ReviewDocumentSource,
+        ReviewEvidenceLocation,
+    )
+
+    from .test_confirmed_areas_database import review_changes
+
+    job = uuid4()
+    reviews, areas = adapters(engine)
+    review = initial(job)
+    source = ReviewDocumentSource(
+        "D-p0002-f0001", 2, evidence_text="-35 °C", fact_id="p0002-f0001"
+    )
+    location = ReviewEvidenceLocation(
+        2,
+        source.source_id,
+        source.evidence_text,
+        (ProposedRegion(BOX, "analysis_vlm", 0.9, "analysis_vlm"),),
+    )
+    review = replace(
+        review,
+        allowed_pages=(1, 2),
+        findings=(
+            replace(
+                review.findings[0],
+                evidence_locations=(location,),
+                document_context_basis_sources=(source,),
+                source_kinds=("D",),
+            ),
+        ),
+    )
+    try:
+        await reviews.insert(review)
+        restored = await reviews.load(job)
+        assert restored.findings[0].document_context_basis_sources == (source,)
+        assert restored.findings[0].evidence_locations == (location,)
+        changes = review_changes(engine, reviews, areas)
+        accepted = await changes.decide(
+            job_id=job,
+            finding_id="vlm:1",
+            decision=Decision.ACCEPTED,
+            actor="integration:2",
+            expected_revision=0,
+        )
+        approved = await seal(reviews, accepted)
+        exported = await ExportReview(reviews, areas).execute(job_id=job)
+        assert len(exported["findings"]) == 1
+        assert exported["findings"][0]["source_kinds"] == ["D"]
+        assert exported["findings"][0]["evidence_locations"][0]["regions"]
+        assert (await reviews.load(job)).approved_revision == approved.revision
+    finally:
+        await cleanup(engine, job)

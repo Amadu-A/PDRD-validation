@@ -34,6 +34,21 @@ def export_manifest(review: ReviewSession, areas: tuple[AreaStatus, ...]) -> dic
             regions = (finding.issue_box,) if finding.issue_box is not None else ()
         else:
             regions = area.regions if area is not None else ()
+        evidence_by_page = {}
+        for location in finding.evidence_locations:
+            if location.page != finding.page_number:
+                evidence_by_page.setdefault(location.page, []).extend(
+                    region.bbox for region in location.proposed_regions
+                )
+        if area is not None and finding.document_context_basis_sources:
+            # Четыре основные рамки допускают правку; прочие исходные D-доказательства неизменны.
+            primary_evidence = tuple(
+                region.bbox
+                for location in finding.evidence_locations
+                if location.page == finding.page_number
+                for region in location.proposed_regions
+            )
+            regions = tuple(dict.fromkeys((*regions, *primary_evidence[4:])))
         findings.append(
             {
                 "number": number,
@@ -44,6 +59,19 @@ def export_manifest(review: ReviewSession, areas: tuple[AreaStatus, ...]) -> dic
                 "text": finding.text,
                 "normative_basis": finding.normative_basis,
                 "regions": [asdict(box) for box in regions],
+                "evidence_locations": [
+                    {
+                        "page": page,
+                        "regions": [asdict(box) for box in dict.fromkeys(boxes)]
+                        if area is not None
+                        else [],
+                    }
+                    for page, boxes in sorted(evidence_by_page.items())
+                ],
+                "document_context_basis_sources": [
+                    asdict(source) for source in finding.document_context_basis_sources
+                ],
+                "source_kinds": list(finding.source_kinds),
                 "callout_box": asdict(finding.callout_box)
                 if finding.callout_box
                 else None,

@@ -34,6 +34,7 @@ from pdrd_analysis_service.application.use_cases.finding_visual_regions import (
     parse_finding_visual_regions,
 )
 from pdrd_analysis_service.domain.analysis import (
+    DocumentContextSource,
     FindingDraft,
     GenerationMetrics,
     NormativeSource,
@@ -540,6 +541,7 @@ class CheckPageAgainstNorms:
             ...,
         ],
         image_bytes: bytes,
+        document_context_source_ids: tuple[str, ...] = (),
     ) -> tuple[
         str,
         ViolationCandidateSelection,
@@ -609,6 +611,7 @@ class CheckPageAgainstNorms:
                     source_ids=normative_source_ids,
                     technical_assignment_source_ids=(technical_assignment_source_ids),
                     user_package_source_ids=(user_package_source_ids),
+                    document_context_source_ids=document_context_source_ids,
                     max_issues=current_capacity,
                 ),
                 num_predict=current_num_predict,
@@ -829,7 +832,7 @@ class CheckPageAgainstNorms:
             UserPackageSource,
             ...,
         ] = (),
-        document_context_sources: tuple[dict[str, object], ...] = (),
+        document_context_sources: tuple[DocumentContextSource, ...] = (),
     ) -> tuple[
         str,
         tuple[
@@ -852,6 +855,11 @@ class CheckPageAgainstNorms:
         user_package_source_ids = tuple(
             source.source_id for source in user_package_sources if source.source_id
         )
+
+        document_context_by_id = {
+            source.source_id: source for source in document_context_sources
+        }
+        document_context_source_ids = tuple(document_context_by_id)
 
         prompt = build_normative_check_prompt(
             page_number=page_number,
@@ -877,6 +885,7 @@ class CheckPageAgainstNorms:
             technical_assignment_source_ids=(technical_assignment_source_ids),
             user_package_source_ids=(user_package_source_ids),
             image_bytes=image_bytes,
+            document_context_source_ids=document_context_source_ids,
         )
 
         # Восстановление факта повторения маркировки не зависит от того,
@@ -1021,7 +1030,16 @@ class CheckPageAgainstNorms:
                 if source_id in user_package_by_id
             )
 
+            selected_document_context_sources = tuple(
+                document_context_by_id[source_id]
+                for source_id in string_tuple(
+                    violation.get("document_context_source_ids"), limit=2400
+                )
+                if source_id in document_context_by_id
+            )
+
             if is_hypothesis:
+                selected_document_context_sources = ()
                 # Исходные запрошенные IDs остаются в origin_assertions, но
                 # тематический документ не подтверждает сам факт повтора.
                 selected_normative_sources = ()
@@ -1073,6 +1091,7 @@ class CheckPageAgainstNorms:
                 selected_normative_sources
                 or selected_technical_assignment_sources
                 or selected_user_package_sources
+                or selected_document_context_sources
             )
 
             comment = str(
@@ -1112,10 +1131,12 @@ class CheckPageAgainstNorms:
             ):
                 finding_category = "customer_requirements"
 
-            if not selected_any_source and finding_category in {
-                "normative_control",
-                "customer_requirements",
-            }:
+            if (
+                not selected_normative_sources
+                and not selected_technical_assignment_sources
+                and not selected_user_package_sources
+                and finding_category in {"normative_control", "customer_requirements"}
+            ):
                 finding_category = "other"
 
             normalized_status = finding_status(
@@ -1182,6 +1203,22 @@ class CheckPageAgainstNorms:
                                 "visual_regions",
                             )
                         )
+                    ),
+                    document_context_source_ids=tuple(
+                        source.source_id for source in selected_document_context_sources
+                    ),
+                    document_context_basis_sources=selected_document_context_sources,
+                    evidence_locations=tuple(
+                        {
+                            "source_id": source.source_id,
+                            "page": source.page,
+                            "fact_id": source.fact_id,
+                            "text": source.evidence_text,
+                            "visual_regions": [
+                                region.as_dict() for region in source.visual_regions
+                            ],
+                        }
+                        for source in selected_document_context_sources
                     ),
                     origin_assertions=origin_assertions,
                     object_ref=str(violation.get("object_ref", "")).strip()[:80],

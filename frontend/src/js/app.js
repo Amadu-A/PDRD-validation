@@ -206,6 +206,8 @@ const analysisForm = createAnalysisForm({
     "[data-explanatory-note-input]",
   ),
 
+  documentContextInput: requireElement("[data-document-context-input]"),
+
   noteStartPageInput: requireElement(
     "[data-note-start-input]",
   ),

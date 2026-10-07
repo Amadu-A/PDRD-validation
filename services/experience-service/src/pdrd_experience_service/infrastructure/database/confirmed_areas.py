@@ -453,6 +453,7 @@ class SqlAlchemyConfirmedAreasRepository:
 
             if (
                 finding is None
+                or not row.regions
                 or row.source_sha256 != review.source_sha256
                 or row.page_number != finding.page_number
                 or row.confirmed_at < review.opened_at

@@ -110,6 +110,7 @@ def build_container() -> ApplicationContainer:
                     semantic_threshold=settings.document_context.semantic_threshold,
                     max_cross_page_candidates=settings.document_context.max_cross_page_candidates,
                     max_evidence_sources_per_finding=settings.document_context.max_evidence_sources_per_finding,
+                    max_saved_evidence_sources_per_finding=settings.document_context.max_saved_evidence_sources_per_finding,
                     validation_batch_size=settings.document_context.validation_batch_size,
                     validation_num_predict=settings.document_context.validation_num_predict,
                 ),

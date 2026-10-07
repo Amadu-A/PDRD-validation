@@ -1139,6 +1139,8 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
             origin_assertions=finding.origin_assertions,
             object_ref=finding.object_ref,
             evidence_locations=finding.evidence_locations,
+            document_context_source_ids=finding.document_context_source_ids,
+            document_context_basis_sources=finding.document_context_basis_sources,
         )
 
     @staticmethod
@@ -1285,4 +1287,6 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
             origin_assertions=finding.origin_assertions,
             object_ref=finding.object_ref,
             evidence_locations=finding.evidence_locations,
+            document_context_source_ids=finding.document_context_source_ids,
+            document_context_basis_sources=finding.document_context_basis_sources,
         )
