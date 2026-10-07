@@ -594,8 +594,9 @@ def build_page_understanding_prompt(
     page_number: int,
     heuristic_page_type: str,
     extracted_text: str,
+    max_facts: int = 12,
 ) -> str:
-    """Формирует промпт объективного понимания листа."""
+    """Формирует промпт объективного понимания листа и D-фактов."""
     combined_mode = _combined_mode_instruction(
         extracted_text,
     )
@@ -630,6 +631,20 @@ def build_page_understanding_prompt(
 - видимые связи;
 - важные марки, теги и обозначения.
 
+Дополнительно извлеки до {max_facts} атомарных document_facts
+из видимого текста и изображения этой страницы.
+Сохраняй исходные названия, значения, единицы и короткий
+дословный evidence_text. Для каждого факта укажи явный
+идентификатор объекта, точное название свойства, условия
+(система, помещение, участок, режим), таблицу и её продолжение.
+Допустимые kind: parameter, quantity, identifier, material,
+equipment_model, room_property, operating_mode, relationship,
+reference, requirement, table_record, other.
+Один факт описывает одно свойство или одну связь. Не придумывай
+невидимые значения. Если уверенно видна область evidence,
+верни visual_regions в координатах 0..1000, иначе [].
+Не считай похожие теги одним объектом без явного совпадения.
+
 Затем сформулируй до 6 НЕЙТРАЛЬНЫХ тем,
 по которым следует подобрать нормативные требования.
 
@@ -663,8 +678,9 @@ def build_normative_check_prompt(
         UserPackageSource,
         ...,
     ] = (),
+    document_context_sources: tuple[dict[str, object], ...] = (),
 ) -> str:
-    """Формирует prompt инженерной и N/T/U проверки."""
+    """Формирует prompt инженерной и N/T/U проверки с D-контекстом."""
     facts_payload = {
         "discipline": page_facts.discipline,
         "page_type": page_facts.page_type,
@@ -778,6 +794,12 @@ def build_normative_check_prompt(
         ),
     )
 
+    document_json = json.dumps(
+        document_context_sources,
+        ensure_ascii=False,
+        default=list,
+    )
+
     conflict_json = json.dumps(
         conflict_payload,
         ensure_ascii=False,
@@ -826,6 +848,16 @@ CONFLICT CANDIDATES:
 
 USER PACKAGE SOURCES:
 {user_package_json}
+
+DOCUMENT CONTEXT SOURCES:
+{document_json}
+
+D-source — факт из этого же проверяемого PDF, а не норматив,
+ТЗ, пользовательский пакет или База Опыта. Используй D для
+понимания связанных страниц, продолжения таблиц и снятия
+ложных замечаний. D может показать внутреннее противоречие,
+но не доказывает нарушение ГОСТ/СП/ПУЭ и не определяет,
+какое из двух разных значений правильно.
 
 NORMATIVE SOURCES:
 {normative_json}

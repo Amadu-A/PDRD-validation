@@ -3,6 +3,7 @@
 """Внутренний HTTP API проверки выбора и извлечения PDF-страниц."""
 
 import base64
+from hashlib import sha256
 from typing import Annotated
 
 from fastapi import (
@@ -180,6 +181,7 @@ async def extract_pdf(
 
     return PdfExtractionResponse(
         file_name=(file.filename or "document.pdf"),
+        source_sha256=sha256(content).hexdigest(),
         total_pages=document.total_pages,
         selected_pages=list(
             document.selected_page_numbers,

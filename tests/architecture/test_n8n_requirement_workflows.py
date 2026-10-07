@@ -394,10 +394,6 @@ def test_requirement_flow_order_is_consistent() -> None:
             "Check Norms",
         ),
         (
-            "Check Norms",
-            "Merge Finding Candidates",
-        ),
-        (
             "Merge Finding Candidates",
             "Prepare Finding Normative Queries",
         ),
@@ -415,6 +411,27 @@ def test_requirement_flow_order_is_consistent() -> None:
         workflow = _workflow(
             path,
         )
+
+        if path.name == "analysis-v2-pdf.json":
+            assert (
+                _direct_functional_successor(
+                    workflow, "Continue Cross-Page Consistency"
+                )
+                == "Check Cross-Page Consistency"
+            )
+            assert (
+                _functional_successor(workflow, "Check Cross-Page Consistency")
+                == "Merge Cross-Page Checks"
+            )
+            assert (
+                _functional_successor(workflow, "Merge Cross-Page Checks")
+                == "Merge Finding Candidates"
+            )
+        else:
+            assert (
+                _functional_successor(workflow, "Check Norms")
+                == "Merge Finding Candidates"
+            )
 
         for (
             source,

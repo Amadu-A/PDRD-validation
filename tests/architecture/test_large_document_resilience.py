@@ -166,12 +166,13 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
         "Understand Pages Stage",
     ]
 
-    assert _successors(
-        workflow,
-        "Understand Pages Stage",
-    ) == [
-        "Understand Page",
+    assert _successors(workflow, "Understand Pages Stage") == [
+        "Progress Build Document Context"
     ]
+    assert _successors(workflow, "Continue Build Document Context") == [
+        "Create Document Context"
+    ]
+    assert _successors(workflow, "Create Document Context") == ["Understand Page"]
 
     assert _successors(
         workflow,
@@ -194,11 +195,15 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
         "Check Norms",
     ]
 
-    assert _successors(
-        workflow,
-        "Check Norms",
-    ) == [
-        "Gate Expand Norm Check Stage",
+    assert _successors(workflow, "Check Norms") == ["Progress Cross-Page Consistency"]
+    assert _successors(workflow, "Continue Cross-Page Consistency") == [
+        "Check Cross-Page Consistency"
+    ]
+    assert _successors(workflow, "Check Cross-Page Consistency") == [
+        "Merge Cross-Page Checks"
+    ]
+    assert _successors(workflow, "Merge Cross-Page Checks") == [
+        "Gate Expand Norm Check Stage"
     ]
 
     assert _successors(

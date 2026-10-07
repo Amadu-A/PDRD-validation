@@ -1,6 +1,6 @@
 # tests/architecture/test_analysis_progress_flow.py
 
-"""Architecture guards Stage 8.3 progress and cooperative cancellation."""
+"""Архитектурные проверки прогресса и кооперативной отмены анализа."""
 
 import json
 from pathlib import Path
@@ -665,6 +665,14 @@ def test_cancelled_checkpoint_returns_explicit_webhook_response() -> None:
                 _stage,
             ) in config["cases"]
         }
+
+        if config["path"].name == "analysis-v2-pdf.json":
+            expected_sources.update(
+                {
+                    ("Continue Build Document Context", 0),
+                    ("Continue Cross-Page Consistency", 0),
+                }
+            )
 
         assert (
             _incoming_connections(

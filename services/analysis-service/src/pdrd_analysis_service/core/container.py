@@ -1,6 +1,6 @@
 # services/analysis-service/src/pdrd_analysis_service/core/container.py
 
-"""Composition root Analysis Service."""
+"""Сборка зависимостей сервиса анализа."""
 
 from dataclasses import dataclass
 
@@ -17,6 +17,10 @@ from pdrd_analysis_service.application.use_cases import (
     LocalizeFindings,
     UnderstandPage,
     ValidateProjectContext,
+)
+from pdrd_analysis_service.application.use_cases.document_context import (
+    CheckCrossPageConsistency,
+    DocumentContextOptions,
 )
 from pdrd_analysis_service.application.use_cases.technical_assignment_validation import (
     CheckPageAgainstTechnicalAssignment,
@@ -38,7 +42,7 @@ from pdrd_analysis_service.infrastructure.vllm_cache import (
 
 @dataclass(frozen=True, slots=True)
 class ApplicationContainer:
-    """Runtime dependencies Analysis Service."""
+    """Зависимости работающего сервиса анализа."""
 
     settings: Settings
 
@@ -51,10 +55,10 @@ class ApplicationContainer:
     check_page_against_technical_assignment: CheckPageAgainstTechnicalAssignment
 
     finalize_findings: FinalizeFindings
-
     localize_findings: LocalizeFindings
 
     check_readiness: CheckReadiness
+    check_cross_page_consistency: CheckCrossPageConsistency | None = None
 
     validate_project_context: ValidateProjectContext | None = None
 
@@ -97,9 +101,26 @@ def build_container() -> ApplicationContainer:
 
     return ApplicationContainer(
         settings=settings,
+        check_cross_page_consistency=(
+            CheckCrossPageConsistency(
+                vision_model=vision_model,
+                options=DocumentContextOptions(
+                    max_related_facts_per_page=settings.document_context.max_related_facts_per_page,
+                    max_text_sources_per_page=settings.document_context.max_text_sources_per_page,
+                    semantic_threshold=settings.document_context.semantic_threshold,
+                    max_cross_page_candidates=settings.document_context.max_cross_page_candidates,
+                    max_evidence_sources_per_finding=settings.document_context.max_evidence_sources_per_finding,
+                    validation_batch_size=settings.document_context.validation_batch_size,
+                    validation_num_predict=settings.document_context.validation_num_predict,
+                ),
+            )
+            if settings.document_context.enabled
+            else None
+        ),
         understand_page=UnderstandPage(
             vision_model=vision_model,
             num_predict=(settings.pipeline.page_facts_num_predict),
+            max_facts_per_page=settings.pipeline.max_facts_per_page,
         ),
         build_normative_queries=BuildNormativeQueries(
             max_queries=(settings.pipeline.max_normative_queries),

@@ -112,8 +112,10 @@ class AnalysisProgressSettings(BaseModel):
 class PipelineSettings(BaseModel):
     """Настройки VLM pipeline."""
 
+    max_facts_per_page: int = Field(default=12, ge=1, le=40)
+
     page_facts_num_predict: int = Field(
-        default=1600,
+        default=3200,
         ge=1,
         le=10000,
     )
@@ -255,6 +257,19 @@ class ProjectContextSettings(BaseModel):
     )
 
 
+class DocumentContextSettings(BaseModel):
+    """Ограничения D-retrieval и семантической проверки всего PDF."""
+
+    enabled: bool = True
+    max_related_facts_per_page: int = Field(default=12, ge=1, le=100)
+    max_text_sources_per_page: int = Field(default=5, ge=1, le=50)
+    semantic_threshold: float = Field(default=0.45, ge=0.0, le=1.0)
+    max_cross_page_candidates: int = Field(default=24, ge=1, le=200)
+    max_evidence_sources_per_finding: int = Field(default=8, ge=2, le=50)
+    validation_batch_size: int = Field(default=8, ge=1, le=30)
+    validation_num_predict: int = Field(default=1800, ge=100, le=10000)
+
+
 class Settings(BaseSettings):
     """Настройки рабочего процесса Analysis Service."""
 
@@ -299,6 +314,14 @@ class Settings(BaseSettings):
 
     project_context: ProjectContextSettings = Field(
         default_factory=ProjectContextSettings,
+    )
+
+    document_context: DocumentContextSettings = Field(
+        default_factory=DocumentContextSettings,
+    )
+
+    document_context: DocumentContextSettings = Field(
+        default_factory=DocumentContextSettings,
     )
 
 

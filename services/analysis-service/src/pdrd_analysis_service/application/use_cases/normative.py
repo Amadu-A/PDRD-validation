@@ -829,6 +829,7 @@ class CheckPageAgainstNorms:
             UserPackageSource,
             ...,
         ] = (),
+        document_context_sources: tuple[dict[str, object], ...] = (),
     ) -> tuple[
         str,
         tuple[
@@ -860,6 +861,7 @@ class CheckPageAgainstNorms:
             technical_assignment_sources=(technical_assignment_sources),
             conflict_candidates=conflict_candidates,
             user_package_sources=user_package_sources,
+            document_context_sources=document_context_sources,
             normative_text_limit=(self.normative_text_limit),
             normative_system_prompt=(normative_system_prompt),
         )

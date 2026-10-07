@@ -15,6 +15,9 @@ from pdrd_knowledge_service.application.ports.persistence import (
 from pdrd_knowledge_service.application.use_cases.applied_experience import (
     SearchAppliedExperience,
 )
+from pdrd_knowledge_service.application.use_cases.document_context import (
+    BuildDocumentContext,
+)
 from pdrd_knowledge_service.application.use_cases.experience import (
     SearchExperience,
 )
@@ -169,6 +172,9 @@ class ApplicationContainer:
     search_project_context: SearchProjectContext | None = None
 
     delete_project_context: DeleteProjectContext | None = None
+
+    build_document_context: BuildDocumentContext | None = None
+    search_document_context: SearchProjectContext | None = None
 
 
 def build_container() -> ApplicationContainer:
@@ -398,6 +404,26 @@ def build_container() -> ApplicationContainer:
         reader=(technical_assignment_requirement_reader),
     )
 
+    document_settings = settings.document_context
+    document_cache_version = (
+        document_settings.schema_version * 10000
+        + document_settings.prompt_version * 100
+        + document_settings.normalization_version
+    )
+    document_creator = CreateProjectContext(
+        embedding_provider=embedding_provider,
+        vector_store=vector_store,
+        collection_prefix=document_settings.collection_prefix,
+        embedding_model=settings.embedding_model,
+        embedding_dimension=settings.embedding_dimension,
+        embedding_schema_version=settings.embedding_schema_version,
+        chunk_size=document_settings.chunk_size,
+        chunk_overlap=document_settings.chunk_overlap,
+        embed_batch_size=document_settings.embed_batch_size,
+        upsert_batch_size=document_settings.upsert_batch_size,
+        cache_schema_version=document_cache_version,
+    )
+
     project_settings = settings.project_context
 
     resolve_project_context_cache = ResolveProjectContextCache(
@@ -448,6 +474,31 @@ def build_container() -> ApplicationContainer:
         ),
         list_technical_assignment_requirements=(list_technical_assignment_requirements),
         search_technical_assignment_guided=(search_technical_assignment_guided),
+        build_document_context=(
+            BuildDocumentContext(
+                create_context=document_creator,
+                cache_enabled=document_settings.cache_enabled,
+            )
+            if document_settings.enabled
+            else None
+        ),
+        search_document_context=(
+            SearchProjectContext(
+                embedding_provider=embedding_provider,
+                vector_store=vector_store,
+                collection_prefix=document_settings.collection_prefix,
+                embedding_model=settings.embedding_model,
+                top_k=document_settings.top_k,
+                source_prefix="D",
+                query_instruction=(
+                    "Найди в этом же проверяемом PDF связанные факты, "
+                    "объекты, теги, параметры, таблицы и продолжения. "
+                    "Предпочитай тот же объект и условия."
+                ),
+            )
+            if document_settings.enabled
+            else None
+        ),
         resolve_project_context_cache=(resolve_project_context_cache),
         create_project_context=(
             CreateProjectContext(

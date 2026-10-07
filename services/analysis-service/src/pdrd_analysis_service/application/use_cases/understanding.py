@@ -20,6 +20,7 @@ from pdrd_analysis_service.domain.analysis import (
     GenerationMetrics,
     PageFacts,
 )
+from pdrd_analysis_service.domain.document_context import document_fact_from_mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +30,7 @@ class UnderstandPage:
     vision_model: StructuredVisionModel
 
     num_predict: int
+    max_facts_per_page: int = 12
 
     async def execute(
         self,
@@ -48,9 +50,10 @@ class UnderstandPage:
                     page_number=page_number,
                     heuristic_page_type=(heuristic_page_type),
                     extracted_text=(extracted_text),
+                    max_facts=self.max_facts_per_page,
                 )
             ),
-            schema=(build_page_facts_schema()),
+            schema=(build_page_facts_schema(self.max_facts_per_page)),
             num_predict=self.num_predict,
             seed=100,
             stage=(f"page_understanding:{page_number}"),
@@ -104,6 +107,11 @@ class UnderstandPage:
                     "normative_queries",
                 ),
                 limit=6,
+            ),
+            document_facts=tuple(
+                fact
+                for raw in payload.get("document_facts", [])[: self.max_facts_per_page]
+                if (fact := document_fact_from_mapping(raw)) is not None
             ),
         )
 

@@ -1,6 +1,6 @@
 # services/document-service/src/pdrd_document_service/transport/http/schemas/pdf.py
 
-"""HTTP schemas PDF extraction."""
+"""HTTP-схемы извлечения PDF."""
 
 from pydantic import (
     BaseModel,
@@ -106,6 +106,7 @@ class PdfExtractionResponse(BaseModel):
     )
 
     file_name: str
+    source_sha256: str
 
     total_pages: int
 

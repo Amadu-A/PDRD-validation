@@ -433,7 +433,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_facts: $('Technical Assignment First Pass').all()[$itemIndex].json.facts, extracted_text: $('Technical Assignment First Pass').all()[$itemIndex].json.expanded.page.text, project_context_texts: $json.project_context_texts ?? [] }) }}",
+        "body": "={{ JSON.stringify({ page_facts: $('Technical Assignment First Pass').all()[$itemIndex].json.facts, extracted_text: $('Technical Assignment First Pass').all()[$itemIndex].json.expanded.page.text, project_context_texts: $('Augment Project Context').all()[$itemIndex].json.project_context_texts ?? [] }) }}",
         "options": {
           "timeout": 1800000
         }
@@ -516,7 +516,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ document_id: $json.document_id, items: $json.items.map((item) => ({ page_number: item.page_number, extracted_text: item.extracted_text, page_facts: item.page_facts, normative_sources: item.normative_sources, technical_assignment_sources: item.technical_assignment_sources, conflict_candidates: item.conflict_candidates, user_package_sources: item.user_package_sources, image_base64: item.image_base64, normative_system_prompt: item.normative_system_prompt })) }) }}",
+        "body": "={{ JSON.stringify({ document_id: $json.document_id, items: $json.items.map((item) => ({ page_number: item.page_number, extracted_text: item.extracted_text, page_facts: item.page_facts, normative_sources: item.normative_sources, technical_assignment_sources: item.technical_assignment_sources, conflict_candidates: item.conflict_candidates, user_package_sources: item.user_package_sources, document_context_sources: item.document_context_sources, image_base64: item.image_base64, normative_system_prompt: item.normative_system_prompt })) }) }}",
         "options": {
           "timeout": 3300000
         }
@@ -660,7 +660,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const index = Number(\n  $json.page_index ?? $itemIndex,\n);\n\nconst prepared =\n  $('Technical Assignment First Pass')\n    .all()[index]?.json ?? {};\n\nconst expanded =\n  prepared.expanded ?? {};\n\nconst understanding = {\n  facts:\n    prepared.facts ?? {},\n  metrics:\n    prepared.understanding_metrics ?? {},\n};\n\nconst queries =\n  $('Build Normative Queries')\n    .all()[index]?.json ?? {};\n\nconst requirements =\n  $('Normalize Requirement Search')\n    .all()[index]?.json ?? {};\n\nconst userPackages =\n  $('Search User Packages')\n    .all()[index]?.json ?? {};\n\nconst check =\n  $('Gate Expand Norm Check Stage')\n    .all()[index]?.json ?? {};\n\nconst merged =\n  $('Merge Finding Candidates')\n    .all()[index]?.json ?? {};\n\nconst tFirst = prepared;\n\nconst enrichment =\n  $('Prepare Experience Queries')\n    .all()[index]?.json ?? {};\n\nconst augmentation =\n  $('Augment Project Context')\n    .all()[index]?.json ?? {};\n\nconst findingQuery =\n  $('Prepare Finding Normative Queries')\n    .all()[index]?.json ?? {};\n\nconst finalization =\n  $json.finalization ?? {};\n\nconst findings = (\n  finalization.findings ?? []\n).map((finding) => ({\n  ...finding,\n  project_context_sources:\n    augmentation.sources ?? [],\n}));\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding\n    === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\n\nconst candidateGroups = Object.values(\n  candidatesByFinding,\n).filter(\n  (value) => Array.isArray(value),\n);\n\nconst candidatesCount = candidateGroups\n  .reduce(\n    (total, sources) =>\n      total + sources.length,\n    0,\n  );\n\nconst findingsWithCandidates =\n  candidateGroups\n    .filter(\n      (sources) => sources.length > 0,\n    )\n    .length;\n\nconst tDecisions = Array.isArray(\n  tFirst.decisions,\n)\n  ? tFirst.decisions\n  : [];\n\nreturn {\n  json: {\n    document:\n      expanded.document,\n    project_context:\n      expanded.project_context,\n    page_number:\n      expanded.page.page_number,\n    heuristic_page_type:\n      expanded.page.page_type,\n    width_points:\n      expanded.page.width_points,\n    height_points:\n      expanded.page.height_points,\n    extracted_text:\n      expanded.page.text,\n    facts:\n      understanding.facts ?? {},\n    normative_queries:\n      queries.queries ?? [],\n    normative_sources:\n      requirements.normative_sources ?? [],\n    technical_assignment_sources:\n      requirements.technical_assignment_sources ?? [],\n    conflict_candidates:\n      requirements.conflict_candidates ?? [],\n    requirement_diagnostics:\n      requirements.diagnostics ?? [],\n    reference_resolutions:\n      requirements.reference_resolutions ?? [],\n    user_package_sources:\n      userPackages.sources ?? [],\n    technical_assignment_first_pass: {\n      enabled:\n        Boolean(tFirst.enabled),\n      requirements_count:\n        Number(tFirst.requirements_count ?? 0),\n      decisions_count:\n        tDecisions.length,\n      satisfied_count:\n        tDecisions.filter(\n          (decision) =>\n            decision.status === 'satisfied',\n        ).length,\n      not_applicable_count:\n        tDecisions.filter(\n          (decision) =>\n            decision.status === 'not_applicable',\n        ).length,\n      violated_count:\n        tDecisions.filter(\n          (decision) =>\n            decision.status === 'violated',\n        ).length,\n      needs_review_count:\n        tDecisions.filter(\n          (decision) =>\n            decision.status\n              === 'insufficient_evidence',\n        ).length,\n      findings_count:\n        Array.isArray(tFirst.findings)\n          ? tFirst.findings.length\n          : 0,\n      summary:\n        String(tFirst.summary ?? ''),\n      metrics:\n        Array.isArray(tFirst.metrics)\n          ? tFirst.metrics\n          : [],\n    },\n    finding_candidates: {\n      normative_check_count:\n        Array.isArray(check.findings)\n          ? check.findings.length\n          : 0,\n      merged_count:\n        Array.isArray(merged.findings)\n          ? merged.findings.length\n          : 0,\n    },\n    normative_enrichment: {\n      queries_count:\n        findingQuery.normative_queries?.length\n        ?? 0,\n      findings_with_candidates:\n        findingsWithCandidates,\n      candidates_count:\n        candidatesCount,\n    },\n    normative_check: {\n      summary:\n        check.summary ?? '',\n      findings:\n        check.findings ?? [],\n      metrics:\n        check.metrics ?? {},\n    },\n    findings,\n  },\n};"
+        "jsCode": "const index = Number(\n  $json.page_index ?? $itemIndex,\n);\n\nconst prepared =\n  $('Technical Assignment First Pass')\n    .all()[index]?.json ?? {};\n\nconst expanded =\n  prepared.expanded ?? {};\n\nconst understanding = {\n  facts:\n    prepared.facts ?? {},\n  metrics:\n    prepared.understanding_metrics ?? {},\n};\n\nconst queries =\n  $('Build Normative Queries')\n    .all()[index]?.json ?? {};\n\nconst requirements =\n  $('Normalize Requirement Search')\n    .all()[index]?.json ?? {};\n\nconst userPackages =\n  $('Search User Packages')\n    .all()[index]?.json ?? {};\n\nconst check =\n  $('Gate Expand Norm Check Stage')\n    .all()[index]?.json ?? {};\n\nconst merged =\n  $('Merge Finding Candidates')\n    .all()[index]?.json ?? {};\n\nconst tFirst = prepared;\n\nconst enrichment =\n  $('Prepare Experience Queries')\n    .all()[index]?.json ?? {};\n\nconst augmentation =\n  $('Augment Project Context')\n    .all()[index]?.json ?? {};\n\nconst findingQuery =\n  $('Prepare Finding Normative Queries')\n    .all()[index]?.json ?? {};\n\nconst finalization =\n  $json.finalization ?? {};\n\nconst findings = (\n  finalization.findings ?? []\n).map((finding) => ({\n  ...finding,\n  project_context_sources:\n    augmentation.sources ?? [],\n}));\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding\n    === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\n\nconst candidateGroups = Object.values(\n  candidatesByFinding,\n).filter(\n  (value) => Array.isArray(value),\n);\n\nconst candidatesCount = candidateGroups\n  .reduce(\n    (total, sources) =>\n      total + sources.length,\n    0,\n  );\n\nconst findingsWithCandidates =\n  candidateGroups\n    .filter(\n      (sources) => sources.length > 0,\n    )\n    .length;\n\nconst tDecisions = Array.isArray(\n  tFirst.decisions,\n)\n  ? tFirst.decisions\n  : [];\n\nreturn {\n  json: {\n    document:\n      expanded.document,\n    project_context:\n      expanded.project_context,\n    page_number:\n      expanded.page.page_number,\n    heuristic_page_type:\n      expanded.page.page_type,\n    width_points:\n      expanded.page.width_points,\n    height_points:\n      expanded.page.height_points,\n    extracted_text:\n      expanded.page.text,\n    facts:\n      understanding.facts ?? {},\n    document_context_sources:\n      $('Expand Page Document Context').all()[index]?.json.sources ?? [],\n    normative_queries:\n      queries.queries ?? [],\n    normative_sources:\n      requirements.normative_sources ?? [],\n    technical_assignment_sources:\n      requirements.technical_assignment_sources ?? [],\n    conflict_candidates:\n      requirements.conflict_candidates ?? [],\n    requirement_diagnostics:\n      requirements.diagnostics ?? [],\n    reference_resolutions:\n      requirements.reference_resolutions ?? [],\n    user_package_sources:\n      userPackages.sources ?? [],\n    technical_assignment_first_pass: {\n      enabled:\n        Boolean(tFirst.enabled),\n      requirements_count:\n        Number(tFirst.requirements_count ?? 0),\n      decisions_count:\n        tDecisions.length,\n      satisfied_count:\n        tDecisions.filter(\n          (decision) =>\n            decision.status === 'satisfied',\n        ).length,\n      not_applicable_count:\n        tDecisions.filter(\n          (decision) =>\n            decision.status === 'not_applicable',\n        ).length,\n      violated_count:\n        tDecisions.filter(\n          (decision) =>\n            decision.status === 'violated',\n        ).length,\n      needs_review_count:\n        tDecisions.filter(\n          (decision) =>\n            decision.status\n              === 'insufficient_evidence',\n        ).length,\n      findings_count:\n        Array.isArray(tFirst.findings)\n          ? tFirst.findings.length\n          : 0,\n      summary:\n        String(tFirst.summary ?? ''),\n      metrics:\n        Array.isArray(tFirst.metrics)\n          ? tFirst.metrics\n          : [],\n    },\n    finding_candidates: {\n      normative_check_count:\n        Array.isArray(check.findings)\n          ? check.findings.length\n          : 0,\n      merged_count:\n        Array.isArray(merged.findings)\n          ? merged.findings.length\n          : 0,\n    },\n    normative_enrichment: {\n      queries_count:\n        findingQuery.normative_queries?.length\n        ?? 0,\n      findings_with_candidates:\n        findingsWithCandidates,\n      candidates_count:\n        candidatesCount,\n    },\n    normative_check: {\n      summary:\n        check.summary ?? '',\n      findings:\n        check.findings ?? [],\n      metrics:\n        check.metrics ?? {},\n    },\n    findings,\n  },\n};"
       },
       "id": "57a66ecb-aeff-449d-9240-38dbd0dcb7f4",
       "name": "Build Page Result",
@@ -673,7 +673,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const pageItems = $input.all().map((item) => item.json);\npageItems.sort((left, right) => left.page_number - right.page_number);\nconst document = pageItems[0]?.document ?? { file_name: 'document.pdf', total_pages: 0, selected_pages: [] };\nconst context = pageItems[0]?.project_context ?? { enabled: false };\nconst pages = pageItems.map(({ document: _document, project_context: _context, ...page }) => page);\nconst findings = pages.flatMap((page) => Array.isArray(page.findings) ? page.findings : []);\nconst reportFindings = findings.filter((finding) => finding.status !== 'hypothesis');\n\nreturn [{\n  json: {\n    status: 'completed',\n    source_mode: 'pdf_only',\n    file_name: document.file_name,\n    pdf_file_name: document.file_name,\n    total_pages: document.total_pages,\n    selected_pages: document.selected_pages,\n    analyzed_pages: pages.length,\n    findings_count: reportFindings.length,\n    hypotheses_count: findings.length - reportFindings.length,\n    summary: reportFindings.length ? `Найдено замечаний: ${reportFindings.length}.` : 'Замечания по выбранным листам не найдены.',\n    findings,\n    pages,\n    explanatory_note_context: context,\n    pipeline: ['document_extract','explanatory_note_validation','project_context_cache','technical_assignment_requirement_feed','page_understanding','technical_assignment_first_pass','project_context_retrieval','normative_queries','requirement_search','user_package_search','normative_check','finding_candidate_merge','finding_normative_search','experience_search','finalization'],\n    limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Техническое задание проверяется независимым exhaustive T-first проходом и не является нормативным доказательством.', 'T-guided retrieval используется дополнительно и не управляет сохранением T-first findings.', 'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n  },\n}];"
+        "jsCode": "const pageItems = $input.all().map((item) => item.json);\npageItems.sort((left, right) => left.page_number - right.page_number);\nconst document = pageItems[0]?.document ?? { file_name: 'document.pdf', total_pages: 0, selected_pages: [] };\nconst context = pageItems[0]?.project_context ?? { enabled: false };\nconst pages = pageItems.map(({ document: _document, project_context: _context, ...page }) => page);\nconst findings = pages.flatMap((page) => Array.isArray(page.findings) ? page.findings : []);\nconst reportFindings = findings.filter((finding) => finding.status !== 'hypothesis');\n\nreturn [{\n  json: {\n    status: 'completed',\n    source_mode: 'pdf_only',\n    file_name: document.file_name,\n    pdf_file_name: document.file_name,\n    total_pages: document.total_pages,\n    selected_pages: document.selected_pages,\n    analyzed_pages: pages.length,\n    findings_count: reportFindings.length,\n    hypotheses_count: findings.length - reportFindings.length,\n    summary: reportFindings.length ? `Найдено замечаний: ${reportFindings.length}.` : 'Замечания по выбранным листам не найдены.',\n    findings,\n    pages,\n    explanatory_note_context: context,\n    pipeline: ['document_extract','explanatory_note_validation','project_context_cache','technical_assignment_requirement_feed','page_understanding','document_context_build','technical_assignment_first_pass','project_context_retrieval','document_context_retrieval','normative_queries','requirement_search','user_package_search','normative_check','cross_page_consistency','finding_candidate_merge','finding_normative_search','experience_search','finalization'],\n    limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'D-sources описывают проверяемый PDF и не являются нормативным доказательством.', 'Техническое задание проверяется независимым exhaustive T-first проходом и не является нормативным доказательством.', 'T-guided retrieval используется дополнительно и не управляет сохранением T-first findings.', 'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n  },\n}];"
       },
       "id": "c1b7af80-0faa-4369-aa77-78ef1990636f",
       "name": "Aggregate PDF Result",
@@ -1326,7 +1326,7 @@
       "name": "Understand Page",
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const source = $('Gate Collect Understanding Stage').first().json;\nconst expandedItems = Array.isArray(source.expanded_items)\n  ? source.expanded_items\n  : [];\nconst results = Array.isArray($json.items)\n  ? $json.items\n  : [];\n\nif (results.length !== expandedItems.length) {\n  throw new Error(\n    `Understanding stage потерял страницы: expected=${expandedItems.length}, actual=${results.length}.`,\n  );\n}\n\nreturn results.map((entry, index) => {\n  const expanded = expandedItems[index];\n  const expectedPage = Number(expanded?.page?.page_number ?? 0);\n  const actualPage = Number(entry?.page_number ?? 0);\n\n  if (!expectedPage || actualPage !== expectedPage) {\n    throw new Error(\n      `Understanding stage нарушил порядок страниц: expected=${expectedPage}, actual=${actualPage}.`,\n    );\n  }\n\n  return {\n    json: {\n      page_number: actualPage,\n      expanded,\n      facts: entry?.result?.facts ?? {},\n      understanding_metrics:\n        entry?.result?.metrics ?? {},\n    },\n  };\n});"
+        "jsCode": "const source = $('Gate Collect Understanding Stage').first().json;\nconst expandedItems = Array.isArray(source.expanded_items)\n  ? source.expanded_items\n  : [];\nconst stage = $('Understand Pages Stage').first().json;\nconst results = Array.isArray(stage.items)\n  ? stage.items\n  : [];\n\nif (results.length !== expandedItems.length) {\n  throw new Error(\n    `Understanding stage потерял страницы: expected=${expandedItems.length}, actual=${results.length}.`,\n  );\n}\n\nreturn results.map((entry, index) => {\n  const expanded = expandedItems[index];\n  const expectedPage = Number(expanded?.page?.page_number ?? 0);\n  const actualPage = Number(entry?.page_number ?? 0);\n\n  if (!expectedPage || actualPage !== expectedPage) {\n    throw new Error(\n      `Understanding stage нарушил порядок страниц: expected=${expectedPage}, actual=${actualPage}.`,\n    );\n  }\n\n  return {\n    json: {\n      page_number: actualPage,\n      expanded,\n      facts: entry?.result?.facts ?? {},\n      understanding_metrics:\n        entry?.result?.metrics ?? {},\n    },\n  };\n});"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1354,7 +1354,7 @@
       "name": "Gate Collect Norm Check Stage",
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const preparedPages = $('Technical Assignment First Pass')\n  .all()\n  .map((item) => item.json);\n\nconst augmentations = $('Augment Project Context')\n  .all()\n  .map((item) => item.json);\n\nconst requirements = $('Normalize Requirement Search')\n  .all()\n  .map((item) => item.json);\n\nconst userPackages = $input.all()\n  .map((item) => item.json);\n\nconst expected = preparedPages.length;\n\nif (\n  augmentations.length !== expected\n  || requirements.length !== expected\n  || userPackages.length !== expected\n) {\n  throw new Error(\n    'Normative stage потеряла page-local retrieval context.',\n  );\n}\n\nreturn [{\n  json: {\n    document_id:\n      $('POST /analysis/v2/pdf').first().json.body.document_id,\n    items: preparedPages.map((page, index) => ({\n      page_number:\n        page.expanded.page.page_number,\n      extracted_text:\n        augmentations[index].analysis_text ?? '',\n      page_facts:\n        page.facts ?? {},\n      normative_sources:\n        requirements[index].normative_sources ?? [],\n      technical_assignment_sources:\n        requirements[index]\n          .technical_assignment_sources ?? [],\n      conflict_candidates:\n        requirements[index].conflict_candidates ?? [],\n      user_package_sources:\n        userPackages[index].sources ?? [],\n      image_base64:\n        page.expanded.page.image_base64,\n      normative_system_prompt:\n        $('POST /analysis/v2/pdf')\n          .first()\n          .json.body?.normative_system_prompt\n          ?? null,\n    })),\n  },\n}];"
+        "jsCode": "const preparedPages = $('Technical Assignment First Pass')\n  .all()\n  .map((item) => item.json);\n\nconst augmentations = $('Augment Project Context')\n  .all()\n  .map((item) => item.json);\n\nconst requirements = $('Normalize Requirement Search')\n  .all()\n  .map((item) => item.json);\n\nconst userPackages = $input.all()\n  .map((item) => item.json);\nconst documentContexts = $('Expand Page Document Context')\n  .all().map((item) => item.json);\n\nconst expected = preparedPages.length;\n\nif (\n  augmentations.length !== expected\n  || requirements.length !== expected\n  || userPackages.length !== expected\n  || documentContexts.length !== expected\n) {\n  throw new Error(\n    'Normative stage потеряла page-local retrieval context.',\n  );\n}\n\nreturn [{\n  json: {\n    document_id:\n      $('POST /analysis/v2/pdf').first().json.body.document_id,\n    items: preparedPages.map((page, index) => ({\n      page_number:\n        page.expanded.page.page_number,\n      extracted_text:\n        augmentations[index].analysis_text ?? '',\n      page_facts:\n        page.facts ?? {},\n      normative_sources:\n        requirements[index].normative_sources ?? [],\n      technical_assignment_sources:\n        requirements[index]\n          .technical_assignment_sources ?? [],\n      conflict_candidates:\n        requirements[index].conflict_candidates ?? [],\n      user_package_sources:\n        userPackages[index].sources ?? [],\n      document_context_sources:\n        documentContexts[index].sources ?? [],\n      image_base64:\n        page.expanded.page.image_base64,\n      normative_system_prompt:\n        $('POST /analysis/v2/pdf')\n          .first()\n          .json.body?.normative_system_prompt\n          ?? null,\n    })),\n  },\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1403,6 +1403,253 @@
       "position": [
         3460,
         980
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'building_document_context' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "47109588-f9ab-495d-83b3-c4d0f0105726",
+      "name": "Progress Build Document Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        110,
+        1180
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3de03ebc-be46-4cf6-99dc-c6d796b10d16",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "90564f8f-191e-4b0a-90b7-cf11b8c8a856",
+      "name": "Continue Build Document Context",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        320,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/document-contexts",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({\n  document_id: $('POST /analysis/v2/pdf').first().json.body.document_id,\n  source_sha256: $('Document Extract PDF').first().json.source_sha256,\n  pages: $('Understand Pages Stage').first().json.items.map((entry, index) => ({\n    page_number: entry.page_number,\n    text: $('Gate Collect Understanding Stage').first().json.expanded_items[index].page.text,\n    document_facts: entry.result.facts.document_facts ?? [],\n  })),\n}) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "84841489-24f2-4475-9358-690740d85b38",
+      "name": "Create Document Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1860,
+        800
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-knowledge-service:8401/internal/v1/document-contexts/search",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({\n  context_id: $('Create Document Context').first().json.context_id,\n  query: JSON.stringify(\n    $('Technical Assignment First Pass').all()[$itemIndex].json.facts ?? {}\n  ).slice(0, 1800),\n}) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "8454731a-451c-48ae-87af-3d98185b702a",
+      "name": "Search Document Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2260,
+        800
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "678f0f23-812a-408d-9d57-0de0fcb69c75",
+      "name": "Gate Collect Page Document Context",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const understood = $('Understand Page').all().map((item) => item.json);\nconst semantic = $input.all().map((item) => item.json);\nif (understood.length !== semantic.length) {\n  throw new Error('D retrieval потерял PDF-страницы.');\n}\nreturn [{\n  json: {\n    pages: understood.map((item) => ({\n      page_number: item.page_number,\n      extracted_text: item.expanded.page.text,\n      page_facts: item.facts,\n    })),\n    semantic: semantic.map((item, index) => ({\n      page_number: understood[index].page_number,\n      sources: item.sources ?? [],\n    })),\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        980
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/document-context/pages",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "f8d11862-0101-4ffc-bbd3-8c7f8df1f13a",
+      "name": "Build Page Document Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        750,
+        800
+      ]
+    },
+    {
+      "id": "ff5e81a1-5e97-4690-85a5-4b1fa1877699",
+      "name": "Expand Page Document Context",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const understood = $('Understand Page').all().map((item) => item.json);\nconst items = Array.isArray($json.items) ? $json.items : [];\nif (items.length !== understood.length) {\n  throw new Error('D context потерял PDF-страницы.');\n}\nreturn items.map((item, index) => {\n  if (Number(item.page_number) !== Number(understood[index].page_number)) {\n    throw new Error('D context нарушил порядок страниц.');\n  }\n  return { json: item };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        980
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'checking_cross_page_consistency' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "ad7dff97-62f8-40e1-8f43-8c190bc99a72",
+      "name": "Progress Cross-Page Consistency",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        1180
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "73d3f4f9-6e52-4a3e-9131-1fb818c2b09e",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "122d6dc1-4118-43e9-8341-70f2811f0aa9",
+      "name": "Continue Cross-Page Consistency",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1010,
+        1180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/document-context/check-consistency",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({\n  document_id: $('POST /analysis/v2/pdf').first().json.body.document_id,\n  pages: $('Understand Page').all().map((item) => ({\n    page_number: item.json.page_number,\n    extracted_text: item.json.expanded.page.text,\n    page_facts: item.json.facts,\n    text_words: item.json.expanded.page.text_words ?? [],\n  })),\n}) }}",
+        "options": {
+          "timeout": 3300000
+        }
+      },
+      "id": "7901f509-8f88-4325-8c1c-dfff6f3fdf7f",
+      "name": "Check Cross-Page Consistency",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2680,
+        800
+      ],
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const norm = $('Check Norms').first().json;\nconst entries = Array.isArray(norm.items) ? norm.items : [];\nconst cross = Array.isArray($json.findings) ? $json.findings : [];\nconst byPage = new Map();\nfor (const finding of cross) {\n  const page = Number(finding.page ?? 0);\n  const items = byPage.get(page) ?? [];\n  items.push(finding);\n  byPage.set(page, items);\n}\nconst seen = new Set();\nconst items = entries.map((entry) => {\n  const current = Array.isArray(entry.result?.findings)\n    ? entry.result.findings : [];\n  const findings = [...current, ...(byPage.get(Number(entry.page_number)) ?? [])];\n  for (const finding of findings) {\n    const id = String(finding.finding_id ?? '');\n    if (!id || seen.has(id)) {\n      throw new Error('Cross-page merge: пустой либо повторный finding_id.');\n    }\n    seen.add(id);\n  }\n  return {\n    ...entry,\n    result: { ...entry.result, findings },\n  };\n});\nreturn [{ json: { items } }];"
+      },
+      "id": "000506dc-378c-4767-a17e-f0d098b3b4af",
+      "name": "Merge Cross-Page Checks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3200,
+        800
       ]
     }
   ],
@@ -1510,7 +1757,7 @@
       "main": [
         [
           {
-            "node": "Build Normative Queries",
+            "node": "Search Document Context",
             "type": "main",
             "index": 0
           }
@@ -1570,7 +1817,7 @@
       "main": [
         [
           {
-            "node": "Gate Expand Norm Check Stage",
+            "node": "Progress Cross-Page Consistency",
             "type": "main",
             "index": 0
           }
@@ -2138,7 +2385,7 @@
       "main": [
         [
           {
-            "node": "Understand Page",
+            "node": "Progress Build Document Context",
             "type": "main",
             "index": 0
           }
@@ -2216,6 +2463,141 @@
         [
           {
             "node": "Build Page Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Build Document Context": {
+      "main": [
+        [
+          {
+            "node": "Continue Build Document Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Build Document Context": {
+      "main": [
+        [
+          {
+            "node": "Create Document Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Document Context": {
+      "main": [
+        [
+          {
+            "node": "Understand Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Document Context": {
+      "main": [
+        [
+          {
+            "node": "Gate Collect Page Document Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Collect Page Document Context": {
+      "main": [
+        [
+          {
+            "node": "Build Page Document Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Page Document Context": {
+      "main": [
+        [
+          {
+            "node": "Expand Page Document Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expand Page Document Context": {
+      "main": [
+        [
+          {
+            "node": "Build Normative Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Cross-Page Consistency": {
+      "main": [
+        [
+          {
+            "node": "Continue Cross-Page Consistency",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Cross-Page Consistency": {
+      "main": [
+        [
+          {
+            "node": "Check Cross-Page Consistency",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Cross-Page Consistency": {
+      "main": [
+        [
+          {
+            "node": "Merge Cross-Page Checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Cross-Page Checks": {
+      "main": [
+        [
+          {
+            "node": "Gate Expand Norm Check Stage",
             "type": "main",
             "index": 0
           }

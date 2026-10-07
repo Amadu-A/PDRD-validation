@@ -495,7 +495,10 @@ class FinalizeFindings:
         # Проверенная текстом запись остаётся осторожным фактическим
         # замечанием; все прочие кандидаты проходят неизменный quality gate.
         protected = tuple(
-            finding for finding in findings if _is_protected_duplicate_review(finding)
+            finding
+            for finding in findings
+            if _is_protected_duplicate_review(finding)
+            or finding.category == "document_consistency"
         )
         eligible_experience = {
             finding_id: tuple(
@@ -530,7 +533,10 @@ class FinalizeFindings:
             for finding in findings
             if finding.status != "hypothesis"
             and (
-                not _is_protected_duplicate_review(finding)
+                (
+                    not _is_protected_duplicate_review(finding)
+                    and finding.category != "document_consistency"
+                )
                 or normalized_candidate_groups.get(finding.finding_id)
             )
         )
@@ -625,6 +631,7 @@ class FinalizeFindings:
             ordinary_by_id.get(finding.finding_id, self._fallback(finding))
             for finding in findings
             if _is_protected_duplicate_review(finding)
+            or finding.category == "document_consistency"
             or finding.status == "hypothesis"
             or finding.finding_id in ordinary_by_id
         ]
@@ -1131,6 +1138,7 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
             user_package_basis_sources=(finding.user_package_basis_sources),
             origin_assertions=finding.origin_assertions,
             object_ref=finding.object_ref,
+            evidence_locations=finding.evidence_locations,
         )
 
     @staticmethod
@@ -1247,8 +1255,12 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                     "customer_requirements" if has_customer_basis else "other"
                 )
 
-            if not has_customer_basis:
+            if not has_customer_basis and finding.category != "document_consistency":
                 normalized_status = "needs_review"
+
+        if finding.category == "document_consistency":
+            comment = finding.comment
+            recommendation = _fallback_recommendation(finding)
 
         return FinalFinding(
             finding_id=finding.finding_id,
@@ -1272,4 +1284,5 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
             user_package_basis_sources=(finding.user_package_basis_sources),
             origin_assertions=finding.origin_assertions,
             object_ref=finding.object_ref,
+            evidence_locations=finding.evidence_locations,
         )

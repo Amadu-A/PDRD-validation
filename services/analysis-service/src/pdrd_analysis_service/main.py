@@ -1,12 +1,15 @@
 # services/analysis-service/src/pdrd_analysis_service/main.py
 
-"""FastAPI entry point Analysis Service."""
+"""Точка входа FastAPI сервиса анализа."""
 
 from fastapi import FastAPI
 
 from pdrd_analysis_service.core.container import (
     ApplicationContainer,
     build_container,
+)
+from pdrd_analysis_service.transport.http.document_context_routes import (
+    router as document_context_router,
 )
 from pdrd_analysis_service.transport.http.project_context_routes import (
     router as project_context_router,
@@ -47,6 +50,8 @@ def create_app(
     application.include_router(
         project_context_router,
     )
+
+    application.include_router(document_context_router)
 
     application.include_router(
         technical_assignment_router,

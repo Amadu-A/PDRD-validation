@@ -13,6 +13,9 @@ from pdrd_knowledge_service.core.container import (
     build_container,
 )
 from pdrd_knowledge_service.core.observability import configure_experience_logging
+from pdrd_knowledge_service.transport.http.routers.document_context import (
+    router as document_context_router,
+)
 from pdrd_knowledge_service.transport.http.routers.health import (
     router as health_router,
 )
@@ -66,6 +69,8 @@ def create_app(
     application.include_router(
         project_context_router,
     )
+
+    application.include_router(document_context_router)
 
     application.include_router(
         normative_sections_router,

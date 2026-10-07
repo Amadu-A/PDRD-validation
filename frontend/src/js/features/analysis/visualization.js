@@ -254,10 +254,11 @@ function findingsForPage(
       ({
         finding,
       }) => (
-        normalizedPage(
-          finding.page
-          ?? finding.page_number,
-        ) === pageNumber
+        normalizedPage(finding.page ?? finding.page_number) === pageNumber
+        || (Array.isArray(finding.evidence_locations)
+          && finding.evidence_locations.some(
+            (item) => normalizedPage(item?.page) === pageNumber
+          ))
       ),
     )
     .map(
@@ -2135,6 +2136,7 @@ function appendPageVisualization(
     "analysis-result__page-visualization",
   );
 
+  section.id = "analysis-page-" + pageNumber;
   section.append(
     createElement(
       "h4",

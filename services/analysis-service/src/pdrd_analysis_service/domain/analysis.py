@@ -8,6 +8,8 @@ from typing import (
     Literal,
 )
 
+from pdrd_analysis_service.domain.document_context import DocumentFact
+
 FindingCategory = Literal[
     "normative_control",
     "equipment",
@@ -16,6 +18,7 @@ FindingCategory = Literal[
     "completeness",
     "optimization",
     "customer_requirements",
+    "document_consistency",
     "other",
 ]
 
@@ -109,6 +112,8 @@ class PageFacts:
         str,
         ...,
     ]
+
+    document_facts: tuple[DocumentFact, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -338,6 +343,7 @@ class FindingDraft:
     origin_assertions: tuple[dict[str, Any], ...] = ()
 
     object_ref: str = ""
+    evidence_locations: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -384,11 +390,12 @@ class FinalFinding:
     origin_assertions: tuple[dict[str, Any], ...] = ()
 
     object_ref: str = ""
+    evidence_locations: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class ReadinessReport:
-    """Readiness Analysis Service."""
+    """Готовность сервиса анализа."""
 
     vision_model: bool
 

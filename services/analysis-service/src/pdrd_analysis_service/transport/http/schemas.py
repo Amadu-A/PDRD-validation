@@ -1,6 +1,6 @@
 # services/analysis-service/src/pdrd_analysis_service/transport/http/schemas.py
 
-"""HTTP schemas Analysis Service."""
+"""HTTP-схемы сервиса анализа."""
 
 from typing import Any
 
@@ -20,13 +20,14 @@ from pdrd_analysis_service.domain.analysis import (
     TechnicalAssignmentSource,
     UserPackageSource,
 )
+from pdrd_analysis_service.domain.document_context import document_fact_from_mapping
 from pdrd_analysis_service.domain.visualization import (
     FindingLocalizationTarget,
 )
 
 
 class PageFactsPayload(BaseModel):
-    """HTTP representation PageFacts."""
+    """HTTP-представление фактов страницы."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -41,6 +42,7 @@ class PageFactsPayload(BaseModel):
     labels: list[str]
 
     normative_queries: list[str]
+    document_facts: list[dict[str, Any]] = Field(default_factory=list)
 
     def to_domain(
         self,
@@ -62,11 +64,16 @@ class PageFactsPayload(BaseModel):
             normative_queries=tuple(
                 self.normative_queries,
             ),
+            document_facts=tuple(
+                fact
+                for raw in self.document_facts
+                if (fact := document_fact_from_mapping(raw)) is not None
+            ),
         )
 
 
 class NormativeSourcePayload(BaseModel):
-    """HTTP representation managed normative source."""
+    """HTTP-представление управляемого нормативного источника."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -110,7 +117,7 @@ class NormativeSourcePayload(BaseModel):
 
 
 class TechnicalAssignmentSourcePayload(BaseModel):
-    """HTTP representation T-source."""
+    """HTTP-представление источника технического задания."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -184,7 +191,7 @@ class TechnicalAssignmentConflictCandidatePayload(
 
 
 class UserPackageSourcePayload(BaseModel):
-    """HTTP representation user-package source."""
+    """HTTP-представление источника пользовательского пакета."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -228,7 +235,7 @@ class UserPackageSourcePayload(BaseModel):
 
 
 class ExperienceSourcePayload(BaseModel):
-    """HTTP representation Experience source."""
+    """HTTP-представление источника Базы опыта."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -284,7 +291,7 @@ class ExperienceSourcePayload(BaseModel):
 
 
 class FindingVisualRegionPayload(BaseModel):
-    """HTTP representation visual evidence region finding."""
+    """HTTP-представление области доказательства замечания."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -385,6 +392,7 @@ class FindingDraftPayload(BaseModel):
     origin_assertions: list[dict[str, Any]] = Field(default_factory=list)
 
     object_ref: str = ""
+    evidence_locations: list[dict[str, Any]] = Field(default_factory=list)
 
     def to_domain(
         self,
@@ -422,6 +430,7 @@ class FindingDraftPayload(BaseModel):
             visual_regions=tuple(region.to_domain() for region in self.visual_regions),
             origin_assertions=tuple(self.origin_assertions),
             object_ref=self.object_ref,
+            evidence_locations=tuple(self.evidence_locations),
         )
 
 
@@ -505,6 +514,8 @@ class CheckNormsRequest(BaseModel):
     user_package_sources: list[UserPackageSourcePayload,] = Field(
         default_factory=list,
     )
+
+    document_context_sources: list[dict[str, Any]] = Field(default_factory=list)
 
     image_base64: str = Field(
         min_length=1,
@@ -599,7 +610,7 @@ class FindingBoundingBoxPayload(BaseModel):
 
 
 class FindingLocationPayload(BaseModel):
-    """HTTP representation legacy finding location."""
+    """HTTP-представление прежнего формата положения замечания."""
 
     finding_id: str
 
@@ -689,6 +700,7 @@ class FinalFindingPayload(BaseModel):
     origin_assertions: list[dict[str, Any]] = Field(default_factory=list)
 
     object_ref: str = ""
+    evidence_locations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class FinalizeResponse(BaseModel):
@@ -705,7 +717,7 @@ class FinalizeResponse(BaseModel):
 
 
 class LiveHealthResponse(BaseModel):
-    """Liveness response."""
+    """Ответ проверки доступности."""
 
     status: str
     service: str
@@ -713,7 +725,7 @@ class LiveHealthResponse(BaseModel):
 
 
 class ReadyHealthResponse(BaseModel):
-    """Readiness response."""
+    """Ответ проверки готовности."""
 
     status: str
     service: str

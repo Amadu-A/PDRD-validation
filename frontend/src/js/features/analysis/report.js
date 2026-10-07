@@ -27,6 +27,7 @@ const CATEGORY_LABELS = {
   completeness: "Комплектность",
   optimization: "Оптимизация",
   customer_requirements: "Требования заказчика",
+  document_consistency: "Согласованность документа",
   other: "Прочее",
 };
 
@@ -812,6 +813,24 @@ function appendFinding(
     "Основание на листе",
     finding.evidence,
   );
+
+  const evidenceLocations = Array.isArray(finding.evidence_locations)
+    ? finding.evidence_locations : [];
+  if (evidenceLocations.length) {
+    const details = createElement("div", "analysis-result__evidence-pages");
+    details.append(createElement("strong", "", "Страницы доказательств:"));
+    evidenceLocations.forEach((location) => {
+      const pageNumber = Number(location?.page);
+      if (!Number.isInteger(pageNumber) || pageNumber < 1) return;
+      const link = createElement("a", "analysis-result__evidence-link");
+      link.href = "#analysis-page-" + pageNumber;
+      link.append(document.createTextNode(
+        "Страница " + pageNumber + ": " + String(location.text ?? "")
+      ));
+      details.append(link);
+    });
+    article.append(details);
+  }
 
   const reviewBasis = appendTextBlock(
     article,
