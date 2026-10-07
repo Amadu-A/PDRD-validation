@@ -1,5 +1,5 @@
 # ops/Dockerfile.quality
-# Python 3.12 + Node.js для единых Python и frontend quality gates.
+# Python 3.12 и Node.js для общих проверок Python и интерфейса.
 
 FROM python:3.12.13-slim-bookworm
 
@@ -16,14 +16,14 @@ WORKDIR /workspace
 COPY pyproject.toml /workspace/pyproject.toml
 COPY requirements-dev.txt /workspace/requirements-dev.txt
 
-# Editable dependencies требуют исходные каталоги микросервисов.
+# Установка локальных зависимостей требует исходных каталогов микросервисов.
 COPY services /workspace/services
 
 RUN pip install \
     --no-cache-dir \
     -r /workspace/requirements-dev.txt
 
-# Architecture checks изучают frontend, n8n, scripts и compose.
+# Архитектурные проверки изучают frontend, n8n, scripts и compose.
 COPY . /workspace
 
-CMD ["/bin/sh", "-c", "python -m ruff check . && python -m ruff format --check . && python -m pytest -q --import-mode=importlib"]
+CMD ["/bin/sh", "-c", "python -m pip check && python -m ruff check . && python -m ruff format --check . && python -m pytest -q --import-mode=importlib && node --test frontend/tests/*.test.js"]

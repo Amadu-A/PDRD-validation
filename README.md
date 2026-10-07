@@ -1879,6 +1879,7 @@ PDRD-validation/
 ├── ops/
 │   ├── certificates/                 # CA bundle AD и локальные файлы сертификатов
 │   ├── check-quality.ps1             # общий Windows quality gate
+│   ├── check-quality.sh              # Linux: общий и пять изолированных наборов
 │   ├── Dockerfile.quality
 │   ├── compose.user-test.yaml         # изолированные PostgreSQL-проверки
 │   ├── compose.auth-test.yaml
@@ -2074,34 +2075,29 @@ git diff -- README.md
 
 ## Linux: общие и изолированные тесты
 
+Из корня репозитория запустите общий набор и пять изолированных интеграционных наборов одной командой:
+
 ```bash
-docker compose --profile test run --rm --no-deps --build quality-tests
+bash ops/check-quality.sh
 ```
 
-PostgreSQL-проверки запускаются **в отдельных тестовых проектах** с временными БД; Knowledge дополнительно использует тестовый Qdrant. Они не должны получать рабочие database URL или production volumes.
+Скрипт выводит шесть этапов: зависимости, Ruff, Python- и frontend-тесты в `quality-tests`, затем PostgreSQL-проверки Gateway, Knowledge, Experience, User и Auth. Интеграционные наборы запускаются **в отдельных тестовых проектах** с временными БД; Knowledge дополнительно использует тестовый Qdrant. Они не должны получать рабочие database URL или production volumes.
 
-| Подсистема | Compose-файл | Контейнер с итоговым кодом |
+| Подсистема | Compose-файл | Остановка с кодом тестов |
 |---|---|---|
-| User | `ops/compose.user-test.yaml` | `user-test-runner` |
-| Auth | `ops/compose.auth-test.yaml` | `auth-test-runner` |
-| Gateway, история и хранение | `ops/compose.gateway-test.yaml` | `gateway-test-runner` |
-| Knowledge, ТЗ и удаление точек | `ops/compose.knowledge-test.yaml` | `knowledge-test-runner` |
-| Experience, Review и каталог | `ops/compose.experience-test.yaml` | `experience-test-runner` |
+| User | `ops/compose.user-test.yaml` | `--exit-code-from user-test-runner` |
+| Auth | `ops/compose.auth-test.yaml` | `--exit-code-from auth-test-runner` |
+| Gateway | `ops/compose.gateway-test.yaml` | `--exit-code-from gateway-test-runner` |
+| Knowledge | `ops/compose.knowledge-test.yaml` | `--exit-code-from knowledge-test-runner` |
+| Experience | `ops/compose.experience-test.yaml` | `--exit-code-from experience-test-runner` |
 
-Пример запуска всех пяти наборов на Linux перед обновлением сервисов:
+Для проверки и последующего обновления сервисов:
 
 ```bash
-set -euo pipefail
-for suite in user auth gateway knowledge experience; do
-    docker compose -p "pdrd-${suite}-test" -f "ops/compose.${suite}-test.yaml" up \
-        --build --abort-on-container-exit --exit-code-from "${suite}-test-runner"
-    docker compose -p "pdrd-${suite}-test" -f "ops/compose.${suite}-test.yaml" down --remove-orphans
-done
-bash scripts/up.sh
-bash scripts/check-stack.sh
+bash ops/check-quality.sh && bash scripts/up.sh
 ```
 
-Если runner завершился с ошибкой, стек не обновлять: сначала исправить причину, затем повторить соответствующий набор. Очистка оставшегося тестового проекта выполняется его `down --remove-orphans`; не подменять это удалением рабочих томов.
+`up.sh` запускается только после успешного завершения всех шести этапов. При ошибке скрипт печатает название этапа, возвращает исходный код ошибки и останавливается. Текущий тестовый проект очищается через `down --remove-orphans`, в том числе при ошибке runner или прерывании запуска. Если не удалось выполнить саму очистку, проверка также завершается ошибкой. Рабочий стек эти команды очистки не затрагивают. После исправления причины повторите `bash ops/check-quality.sh`.
 
 Проверка доступного общего VLM runtime запускается отдельно:
 
