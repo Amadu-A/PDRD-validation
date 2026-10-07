@@ -161,11 +161,19 @@ async def test_cross_page_review_provenance_roundtrip_and_export_in_postgresql(e
             actor="integration:2",
             expected_revision=0,
         )
-        approved = await seal(reviews, accepted)
+        approved = await changes.approve(
+            job_id=job,
+            actor="integration:2",
+            expected_revision=accepted.revision,
+        )
+        assert approved.revision == accepted.revision + 1 == 2
         exported = await ExportReview(reviews, areas).execute(job_id=job)
         assert len(exported["findings"]) == 1
         assert exported["findings"][0]["source_kinds"] == ["D"]
         assert exported["findings"][0]["evidence_locations"][0]["regions"]
-        assert (await reviews.load(job)).approved_revision == approved.revision
+        persisted = await reviews.load(job)
+        assert persisted == approved
+        assert persisted.approved_revision == 2
+        assert [event.session_revision for event in persisted.history] == [0, 1, 2]
     finally:
         await cleanup(engine, job)
