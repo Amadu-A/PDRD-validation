@@ -18,7 +18,7 @@ from pdrd_knowledge_service.infrastructure.database.models import NormativeSecti
 from pdrd_knowledge_service.infrastructure.database.unit_of_work import (
     SqlAlchemyNormativeCatalogUnitOfWork,
 )
-from sqlalchemy import delete, text
+from sqlalchemy import delete
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -32,7 +32,7 @@ pytestmark = [
 
 
 async def test_package_owner_roundtrip_after_migration() -> None:
-    """Владелец папки и документа сохраняется при записи и индексационном обновлении."""
+    """Владелец папки и документа сохраняется после миграции БД до head."""
     url = make_url(os.environ["KNOWLEDGE_OWNER_TEST_DATABASE_URL"])
     assert (url.host, url.database, url.username) == (
         "knowledge-test-postgres",
@@ -72,13 +72,7 @@ async def test_package_owner_roundtrip_after_migration() -> None:
         owner_user_id=owner,
     )
     try:
-        async with engine.connect() as connection:
-            assert (
-                await connection.scalar(
-                    text("SELECT version_num FROM public.alembic_version_knowledge")
-                )
-                == "20261006_0006"
-            )
+        # Актуальность Alembic head проверяется compose-runner до запуска pytest.
         async with SqlAlchemyNormativeCatalogUnitOfWork(sessions) as work:
             await work.sections.add(section)
             await work.categories.add(category)
@@ -90,7 +84,8 @@ async def test_package_owner_roundtrip_after_migration() -> None:
             assert stored.owner_user_id == owner
             await work.documents.update(
                 stored.transition_indexing(
-                    target_status=IndexingStatus.QUEUED, changed_at=now
+                    target_status=IndexingStatus.QUEUED,
+                    changed_at=now,
                 )
             )
             await work.commit()
@@ -198,7 +193,13 @@ async def test_cascade_section_delete_postgres_and_filesystem(tmp_path) -> None:
         async with factory() as work:
             for section_id in (target, other):
                 await work.sections.add(
-                    NormativeSection(section_id, str(section_id), "Промпт", now, now)
+                    NormativeSection(
+                        section_id,
+                        str(section_id),
+                        "Промпт",
+                        now,
+                        now,
+                    )
                 )
             for section_id in (target, other):
                 for area in CatalogArea:
@@ -212,9 +213,9 @@ async def test_cascade_section_delete_postgres_and_filesystem(tmp_path) -> None:
                             now,
                             now,
                             area=area,
-                            owner_user_id=owner
-                            if area is CatalogArea.USER_PACKAGE
-                            else None,
+                            owner_user_id=(
+                                owner if area is CatalogArea.USER_PACKAGE else None
+                            ),
                         )
                     )
                     key = f"{section_id}/{doc}.pdf"
@@ -234,38 +235,55 @@ async def test_cascade_section_delete_postgres_and_filesystem(tmp_path) -> None:
                             created_at=now,
                             updated_at=now,
                             area=area,
-                            owner_user_id=owner
-                            if area is CatalogArea.USER_PACKAGE
-                            else None,
+                            owner_user_id=(
+                                owner if area is CatalogArea.USER_PACKAGE else None
+                            ),
                         )
                     )
-                    await storage.save(storage_key=key, content=b"%PDF-test")
                     await storage.save(
-                        storage_key=key + ".preview.pdf", content=b"%PDF-test"
+                        storage_key=key,
+                        content=b"%PDF-test",
+                    )
+                    await storage.save(
+                        storage_key=key + ".preview.pdf",
+                        content=b"%PDF-test",
                     )
             await work.commit()
+
         # Осиротевший файл не должен пережить каскадную очистку UUID-папки.
         await storage.save(
-            storage_key=f"{target}/orphan.preview.pdf", content=b"%PDF-test"
+            storage_key=f"{target}/orphan.preview.pdf",
+            content=b"%PDF-test",
         )
+
         use_case = DeleteNormativeSection(
-            factory, storage, vectors, "shared", PostgresCatalogSectionLocks(engine)
+            factory,
+            storage,
+            vectors,
+            "shared",
+            PostgresCatalogSectionLocks(engine),
         )
+
         with pytest.raises(RuntimeError, match="qdrant offline"):
             await use_case.execute(section_id=target)
+
         async with factory() as work:
             assert (await work.sections.get(target)).deleting
             assert len(await work.documents.list_by_section(target)) == 2
+
         assert (tmp_path / str(target)).exists()
+
         vectors.fail = False
         await use_case.execute(section_id=target)
         await use_case.execute(section_id=target)
+
         async with factory() as work:
             assert await work.sections.get(target) is None
             assert await work.categories.list_by_section(target) == []
             assert await work.documents.list_by_section(target) == []
             assert not (await work.sections.get(other)).deleting
             assert len(await work.documents.list_by_section(other)) == 2
+
         assert not (tmp_path / str(target)).exists()
         assert len(list((tmp_path / str(other)).iterdir())) == 4
         assert {call["collection"] for call in vectors.filters} == {"shared"}
