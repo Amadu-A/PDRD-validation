@@ -73,3 +73,29 @@ def test_requirements_and_finalization_only_receive_supplied_d_evidence(enabled)
         assert "DOCUMENT CONTEXT SOURCES:" not in requirements
         assert "document_context_source_ids" not in requirements
         assert "document_context_basis_sources" not in finalization
+
+
+@pytest.mark.parametrize("document_context", [False, True])
+def test_equipment_schema_is_independent_of_d(document_context: bool) -> None:
+    """EQ-поля добавляются при обоих значениях D, без них baseline прежний."""
+    d_limit = 12 if document_context else 0
+    schema = build_page_facts_schema(d_limit, max_equipment=8)
+    assert schema["properties"]["equipment_identities"]["maxItems"] == 8
+    assert "equipment_identities" in schema["required"]
+    identity_schema = schema["properties"]["equipment_identities"]["items"]
+    assert identity_schema["properties"]["status"]["enum"] == [
+        "resolved",
+        "needs_review",
+    ]
+    prompt = build_page_understanding_prompt(
+        **BASELINE["arguments"],
+        max_facts=d_limit,
+        max_equipment=8,
+    )
+    assert "equipment_identities" in prompt
+    assert "Не угадывай производителя" in prompt
+    assert "status=resolved" in prompt
+    assert "equipment_identities" not in build_page_understanding_prompt(
+        **BASELINE["arguments"],
+        max_facts=d_limit,
+    )

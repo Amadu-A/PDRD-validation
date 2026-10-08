@@ -43,6 +43,9 @@ from pdrd_api_gateway.transport.http.routers.analysis_progress import (
 from pdrd_api_gateway.transport.http.routers.auth_proxy import (
     router as auth_proxy_router,
 )
+from pdrd_api_gateway.transport.http.routers.equipment_search import (
+    router as equipment_search_router,
+)
 from pdrd_api_gateway.transport.http.routers.experience import (
     router as experience_router,
 )
@@ -173,6 +176,7 @@ def create_app(
     application.include_router(
         analyses_router,
     )
+    application.include_router(equipment_search_router)
 
     application.include_router(
         analysis_cancellation_router,

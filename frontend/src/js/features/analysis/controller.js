@@ -33,6 +33,7 @@ import {
 } from "./report.js";
 import { rememberAcceptedAnalysis, temporaryAnalysisLink } from "./guest-access.js";
 import { appendGuestShareLink } from "./share-link.js";
+import { followEquipmentEvents } from "./equipment-events.js";
 
 
 /**
@@ -52,6 +53,8 @@ export function createAnalysisController({
   let activeJobId = null;
 
   let cancellationRequested = false;
+  let equipmentMessage = "";
+  let equipmentEventsAbort = null;
 
 
   function progressDescription(
@@ -162,7 +165,8 @@ export function createAnalysisController({
       + stageLine
       + queueLine
       + `\nПопытка worker: ${payload.attempt_count ?? 0}\n`
-      + `Прошло: ${elapsedSeconds} сек.`,
+      + `Прошло: ${elapsedSeconds} сек.`
+      + (equipmentMessage ? `\nОборудование: ${equipmentMessage}` : ""),
     );
   }
 
@@ -378,8 +382,10 @@ export function createAnalysisController({
         "Отправляем документы в API Gateway…",
       );
 
+      const formData = analysisForm.toFormData();
+      const useEquipment = formData.get?.("use_equipment_web_search") === "true";
       const accepted = await submitAnalysis(
-        analysisForm.toFormData(),
+        formData,
       );
 
       const jobId = accepted.job_id;
@@ -390,12 +396,25 @@ export function createAnalysisController({
         );
       }
 
+      analysisForm.resetUnverifiedSources?.();
       const guestAccess = rememberAcceptedAnalysis(accepted);
       const url = new URL(window.location.href);
       url.searchParams.set("job_id", jobId);
       window.history.replaceState(null, "", url);
 
       activeJobId = jobId;
+      equipmentMessage = "";
+      equipmentEventsAbort?.abort();
+      equipmentEventsAbort = useEquipment ? new AbortController() : null;
+      if (equipmentEventsAbort) {
+        void followEquipmentEvents(jobId, {
+          signal: equipmentEventsAbort.signal,
+          onEvent: (event) => {
+            if (activeJobId !== jobId) return;
+            equipmentMessage = String(event.message || "").slice(0, 200);
+          },
+        });
+      }
 
       modal.setJobId(
         jobId,
@@ -503,6 +522,9 @@ export function createAnalysisController({
       );
 
     } finally {
+      equipmentEventsAbort?.abort();
+      equipmentEventsAbort = null;
+      equipmentMessage = "";
       activeJobId = null;
 
       cancellationRequested = false;

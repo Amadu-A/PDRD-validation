@@ -4,7 +4,7 @@
 
 import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -102,7 +102,13 @@ class _Finding(_Contract):
     document_context_basis_sources: list[_DocumentSource] = Field(
         default_factory=list, max_length=2400
     )
-    source_kinds: list[Literal["D", "N", "T", "U", "E"]] = Field(default_factory=list)
+    equipment_documentation_basis_sources: list[dict[str, Any]] = Field(
+        default_factory=list, max_length=100
+    )
+    equipment_details: dict[str, Any] | None = None
+    source_kinds: list[Literal["D", "N", "T", "U", "E", "EQ"]] = Field(
+        default_factory=list
+    )
 
     @model_validator(mode="after")
     def check_origin(self):
@@ -190,6 +196,14 @@ class HttpReviewedPdfSource:
                     document_context_basis_sources=tuple(
                         f"{source.source_id}, стр. {source.page}: {source.evidence_text or source.text}"
                         for source in row.document_context_basis_sources
+                    ),
+                    equipment_documentation_basis_sources=tuple(
+                        f"{source.get('manufacturer', '')} {source.get('model', '')}, "
+                        f"ревизия {source.get('document_revision', '')}, "
+                        f"стр. {source.get('page', '')}: "
+                        f"{source.get('snippet', '')} "
+                        f"[{source.get('source_url', '')}]"
+                        for source in row.equipment_documentation_basis_sources
                     ),
                     source_kinds=tuple(row.source_kinds),
                     callout_box=row.callout_box.to_port() if row.callout_box else None,

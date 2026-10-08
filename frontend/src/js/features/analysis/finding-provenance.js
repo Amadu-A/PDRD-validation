@@ -16,6 +16,7 @@ export function findingSourceKinds(finding) {
     ["T", preferredSourceArray(finding.technical_assignment_basis_sources, finding.technical_assignment_sources)],
     ["U", preferredSourceArray(finding.user_package_basis_sources, finding.user_package_sources)],
     ["E", finding.experience_sources],
+    ["EQ", finding.equipment_documentation_basis_sources],
   ];
   return arrays.filter(([, values]) => Array.isArray(values) && values.length).map(([kind]) => kind);
 }
@@ -28,6 +29,7 @@ export function findingSourceDescription(finding) {
     U: "U — сохранённый источник из пользовательских документов; это не нормативное основание.",
     D: "D — факты проверяемого PDF. Они подтверждают содержание и внутренние противоречия, но не определяют правильное значение и не заменяют норматив.",
     E: "E — сохранённый инженерный опыт для повторной проверки и формулировки; он не доказывает нарушение.",
+    EQ: "EQ — сохранённая техническая документация производителя для указанной модели и ревизии.",
   };
   const kinds = findingSourceKinds(finding);
   const lines = kinds.length
@@ -65,4 +67,14 @@ export function focusDocumentEvidence(link, findingId, pageNumber) {
       window.setTimeout(() => node.classList.remove("is-document-evidence-focus"), 2500);
     }
   });
+}
+
+/** Строит путь к сохранённой версии только для канонических ID задания и EQ. */
+export function equipmentSnapshotUrl(jobId, sourceId) {
+  const job = String(jobId || "");
+  const source = String(sourceId || "");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(job)
+      || !/^EQ-[0-9a-f]{32}$/i.test(source)) return null;
+  return "/api/v1/analyses/" + encodeURIComponent(job)
+    + "/equipment-documents/" + encodeURIComponent(source);
 }

@@ -98,3 +98,35 @@ def test_build_data_omits_technical_assignment_fields_without_snapshot() -> None
     assert "technical_assignment_id" not in data
 
     assert "technical_assignment_analysis_document_id" not in data
+
+
+def test_equipment_flags_are_explicit_in_workflow_payload() -> None:
+    """PDF workflow получает оба флага, включая выключенный режим."""
+    snapshot = NormativeAnalysisSnapshot.create(
+        section_id=uuid4(),
+        document_ids=(),
+        system_prompt="",
+    )
+    enabled = AnalysisSubmission.create(
+        pdf_present=True,
+        cad_present=False,
+        pages=None,
+        pdf_file_name="drawing.pdf",
+        cad_file_name=None,
+        use_equipment_web_search=True,
+        allow_unverified_equipment_sources=True,
+    )
+    for submission, expected in (
+        (_submission(), "false"),
+        (enabled, "true"),
+    ):
+        data = N8nAnalysisOrchestrator._build_data(
+            AnalysisRequestArtifacts(
+                submission=submission,
+                pdf_content=b"%PDF-test",
+                cad_content=None,
+                normative_snapshot=snapshot,
+            )
+        )
+        assert data["use_equipment_web_search"] == expected
+        assert data["allow_unverified_equipment_sources"] == expected

@@ -9,6 +9,7 @@ import { currentSession, subscribeSession } from "../auth/session.js";
 import { bindPortalNavigation } from "../portal/navigation.js";
 import { renderCapabilities } from "./capabilities.js";
 import { renderSessions } from "./sessions.js";
+import { renderEquipmentSources } from "./equipment-sources.js";
 import { consumeVerificationToken } from "./verification-link.js";
 
 const status = document.querySelector("[data-account-status]");
@@ -59,6 +60,7 @@ export async function startAccountPage() {
   subscribeSession((session) => {
     renderAccount(session);
     void renderSessions(document, session);
+    void renderEquipmentSources(document, session);
   });
   try {
     await bindSiteHeader(document.querySelector("[data-site-header]"));

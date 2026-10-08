@@ -28,7 +28,9 @@ FINDING_STATUSES = (
 )
 
 
-def build_page_facts_schema(max_facts: int = 12) -> dict[str, Any]:
+def build_page_facts_schema(
+    max_facts: int = 12, max_equipment: int = 0
+) -> dict[str, Any]:
     """Возвращает лёгкую схему листа; D-факты добавляет только при положительном лимите."""
     schema = {
         "type": "object",
@@ -91,7 +93,7 @@ def build_page_facts_schema(max_facts: int = 12) -> dict[str, Any]:
     }
 
     if max_facts <= 0:
-        return schema
+        return _add_equipment_schema(schema, max_equipment)
 
     text_fields = (
         "kind",
@@ -131,6 +133,77 @@ def build_page_facts_schema(max_facts: int = 12) -> dict[str, Any]:
         },
     }
     schema["required"].append("document_facts")
+    return _add_equipment_schema(schema, max_equipment)
+
+
+def _add_equipment_schema(schema: dict[str, Any], limit: int) -> dict[str, Any]:
+    """Условно добавляет идентичность и проектные параметры оборудования."""
+    if limit <= 0:
+        return schema
+
+    text = {"type": "string", "maxLength": 220}
+    parameter_fields = (
+        "property_name",
+        "value_raw",
+        "unit_raw",
+        "role",
+        "current_type",
+        "mode",
+        "evidence_text",
+    )
+    parameter = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            **dict.fromkeys(parameter_fields, text),
+            "phase": text,
+            "configuration": text,
+            "condition": text,
+        },
+        "required": list(parameter_fields),
+    }
+    identity_fields = (
+        "manufacturer",
+        "model",
+        "variant",
+        "article",
+        "equipment_type",
+        "object_ref",
+        "evidence_text",
+        "status",
+    )
+    properties = dict.fromkeys(identity_fields, text)
+    properties["status"] = {
+        "type": "string",
+        "enum": ["resolved", "needs_review"],
+    }
+    properties["confidence"] = {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+    }
+    properties["visual_regions"] = build_finding_visual_regions_schema()
+    properties["parameters"] = {
+        "type": "array",
+        "maxItems": 8,
+        "items": parameter,
+    }
+    schema["properties"]["equipment_identities"] = {
+        "type": "array",
+        "maxItems": limit,
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": properties,
+            "required": [
+                *identity_fields,
+                "confidence",
+                "visual_regions",
+                "parameters",
+            ],
+        },
+    }
+    schema["required"].append("equipment_identities")
     return schema
 
 

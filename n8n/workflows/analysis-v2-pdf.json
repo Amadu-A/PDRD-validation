@@ -293,7 +293,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ document_id: $json.document_id, items: $json.items.map((item) => ({ use_document_context: item.use_document_context, page_number: item.page_number, heuristic_page_type: item.heuristic_page_type, extracted_text: item.extracted_text, image_base64: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.page_number))?.image_base64 ?? '' })) }) }}",
+        "body": "={{ JSON.stringify({ document_id: $json.document_id, items: $json.items.map((item) => ({ use_document_context: item.use_document_context, use_equipment_web_search: item.use_equipment_web_search, page_number: item.page_number, heuristic_page_type: item.heuristic_page_type, extracted_text: item.extracted_text, image_base64: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.page_number))?.image_base64 ?? '' })) }) }}",
         "options": {
           "timeout": 3300000
         }
@@ -690,7 +690,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const pageItems = $input.all().map((item) => item.json);\npageItems.sort((left, right) => left.page_number - right.page_number);\nconst document = pageItems[0]?.document ?? { file_name: 'document.pdf', total_pages: 0, selected_pages: [] };\nconst context = pageItems[0]?.project_context ?? { enabled: false };\nconst pages = pageItems.map(({ document: _document, project_context: _context, ...page }) => page);\nconst findings = pages.flatMap((page) => Array.isArray(page.findings) ? page.findings : []);\nconst reportFindings = findings.filter((finding) => finding.status !== 'hypothesis');\n\nreturn [{\n  json: {\n    status: 'completed',\n    source_mode: 'pdf_only',\n    file_name: document.file_name,\n    pdf_file_name: document.file_name,\n    total_pages: document.total_pages,\n    selected_pages: document.selected_pages,\n    analyzed_pages: pages.length,\n    findings_count: reportFindings.length,\n    hypotheses_count: findings.length - reportFindings.length,\n    summary: reportFindings.length ? `Найдено замечаний: ${reportFindings.length}.` : 'Замечания по выбранным листам не найдены.',\n    findings,\n    pages,\n    explanatory_note_context: context,\n    use_document_context: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context),\n    pipeline: ['document_extract','explanatory_note_validation','project_context_cache','technical_assignment_requirement_feed','page_understanding','document_context_build','technical_assignment_first_pass','project_context_retrieval','document_context_retrieval','normative_queries','requirement_search','user_package_search','normative_check','cross_page_consistency','finding_candidate_merge','finding_normative_search','experience_search','finalization'].filter((stage) => ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context) || !['document_context_build','document_context_retrieval','cross_page_consistency'].includes(stage)),\n    limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'D-sources описывают проверяемый PDF и не являются нормативным доказательством.', 'Техническое задание проверяется независимым exhaustive T-first проходом и не является нормативным доказательством.', 'T-guided retrieval используется дополнительно и не управляет сохранением T-first findings.', 'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n  },\n}];"
+        "jsCode": "const pageItems = $input.all().map((item) => item.json);\npageItems.sort((left, right) => left.page_number - right.page_number);\nconst document = pageItems[0]?.document ?? { file_name: 'document.pdf', total_pages: 0, selected_pages: [] };\nconst context = pageItems[0]?.project_context ?? { enabled: false };\nconst pages = pageItems.map(({ document: _document, project_context: _context, ...page }) => page);\nconst findings = pages.flatMap((page) => Array.isArray(page.findings) ? page.findings : []);\nconst reportFindings = findings.filter((finding) => finding.status !== 'hypothesis');\nconst equipmentEnabled = ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_equipment_web_search);\nconst equipmentCheck = equipmentEnabled\n  ? ($('Merge Equipment Candidates').first().json.equipment_check ?? { enabled: true, status: 'incomplete', warnings: ['Equipment Search не завершился.'] })\n  : null;\n\n\nreturn [{\n  json: {\n    status: 'completed',\n    source_mode: 'pdf_only',\n    file_name: document.file_name,\n    pdf_file_name: document.file_name,\n    total_pages: document.total_pages,\n    selected_pages: document.selected_pages,\n    analyzed_pages: pages.length,\n    findings_count: reportFindings.length,\n    hypotheses_count: findings.length - reportFindings.length,\n    summary: reportFindings.length ? `Найдено замечаний: ${reportFindings.length}.` : 'Замечания по выбранным листам не найдены.',\n    findings,\n    ...(equipmentCheck ? { equipment_check: equipmentCheck } : {}),\n    pages,\n    explanatory_note_context: context,\n    use_document_context: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context),\n    pipeline: ['document_extract','explanatory_note_validation','project_context_cache','technical_assignment_requirement_feed','page_understanding','document_context_build','technical_assignment_first_pass','project_context_retrieval','document_context_retrieval','normative_queries','requirement_search','user_package_search','normative_check','cross_page_consistency','finding_candidate_merge','finding_normative_search','experience_search','finalization'].filter((stage) => ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context) || !['document_context_build','document_context_retrieval','cross_page_consistency'].includes(stage)),\n    limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'D-sources описывают проверяемый PDF и не являются нормативным доказательством.', 'Техническое задание проверяется независимым exhaustive T-first проходом и не является нормативным доказательством.', 'T-guided retrieval используется дополнительно и не управляет сохранением T-first findings.', 'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n  },\n}];"
       },
       "id": "c1b7af80-0faa-4369-aa77-78ef1990636f",
       "name": "Aggregate PDF Result",
@@ -1329,7 +1329,7 @@
       "name": "Gate Collect Understanding Stage",
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const expandedItems = $input.all().map((item) => item.json);\n\nif (!expandedItems.length) {\n  throw new Error('Understanding stage не получил PDF-страницы.');\n}\n\nreturn [{\n  json: {\n    document_id:\n      $('POST /analysis/v2/pdf').first().json.body.document_id,\n    expanded_items: expandedItems,\n    items: expandedItems.map((item) => ({\n      use_document_context: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context),\n      page_number: item.page.page_number,\n      heuristic_page_type: item.page.page_type,\n      extracted_text: item.page.text,\n    })),\n  },\n}];"
+        "jsCode": "const expandedItems = $input.all().map((item) => item.json);\n\nif (!expandedItems.length) {\n  throw new Error('Understanding stage не получил PDF-страницы.');\n}\n\nreturn [{\n  json: {\n    document_id:\n      $('POST /analysis/v2/pdf').first().json.body.document_id,\n    expanded_items: expandedItems,\n    items: expandedItems.map((item) => ({\n      use_document_context: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context),\n      use_equipment_web_search: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_equipment_web_search),\n      page_number: item.page.page_number,\n      heuristic_page_type: item.page.page_type,\n      extracted_text: item.page.text,\n    })),\n  },\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1784,6 +1784,190 @@
         400
       ],
       "notes": "При выключенном контексте документа полностью обходит специализированные D-запросы."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a983ec95-a2cd-42c7-85a7-e86b3d9c338a",
+              "leftValue": "={{ ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_equipment_web_search) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f0e94a9a-8d06-48c3-a22c-9ee95c1c3988",
+      "name": "Use Equipment Search",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/equipment-search/' + $('POST /analysis/v2/pdf').first().json.body.document_id + '/start' }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ identities: $json.identities ?? [], allow_unverified: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.allow_unverified_equipment_sources) }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "278d4773-46e0-45d7-aeda-acff1dc1a057",
+      "name": "Start Equipment Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1160,
+        600
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0e06891d-7713-4f7f-9568-8758a5e791a6",
+              "leftValue": "={{ ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_equipment_web_search) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f1968801-d831-4e12-9c3a-7c8725aa26f9",
+      "name": "Use Equipment Results",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4380,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/equipment-search/' + $('POST /analysis/v2/pdf').first().json.body.document_id + '/wait' }}",
+        "options": {
+          "timeout": 205000
+        }
+      },
+      "id": "dcbe9a68-429e-41f3-a28e-a73fa34113af",
+      "name": "Await Equipment Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4600,
+        920
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdrd-analysis-service:8501/internal/v1/stages/compare-equipment",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ pages: $('Technical Assignment First Pass').all().map((item) => ({ page_number: item.json.expanded?.page?.page_number, page_type: item.json.expanded?.page?.page_type ?? '', facts: item.json.facts ?? {} })), search: $json }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "b5f366a9-94cf-4432-a4a9-903f08017b14",
+      "name": "Compare Equipment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4820,
+        920
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const original = $('Collect Equipment Candidates').first().json.pages;\nconst equipment = $input.first()?.json ?? {};\nconst byPage = equipment.candidates_by_page ?? {};\nconst equipmentCheck = {\n  enabled: true,\n  metrics: equipment.metrics ?? {},\n  diagnostics: Array.isArray(equipment.diagnostics) ? equipment.diagnostics : [],\n  status: String(equipment.status ?? 'incomplete'),\n  inventory: Array.isArray(equipment.inventory) ? equipment.inventory : [],\n  comparisons: Array.isArray(equipment.comparisons) ? equipment.comparisons : [],\n  warnings: Array.isArray(equipment.warnings) ? equipment.warnings : ['Equipment Search не завершился.'],\n};\nreturn original.map((page) => ({\n  json: {\n    ...page,\n    equipment_check: equipmentCheck,\n    findings: [\n      ...(page.findings ?? []),\n      ...(Array.isArray(byPage[String(page.page_number)])\n        ? byPage[String(page.page_number)]\n        : []),\n    ],\n  },\n}));"
+      },
+      "id": "53308c95-8db6-4a3f-9122-5b32cc579c81",
+      "name": "Merge Equipment Candidates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5040,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const pages = $input.all().map((item) => item.json);\nif (!pages.length) throw new Error('Нет страниц для EQ merge.');\nreturn [{ json: { pages } }];"
+      },
+      "id": "23db940e-d3f9-40a3-80aa-90ff9dd89f10",
+      "name": "Collect Equipment Candidates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4160,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return $('Collect Equipment Candidates').first().json.pages.map((page) => ({ json: page }));"
+      },
+      "id": "13a2288c-4426-42cd-a31f-a55c4fd873ee",
+      "name": "Restore Equipment Pages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5040,
+        1020
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const pages = $('Understand Pages Stage').first().json.items ?? [];\nconst groups = new Map();\nfor (const entry of pages) {\n  for (const raw of entry?.result?.facts?.equipment_identities ?? []) {\n    if (!raw?.manufacturer || !raw?.model) continue;\n    const manufacturer = String(raw.manufacturer).trim();\n    const model = String(raw.model).trim();\n    const variant = String(raw.variant ?? '').trim();\n    const key = [manufacturer, model, variant].map((value) => value.toLowerCase()).join('|');\n    const confidence = Number(raw.confidence ?? 0);\n    const resolved = raw.status === 'resolved' && confidence >= 0.75;\n    const properties = (Array.isArray(raw.parameters) ? raw.parameters : [])\n      .map((parameter) => String(parameter?.property_name ?? '').trim())\n      .filter((value) => value.length > 0 && value.length <= 80)\n      .slice(0, 8);\n    const previous = groups.get(key);\n    if (previous) {\n      previous.confidence = Math.min(previous.confidence, confidence);\n      if (!resolved) previous.status = 'needs_review';\n      previous.properties = [...new Set([...previous.properties, ...properties])].slice(0, 8);\n    } else {\n      groups.set(key, {\n        manufacturer, model, variant,\n        status: resolved ? 'resolved' : 'needs_review',\n        confidence,\n        properties: [...new Set(properties)],\n      });\n    }\n  }\n}\nreturn [{ json: { identities: [...groups.values()] } }];"
+      },
+      "id": "d1a595b1-bcf3-4bfd-9a55-4c6bd03c1121",
+      "name": "Build Equipment Search Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        600
+      ]
     }
   ],
   "pinData": {},
@@ -2149,7 +2333,7 @@
             "index": 0
           },
           {
-            "node": "Gate Enrich Findings",
+            "node": "Collect Equipment Candidates",
             "type": "main",
             "index": 0
           }
@@ -2518,7 +2702,7 @@
       "main": [
         [
           {
-            "node": "Use Document Context",
+            "node": "Use Equipment Search",
             "type": "main",
             "index": 0
           }
@@ -2807,6 +2991,119 @@
         [
           {
             "node": "Resolve Project Context Cache",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Equipment Search": {
+      "main": [
+        [
+          {
+            "node": "Build Equipment Search Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Use Document Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Equipment Search": {
+      "main": [
+        [
+          {
+            "node": "Use Document Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Equipment Results": {
+      "main": [
+        [
+          {
+            "node": "Await Equipment Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Restore Equipment Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Await Equipment Search": {
+      "main": [
+        [
+          {
+            "node": "Compare Equipment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare Equipment": {
+      "main": [
+        [
+          {
+            "node": "Merge Equipment Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Equipment Candidates": {
+      "main": [
+        [
+          {
+            "node": "Gate Enrich Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Equipment Candidates": {
+      "main": [
+        [
+          {
+            "node": "Use Equipment Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Equipment Pages": {
+      "main": [
+        [
+          {
+            "node": "Gate Enrich Findings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Equipment Search Inputs": {
+      "main": [
+        [
+          {
+            "node": "Start Equipment Search",
             "type": "main",
             "index": 0
           }

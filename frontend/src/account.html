@@ -60,6 +60,29 @@
         <h2 class="account-card__title" id="historyTitle">История проверок</h2>
         <p class="account-card__description">Ваши сохранённые задания. Открытие результата не запускает анализ повторно.</p>
       </section>
+      <section class="account-card account-card--spaced" id="equipment-sources" data-equipment-sources hidden aria-labelledby="equipmentSourcesTitle">
+        <h2 class="account-card__title" id="equipmentSourcesTitle">Источники документации оборудования</h2>
+        <p class="account-card__description">Доверие применяется к точному домену производителя. Каждое решение сохраняется в истории.</p>
+        <div class="account-actions">
+          <label>Статус <select data-equipment-filter-status><option value="">Все</option><option value="pending">Ожидают</option><option value="trusted">Подтверждены</option><option value="blocked">Заблокированы</option></select></label>
+          <label>Поиск <input type="search" data-equipment-filter-query placeholder="Производитель или домен"></label>
+          <button type="button" data-equipment-filter-apply>Найти</button>
+        </div>
+        <ul class="account-sessions" data-equipment-source-list></ul>
+        <h3>Добавить точный домен</h3>
+        <form data-equipment-source-form>
+          <div class="account-actions">
+            <label>Производитель <input name="manufacturer" list="equipment-manufacturers" required maxlength="200"></label>
+            <datalist id="equipment-manufacturers" data-equipment-manufacturers></datalist>
+            <label>Hostname <input name="hostname" required maxlength="253" placeholder="www.example.com"></label>
+            <label>Статус <select name="status"><option value="pending">Ожидает</option><option value="trusted">Доверенный</option><option value="blocked">Заблокирован</option></select></label>
+            <label><input type="checkbox" name="allow_http"> Разрешить HTTP</label>
+            <label>Причина <input name="reason" required maxlength="1000"></label>
+            <button type="submit">Сохранить</button>
+          </div>
+        </form>
+        <p class="portal-status" data-equipment-source-status role="status" aria-live="polite"></p>
+      </section>
       <section class="account-card account-card--spaced" id="security" aria-labelledby="securityTitle">
         <p class="account-card__overline">Учётная запись</p><h2 class="account-card__title" id="securityTitle">Безопасность и устройства</h2>
         <p class="account-card__description" data-session-summary></p>

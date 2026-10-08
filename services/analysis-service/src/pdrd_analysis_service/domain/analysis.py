@@ -2,7 +2,7 @@
 
 """Модели предметной области визуального анализа."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Any,
     Literal,
@@ -114,6 +114,7 @@ class PageFacts:
     ]
 
     document_facts: tuple[DocumentFact, ...] = ()
+    equipment_identities: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,8 +196,27 @@ class DocumentContextSource:
             raise ValueError("Источник D должен содержать физическую страницу в ID.")
 
 
+@dataclass(frozen=True, slots=True)
+class EquipmentDocumentationSource:
+    """Конкретный snapshot документа производителя для EQ-замечания."""
+
+    source_id: str
+    manufacturer: str
+    model: str
+    variant: str
+    property_name: str
+    value_raw: str
+    unit_raw: str
+    page: int
+    snippet: str
+    document_revision: str
+    sha256: str
+    source_url: str
+    trust_status: str
+
+
 def saved_source_kinds(
-    *, document=(), normative=(), technical=(), user=(), experience=()
+    *, document=(), normative=(), technical=(), user=(), experience=(), equipment=()
 ) -> tuple[str, ...]:
     """Вычисляет типы источников только из сохранённых оснований."""
     return tuple(
@@ -207,6 +227,7 @@ def saved_source_kinds(
             ("T", technical),
             ("U", user),
             ("E", experience),
+            ("EQ", equipment),
         )
         if sources
     )
@@ -386,12 +407,16 @@ class FindingDraft:
     evidence_locations: tuple[dict[str, Any], ...] = ()
     document_context_source_ids: tuple[str, ...] = ()
     document_context_basis_sources: tuple[DocumentContextSource, ...] = ()
+    equipment_documentation_source_ids: tuple[str, ...] = ()
+    equipment_documentation_basis_sources: tuple[EquipmentDocumentationSource, ...] = ()
+    equipment_details: dict[str, Any] = field(default_factory=dict)
 
     @property
     def source_kinds(self) -> tuple[str, ...]:
         """Возвращает происхождение замечания без доверия ответу модели."""
         return saved_source_kinds(
             document=self.document_context_basis_sources,
+            equipment=self.equipment_documentation_basis_sources,
             normative=self.basis_sources,
             technical=self.technical_assignment_basis_sources,
             user=self.user_package_basis_sources,
@@ -446,12 +471,16 @@ class FinalFinding:
     evidence_locations: tuple[dict[str, Any], ...] = ()
     document_context_source_ids: tuple[str, ...] = ()
     document_context_basis_sources: tuple[DocumentContextSource, ...] = ()
+    equipment_documentation_source_ids: tuple[str, ...] = ()
+    equipment_documentation_basis_sources: tuple[EquipmentDocumentationSource, ...] = ()
+    equipment_details: dict[str, Any] = field(default_factory=dict)
 
     @property
     def source_kinds(self) -> tuple[str, ...]:
         """Возвращает происхождение замечания без доверия ответу модели."""
         return saved_source_kinds(
             document=self.document_context_basis_sources,
+            equipment=self.equipment_documentation_basis_sources,
             normative=self.basis_sources,
             technical=self.technical_assignment_basis_sources,
             user=self.user_package_basis_sources,

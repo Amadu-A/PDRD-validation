@@ -50,6 +50,7 @@ class Permission(StrEnum):
     NORMATIVE_CATALOG_READ = "normative.catalog.read"
     NORMATIVE_WRITE = "normative.write"
     NORMATIVE_DELETE = "normative.delete"
+    EQUIPMENT_SOURCES_MANAGE = "equipment_sources.manage"
     EXPERIENCE_CATALOG_READ = "experience.catalog.read"
     EXPERIENCE_CAPTURE = "experience.capture"
     EXPERIENCE_VERSION_CREATE = "experience.version.create"
@@ -157,6 +158,7 @@ _ADMIN_PERMISSIONS = frozenset(
         *_PROFILE_PERMISSIONS,
         *_HEAD_PERMISSIONS,
         Permission.NORMATIVE_DELETE,
+        Permission.EQUIPMENT_SOURCES_MANAGE,
         Permission.EXPERIENCE_VERSION_CREATE,
         Permission.EXPERIENCE_VERSION_APPLY,
         Permission.SYSTEM_PROMPT_MANAGE,

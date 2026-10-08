@@ -116,6 +116,11 @@ def finding_from_json(
             )
             for item in value.get("document_context_basis_sources", [])
         ),
+        equipment_documentation_basis_sources=tuple(
+            dict(item)
+            for item in value.get("equipment_documentation_basis_sources", [])
+        ),
+        equipment_details=value.get("equipment_details"),
         source_kinds=tuple(value.get("source_kinds", [])),
         display_regions=(
             tuple(Rectangle(**box) for box in value["display_regions"])

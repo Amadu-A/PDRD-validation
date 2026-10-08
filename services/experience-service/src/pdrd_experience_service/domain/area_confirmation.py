@@ -139,6 +139,12 @@ def content_signature(
             asdict(item) for item in finding.document_context_basis_sources
         ]
 
+    if finding.equipment_documentation_basis_sources:
+        payload["equipment_documentation_basis_sources"] = [
+            dict(item) for item in finding.equipment_documentation_basis_sources
+        ]
+        payload["equipment_details"] = finding.equipment_details
+
     if finding.display_regions is not None:
         payload["display_regions"] = [
             [float(box.x_min), float(box.y_min), float(box.x_max), float(box.y_max)]

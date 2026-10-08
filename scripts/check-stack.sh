@@ -324,6 +324,9 @@ check_service_state "api-gateway-outbox"
 check_service_state "api-gateway-worker"
 
 check_service_state "document-service"
+check_service_state "searxng"
+check_service_state "equipment-search-service"
+check_migrations_current "equipment-search-service" "identity" "Equipment Search"
 
 check_service_state "knowledge-service"
 check_migrations_current "knowledge-service" "identity" "Knowledge Service"

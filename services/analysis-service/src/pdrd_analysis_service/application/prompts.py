@@ -597,8 +597,9 @@ def build_page_understanding_prompt(
     heuristic_page_type: str,
     extracted_text: str,
     max_facts: int = 12,
+    max_equipment: int = 0,
 ) -> str:
-    """Формирует прежний лёгкий промпт; инструкции D добавляет при положительном лимите."""
+    """Добавляет инструкции D и EQ только при включённых режимах."""
     combined_mode = _combined_mode_instruction(
         extracted_text,
     )
@@ -620,6 +621,28 @@ reference, requirement, table_record, other.
 
 """
         if max_facts > 0
+        else ""
+    )
+
+    equipment_instruction = (
+        f"""Дополнительно найди до {max_equipment} явно обозначенных моделей оборудования.
+Для каждого объекта верни equipment_identities: manufacturer, model, variant,
+article, equipment_type, object_ref, evidence_text, visual_regions,
+confidence, status и параметры проекта в parameters.
+Идентификаторы переписывай дословно. Не угадывай производителя, модель
+или исполнение. При достоверном точном обозначении ставь status=resolved.
+При сомнении ставь status=needs_review и оставляй
+неизвестные поля пустыми. В параметрах указывай property_name, value_raw,
+unit_raw, role (input/output/other), current_type (AC/DC/unknown), mode,
+phase (1-phase/3-phase только если фазность явно указана), configuration,
+condition и дословный evidence_text. Числа, диапазоны, перечисления
+характеристики расцепления (trip_curve), степень защиты (protection_degree)
+и необходимость заземления (requires_earthing) переписывай без домыслов;
+нечисловые значения сохраняй в value_raw с пустой unit_raw.
+Не делай вывод о нарушении.
+
+"""
+        if max_equipment > 0
         else ""
     )
 
@@ -653,7 +676,7 @@ reference, requirement, table_record, other.
 - видимые связи;
 - важные марки, теги и обозначения.
 
-{document_instruction}Затем сформулируй до 6 НЕЙТРАЛЬНЫХ тем,
+{document_instruction}{equipment_instruction}Затем сформулируй до 6 НЕЙТРАЛЬНЫХ тем,
 по которым следует подобрать нормативные требования.
 
 Не утверждай наличие нарушения.

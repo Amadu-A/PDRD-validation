@@ -244,6 +244,18 @@ def completed_analysis_from_visualization(
                     visual_regions=_document_regions(raw),
                 )
             )
+        equipment_sources = []
+        for raw in finding.get("equipment_documentation_basis_sources", []):
+            if not isinstance(raw, dict):
+                continue
+            if not str(raw.get("source_id") or "").startswith("EQ-"):
+                raise ReviewError("Неверная идентичность источника EQ.")
+            if not isinstance(raw.get("page"), int) or raw["page"] < 1:
+                raise ReviewError("Неверная страница документации EQ.")
+            equipment_sources.append(dict(raw))
+        equipment_details = finding.get("equipment_details")
+        if equipment_details is not None and not isinstance(equipment_details, dict):
+            raise ReviewError("Некорректные детали сравнения EQ.")
         kinds = tuple(
             kind
             for kind, arrays in (
@@ -252,6 +264,7 @@ def completed_analysis_from_visualization(
                 ("T", finding.get("technical_assignment_basis_sources", [])),
                 ("U", finding.get("user_package_basis_sources", [])),
                 ("E", finding.get("experience_sources", [])),
+                ("EQ", equipment_sources),
             )
             if arrays
         )
@@ -264,6 +277,10 @@ def completed_analysis_from_visualization(
                 normative_basis=normative_basis,
                 evidence_locations=tuple(evidence),
                 document_context_basis_sources=tuple(document_sources),
+                equipment_documentation_basis_sources=tuple(equipment_sources),
+                equipment_details=dict(equipment_details)
+                if equipment_details
+                else None,
                 source_kinds=kinds,
                 proposed_regions=(() if key in ambiguous else locations.get(key, ())),
             )

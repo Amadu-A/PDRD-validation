@@ -9,6 +9,7 @@ const capabilities = [
   ["review.findings.decide", "Принятие и отклонение замечаний"],
   ["review.approve", "Утверждение Human Review"],
   ["normative.write", "Изменение нормативной базы"],
+  ["equipment_sources.manage", "Управление источниками оборудования"],
   ["experience.capture", "Сохранение утверждённого Review в Experience"],
   ["system_prompt.manage", "Системный промпт"],
   ["admin.access", "Администрирование PDRD"],

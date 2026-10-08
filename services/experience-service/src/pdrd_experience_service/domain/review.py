@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
 from pdrd_experience_service.domain.rejection_feedback import validate_feedback
@@ -175,6 +176,8 @@ class OriginalFinding:
     proposed_regions: tuple[ProposedRegion, ...] = ()
     evidence_locations: tuple[ReviewEvidenceLocation, ...] = ()
     document_context_basis_sources: tuple[ReviewDocumentSource, ...] = ()
+    equipment_documentation_basis_sources: tuple[dict[str, Any], ...] = ()
+    equipment_details: dict[str, Any] | None = None
     source_kinds: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -223,6 +226,8 @@ class ReviewedFinding:
     comment: str = ""
     evidence_locations: tuple[ReviewEvidenceLocation, ...] = ()
     document_context_basis_sources: tuple[ReviewDocumentSource, ...] = ()
+    equipment_documentation_basis_sources: tuple[dict[str, Any], ...] = ()
+    equipment_details: dict[str, Any] | None = None
     source_kinds: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -358,6 +363,8 @@ class ReviewSession:
                 proposed_regions=item.proposed_regions,
                 evidence_locations=item.evidence_locations,
                 document_context_basis_sources=item.document_context_basis_sources,
+                equipment_documentation_basis_sources=item.equipment_documentation_basis_sources,
+                equipment_details=item.equipment_details,
                 source_kinds=item.source_kinds,
             )
             for item in originals

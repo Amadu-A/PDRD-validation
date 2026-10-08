@@ -5,7 +5,7 @@
 import base64
 import binascii
 from dataclasses import asdict
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import (
     APIRouter,
@@ -13,7 +13,11 @@ from fastapi import (
     HTTPException,
     status,
 )
+from pydantic import BaseModel, Field
 
+from pdrd_analysis_service.application.equipment_pipeline import (
+    compare_equipment_stage,
+)
 from pdrd_analysis_service.application.ports.vision_model import (
     VisionModelError,
 )
@@ -37,6 +41,7 @@ from pdrd_analysis_service.transport.http.schemas import (
     CheckNormsRequest,
     CheckNormsResponse,
     DocumentContextSourcePayload,
+    EquipmentDocumentationSourcePayload,
     ExperienceSourcePayload,
     FinalFindingPayload,
     FinalizeRequest,
@@ -100,6 +105,8 @@ def _decode_image(
 
 def _page_facts_payload(
     facts: PageFacts,
+    *,
+    include_equipment: bool = False,
 ) -> PageFactsPayload:
     """Преобразует PageFacts в HTTP payload."""
     return PageFactsPayload(
@@ -119,6 +126,9 @@ def _page_facts_payload(
             facts.normative_queries,
         ),
         document_facts=[asdict(fact) for fact in facts.document_facts],
+        equipment_identities=(
+            list(facts.equipment_identities) if include_equipment else None
+        ),
     )
 
 
@@ -281,6 +291,14 @@ def _finding_draft_payload(
             DocumentContextSourcePayload.model_validate(asdict(source))
             for source in finding.document_context_basis_sources
         ],
+        equipment_documentation_source_ids=list(
+            finding.equipment_documentation_source_ids,
+        ),
+        equipment_documentation_basis_sources=[
+            EquipmentDocumentationSourcePayload.model_validate(asdict(source))
+            for source in finding.equipment_documentation_basis_sources
+        ],
+        equipment_details=dict(finding.equipment_details),
     )
 
 
@@ -343,6 +361,14 @@ def _final_finding_payload(
             DocumentContextSourcePayload.model_validate(asdict(source))
             for source in finding.document_context_basis_sources
         ],
+        equipment_documentation_source_ids=list(
+            finding.equipment_documentation_source_ids,
+        ),
+        equipment_documentation_basis_sources=[
+            EquipmentDocumentationSourcePayload.model_validate(asdict(source))
+            for source in finding.equipment_documentation_basis_sources
+        ],
+        equipment_details=dict(finding.equipment_details),
     )
 
 
@@ -405,6 +431,7 @@ async def health_ready(
 @router.post(
     "/internal/v1/pages/understand",
     response_model=UnderstandPageResponse,
+    response_model_exclude_none=True,
 )
 async def understand_page(
     request: UnderstandPageRequest,
@@ -424,6 +451,7 @@ async def understand_page(
     try:
         facts, metrics = await container.understand_page.execute(
             use_document_context=request.use_document_context,
+            use_equipment_web_search=request.use_equipment_web_search,
             page_number=request.page_number,
             heuristic_page_type=(request.heuristic_page_type),
             extracted_text=(request.extracted_text),
@@ -441,6 +469,7 @@ async def understand_page(
     return UnderstandPageResponse(
         facts=_page_facts_payload(
             facts,
+            include_equipment=request.use_equipment_web_search,
         ),
         metrics=metrics.as_dict(),
     )
@@ -659,3 +688,52 @@ async def finalize_findings(
         ],
         metrics=metrics,
     )
+
+
+@router.post("/internal/v1/stages/compare-equipment")
+async def compare_equipment_http(payload: dict[str, Any]) -> dict[str, Any]:
+    """Готовит EQ-кандидатов из сохранённых фактов производителя."""
+    pages = payload.get("pages", [])
+    search = payload.get("search", {})
+    if not isinstance(pages, list) or not isinstance(search, dict):
+        raise HTTPException(422, "Некорректный EQ payload.")
+    return compare_equipment_stage(pages, search)
+
+
+class EquipmentVisionRequest(BaseModel):
+    """Одна ограниченная страница PDF производителя для адресного VLM."""
+
+    manufacturer: str = Field(min_length=1, max_length=200)
+    model: str = Field(min_length=1, max_length=200)
+    variant: str = Field(default="", max_length=200)
+    properties: tuple[str, ...] = Field(default_factory=tuple, max_length=8)
+    page: int = Field(ge=1, le=40)
+    image_base64: str = Field(max_length=27_000_000)
+
+
+@router.post("/internal/v1/stages/equipment-document-vision")
+async def equipment_document_vision(
+    request: EquipmentVisionRequest,
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+) -> dict[str, Any]:
+    """Проверяет точную маркировку и читает не более восьми свойств скана."""
+    image = _decode_image(
+        encoded=request.image_base64,
+        max_bytes=container.settings.pipeline.max_image_bytes,
+    )
+    if not image.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise HTTPException(422, "Ожидается PNG страницы документации.")
+    use_case = container.extract_equipment_vision
+    if use_case is None:
+        raise HTTPException(503, "EQ VLM не настроена.")
+    try:
+        return await use_case.execute(
+            manufacturer=request.manufacturer,
+            model=request.model,
+            variant=request.variant,
+            properties=request.properties,
+            page=request.page,
+            image_bytes=image,
+        )
+    except VisionModelError as error:
+        raise HTTPException(503, "Адресная VLM-проверка недоступна.") from error

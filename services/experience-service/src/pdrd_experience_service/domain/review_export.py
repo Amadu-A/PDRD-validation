@@ -71,6 +71,17 @@ def export_manifest(review: ReviewSession, areas: tuple[AreaStatus, ...]) -> dic
                 "document_context_basis_sources": [
                     asdict(source) for source in finding.document_context_basis_sources
                 ],
+                **(
+                    {
+                        "equipment_documentation_basis_sources": [
+                            dict(source)
+                            for source in finding.equipment_documentation_basis_sources
+                        ],
+                        "equipment_details": finding.equipment_details,
+                    }
+                    if finding.equipment_documentation_basis_sources
+                    else {}
+                ),
                 "source_kinds": list(finding.source_kinds),
                 "callout_box": asdict(finding.callout_box)
                 if finding.callout_box

@@ -35,6 +35,7 @@ class ReviewedPdfFinding:
     callout_box: AnalysisBoundingBox | None
     evidence_locations: tuple[ReviewedPdfEvidenceLocation, ...] = ()
     document_context_basis_sources: tuple[str, ...] = ()
+    equipment_documentation_basis_sources: tuple[str, ...] = ()
     source_kinds: tuple[str, ...] = ()
 
 

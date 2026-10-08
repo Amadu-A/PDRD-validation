@@ -499,6 +499,11 @@ class FinalizeFindings:
             for finding in findings
             if _is_protected_duplicate_review(finding)
             or finding.category == "document_consistency"
+            or (
+                finding.category == "equipment"
+                and finding.status == "confirmed"
+                and finding.equipment_documentation_basis_sources
+            )
         )
         eligible_experience = {
             finding_id: tuple(
@@ -536,6 +541,11 @@ class FinalizeFindings:
                 (
                     not _is_protected_duplicate_review(finding)
                     and finding.category != "document_consistency"
+                    and not (
+                        finding.category == "equipment"
+                        and finding.status == "confirmed"
+                        and finding.equipment_documentation_basis_sources
+                    )
                 )
                 or normalized_candidate_groups.get(finding.finding_id)
             )
@@ -632,6 +642,11 @@ class FinalizeFindings:
             for finding in findings
             if _is_protected_duplicate_review(finding)
             or finding.category == "document_consistency"
+            or (
+                finding.category == "equipment"
+                and finding.status == "confirmed"
+                and finding.equipment_documentation_basis_sources
+            )
             or finding.status == "hypothesis"
             or finding.finding_id in ordinary_by_id
         ]
@@ -1141,6 +1156,9 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
             evidence_locations=finding.evidence_locations,
             document_context_source_ids=finding.document_context_source_ids,
             document_context_basis_sources=finding.document_context_basis_sources,
+            equipment_documentation_source_ids=finding.equipment_documentation_source_ids,
+            equipment_documentation_basis_sources=finding.equipment_documentation_basis_sources,
+            equipment_details=finding.equipment_details,
         )
 
     @staticmethod
@@ -1289,4 +1307,7 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
             evidence_locations=finding.evidence_locations,
             document_context_source_ids=finding.document_context_source_ids,
             document_context_basis_sources=finding.document_context_basis_sources,
+            equipment_documentation_source_ids=finding.equipment_documentation_source_ids,
+            equipment_documentation_basis_sources=finding.equipment_documentation_basis_sources,
+            equipment_details=finding.equipment_details,
         )

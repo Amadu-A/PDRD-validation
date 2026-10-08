@@ -207,6 +207,8 @@ const analysisForm = createAnalysisForm({
   ),
 
   documentContextInput: requireElement("[data-document-context-input]"),
+  equipmentSearchInput: requireElement("[data-equipment-search-input]"),
+  unverifiedSourcesInput: requireElement("[data-unverified-sources-input]"),
 
   noteStartPageInput: requireElement(
     "[data-note-start-input]",

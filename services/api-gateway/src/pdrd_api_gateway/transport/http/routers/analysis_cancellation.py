@@ -2,9 +2,11 @@
 
 """HTTP API отмены analysis jobs."""
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
+import httpx
 from fastapi import (
     APIRouter,
     Depends,
@@ -27,6 +29,7 @@ from pdrd_api_gateway.core.container import (
 from pdrd_api_gateway.domain.analysis_job import (
     AnalysisJobStatus,
 )
+from pdrd_api_gateway.infrastructure.equipment_search import EquipmentSearchClient
 from pdrd_api_gateway.transport.http.dependencies import (
     get_container,
 )
@@ -102,6 +105,17 @@ async def cancel_analysis(
                 error,
             ),
         ) from error
+
+    if container.settings.equipment_search.enabled and job.document_id is not None:
+        try:
+            await EquipmentSearchClient(container.settings.equipment_search).cancel(
+                job.document_id,
+            )
+        except (httpx.HTTPError, RuntimeError):
+            logging.getLogger(__name__).exception(
+                "cancel_equipment_search_failed job_id=%s",
+                job_id,
+            )
 
     return AnalysisCancellationResponse(
         job_id=job.id,

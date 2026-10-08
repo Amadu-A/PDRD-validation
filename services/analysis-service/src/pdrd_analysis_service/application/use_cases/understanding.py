@@ -40,12 +40,14 @@ class UnderstandPage:
         extracted_text: str,
         image_bytes: bytes,
         use_document_context: bool = True,
+        use_equipment_web_search: bool = False,
     ) -> tuple[
         PageFacts,
         GenerationMetrics,
     ]:
         """Извлекает сведения страницы; при выключенном D использует лёгкие промпт и схему."""
         max_facts = self.max_facts_per_page if use_document_context else 0
+        max_equipment = 8 if use_equipment_web_search else 0
         result = await self.vision_model.generate_json(
             prompt=(
                 build_page_understanding_prompt(
@@ -53,9 +55,10 @@ class UnderstandPage:
                     heuristic_page_type=(heuristic_page_type),
                     extracted_text=(extracted_text),
                     max_facts=max_facts,
+                    max_equipment=max_equipment,
                 )
             ),
-            schema=(build_page_facts_schema(max_facts)),
+            schema=(build_page_facts_schema(max_facts, max_equipment)),
             num_predict=self.num_predict,
             seed=100,
             stage=(f"page_understanding:{page_number}"),
@@ -109,6 +112,11 @@ class UnderstandPage:
                     "normative_queries",
                 ),
                 limit=6,
+            ),
+            equipment_identities=tuple(
+                raw
+                for raw in payload.get("equipment_identities", [])[:max_equipment]
+                if isinstance(raw, dict)
             ),
             document_facts=tuple(
                 fact

@@ -35,6 +35,16 @@ def reviewed_payload(manifest: ReviewedPdfManifest):
                 "Контекст проверяемого PDF",
                 "\n".join(row.document_context_basis_sources) or "Не указано.",
             ),
+            *(
+                (
+                    AnalysisPdfReportField(
+                        "Документация производителя [EQ]",
+                        "\n".join(row.equipment_documentation_basis_sources),
+                    ),
+                )
+                if row.equipment_documentation_basis_sources
+                else ()
+            ),
             AnalysisPdfReportField("Тег", row.experience_tag),
         )
         title = f"№{row.number} · {page_label}"

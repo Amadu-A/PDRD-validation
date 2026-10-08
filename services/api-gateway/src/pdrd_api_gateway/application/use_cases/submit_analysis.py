@@ -60,6 +60,8 @@ class SubmitAnalysis:
         pages: str | None,
         use_explanatory_note: bool = False,
         use_document_context: bool = False,
+        use_equipment_web_search: bool = False,
+        allow_unverified_equipment_sources: bool = False,
         note_start_page: str | int | None = None,
         note_end_page: str | int | None = None,
         normative_section_id: UUID | None = None,
@@ -154,6 +156,8 @@ class SubmitAnalysis:
             cad_file_name=cad_file_name,
             use_explanatory_note=use_explanatory_note,
             use_document_context=use_document_context,
+            use_equipment_web_search=use_equipment_web_search,
+            allow_unverified_equipment_sources=allow_unverified_equipment_sources,
             note_start_page=note_start_page,
             note_end_page=note_end_page,
         )

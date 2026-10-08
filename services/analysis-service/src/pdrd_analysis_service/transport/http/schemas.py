@@ -14,6 +14,7 @@ from pydantic import (
 
 from pdrd_analysis_service.domain.analysis import (
     DocumentContextSource,
+    EquipmentDocumentationSource,
     ExperienceSource,
     FindingDraft,
     FindingVisualRegion,
@@ -47,6 +48,7 @@ class PageFactsPayload(BaseModel):
 
     normative_queries: list[str]
     document_facts: list[dict[str, Any]] = Field(default_factory=list)
+    equipment_identities: list[dict[str, Any]] | None = None
 
     def to_domain(
         self,
@@ -68,6 +70,7 @@ class PageFactsPayload(BaseModel):
             normative_queries=tuple(
                 self.normative_queries,
             ),
+            equipment_identities=tuple(self.equipment_identities or ()),
             document_facts=tuple(
                 fact
                 for raw in self.document_facts
@@ -372,6 +375,29 @@ class DocumentContextSourcePayload(BaseModel):
         )
 
 
+class EquipmentDocumentationSourcePayload(BaseModel):
+    """Доказательство EQ с неизменяемой версией документа производителя."""
+
+    model_config = ConfigDict(extra="forbid")
+    source_id: str
+    manufacturer: str
+    model: str
+    variant: str = ""
+    property_name: str
+    value_raw: str
+    unit_raw: str
+    page: int = Field(ge=1)
+    snippet: str
+    document_revision: str = ""
+    sha256: str
+    source_url: str
+    trust_status: str
+
+    def to_domain(self) -> EquipmentDocumentationSource:
+        """Преобразует проверенный EQ snapshot в доменную модель."""
+        return EquipmentDocumentationSource(**self.model_dump())
+
+
 class FindingProvenancePayload(BaseModel):
     """Серверное происхождение замечания; входной список типов игнорируется."""
 
@@ -379,6 +405,11 @@ class FindingProvenancePayload(BaseModel):
     document_context_basis_sources: list[DocumentContextSourcePayload] = Field(
         default_factory=list, max_length=2400
     )
+    equipment_documentation_source_ids: list[str] = Field(default_factory=list)
+    equipment_documentation_basis_sources: list[EquipmentDocumentationSourcePayload] = (
+        Field(default_factory=list, max_length=100)
+    )
+    equipment_details: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
@@ -396,6 +427,12 @@ class FindingProvenancePayload(BaseModel):
                 source.source_id for source in self.document_context_basis_sources
             )
         )
+        self.equipment_documentation_source_ids = list(
+            dict.fromkeys(
+                source.source_id
+                for source in self.equipment_documentation_basis_sources
+            )
+        )
         return self
 
     @computed_field
@@ -405,6 +442,7 @@ class FindingProvenancePayload(BaseModel):
         return list(
             saved_source_kinds(
                 document=self.document_context_basis_sources,
+                equipment=self.equipment_documentation_basis_sources,
                 normative=getattr(self, "basis_sources", ()),
                 technical=getattr(self, "technical_assignment_basis_sources", ()),
                 user=getattr(self, "user_package_basis_sources", ()),
@@ -509,6 +547,15 @@ class FindingDraftPayload(FindingProvenancePayload):
             document_context_basis_sources=tuple(
                 source.to_domain() for source in self.document_context_basis_sources
             ),
+            equipment_documentation_source_ids=tuple(
+                source.source_id
+                for source in self.equipment_documentation_basis_sources
+            ),
+            equipment_documentation_basis_sources=tuple(
+                source.to_domain()
+                for source in self.equipment_documentation_basis_sources
+            ),
+            equipment_details=dict(self.equipment_details),
         )
 
 
@@ -525,6 +572,7 @@ class UnderstandPageRequest(BaseModel):
 
     heuristic_page_type: str
     use_document_context: bool = True
+    use_equipment_web_search: bool = False
     extracted_text: str
 
     image_base64: str = Field(

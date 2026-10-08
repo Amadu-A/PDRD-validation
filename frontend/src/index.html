@@ -717,6 +717,24 @@
                 Учитывать контекст всего проекта (Увеличивает длительность анализа в ~2,5 раза)
               </span>
             </label>
+            <label class="analysis-form__toggle">
+              <input class="analysis-form__toggle-control" data-equipment-search-input
+                type="checkbox" name="use_equipment_web_search">
+              <span class="analysis-form__toggle-label">
+                Искать документацию на оборудование в интернете
+              </span>
+            </label>
+            <label class="analysis-form__toggle">
+              <input class="analysis-form__toggle-control" data-unverified-sources-input
+                type="checkbox" name="allow_unverified_equipment_sources" disabled>
+              <span class="analysis-form__toggle-label">
+                Разрешить неподтверждённые источники
+              </span>
+            </label>
+            <p class="analysis-form__hint">
+              Неподтверждённые технические данные могут быть ошибочными.
+              Разрешение действует только для текущего задания.
+            </p>
             <p class="analysis-form__hint">
               В режиме PDF-only сопоставляются страницы проверяемого PDF. По умолчанию выключено.
             </p>

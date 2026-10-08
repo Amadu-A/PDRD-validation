@@ -35,8 +35,12 @@ def _run_code(code: str, *, current: dict, parent: dict) -> dict:
         capture_output=True,
         text=True,
         encoding="utf-8",
-        check=True,
+        check=False,
     )
+    if result.returncode:
+        raise RuntimeError(
+            f"Node sandbox завершился с кодом {result.returncode}: {result.stderr}"
+        )
     return json.loads(result.stdout)
 
 

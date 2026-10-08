@@ -1,0 +1,16 @@
+# ops/searxng/settings.yml
+# Приватный метапоиск только для Equipment Search Service.
+
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "PDRD Equipment Search"
+
+search:
+  formats:
+    - json
+
+server:
+  limiter: false
+  image_proxy: false

@@ -675,6 +675,7 @@ class GetAnalysisAnnotatedPdf:
                 ("T", "technical_assignment_basis_sources"),
                 ("U", "user_package_basis_sources"),
                 ("E", "experience_sources"),
+                ("EQ", "equipment_documentation_basis_sources"),
             )
             if finding.get(key)
         ]
@@ -769,6 +770,31 @@ class GetAnalysisAnnotatedPdf:
             ),
         )
 
+        eq_sources = finding.get("equipment_documentation_basis_sources", [])
+        cls._append_field(
+            fields,
+            "Документация производителя [EQ]",
+            "\n".join(
+                f"{source.get('manufacturer', '')} {source.get('model', '')}, "
+                f"ревизия {source.get('document_revision', '')}, "
+                f"стр. {source.get('page', '')}: "
+                f"{source.get('snippet', '')} "
+                f"[{source.get('source_url', '')}]"
+                for source in eq_sources
+                if isinstance(source, dict)
+            ),
+        )
+        details = finding.get("equipment_details") or {}
+        if isinstance(details, dict) and eq_sources:
+            cls._append_field(
+                fields,
+                "Сравнение оборудования",
+                f"{details.get('property_name', '')}: "
+                f"проект {details.get('project_value', '')} "
+                f"{details.get('project_unit', '')}; "
+                f"производитель {details.get('manufacturer_value', '')} "
+                f"{details.get('manufacturer_unit', '')}.",
+            )
         cls._append_field(
             fields,
             "Нормативное основание",

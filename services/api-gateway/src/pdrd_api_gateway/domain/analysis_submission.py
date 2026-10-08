@@ -36,6 +36,8 @@ class AnalysisSubmission:
     note_start_page: int | None
     note_end_page: int | None
     use_document_context: bool = False
+    use_equipment_web_search: bool = False
+    allow_unverified_equipment_sources: bool = False
 
     @classmethod
     def create(
@@ -48,6 +50,8 @@ class AnalysisSubmission:
         cad_file_name: str | None,
         use_explanatory_note: bool = False,
         use_document_context: bool = False,
+        use_equipment_web_search: bool = False,
+        allow_unverified_equipment_sources: bool = False,
         note_start_page: str | int | None = None,
         note_end_page: str | int | None = None,
     ) -> "AnalysisSubmission":
@@ -78,6 +82,16 @@ class AnalysisSubmission:
                 "Контекст всего проекта доступен в режиме PDF-only."
             )
 
+        if use_equipment_web_search and source_mode is not AnalysisSourceMode.PDF_ONLY:
+            raise InvalidAnalysisSubmissionError(
+                "Проверка оборудования доступна только в режиме PDF-only."
+            )
+
+        if allow_unverified_equipment_sources and not use_equipment_web_search:
+            raise InvalidAnalysisSubmissionError(
+                "Неподтверждённые источники доступны только при проверке оборудования."
+            )
+
         return cls(
             document_id=uuid4(),
             source_mode=source_mode,
@@ -86,6 +100,8 @@ class AnalysisSubmission:
             cad_file_name=(cad_file_name if cad_present else None),
             use_explanatory_note=normalized_use_note,
             use_document_context=use_document_context,
+            use_equipment_web_search=use_equipment_web_search,
+            allow_unverified_equipment_sources=allow_unverified_equipment_sources,
             note_start_page=normalized_note_start,
             note_end_page=normalized_note_end,
         )

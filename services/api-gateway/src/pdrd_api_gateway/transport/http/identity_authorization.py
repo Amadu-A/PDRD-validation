@@ -39,6 +39,9 @@ def required_permission(
     if len(segments) < 3 or segments[:2] != ["api", "v1"]:
         return None
 
+    if segments[2] == "equipment-sources":
+        return ("equipment_sources.manage",)
+
     if segments[2] == "normative":
         if "technical-assignments" in segments:
             return None

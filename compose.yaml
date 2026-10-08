@@ -119,6 +119,75 @@ services:
     networks:
       - app-net
 
+  searxng:
+    image: searxng/searxng:${PDRD_SEARXNG_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${PDRD_EQUIPMENT_INTERNAL_KEY:?PDRD_EQUIPMENT_INTERNAL_KEY must be set in .env}
+      SEARXNG_BIND_ADDRESS: 0.0.0.0
+      SEARXNG_PORT: 8080
+    volumes:
+      - ./ops/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    logging: *default-logging
+    networks: [app-net]
+
+  equipment-search-migrate:
+    build:
+      context: ./services/equipment-search-service
+      target: runtime
+    restart: "no"
+    env_file: *app-env-files
+    environment: &equipment-search-environment
+      EQUIPMENT_SEARCH_SERVICE_DATABASE__HOST: postgres
+      EQUIPMENT_SEARCH_SERVICE_DATABASE__PORT: 5432
+      EQUIPMENT_SEARCH_SERVICE_DATABASE__NAME: ${PDRD_POSTGRES_DB:-pdrd}
+      EQUIPMENT_SEARCH_SERVICE_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
+      EQUIPMENT_SEARCH_SERVICE_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
+      EQUIPMENT_SEARCH_SERVICE_INTERNAL_KEY: ${PDRD_EQUIPMENT_INTERNAL_KEY:?PDRD_EQUIPMENT_INTERNAL_KEY must be set in .env}
+    command: ["python", "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+    networks: [app-net]
+
+  equipment-search-service:
+    build:
+      context: ./services/equipment-search-service
+      target: runtime
+    restart: unless-stopped
+    env_file: *app-env-files
+    environment: *equipment-search-environment
+    volumes:
+      - equipment_documents:/data/equipment-documents
+    depends_on:
+      equipment-search-migrate:
+        condition: service_completed_successfully
+      document-service:
+        condition: service_healthy
+      searxng:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8601/health/ready', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *default-logging
+    networks: [app-net]
+
+  equipment-search-service-tests:
+    build:
+      context: ./services/equipment-search-service
+      target: test
+    profiles: [test]
+    env_file: *app-env-files
+    environment: *equipment-search-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [app-net]
+
   quality-tests:
     build:
       context: .
@@ -138,6 +207,9 @@ services:
 
     environment:
       <<: *api-gateway-environment
+      API_GATEWAY_EQUIPMENT_SEARCH__ENABLED: "true"
+      API_GATEWAY_EQUIPMENT_SEARCH__BASE_URL: http://equipment-search-service:8601
+      API_GATEWAY_EQUIPMENT_SEARCH__INTERNAL_KEY: ${PDRD_EQUIPMENT_INTERNAL_KEY:?PDRD_EQUIPMENT_INTERNAL_KEY must be set in .env}
       API_GATEWAY_IDENTITY_PROXY__ENABLED: ${API_GATEWAY_IDENTITY_PROXY__ENABLED:-false}
       API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED: ${API_GATEWAY_IDENTITY_PROXY__AUTHORIZATION_ENABLED:-false}
       API_GATEWAY_IDENTITY_PROXY__AUTH_INTERNAL_KEY: ${AUTH_SERVICE_HTTP__INTERNAL_KEY:-}
@@ -884,6 +956,7 @@ volumes:
   qdrant_data:
   analysis_artifacts:
   analysis_vlm_cache:
+  equipment_documents:
   normative_documents:
   technical_assignment_documents:
 

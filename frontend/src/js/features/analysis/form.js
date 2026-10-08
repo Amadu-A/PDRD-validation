@@ -33,6 +33,8 @@ export function createAnalysisForm({
   pagesHint,
   useExplanatoryNoteInput,
   documentContextInput = null,
+  equipmentSearchInput = null,
+  unverifiedSourcesInput = null,
   noteStartPageInput,
   noteEndPageInput,
   getNormativeSelection = () => null,
@@ -280,6 +282,18 @@ export function createAnalysisForm({
       const documentAvailable = getMode() === "pdf_only";
       documentContextInput.disabled = !documentAvailable;
       if (!documentAvailable) documentContextInput.checked = false;
+    }
+
+    if (equipmentSearchInput) {
+      const equipmentAvailable = getMode() === "pdf_only";
+      equipmentSearchInput.disabled = !equipmentAvailable;
+      if (!equipmentAvailable) equipmentSearchInput.checked = false;
+    }
+
+    if (unverifiedSourcesInput) {
+      const allowUnverified = Boolean(equipmentSearchInput?.checked && !equipmentSearchInput.disabled);
+      unverifiedSourcesInput.disabled = !allowUnverified;
+      if (!allowUnverified) unverifiedSourcesInput.checked = false;
     }
 
     const enabled = (
@@ -676,6 +690,9 @@ export function createAnalysisForm({
   function toFormData() {
     const body = new FormData();
     body.append("use_document_context", String(Boolean(documentContextInput?.checked && !documentContextInput.disabled && getMode() === "pdf_only")));
+    const equipmentEnabled = Boolean(equipmentSearchInput?.checked && !equipmentSearchInput.disabled && getMode() === "pdf_only");
+    body.append("use_equipment_web_search", String(equipmentEnabled));
+    body.append("allow_unverified_equipment_sources", String(Boolean(equipmentEnabled && unverifiedSourcesInput?.checked && !unverifiedSourcesInput.disabled)));
 
     const pdf = pdfInput.files[0];
 
@@ -1039,6 +1056,8 @@ export function createAnalysisForm({
       },
     );
 
+    equipmentSearchInput?.addEventListener("change", syncExplanatoryNote);
+
     useExplanatoryNoteInput.addEventListener(
       "change",
       () => {
@@ -1086,7 +1105,12 @@ export function createAnalysisForm({
   }
 
 
+  function resetUnverifiedSources() {
+    if (unverifiedSourcesInput) unverifiedSourcesInput.checked = false;
+  }
+
   return {
+    resetUnverifiedSources,
     applyProjectContextPreflight,
     bind,
     getMode,

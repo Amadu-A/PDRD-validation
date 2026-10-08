@@ -1,5 +1,5 @@
 # ops/check-quality.sh
-# Общая проверка и пять изолированных интеграционных наборов Linux.
+# Общая проверка и шесть изолированных интеграционных наборов Linux.
 # Запуск: bash ops/check-quality.sh. После успеха: bash scripts/up.sh.
 
 set -euo pipefail
@@ -39,15 +39,15 @@ trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-printf '\n[%s/6] %s\n' "${stage_number}" "${current_stage}"
+printf '\n[%s/7] %s\n' "${stage_number}" "${current_stage}"
 git diff --check
 docker compose --profile test run --rm --no-deps --build quality-tests
 
-for suite in gateway knowledge experience user auth; do
+for suite in gateway knowledge experience user auth equipment; do
     stage_number=$((stage_number + 1))
     current_stage="Интеграционные тесты ${suite}"
     active_suite="${suite}"
-    printf '\n[%s/6] %s\n' "${stage_number}" "${current_stage}"
+    printf '\n[%s/7] %s\n' "${stage_number}" "${current_stage}"
     compose_suite "${suite}" up --build --abort-on-container-exit \
         --exit-code-from "${suite}-test-runner"
     compose_suite "${suite}" down --remove-orphans
