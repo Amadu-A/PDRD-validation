@@ -25,9 +25,7 @@ def test_document_context_is_built_once_and_used_before_page_check() -> None:
     workflow = _workflow()
     names = {node["name"] for node in workflow["nodes"]}
     assert len(names) == len(workflow["nodes"])
-    assert _next(workflow, "Understand Pages Stage") == [
-        "Progress Build Document Context"
-    ]
+    assert _next(workflow, "Understand Pages Stage") == ["Use Document Context"]
     assert _next(workflow, "Create Document Context") == ["Understand Page"]
     assert _next(workflow, "Search Document Context") == [
         "Gate Collect Page Document Context"
@@ -51,7 +49,7 @@ def test_cross_page_stage_is_once_per_document_and_before_finalization() -> None
         if node["name"] == "Check Cross-Page Consistency"
     )
     assert "$('Understand Page').all()" in check["parameters"]["body"]
-    assert _next(workflow, "Check Norms") == ["Progress Cross-Page Consistency"]
+    assert _next(workflow, "Check Norms") == ["Use Cross-Page Consistency"]
     assert _next(workflow, "Check Cross-Page Consistency") == [
         "Merge Cross-Page Checks"
     ]
@@ -64,7 +62,7 @@ def test_cross_page_stage_is_once_per_document_and_before_finalization() -> None
 
 
 def test_document_switch_controls_all_d_stages_and_single_merge():
-    """Workflow передаёт выбор пользователя в каждый затратный D-этап."""
+    """Оркестратор передаёт выбор пользователя в каждый затратный D-этап."""
     nodes = {node["name"]: node for node in _workflow()["nodes"]}
     for name in (
         "Create Document Context",
@@ -97,3 +95,43 @@ def test_http_expressions_do_not_spread_current_item_proxy():
                 f"{path.name}: {node['name']} напрямую разворачивает $json; "
                 "n8n может отправить запрос без тела."
             )
+
+
+def test_fast_mode_bypasses_specialized_http_and_keeps_shared_outputs():
+    """Ветви без D не выполняют специальные HTTP и сходятся перед общими потребителями."""
+    workflow = _workflow()
+    nodes = {node["name"]: node for node in workflow["nodes"]}
+    branches = {
+        "Use Document Context": ("Progress Build Document Context", "Understand Page"),
+        "Retrieve Document Context": (
+            "Search Document Context",
+            "Empty Page Document Context",
+        ),
+        "Use Cross-Page Consistency": (
+            "Progress Cross-Page Consistency",
+            "Merge Cross-Page Checks",
+        ),
+    }
+    for name, (enabled, disabled) in branches.items():
+        node = nodes[name]
+        assert node["type"] == "n8n-nodes-base.if"
+        condition = node["parameters"]["conditions"]["conditions"][0]
+        assert "use_document_context" in condition["leftValue"]
+        assert "['true', true].includes" in condition["leftValue"]
+        outputs = workflow["connections"][name]["main"]
+        assert [edge["node"] for edge in outputs[0]] == [enabled]
+        assert [edge["node"] for edge in outputs[1]] == [disabled]
+        assert nodes[disabled]["type"] == "n8n-nodes-base.code"
+    assert _next(workflow, "Augment Project Context") == ["Retrieve Document Context"]
+    assert _next(workflow, "Empty Page Document Context") == [
+        "Expand Page Document Context"
+    ]
+    assert "sources: []" in nodes["Empty Page Document Context"]["parameters"]["jsCode"]
+    assert (
+        "Create Document Context"
+        not in nodes["Understand Page"]["parameters"]["jsCode"]
+    )
+    assert (
+        "Build Page Document Context"
+        not in nodes["Gate Collect Norm Check Stage"]["parameters"]["jsCode"]
+    )

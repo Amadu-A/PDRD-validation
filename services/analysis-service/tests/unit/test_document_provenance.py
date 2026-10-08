@@ -115,14 +115,11 @@ async def test_fake_d_alone_does_not_create_document_provenance():
 
 
 def test_empty_d_schema_and_physical_id_invariant():
-    """Пустой набор запрещает D IDs; ID источника обязан содержать его страницу."""
+    """Без D схема остаётся лёгкой; ID сохранённого D-источника содержит его страницу."""
     schema = build_normative_check_schema(source_ids=(), max_issues=2)
-    assert (
-        schema["properties"]["violations"]["items"]["properties"][
-            "document_context_source_ids"
-        ]["maxItems"]
-        == 0
-    )
+    finding_schema = schema["properties"]["violations"]["items"]
+    assert "document_context_source_ids" not in finding_schema["properties"]
+    assert "document_context_source_ids" not in finding_schema["required"]
     with pytest.raises(ValueError):
         DocumentContextSource("D1", 7)
     with pytest.raises(ValueError):

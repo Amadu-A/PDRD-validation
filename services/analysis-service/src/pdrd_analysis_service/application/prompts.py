@@ -1,6 +1,6 @@
 # services/analysis-service/src/pdrd_analysis_service/application/prompts.py
 
-"""Промпты structured VLM pipeline."""
+"""Промпты этапов анализа со структурированными ответами визуальной модели."""
 
 import json
 from dataclasses import asdict
@@ -598,9 +598,29 @@ def build_page_understanding_prompt(
     extracted_text: str,
     max_facts: int = 12,
 ) -> str:
-    """Формирует промпт объективного понимания листа и D-фактов."""
+    """Формирует прежний лёгкий промпт; инструкции D добавляет при положительном лимите."""
     combined_mode = _combined_mode_instruction(
         extracted_text,
+    )
+
+    document_instruction = (
+        f"""Дополнительно извлеки до {max_facts} атомарных document_facts
+из видимого текста и изображения этой страницы.
+Сохраняй исходные названия, значения, единицы и короткий
+дословный evidence_text. Для каждого факта укажи явный
+идентификатор объекта, точное название свойства, условия
+(система, помещение, участок, режим), таблицу и её продолжение.
+Допустимые kind: parameter, quantity, identifier, material,
+equipment_model, room_property, operating_mode, relationship,
+reference, requirement, table_record, other.
+Один факт описывает одно свойство или одну связь. Не придумывай
+невидимые значения. Если уверенно видна область evidence,
+верни visual_regions в координатах 0..1000, иначе [].
+Не считай похожие теги одним объектом без явного совпадения.
+
+"""
+        if max_facts > 0
+        else ""
     )
 
     return f"""
@@ -633,21 +653,7 @@ def build_page_understanding_prompt(
 - видимые связи;
 - важные марки, теги и обозначения.
 
-Дополнительно извлеки до {max_facts} атомарных document_facts
-из видимого текста и изображения этой страницы.
-Сохраняй исходные названия, значения, единицы и короткий
-дословный evidence_text. Для каждого факта укажи явный
-идентификатор объекта, точное название свойства, условия
-(система, помещение, участок, режим), таблицу и её продолжение.
-Допустимые kind: parameter, quantity, identifier, material,
-equipment_model, room_property, operating_mode, relationship,
-reference, requirement, table_record, other.
-Один факт описывает одно свойство или одну связь. Не придумывай
-невидимые значения. Если уверенно видна область evidence,
-верни visual_regions в координатах 0..1000, иначе [].
-Не считай похожие теги одним объектом без явного совпадения.
-
-Затем сформулируй до 6 НЕЙТРАЛЬНЫХ тем,
+{document_instruction}Затем сформулируй до 6 НЕЙТРАЛЬНЫХ тем,
 по которым следует подобрать нормативные требования.
 
 Не утверждай наличие нарушения.
@@ -682,7 +688,7 @@ def build_normative_check_prompt(
     ] = (),
     document_context_sources: tuple[DocumentContextSource, ...] = (),
 ) -> str:
-    """Формирует prompt инженерной и N/T/U проверки с D-контекстом."""
+    """Формирует промпт инженерной проверки N/T/U, добавляя переданный D-контекст."""
     facts_payload = {
         "discipline": page_facts.discipline,
         "page_type": page_facts.page_type,
@@ -796,11 +802,28 @@ def build_normative_check_prompt(
         ),
     )
 
-    document_json = json.dumps(
-        [asdict(source) for source in document_context_sources],
-        ensure_ascii=False,
-        default=list,
-    )
+    document_instruction = ""
+    if document_context_sources:
+        document_json = json.dumps(
+            [asdict(source) for source in document_context_sources],
+            ensure_ascii=False,
+            default=list,
+        )
+        document_instruction = f"""DOCUMENT CONTEXT SOURCES:
+{document_json}
+
+Если замечание основано на D, заполни document_context_source_ids только ID
+из переданного списка. При отсутствии D верни пустой массив. Источники D
+можно сочетать с N/T/U; не придумывай source_kinds.
+
+D-source — факт из этого же проверяемого PDF, а не норматив,
+ТЗ, пользовательский пакет или База Опыта. Используй D для
+понимания связанных страниц, продолжения таблиц и снятия
+ложных замечаний. D может показать внутреннее противоречие,
+но не доказывает нарушение ГОСТ/СП/ПУЭ и не определяет,
+какое из двух разных значений правильно.
+
+"""
 
     conflict_json = json.dumps(
         conflict_payload,
@@ -851,21 +874,7 @@ CONFLICT CANDIDATES:
 USER PACKAGE SOURCES:
 {user_package_json}
 
-DOCUMENT CONTEXT SOURCES:
-{document_json}
-
-Если замечание основано на D, заполни document_context_source_ids только ID
-из переданного списка. При отсутствии D верни пустой массив. Источники D
-можно сочетать с N/T/U; не придумывай source_kinds.
-
-D-source — факт из этого же проверяемого PDF, а не норматив,
-ТЗ, пользовательский пакет или База Опыта. Используй D для
-понимания связанных страниц, продолжения таблиц и снятия
-ложных замечаний. D может показать внутреннее противоречие,
-но не доказывает нарушение ГОСТ/СП/ПУЭ и не определяет,
-какое из двух разных значений правильно.
-
-NORMATIVE SOURCES:
+{document_instruction}NORMATIVE SOURCES:
 {normative_json}
 
 --- END DYNAMIC ANALYSIS CONTEXT ---
@@ -946,7 +955,7 @@ def build_finalization_prompt(
         ...,
     ] = (),
 ) -> str:
-    """Формирует conservative candidate gate и enrichment N evidence."""
+    """Формирует промпт финальной проверки кандидатов и обогащения нормативными основаниями."""
     findings_payload: list[
         dict[
             str,
@@ -1029,10 +1038,16 @@ def build_finalization_prompt(
                     "normative_basis": normative_basis,
                     "technical_assignment_basis": (technical_assignment_basis),
                     "user_package_basis": user_package_basis,
-                    "document_context_basis_sources": [
-                        asdict(source)
-                        for source in finding.document_context_basis_sources[:8]
-                    ],
+                    **(
+                        {
+                            "document_context_basis_sources": [
+                                asdict(source)
+                                for source in finding.document_context_basis_sources[:8]
+                            ]
+                        }
+                        if finding.document_context_basis_sources
+                        else {}
+                    ),
                 },
                 "experience_examples": experience_examples,
             }

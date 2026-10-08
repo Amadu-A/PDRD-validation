@@ -1,15 +1,42 @@
 // frontend/src/js/features/analysis/finding-provenance.js
 
+/** Согласует сохранённые источники и переходы к доказательствам замечания. */
+
+/** Выбирает непустой сохранённый массив; пустой основной не скрывает резервный. */
+export function preferredSourceArray(primary, fallback) {
+  if (Array.isArray(primary) && primary.length) return primary;
+  return Array.isArray(fallback) ? fallback : [];
+}
+
 /** Происхождение берётся только из сохранённых массивов источников. */
 export function findingSourceKinds(finding) {
   const arrays = [
     ["D", finding.document_context_basis_sources],
-    ["N", finding.basis_sources ?? finding.normative_sources],
-    ["T", finding.technical_assignment_basis_sources ?? finding.technical_assignment_sources],
-    ["U", finding.user_package_basis_sources ?? finding.user_package_sources],
+    ["N", preferredSourceArray(finding.basis_sources, finding.normative_sources)],
+    ["T", preferredSourceArray(finding.technical_assignment_basis_sources, finding.technical_assignment_sources)],
+    ["U", preferredSourceArray(finding.user_package_basis_sources, finding.user_package_sources)],
     ["E", finding.experience_sources],
   ];
   return arrays.filter(([, values]) => Array.isArray(values) && values.length).map(([kind]) => kind);
+}
+
+/** Объясняет происхождение в полном отчёте, не занимая место на чертеже. */
+export function findingSourceDescription(finding) {
+  const descriptions = {
+    N: "N — сохранённое нормативное основание (ГОСТ, СП, ПУЭ и другие нормативы).",
+    T: "T — сохранённое требование технического задания; это не нормативное основание.",
+    U: "U — сохранённый источник из пользовательских документов; это не нормативное основание.",
+    D: "D — факты проверяемого PDF. Они подтверждают содержание и внутренние противоречия, но не определяют правильное значение и не заменяют норматив.",
+    E: "E — сохранённый инженерный опыт для повторной проверки и формулировки; он не доказывает нарушение.",
+  };
+  const kinds = findingSourceKinds(finding);
+  const lines = kinds.length
+    ? kinds.map((kind) => descriptions[kind])
+    : ["Инженерное замечание: сохранённые источники N/T/U/D/E отсутствуют. Вывод основан на данных листа и требует проверки инженером."];
+  if (Array.isArray(finding.project_context_sources) && finding.project_context_sources.length) {
+    lines.push("ПЗ — контекст пояснительной записки; он не является нормативным доказательством.");
+  }
+  return lines.join("\n");
 }
 
 /** Физические страницы одного логического замечания, без повторов. */
@@ -24,19 +51,6 @@ export function findingPages(finding, fallback = 1) {
 export function findingPageLabel(finding, fallback = 1) {
   const pages = findingPages(finding, fallback);
   return `${pages.length > 1 ? "Страницы" : "Страница"} ${pages.join(", ")}`;
-}
-
-/** Рисует отдельный бейдж каждого подтверждённого типа. */
-export function appendSourceBadges(parent, finding) {
-  const kinds = findingSourceKinds(finding);
-  const labels = { D: "Проверяемый PDF", N: "Норматив", T: "Техническое задание", U: "Пользовательские документы", E: "База Опыта" };
-  for (const kind of kinds.length ? kinds : [null]) {
-    const badge = document.createElement("span");
-    badge.className = "analysis-result__badge analysis-result__source-kind";
-    badge.textContent = kind ? `[${kind}]` : "Инженерное";
-    badge.title = kind ? labels[kind] : "Замечание без сохранённых внешних источников";
-    parent.append(badge);
-  }
 }
 
 /** Переходит к странице и подсвечивает сохранённые области этого замечания. */

@@ -1412,7 +1412,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ stage: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context) ? 'building_document_context' : 'understanding_sheet' }) }}",
+        "body": "={{ JSON.stringify({ stage: 'building_document_context' }) }}",
         "options": {
           "timeout": 3000
         }
@@ -1566,7 +1566,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ stage: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context) ? 'checking_cross_page_consistency' : 'checking_norms' }) }}",
+        "body": "={{ JSON.stringify({ stage: 'checking_cross_page_consistency' }) }}",
         "options": {
           "timeout": 3000
         }
@@ -1651,6 +1651,122 @@
         3200,
         800
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ceb4c70d-93c6-4faa-aeae-2b159f367ea8",
+              "leftValue": "={{ ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cf24d97c-72c5-44de-93c4-4fb04b3d11fc",
+      "name": "Use Document Context",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2110,
+        400
+      ],
+      "notes": "При выключенном контексте документа полностью обходит специализированные D-запросы."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "64bf55a9-4259-476e-956f-ff89c659143d",
+              "leftValue": "={{ ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "241294a0-1d9b-40d1-9da2-a21ce0d36925",
+      "name": "Retrieve Document Context",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3900,
+        400
+      ],
+      "notes": "При выключенном контексте документа полностью обходит специализированные D-запросы."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Сохраняем порядок страниц и общий контракт без HTTP-запросов D.\nconst understood = $('Understand Page').all().map((item) => item.json);\nconst augmented = $input.all();\nif (understood.length !== augmented.length) {\n  throw new Error('Быстрый режим потерял страницы при подготовке контекста.');\n}\nreturn [{ json: { items: understood.map((item) => ({\n  page_number: item.page_number, sources: [],\n})) } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4080,
+        600
+      ],
+      "id": "4efa56c1-f296-43ef-b848-2e476828db57",
+      "name": "Empty Page Document Context"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c5e06a76-605c-4ed7-a4da-2fca273139dd",
+              "leftValue": "={{ ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "332b4b9a-bc20-4ef2-abef-0bb86e812919",
+      "name": "Use Cross-Page Consistency",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4910,
+        400
+      ],
+      "notes": "При выключенном контексте документа полностью обходит специализированные D-запросы."
     }
   ],
   "pinData": {},
@@ -1757,7 +1873,7 @@
       "main": [
         [
           {
-            "node": "Search Document Context",
+            "node": "Retrieve Document Context",
             "type": "main",
             "index": 0
           }
@@ -1817,7 +1933,7 @@
       "main": [
         [
           {
-            "node": "Progress Cross-Page Consistency",
+            "node": "Use Cross-Page Consistency",
             "type": "main",
             "index": 0
           }
@@ -2385,7 +2501,7 @@
       "main": [
         [
           {
-            "node": "Progress Build Document Context",
+            "node": "Use Document Context",
             "type": "main",
             "index": 0
           }
@@ -2598,6 +2714,71 @@
         [
           {
             "node": "Gate Expand Norm Check Stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Document Context": {
+      "main": [
+        [
+          {
+            "node": "Progress Build Document Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Understand Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retrieve Document Context": {
+      "main": [
+        [
+          {
+            "node": "Search Document Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Empty Page Document Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Empty Page Document Context": {
+      "main": [
+        [
+          {
+            "node": "Expand Page Document Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Cross-Page Consistency": {
+      "main": [
+        [
+          {
+            "node": "Progress Cross-Page Consistency",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Cross-Page Checks",
             "type": "main",
             "index": 0
           }

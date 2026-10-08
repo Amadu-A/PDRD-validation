@@ -44,7 +44,7 @@ class UnderstandPage:
         PageFacts,
         GenerationMetrics,
     ]:
-        """Извлекает сведения страницы с помощью VLM."""
+        """Извлекает сведения страницы; при выключенном D использует лёгкие промпт и схему."""
         max_facts = self.max_facts_per_page if use_document_context else 0
         result = await self.vision_model.generate_json(
             prompt=(

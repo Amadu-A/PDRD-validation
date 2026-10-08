@@ -4,11 +4,11 @@
  * Строит безопасное DOM-представление результата анализа.
  *
  * Пользовательские и модельные строки вставляются только через textContent.
- * N, T и U citations открывают managed PDF или PDF-preview
+ * Ссылки N, T и U открывают сохранённый PDF или его предварительный просмотр
  * на физической странице источника.
  */
 
-import { appendSourceBadges, findingPageLabel, focusDocumentEvidence } from "./finding-provenance.js";
+import { findingSourceDescription, preferredSourceArray, findingPageLabel, focusDocumentEvidence } from "./finding-provenance.js";
 import {
   sourceModeLabel,
   statusLabel,
@@ -253,41 +253,20 @@ function uniqueSources(
 }
 
 
-function preferredSourceArray(
-  primary,
-  fallback,
-) {
-  if (
-    Array.isArray(
-      primary,
-    )
-    && primary.length
-  ) {
-    return primary;
-  }
-
-  if (Array.isArray(
-    fallback,
-  )) {
-    return fallback;
-  }
-
-  return [];
-}
-
-
+/** Возвращает неповторяющиеся сохранённые нормативные основания. */
 export function normativeSources(
   finding,
 ) {
   return uniqueSources(
     preferredSourceArray(
-      finding.normative_sources,
       finding.basis_sources,
+      finding.normative_sources,
     ),
   );
 }
 
 
+/** Возвращает сохранённые требования ТЗ с непустым резервным массивом. */
 function technicalAssignmentSources(
   finding,
 ) {
@@ -300,6 +279,7 @@ function technicalAssignmentSources(
 }
 
 
+/** Возвращает сохранённые пользовательские источники без повторов. */
 function userPackageSources(
   finding,
 ) {
@@ -312,6 +292,7 @@ function userPackageSources(
 }
 
 
+/** Строит адрес известного маршрута только при наличии идентификатора и физической страницы. */
 function managedCitationUrl(
   source,
   pathPrefix,
@@ -436,6 +417,7 @@ function createManagedCitation(
 }
 
 
+/** Создаёт ссылку на нормативный PDF либо текст при отсутствии адреса. */
 export function createNormativeCitation(
   source,
 ) {
@@ -451,6 +433,7 @@ export function createNormativeCitation(
 }
 
 
+/** Открывает ТЗ через существующий защищённый просмотр; без идентификатора возвращает текст. */
 function createTechnicalAssignmentCitation(
   source,
 ) {
@@ -515,6 +498,7 @@ function createTechnicalAssignmentCitation(
 }
 
 
+/** Создаёт ссылку на сохранённый пользовательский документ либо текст. */
 function createUserPackageCitation(
   source,
 ) {
@@ -782,8 +766,6 @@ function appendFinding(
     ),
   );
 
-  appendSourceBadges(badges, finding);
-
   header.append(
     badges,
   );
@@ -810,6 +792,8 @@ function appendFinding(
     comment,
   );
   reviewText.dataset.reviewText = "";
+
+  appendTextBlock(article, "Происхождение и подтверждение", findingSourceDescription(finding));
 
   appendTextBlock(
     article,
@@ -1367,6 +1351,10 @@ export function renderAnalysisReport(
     {
       normativeSources,
       createNormativeCitation,
+      technicalAssignmentSources,
+      createTechnicalAssignmentCitation,
+      userPackageSources,
+      createUserPackageCitation,
     },
   );
 

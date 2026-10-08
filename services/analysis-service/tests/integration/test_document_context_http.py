@@ -50,6 +50,7 @@ class RecordingVision(FakeVisionModel):
     async def generate_json(self, **kwargs):
         """Проверяет серверную фильтрацию даже при нарушении схемы моделью."""
         self.schema = kwargs["schema"]
+        self.prompt = kwargs["prompt"]
         result = await super().generate_json(**kwargs)
         return replace(
             result, payload={**result.payload, "document_facts": [fact_payload("-37")]}
@@ -117,9 +118,13 @@ async def test_understanding_stage_preserves_document_switch(enabled):
     assert response.status_code == 200, response.text
     facts = response.json()["items"][0]["result"]["facts"]
     assert len(facts["document_facts"]) == int(enabled)
-    assert model.schema["properties"]["document_facts"]["maxItems"] == (
-        12 if enabled else 0
-    )
+    if enabled:
+        assert model.schema["properties"]["document_facts"]["maxItems"] == 12
+        assert "document_facts" in model.prompt
+    else:
+        assert "document_facts" not in model.schema["properties"]
+        assert "document_facts" not in model.schema["required"]
+        assert "document_facts" not in model.prompt
     assert facts["objects"] == ["ЩР-1"]
 
 
