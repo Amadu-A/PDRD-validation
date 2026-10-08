@@ -14,7 +14,8 @@ const vm = require('node:vm');
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 const context = {
   $json: input.current,
-  $: () => ({ item: { json: input.parent } }),
+  $itemIndex: 0,
+  $: () => ({ item: { json: input.parent }, all: () => [{ json: input.parent }] }),
 };
 const result = vm.runInNewContext(`(() => {\n${input.code}\n})()`, context, {
   timeout: 1000,
@@ -77,7 +78,12 @@ def test_workflow_experience_results_stay_with_their_findings(kind, empty_at):
     prepared = _run_code(
         nodes["Prepare Experience Queries"]["parameters"]["jsCode"],
         current={"results": []},
-        parent={"findings": findings, "normative_query_items": []},
+        parent={
+            "page_index": 0,
+            "page_number": 7,
+            "findings": findings,
+            "normative_query_items": [],
+        },
     )["json"]
     assert prepared["experience_queries"] == [
         f"query-{index}" for index in range(3) if index != empty_at

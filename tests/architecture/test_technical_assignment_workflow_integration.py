@@ -1,6 +1,6 @@
 # tests/architecture/test_technical_assignment_workflow_integration.py
 
-"""Architecture guards exhaustive T-first integration в n8n workflows."""
+"""Архитектурные проверки полного независимого прохода требований ТЗ в n8n."""
 
 import json
 from pathlib import Path
@@ -34,7 +34,7 @@ REQUIRED_T_FIRST_NODES = {
 def _workflow(
     path: Path,
 ) -> dict[str, Any]:
-    """Читает workflow JSON."""
+    """Читает JSON workflow."""
     payload = json.loads(
         path.read_text(
             encoding="utf-8",
@@ -52,7 +52,7 @@ def _workflow(
 def _nodes_by_name(
     workflow: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    """Индексирует workflow nodes по имени."""
+    """Индексирует узлы workflow по имени."""
     nodes = workflow.get(
         "nodes",
         [],
@@ -80,7 +80,7 @@ def _serialized_node(
     nodes: dict[str, dict[str, Any]],
     name: str,
 ) -> str:
-    """Сериализует node для architecture assertions."""
+    """Сериализует узел для архитектурных проверок."""
     return json.dumps(
         nodes[name],
         ensure_ascii=False,
@@ -88,7 +88,7 @@ def _serialized_node(
 
 
 def test_every_workflow_loads_complete_atomic_t_feed() -> None:
-    """Все workflow получают bounded paginated atomic T-R feed."""
+    """Все workflow получают полный список атомарных требований ТЗ с ограничением и пагинацией."""
     for path in WORKFLOW_PATHS:
         workflow = _workflow(
             path,
@@ -143,7 +143,7 @@ def test_every_workflow_loads_complete_atomic_t_feed() -> None:
 
 
 def test_every_workflow_runs_independent_t_first_check() -> None:
-    """Atomic feed идёт в отдельный exhaustive Analysis endpoint."""
+    """Атомарные требования передаются в отдельный маршрут полной проверки ТЗ."""
     for path in WORKFLOW_PATHS:
         workflow = _workflow(
             path,
@@ -175,7 +175,11 @@ def test_every_workflow_runs_independent_t_first_check() -> None:
 
             assert "page_facts" in collector, path
 
-            assert "image_base64" in collector, path
+            assert "image_base64" not in collector, path
+
+            assert "image_base64" in check, path
+
+            assert "Technical Assignment Requirement Feed" in collector, path
 
             # Stage 8.4 нормализует batch response обратно
             # в один item на физическую страницу.
@@ -207,7 +211,7 @@ def test_every_workflow_runs_independent_t_first_check() -> None:
 
 
 def test_t_first_findings_are_merged_without_semantic_filtering() -> None:
-    """N-check и T-first findings объединяются lossless перед enrichment."""
+    """Замечания проверки нормативов и независимого прохода ТЗ объединяются без потерь."""
     for path in WORKFLOW_PATHS:
         workflow = _workflow(
             path,
@@ -243,7 +247,7 @@ def test_t_first_findings_are_merged_without_semantic_filtering() -> None:
 
 
 def test_t_first_is_optional_without_changing_non_t_analysis_path() -> None:
-    """Отсутствие ТЗ проходит через explicit bypass, а не fake T payload."""
+    """Отсутствие ТЗ явно обходит независимую проверку требований ТЗ."""
     for path in WORKFLOW_PATHS:
         workflow = _workflow(
             path,
@@ -275,7 +279,7 @@ def test_t_first_is_optional_without_changing_non_t_analysis_path() -> None:
 
 
 def test_workflows_expose_t_first_diagnostics_and_pipeline_stage() -> None:
-    """Runtime result показывает полноту T-first обработки."""
+    """Результат выполнения отражает полноту независимой обработки ТЗ."""
     for path in WORKFLOW_PATHS:
         serialized = json.dumps(
             _workflow(

@@ -1,6 +1,6 @@
 # tests/architecture/test_project_context_cache.py
 
-"""Architecture guards reusable Project Context cache."""
+"""Архитектурные проверки повторного использования кеша контекста ПЗ."""
 
 import json
 from pathlib import Path
@@ -54,7 +54,7 @@ GATEWAY_N8N_PATH = (
 def _workflow(
     path: Path,
 ) -> dict[str, Any]:
-    """Читает workflow JSON."""
+    """Читает JSON workflow."""
     payload = json.loads(
         path.read_text(
             encoding="utf-8",
@@ -72,7 +72,7 @@ def _workflow(
 def _nodes_by_name(
     workflow: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    """Индексирует workflow nodes по name."""
+    """Индексирует узлы workflow по имени."""
     nodes = workflow.get(
         "nodes",
         [],
@@ -104,7 +104,7 @@ def _direct_functional_successor(
     *,
     branch: int = 0,
 ) -> str:
-    """Возвращает единственный прямой non-progress successor."""
+    """Возвращает единственный следующий узел без уведомлений о ходе выполнения."""
     connections = workflow.get(
         "connections",
         {},
@@ -178,7 +178,7 @@ def _functional_successor(
     *,
     branch: int = 0,
 ) -> str:
-    """Возвращает бизнес-successor, прозрачно проходя Progress Gate."""
+    """Возвращает следующий этап, проходя через контрольные узлы уведомлений."""
     current_name = source_name
     current_branch = branch
     visited: set[str] = set()
@@ -216,7 +216,7 @@ def _serialized_node(
     nodes: dict[str, dict[str, Any]],
     name: str,
 ) -> str:
-    """Сериализует node для architecture assertions."""
+    """Сериализует узел для архитектурных проверок."""
     return json.dumps(
         nodes[name],
         ensure_ascii=False,
@@ -224,7 +224,7 @@ def _serialized_node(
 
 
 def test_pdf_workflows_resolve_cache_before_vlm_validation() -> None:
-    """Stage 7 artifact не нарушает PZ cache-before-VLM invariant."""
+    """Артефакт и компактная проекция сохраняют разрешение кеша ПЗ до VLM."""
     for (
         path,
         extract_name,
@@ -259,13 +259,18 @@ def test_pdf_workflows_resolve_cache_before_vlm_validation() -> None:
             == "Persist Visualization Artifact"
         ), path
 
-        assert (
-            _functional_successor(
-                workflow,
-                "Persist Visualization Artifact",
-            )
-            == "Resolve Project Context Cache"
+        expected_next = (
+            "Compact PDF Metadata"
+            if path.name == "analysis-v2-pdf.json"
+            else "Resolve Project Context Cache"
+        )
+        assert _functional_successor(workflow, "Persist Visualization Artifact") == (
+            expected_next
         ), path
+        if expected_next == "Compact PDF Metadata":
+            assert _functional_successor(workflow, expected_next) == (
+                "Resolve Project Context Cache"
+            ), path
 
         assert (
             _functional_successor(
@@ -285,7 +290,7 @@ def test_pdf_workflows_resolve_cache_before_vlm_validation() -> None:
 
 
 def test_pdf_workflows_reuse_cached_validation_and_cache_identity() -> None:
-    """Validate/Create stages получают reusable cache metadata."""
+    """Этапы проверки и создания получают метаданные повторно используемого кеша."""
     for (
         path,
         _extract_name,
@@ -334,7 +339,7 @@ def test_pdf_workflows_reuse_cached_validation_and_cache_identity() -> None:
 
 
 def test_pdf_workflows_do_not_delete_persistent_cache_after_job() -> None:
-    """Reusable Project Context остаётся после завершения analysis job."""
+    """Кеш контекста проекта сохраняется после завершения задания анализа."""
     for (
         path,
         _extract_name,
@@ -373,7 +378,7 @@ def test_pdf_workflows_do_not_delete_persistent_cache_after_job() -> None:
 
 
 def test_all_workflows_use_prepared_technical_assignment_document_identity() -> None:
-    """T-first сверяет requirements с prepared identity исходного ТЗ."""
+    """Независимый проход ТЗ сверяет требования с подготовленным идентификатором исходного ТЗ."""
     for path in ALL_WORKFLOWS:
         workflow = _workflow(
             path,
@@ -394,7 +399,7 @@ def test_all_workflows_use_prepared_technical_assignment_document_identity() -> 
 
 
 def test_api_gateway_forwards_prepared_technical_assignment_identity() -> None:
-    """Gateway передаёт n8n обе T identities из immutable snapshot."""
+    """Gateway передаёт n8n оба идентификатора ТЗ из неизменяемого снимка."""
     source = GATEWAY_N8N_PATH.read_text(
         encoding="utf-8",
     )

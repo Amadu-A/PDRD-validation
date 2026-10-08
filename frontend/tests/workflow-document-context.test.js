@@ -14,9 +14,10 @@ const pageNumbers = [7, 10];
 function scenario(flag, { cancelledStage = null, swappedPages = false } = {}) {
   const saved = new Map();
   const calls = [];
-  const expanded = pageNumbers.map((page) => ({ page: { page_number: page, page_type: "scheme", text: `Б-012, страница ${page}`, image_base64: "cG5n" } }));
+  const expanded = pageNumbers.map((page) => ({ page: { page_number: page, page_type: "scheme", text: `Б-012, страница ${page}` } }));
   saved.set("POST /analysis/v2/pdf", [{ json: { body: { document_id: "job", use_document_context: flag } } }]);
-  saved.set("Document Extract PDF", [{ json: { source_sha256: "sha" } }]);
+  saved.set("Compact PDF Metadata", [{ json: { source_sha256: "sha" } }]);
+  saved.set("Document Extract PDF", [{ json: { pages: pageNumbers.map((page_number) => ({ page_number, text_words: [] })) } }]);
   saved.set("Gate Collect Understanding Stage", [{ json: { expanded_items: expanded } }]);
   const results = pageNumbers.map((page) => ({ page_number: page, result: { facts: { summary: "Помещение", document_facts: [] } } }));
   saved.set("Understand Pages Stage", [{ json: { items: results } }]);

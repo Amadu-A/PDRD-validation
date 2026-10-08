@@ -210,7 +210,15 @@ const vm = require('node:vm');
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 const context = {
   $json: input.current,
-  $: () => ({first: () => ({json: {body: {use_document_context: input.enabled}}})}),
+  $: (name) => {
+    if (name === 'POST /analysis/v2/pdf') {
+      return {first: () => ({json: {body: {use_document_context: input.enabled}}})};
+    }
+    if (name === 'Document Extract PDF') {
+      return {first: () => ({json: {pages: input.source_pages}})};
+    }
+    throw new Error(`Неизвестный узел: ${name}`);
+  },
 };
 const body = vm.runInNewContext(input.expression.slice(3, -2), context, {timeout: 1000});
 if (typeof body !== 'string' || !body.length) {
@@ -220,7 +228,7 @@ process.stdout.write(body);
 """
 
 
-def document_context_workflow_body(current, enabled):
+def document_context_workflow_body(current, enabled, source_pages):
     """Выполняет публикуемое выражение Body без изменения его кода или входа."""
     workflow = json.loads(WORKFLOW_PATH.read_text(encoding="utf-8"))
     node = next(
@@ -236,7 +244,12 @@ def document_context_workflow_body(current, enabled):
     result = subprocess.run(
         ["node", "-e", BODY_EXPRESSION_RUNNER],
         input=json.dumps(
-            {"current": current, "enabled": enabled, "expression": parameters["body"]},
+            {
+                "current": current,
+                "enabled": enabled,
+                "source_pages": source_pages,
+                "expression": parameters["body"],
+            },
             ensure_ascii=False,
         ),
         capture_output=True,
@@ -249,7 +262,7 @@ def document_context_workflow_body(current, enabled):
 
 @pytest.mark.parametrize("switch", [True, "true", False, "false", None, ""])
 async def test_workflow_raw_body_reaches_page_context_api_with_user_switch(switch):
-    """Тело из workflow сохраняет страницы и семантику, а API учитывает выбор без ПЗ."""
+    """HTTP добавляет геометрию собственных листов, а API учитывает выбор D без ПЗ."""
     request = {
         "pages": [
             {
@@ -269,7 +282,18 @@ async def test_workflow_raw_body_reaches_page_context_api_with_user_switch(switc
         ],
     }
     enabled = switch is True or switch == "true"
-    body = document_context_workflow_body(request, switch)
+    current = {
+        **request,
+        "pages": [
+            {key: value for key, value in page.items() if key != "text_words"}
+            for page in request["pages"]
+        ],
+    }
+    source_pages = [
+        {"page_number": page["page_number"], "text_words": page["text_words"]}
+        for page in reversed(request["pages"])
+    ]
+    body = document_context_workflow_body(current, switch, source_pages)
     assert json.loads(body) == {**request, "enabled": enabled}
     app = build_app()
     async with httpx.AsyncClient(
