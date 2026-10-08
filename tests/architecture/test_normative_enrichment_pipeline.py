@@ -1,6 +1,6 @@
 # tests/architecture/test_normative_enrichment_pipeline.py
 
-"""Architecture guards non-destructive normative enrichment TZ-5.2."""
+"""Архитектурные проверки сохранения замечаний при нормативном обогащении."""
 
 import json
 from pathlib import Path
@@ -212,10 +212,15 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
     assert "Search Finding Norms" in nodes
 
     assert (
-        _functional_successor(
-            workflow,
-            "Check Norms",
-        )
+        _direct_functional_successor(workflow, "Continue Cross-Page Consistency")
+        == "Check Cross-Page Consistency"
+    )
+    assert (
+        _functional_successor(workflow, "Check Cross-Page Consistency")
+        == "Merge Cross-Page Checks"
+    )
+    assert (
+        _functional_successor(workflow, "Merge Cross-Page Checks")
         == "Merge Finding Candidates"
     )
 

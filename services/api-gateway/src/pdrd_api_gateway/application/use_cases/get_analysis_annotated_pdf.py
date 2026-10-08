@@ -66,6 +66,7 @@ _CATEGORY_LABELS = {
     "completeness": "Комплектность",
     "optimization": "Оптимизация",
     "customer_requirements": "Требования заказчика",
+    "document_consistency": "Согласованность документа",
     "other": "Прочее",
 }
 
@@ -369,13 +370,7 @@ class GetAnalysisAnnotatedPdf:
                 )
             ).strip()
 
-            located = (
-                locations.get(
-                    finding_id,
-                )
-                if finding_id
-                else None
-            )
+            located = locations.get((finding_id, page_number)) if finding_id else None
 
             fields = cls._finding_fields(
                 finding=finding,
@@ -383,9 +378,23 @@ class GetAnalysisAnnotatedPdf:
                 page_number=page_number,
             )
 
+            pages = sorted(
+                {
+                    page_number,
+                    *(
+                        cls._normalize_page(item.get("page"))
+                        for item in finding.get("evidence_locations", [])
+                        if isinstance(item, dict)
+                        and cls._normalize_page(item.get("page")) is not None
+                    ),
+                }
+            )
+            page_label = ("Страницы " if len(pages) > 1 else "Страница ") + ", ".join(
+                map(str, pages)
+            )
             report_findings.append(
                 AnalysisPdfReportFinding(
-                    title=(f"{index}. Лист/страница {page_number}"),
+                    title=(f"№{index} · {page_label}"),
                     fields=fields,
                 )
             )
@@ -403,15 +412,34 @@ class GetAnalysisAnnotatedPdf:
                     number=index,
                     finding_id=annotation_finding_id,
                     page_number=annotation_page_number,
-                    title=cls._annotation_card_text(
-                        finding,
-                    ),
-                    content=cls._annotation_content(
-                        fields,
-                    ),
+                    title=cls._annotation_card_text(finding),
+                    content=cls._annotation_content(fields),
                     regions=annotation_regions,
                 )
             )
+            evidence_locations = finding.get("evidence_locations", [])
+            if isinstance(evidence_locations, list):
+                secondary_pages = {
+                    cls._normalize_page(item.get("page"))
+                    for item in evidence_locations
+                    if isinstance(item, dict)
+                }
+                for evidence_page in sorted(
+                    page
+                    for page in secondary_pages
+                    if page is not None and page != page_number
+                ):
+                    secondary = locations.get((finding_id, evidence_page))
+                    annotations.append(
+                        AnalysisPdfAnnotation(
+                            number=index,
+                            finding_id=annotation_finding_id,
+                            page_number=evidence_page,
+                            title=cls._annotation_card_text(finding),
+                            content=cls._annotation_content(fields),
+                            regions=secondary.regions if secondary else (),
+                        )
+                    )
 
         metadata = cls._report_metadata(
             job_id=job_id,
@@ -639,6 +667,30 @@ class GetAnalysisAnnotatedPdf:
     ]:
         """Формирует поля так же раздельно, как browser report."""
         fields: list[AnalysisPdfReportField] = []
+        kinds = [
+            kind
+            for kind, key in (
+                ("D", "document_context_basis_sources"),
+                ("N", "basis_sources"),
+                ("T", "technical_assignment_basis_sources"),
+                ("U", "user_package_basis_sources"),
+                ("E", "experience_sources"),
+            )
+            if finding.get(key)
+        ]
+        cls._append_field(
+            fields, "Источники", " ".join(f"[{kind}]" for kind in kinds) or "Инженерное"
+        )
+        cls._append_field(
+            fields,
+            "Контекст проверяемого PDF",
+            "\n".join(
+                f"{source.get('source_id', '')}, стр. {source.get('page', '')}: "
+                f"{source.get('evidence_text') or source.get('text', '')}"
+                for source in finding.get("document_context_basis_sources", [])
+                if isinstance(source, dict)
+            ),
+        )
 
         cls._append_field(
             fields,
@@ -987,14 +1039,11 @@ class GetAnalysisAnnotatedPdf:
             object,
         ],
     ) -> dict[
-        str,
+        tuple[str, int],
         _LocatedFinding,
     ]:
-        """Извлекает только реально located bbox из visualization payload."""
-        result: dict[
-            str,
-            _LocatedFinding,
-        ] = {}
+        """Извлекает located bbox отдельно для каждой страницы finding."""
+        result: dict[tuple[str, int], _LocatedFinding] = {}
 
         raw_pages = visualization.get(
             "pages",
@@ -1066,7 +1115,7 @@ class GetAnalysisAnnotatedPdf:
                 if not regions:
                     continue
 
-                result[finding_id] = _LocatedFinding(
+                result[(finding_id, page_number)] = _LocatedFinding(
                     page_number=page_number,
                     regions=regions,
                 )

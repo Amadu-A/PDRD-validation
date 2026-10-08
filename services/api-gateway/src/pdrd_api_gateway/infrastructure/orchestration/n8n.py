@@ -183,6 +183,9 @@ class N8nAnalysisOrchestrator:
             "document_id": str(
                 submission.document_id,
             ),
+            "use_document_context": "true"
+            if submission.use_document_context
+            else "false",
             "use_explanatory_note": (
                 "true" if submission.use_explanatory_note else "false"
             ),

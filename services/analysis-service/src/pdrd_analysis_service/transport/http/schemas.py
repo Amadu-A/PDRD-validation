@@ -1,6 +1,6 @@
 # services/analysis-service/src/pdrd_analysis_service/transport/http/schemas.py
 
-"""HTTP schemas Analysis Service."""
+"""HTTP-схемы сервиса анализа."""
 
 from typing import Any
 
@@ -8,9 +8,12 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    computed_field,
+    model_validator,
 )
 
 from pdrd_analysis_service.domain.analysis import (
+    DocumentContextSource,
     ExperienceSource,
     FindingDraft,
     FindingVisualRegion,
@@ -19,14 +22,16 @@ from pdrd_analysis_service.domain.analysis import (
     TechnicalAssignmentConflictCandidate,
     TechnicalAssignmentSource,
     UserPackageSource,
+    saved_source_kinds,
 )
+from pdrd_analysis_service.domain.document_context import document_fact_from_mapping
 from pdrd_analysis_service.domain.visualization import (
     FindingLocalizationTarget,
 )
 
 
 class PageFactsPayload(BaseModel):
-    """HTTP representation PageFacts."""
+    """HTTP-представление фактов страницы."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -41,6 +46,7 @@ class PageFactsPayload(BaseModel):
     labels: list[str]
 
     normative_queries: list[str]
+    document_facts: list[dict[str, Any]] = Field(default_factory=list)
 
     def to_domain(
         self,
@@ -62,11 +68,16 @@ class PageFactsPayload(BaseModel):
             normative_queries=tuple(
                 self.normative_queries,
             ),
+            document_facts=tuple(
+                fact
+                for raw in self.document_facts
+                if (fact := document_fact_from_mapping(raw)) is not None
+            ),
         )
 
 
 class NormativeSourcePayload(BaseModel):
-    """HTTP representation managed normative source."""
+    """HTTP-представление управляемого нормативного источника."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -110,7 +121,7 @@ class NormativeSourcePayload(BaseModel):
 
 
 class TechnicalAssignmentSourcePayload(BaseModel):
-    """HTTP representation T-source."""
+    """HTTP-представление источника технического задания."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -184,7 +195,7 @@ class TechnicalAssignmentConflictCandidatePayload(
 
 
 class UserPackageSourcePayload(BaseModel):
-    """HTTP representation user-package source."""
+    """HTTP-представление источника пользовательского пакета."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -228,7 +239,7 @@ class UserPackageSourcePayload(BaseModel):
 
 
 class ExperienceSourcePayload(BaseModel):
-    """HTTP representation Experience source."""
+    """HTTP-представление источника Базы опыта."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -284,7 +295,7 @@ class ExperienceSourcePayload(BaseModel):
 
 
 class FindingVisualRegionPayload(BaseModel):
-    """HTTP representation visual evidence region finding."""
+    """HTTP-представление области доказательства замечания."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -334,7 +345,75 @@ class FindingVisualRegionPayload(BaseModel):
         )
 
 
-class FindingDraftPayload(BaseModel):
+class DocumentContextSourcePayload(BaseModel):
+    """Типизированное доказательство со страницы проверяемого PDF."""
+
+    model_config = ConfigDict(extra="forbid")
+    source_id: str
+    page: int = Field(ge=1)
+    evidence_text: str = ""
+    text: str = ""
+    fact_id: str | None = None
+    chunk_index: int | None = Field(default=None, ge=0)
+    score: float = 0.0
+    match_type: str = ""
+    subject: str = ""
+    property: str = ""
+    scope: str = ""
+    visual_regions: list[FindingVisualRegionPayload] = Field(
+        default_factory=list, max_length=4
+    )
+
+    def to_domain(self) -> DocumentContextSource:
+        """Сохраняет источник вместе с независимыми от индекса областями."""
+        return DocumentContextSource(
+            **self.model_dump(exclude={"visual_regions"}),
+            visual_regions=tuple(region.to_domain() for region in self.visual_regions),
+        )
+
+
+class FindingProvenancePayload(BaseModel):
+    """Серверное происхождение замечания; входной список типов игнорируется."""
+
+    document_context_source_ids: list[str] = Field(default_factory=list)
+    document_context_basis_sources: list[DocumentContextSourcePayload] = Field(
+        default_factory=list, max_length=2400
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_supplied_source_kinds(cls, value):
+        """Исключает подмену происхождения при возврате результата через workflow."""
+        if isinstance(value, dict):
+            value = {key: item for key, item in value.items() if key != "source_kinds"}
+        return value
+
+    @model_validator(mode="after")
+    def align_document_ids(self):
+        """Оставляет ID только источников, сохранённых в самом замечании."""
+        self.document_context_source_ids = list(
+            dict.fromkeys(
+                source.source_id for source in self.document_context_basis_sources
+            )
+        )
+        return self
+
+    @computed_field
+    @property
+    def source_kinds(self) -> list[str]:
+        """Вычисляет бейджи по фактически сохранённым массивам."""
+        return list(
+            saved_source_kinds(
+                document=self.document_context_basis_sources,
+                normative=getattr(self, "basis_sources", ()),
+                technical=getattr(self, "technical_assignment_basis_sources", ()),
+                user=getattr(self, "user_package_basis_sources", ()),
+                experience=getattr(self, "experience_sources", ()),
+            )
+        )
+
+
+class FindingDraftPayload(FindingProvenancePayload):
     """Finding между requirement-check и experience stages."""
 
     model_config = ConfigDict(
@@ -385,6 +464,7 @@ class FindingDraftPayload(BaseModel):
     origin_assertions: list[dict[str, Any]] = Field(default_factory=list)
 
     object_ref: str = ""
+    evidence_locations: list[dict[str, Any]] = Field(default_factory=list)
 
     def to_domain(
         self,
@@ -422,6 +502,13 @@ class FindingDraftPayload(BaseModel):
             visual_regions=tuple(region.to_domain() for region in self.visual_regions),
             origin_assertions=tuple(self.origin_assertions),
             object_ref=self.object_ref,
+            evidence_locations=tuple(self.evidence_locations),
+            document_context_source_ids=tuple(
+                source.source_id for source in self.document_context_basis_sources
+            ),
+            document_context_basis_sources=tuple(
+                source.to_domain() for source in self.document_context_basis_sources
+            ),
         )
 
 
@@ -437,6 +524,7 @@ class UnderstandPageRequest(BaseModel):
     )
 
     heuristic_page_type: str
+    use_document_context: bool = True
     extracted_text: str
 
     image_base64: str = Field(
@@ -504,6 +592,10 @@ class CheckNormsRequest(BaseModel):
 
     user_package_sources: list[UserPackageSourcePayload,] = Field(
         default_factory=list,
+    )
+
+    document_context_sources: list[DocumentContextSourcePayload] = Field(
+        default_factory=list
     )
 
     image_base64: str = Field(
@@ -599,7 +691,7 @@ class FindingBoundingBoxPayload(BaseModel):
 
 
 class FindingLocationPayload(BaseModel):
-    """HTTP representation legacy finding location."""
+    """HTTP-представление прежнего формата положения замечания."""
 
     finding_id: str
 
@@ -650,7 +742,7 @@ class FinalizeRequest(BaseModel):
     )
 
 
-class FinalFindingPayload(BaseModel):
+class FinalFindingPayload(FindingProvenancePayload):
     """Итоговое замечание."""
 
     finding_id: str
@@ -689,6 +781,7 @@ class FinalFindingPayload(BaseModel):
     origin_assertions: list[dict[str, Any]] = Field(default_factory=list)
 
     object_ref: str = ""
+    evidence_locations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class FinalizeResponse(BaseModel):
@@ -705,7 +798,7 @@ class FinalizeResponse(BaseModel):
 
 
 class LiveHealthResponse(BaseModel):
-    """Liveness response."""
+    """Ответ проверки доступности."""
 
     status: str
     service: str
@@ -713,7 +806,7 @@ class LiveHealthResponse(BaseModel):
 
 
 class ReadyHealthResponse(BaseModel):
-    """Readiness response."""
+    """Ответ проверки готовности."""
 
     status: str
     service: str

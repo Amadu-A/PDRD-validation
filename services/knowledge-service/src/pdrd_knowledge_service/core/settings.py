@@ -618,6 +618,21 @@ class ProjectContextSettings(BaseModel):
     collection_prefix: str = "pdrd_project_context"
 
 
+class DocumentContextSettings(BaseModel):
+    """Изолированный D-index проверяемого PDF на общем VectorStore."""
+
+    enabled: bool = True
+    chunk_size: int = Field(default=1800, ge=100, le=20000)
+    chunk_overlap: int = Field(default=250, ge=0, le=10000)
+    top_k: int = Field(default=5, ge=1, le=50)
+    embed_batch_size: int = Field(default=64, ge=1, le=1000)
+    upsert_batch_size: int = Field(default=64, ge=1, le=1000)
+    collection_prefix: str = "pdrd_document_context"
+    schema_version: int = Field(default=1, ge=1, le=100)
+    prompt_version: int = Field(default=1, ge=1, le=100)
+    normalization_version: int = Field(default=1, ge=1, le=100)
+
+
 class Settings(BaseSettings):
     """Настройки Knowledge Service."""
 
@@ -720,6 +735,10 @@ class Settings(BaseSettings):
 
     project_context: ProjectContextSettings = Field(
         default_factory=ProjectContextSettings,
+    )
+
+    document_context: DocumentContextSettings = Field(
+        default_factory=DocumentContextSettings,
     )
 
     @model_validator(

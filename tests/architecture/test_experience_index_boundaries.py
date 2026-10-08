@@ -152,20 +152,22 @@ def test_prepare_does_not_delete_preexisting_temporary_file(tmp_path):
     assert path.read_text(encoding="utf-8") == "OTHER=preserved\n"
 
 
-def test_linux_deployment_runs_quality_before_index_mutations_and_checks_disabled_e():
-    """Старый автоматический обход останавливается; новый worker стартует после quality/SQL gate."""
-    source = (ROOT / "ops/deploy-experience-index.sh").read_text(encoding="utf-8")
-    assert (
-        source.index("deploy-review-services.sh")
-        < source.index("prepare-experience-index.py")
-        < source.index("--wait-timeout 1200")
+def test_linux_startup_builds_and_migrates_before_indexer_and_disables_e_by_default():
+    """Штатный запуск собирает образы, применяет миграции и включает индексатор по профилю."""
+    startup = (ROOT / "scripts/up.sh").read_text(encoding="utf-8")
+    defaults = (ROOT / ".env.example").read_text(encoding="utf-8")
+    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+
+    assert startup.index("docker compose build") < startup.index(
+        "=== Database migrations ==="
     )
-    assert "Settings().search.experience_enabled is False" in source
-    assert source.index("stop experience-indexer") < source.index(
-        "deploy-review-services.sh"
+    assert startup.index("=== Database migrations ===") < startup.index(
+        "docker compose up -d --remove-orphans"
     )
-    assert "experience_runtime sync" not in source
-    assert "down -v" not in source and "shared-vlm" not in source
+    assert 'profile_enabled "experience-index"' in startup
+    assert "KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_ENABLED=false" in defaults
+    assert "experience-indexer:" in compose
+    assert "down -v" not in startup
 
 
 def test_browser_cannot_enable_shadow_search_with_request_parameter():

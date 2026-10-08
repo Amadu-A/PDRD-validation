@@ -23,6 +23,9 @@ from pdrd_api_gateway.infrastructure.database.unit_of_work import (
 from pdrd_api_gateway.infrastructure.knowledge.technical_assignment_index import (
     KnowledgeTechnicalAssignmentIndexCoordinator,
 )
+from pdrd_api_gateway.infrastructure.orchestration.document_context import (
+    KnowledgeDocumentContextLifecycle,
+)
 from pdrd_api_gateway.infrastructure.orchestration.n8n import (
     N8nAnalysisOrchestrator,
 )
@@ -88,6 +91,10 @@ async def execute_analysis_job(
         max_attempts=settings.lifecycle.max_attempts,
         min_retry_budget_seconds=(settings.lifecycle.min_retry_budget_seconds),
         project_context_cleaner=(project_context_cleaner),
+        document_context_lifecycle=KnowledgeDocumentContextLifecycle(
+            base_url=settings.knowledge_service.base_url,
+            internal_key=settings.retention.internal_key.get_secret_value(),
+        ),
         technical_assignment_coordinator=(technical_assignment_coordinator),
     )
 

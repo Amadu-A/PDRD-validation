@@ -4,7 +4,7 @@
 
 PDRD Validation — локальный сервис проверки проектной и рабочей документации по нормативной базе, техническому заданию, пользовательским пакетам документов, контексту проекта и Базе Опыта.
 
-Пользователь загружает PDF, DXF/DWG или PDF вместе с соответствующим CAD-файлом, при необходимости прикладывает Техническое задание и выбирает нормативный раздел/пользовательские документы. Система извлекает текст и геометрию, формирует машинный контекст листа, выполняет semantic retrieval по источникам разных типов, запускает локальный VLM-анализ и возвращает структурированные замечания с разделённой доказательной базой `N/T/U/E`.
+Пользователь загружает PDF, DXF/DWG или PDF вместе с соответствующим CAD-файлом, при необходимости прикладывает Техническое задание и выбирает нормативный раздел/пользовательские документы. Система извлекает текст и геометрию, формирует машинный контекст листа, выполняет semantic retrieval по источникам разных типов, запускает локальный VLM-анализ и возвращает структурированные замечания с разделённой доказательной базой `N/T/U/D/E`.
 
 Открыть проект: **[https://pdrd.itcneoterm.local/](https://pdrd.itcneoterm.local/)**. Корпоративный вход и регистрация работают только через HTTPS.
 
@@ -41,7 +41,7 @@ PDRD Validation — локальный сервис проверки проек�
 - серверная доменная модель Human Review, утверждение ревизий и отбор подтверждённых областей для будущей Базы Опыта;
 - итоговый PDF актуального утверждённого Human Review: принятые замечания, проверенные области VLM и жёлтый Gold на листе и в текстовом списке;
 - постоянный каталог Базы Опыта: авторы из User Service, фильтры, причины отклонения, история правок, версии индекса и подготовка обучающих наборов; поиск E выключен до оценки качества;
-- единая embedding model для N/T/U/E/PZ;
+- единая embedding model для N/T/U/D/E/PZ;
 - blue/green переиндексация Qdrant при смене embedding identity;
 - cross-process GPU lease и RAM/VRAM admission;
 - n8n orchestration;
@@ -49,7 +49,7 @@ PDRD Validation — локальный сервис проверки проек�
 - cleanup временного Project Context;
 - unit, integration, architecture и GPU runtime tests.
 
-# Семантика источников N / T / U / E
+# Семантика источников N / T / U / D / E
 
 Источники не объединяются в одну семантическую роль. Тип источника определяет, что именно он может доказывать.
 
@@ -58,6 +58,7 @@ PDRD Validation — локальный сервис проверки проек�
 | `N1`, `N2`, ... | Normative | нормативная база: ГОСТ, СП, ПУЭ и другие нормативные требования |
 | `T1`, `T2`, ... | Technical Assignment | требования ТЗ, заказчика и проекта |
 | `U1`, `U2`, ... | User Package | пользовательские документы проекта/заказчика |
+| `D-p0007-f0001`, `D-p0010-c0` | Проверяемый PDF | связи страниц, проектные факты и внутренние противоречия, без нормативного статуса |
 | `E1`, `E2`, ... | Experience | База Опыта, используемая при finalization/recommendation |
 
 Главные правила:
@@ -67,7 +68,8 @@ PDRD Validation — локальный сервис проверки проек�
 - `T` может содержать ссылки на нормативы и направлять targeted N retrieval, но не превращается в норматив;
 - `U` является самостоятельным пользовательским/project source, но не нормативным доказательством;
 - `E` является опытом, а не нормативным доказательством. Контракт retrieval существует, но `KNOWLEDGE_SERVICE_SEARCH__EXPERIENCE_ENABLED=false` до trusted ingestion и оценки качества;
-- finding без N/T/U не удаляется автоматически: инженерное/визуальное замечание может остаться `needs_review`;
+- D сохраняется отдельным типом с физическими страницами и областями; источник не определяет правильное значение без авторитетного основания;
+- finding без N/T/U/D не удаляется автоматически: инженерное/визуальное замечание может остаться `needs_review`;
 - `normative_control` без валидного `N` не должен сохраняться только на основании `T` или `U`.
 
 Итоговые typed source arrays:
@@ -76,6 +78,7 @@ PDRD Validation — локальный сервис проверки проек�
 basis_sources                       = N
 technical_assignment_basis_sources  = T
 user_package_basis_sources          = U
+document_context_basis_sources      = D
 experience_sources                  = E
 ```
 
@@ -107,7 +110,7 @@ experience_sources                  = E
 | **API Gateway** | Публичный API, проверка прав/владельца, история, задания, неизменяемый снимок N/T/U, Outbox и артефакты | PostgreSQL `public.analysis_jobs`, `public.outbox_messages`; `/data/analyses` | Основной стек |
 | **Document Service** | Проверка числа PDF-страниц, извлечение PDF/CAD, DWG → DXF, изображения, crop, автоматический и Reviewed PDF | Собственной БД нет; обрабатывает переданные файлы | Основной стек |
 | **Knowledge Service** | Каталог N/U, промпты разделов, личные пакеты, lifecycle ТЗ, индексация, поиск и временный контекст проекта | PostgreSQL `knowledge`, Qdrant, `/data/normative`, `/data/technical-assignments` | Основной стек |
-| **Analysis Service** | VLM-анализ листа, проверка требований, правила доказательной базы N/T/U/E, финализация | Собственной БД нет; технический VLM-кеш `/data/vlm-cache` | Основной стек |
+| **Analysis Service** | VLM-анализ листа, проверка требований, правила доказательной базы N/T/U/D/E, финализация | Собственной БД нет; технический VLM-кеш `/data/vlm-cache` | Основной стек |
 | **User Service** | Профили, внешние идентичности, роли, назначения разделов, права Review/удаления и аудит | PostgreSQL `users`; без паролей | `identity` |
 | **Auth Service** | Локальная/email-аутентификация, LDAPS, подтверждение email, серверные сессии, CSRF и ограничение попыток | PostgreSQL `auth`; хеши только собственных паролей и токенов | `auth` вместе с `identity` |
 | **Admin Service** | Административный API: проверка сессии, роли, разделы и отдельные права пользователя | Собственной БД нет; API Auth/User/Knowledge | `auth` |
@@ -270,10 +273,72 @@ flowchart TD
     ENABLED -->|да: после trusted ingestion| ES["Trusted E retrieval"]
     EMPTY_E --> FINAL["Finalization"]
     ES --> FINAL
-    FINAL --> RESULT["Final findings: N/T/U/E separately"]
+    FINAL --> RESULT["Final findings: N/T/U/D/E separately"]
 ```
 
 `E` в `.env.example` отключён: наличие в workflow шага Experience не означает работающую доверенную базу. Промежуточные гипотезы не удаляются, но не становятся подтверждёнными замечаниями без дополнительной проверки.
+
+### 4.1. Контекст всего PDF и межстраничная проверка
+
+```mermaid
+flowchart TD
+    PDF["Проверяемый PDF: выбранные страницы"] --> EXTRACT["Document Service: текст, страницы, SHA-256"]
+    EXTRACT --> ARTIFACT["Gateway: сохранить растры и геометрию визуализации"]
+    ARTIFACT --> COMPACT["n8n: компактные метаданные без растров для Task Runner"]
+    COMPACT --> MODE{"Учитывать контекст всего проекта?"}
+    MODE -->|Нет: быстрый режим| LIGHT["Прежние лёгкие промпт и схема Understanding, без D-фактов"]
+    LIGHT --> LOCAL["Проверка N/T/U: обход всех специальных D HTTP-узлов"]
+    MODE -->|Да| UNDERSTAND["Понимание листов и атомарные факты D"]
+    UNDERSTAND --> INDEX["Knowledge: временный Qdrant D текущего задания"]
+    INDEX --> SEARCH["Соседние страницы, точные ID, таблицы, семантика"]
+    UNDERSTAND --> SEARCH
+    SEARCH --> PAGECHECK["Проверка требований N/T/U с D-контекстом"]
+    PAGECHECK --> CROSS["Отдельный этап: межстраничные противоречия"]
+    UNDERSTAND --> CROSS
+    CROSS --> VALIDATE["Ограниченная пакетная VLM-проверка объекта, параметра и условий"]
+    VALIDATE --> GROUP["Одно замечание: все D/N/T/U основания и evidence locations"]
+    GROUP --> FINAL["Обогащение E и финализация"]
+    LOCAL --> FINAL
+    FINAL --> SAVE["Постоянный результат, история, Review, подсветка и PDF"]
+    SAVE --> END["Завершение / ошибка / отмена задания"]
+    END --> CLEAN["Worker / Gateway: удалить временный D-индекс"]
+    ORPHAN["Старые осиротевшие индексы"] --> SWEEP["Dispatcher: возраст + отсутствие активного задания"]
+    SWEEP --> CLEAN
+```
+
+Чекбокс находится под «Использовать пояснительную записку», по умолчанию выключен
+и независимо управляет D в PDF-only. Подпись предупреждает об увеличении времени
+примерно в 2,5 раза. D содержит факты проверяемых страниц одного PDF. Для сравнения
+всего PDF в пределах 200 страниц оставьте поле диапазона пустым.
+
+D не является нормативом и не выбирает правильное из противоречащих значений.
+Для сопоставимой группы формируется один `finding_id`; решение Review общее,
+а доказательства и отметки PDF относятся к своим физическим страницам.
+При выключенном D workflow обходит индексирование, поиск, сбор контекста и
+межстраничную проверку вместе с их уведомлениями. Промпт и схема Understanding
+совпадают с прежним лёгким режимом `main`; пустые D-инструкции не добавляются
+в N/T/U и финализацию. Общий контракт результата и порядок страниц сохраняются.
+
+`source_kinds` вычисляет сервер из сохранённых типизированных массивов.
+Карточка на чертеже содержит номер, конкретный текст и рабочие ссылки N/T/U/D;
+полный текст доступен через кнопку «i». Шрифт уменьшен примерно в 1,5 раза,
+цвета и управление Review сохранены. Классификация и её объяснение находятся
+в текстовом списке под страницами. Если источника или адреса нет, ссылка на
+чертеже не создаётся. Для ПЗ адрес к исходному PDF пока отсутствует;
+её контекст отображается в полном отчёте.
+
+Индекс D изолирован по заданию и очищается после его выполнения. Тексты,
+источники и области сохраняются в результате, поэтому удаление индекса не мешает
+истории, Review и PDF. Лимит доказательств VLM отделён от лимита сохранения.
+Подробный контракт, очистка, ограничения и регрессии:
+[Контекст документа](docs/document-context.md).
+
+Code-узлы PDF получают текст и метаданные. Растры и геометрия доказательств
+добавляются напрямую в соответствующие HTTP-запросы. N/E-поиск использует
+явный индекс страницы, поэтому Runner получает только нужный предыдущий узел.
+Полный список требований ТЗ передаётся один раз на этап. Устройство передачи
+данных, диагностика размера и проверки больших PDF:
+[Данные PDF workflow](docs/workflow-payload.md).
 
 ## 5. GPU coordination
 
@@ -428,7 +493,7 @@ flowchart LR
     IDX --> QD[("Qdrant: aliases N/U и T")]
     KS --> QD
     EIDX["Experience indexer: ручные версии"] --> QD
-    KS --> TMP[("Временный Qdrant Project Context")]
+    KS --> TMP[("Временный Qdrant: кэш ПЗ и временный D")]
 ```
 
 Gateway проверяет право на раздел и принадлежность выбранных U; Knowledge повторно ограничивает каталог/поиск допустимыми UUID и владельцем. Администратор не получает чужие личные пакеты автоматически. Разделы являются единым справочником: админка читает их из Knowledge, а User хранит назначения; отдельный справочник отделов для этой функции не создаётся.
@@ -767,7 +832,7 @@ Document не владеет PostgreSQL/Qdrant и не создаёт связи
 
 ```mermaid
 flowchart LR
-    N8N["n8n: контекст листа и N/T/U/E"] --> AS["Analysis Service"]
+    N8N["n8n: контекст листа и N/T/U/D/E"] --> AS["Analysis Service"]
     AS --> VLM["shared-vlm:8000/v1"]
     VLM --> AS
     AS --> CACHE["analysis_vlm_cache: /data/vlm-cache"]
@@ -783,7 +848,7 @@ Analysis не владеет SQL-таблицами или Qdrant. Итог и �
 
 ```mermaid
 flowchart LR
-    KS["Knowledge: N/T/U/E и контекст проекта"] --> EMB["Shared embedding API: shared-embedding:8000/v1"]
+    KS["Knowledge: N/T/U/D/E и контекст проекта"] --> EMB["Shared embedding API: shared-embedding:8000/v1"]
     EMB --> VEC["Векторы: единая embedding identity, 4096 измерений"]
     VEC --> IDX["Индексаторы Knowledge"]
     IDX --> QD[("Проектный Qdrant")]
@@ -1834,6 +1899,7 @@ PDRD-validation/
 ├── ops/
 │   ├── certificates/                 # CA bundle AD и локальные файлы сертификатов
 │   ├── check-quality.ps1             # общий Windows quality gate
+│   ├── check-quality.sh              # Linux: общий и пять изолированных наборов
 │   ├── Dockerfile.quality
 │   ├── compose.user-test.yaml         # изолированные PostgreSQL-проверки
 │   ├── compose.auth-test.yaml
@@ -2029,34 +2095,29 @@ git diff -- README.md
 
 ## Linux: общие и изолированные тесты
 
+Из корня репозитория запустите общий набор и пять изолированных интеграционных наборов одной командой:
+
 ```bash
-docker compose --profile test run --rm --no-deps --build quality-tests
+bash ops/check-quality.sh
 ```
 
-PostgreSQL-проверки запускаются **в отдельных тестовых проектах** с временными БД; Knowledge дополнительно использует тестовый Qdrant. Они не должны получать рабочие database URL или production volumes.
+Скрипт выводит шесть этапов: зависимости, Ruff, Python- и frontend-тесты в `quality-tests`, затем PostgreSQL-проверки Gateway, Knowledge, Experience, User и Auth. Интеграционные наборы запускаются **в отдельных тестовых проектах** с временными БД; Knowledge дополнительно использует тестовый Qdrant. Они не должны получать рабочие database URL или production volumes.
 
-| Подсистема | Compose-файл | Контейнер с итоговым кодом |
+| Подсистема | Compose-файл | Остановка с кодом тестов |
 |---|---|---|
-| User | `ops/compose.user-test.yaml` | `user-test-runner` |
-| Auth | `ops/compose.auth-test.yaml` | `auth-test-runner` |
-| Gateway, история и хранение | `ops/compose.gateway-test.yaml` | `gateway-test-runner` |
-| Knowledge, ТЗ и удаление точек | `ops/compose.knowledge-test.yaml` | `knowledge-test-runner` |
-| Experience, Review и каталог | `ops/compose.experience-test.yaml` | `experience-test-runner` |
+| User | `ops/compose.user-test.yaml` | `--exit-code-from user-test-runner` |
+| Auth | `ops/compose.auth-test.yaml` | `--exit-code-from auth-test-runner` |
+| Gateway | `ops/compose.gateway-test.yaml` | `--exit-code-from gateway-test-runner` |
+| Knowledge | `ops/compose.knowledge-test.yaml` | `--exit-code-from knowledge-test-runner` |
+| Experience | `ops/compose.experience-test.yaml` | `--exit-code-from experience-test-runner` |
 
-Пример запуска всех пяти наборов на Linux перед обновлением сервисов:
+Для проверки и последующего обновления сервисов:
 
 ```bash
-set -euo pipefail
-for suite in user auth gateway knowledge experience; do
-    docker compose -p "pdrd-${suite}-test" -f "ops/compose.${suite}-test.yaml" up \
-        --build --abort-on-container-exit --exit-code-from "${suite}-test-runner"
-    docker compose -p "pdrd-${suite}-test" -f "ops/compose.${suite}-test.yaml" down --remove-orphans
-done
-bash scripts/up.sh
-bash scripts/check-stack.sh
+bash ops/check-quality.sh && bash scripts/up.sh
 ```
 
-Если runner завершился с ошибкой, стек не обновлять: сначала исправить причину, затем повторить соответствующий набор. Очистка оставшегося тестового проекта выполняется его `down --remove-orphans`; не подменять это удалением рабочих томов.
+`up.sh` запускается только после успешного завершения всех шести этапов. При ошибке скрипт печатает название этапа, возвращает исходный код ошибки и останавливается. Текущий тестовый проект очищается через `down --remove-orphans`, в том числе при ошибке runner или прерывании запуска. Если не удалось выполнить саму очистку, проверка также завершается ошибкой. Рабочий стек эти команды очистки не затрагивают. После исправления причины повторите `bash ops/check-quality.sh`.
 
 Проверка доступного общего VLM runtime запускается отдельно:
 

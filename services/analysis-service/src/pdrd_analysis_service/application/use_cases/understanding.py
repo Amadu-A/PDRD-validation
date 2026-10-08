@@ -1,6 +1,6 @@
 # services/analysis-service/src/pdrd_analysis_service/application/use_cases/understanding.py
 
-"""Use case structured understanding инженерного листа."""
+"""Сценарий извлечения структурированных сведений инженерного листа."""
 
 from dataclasses import dataclass
 
@@ -20,6 +20,7 @@ from pdrd_analysis_service.domain.analysis import (
     GenerationMetrics,
     PageFacts,
 )
+from pdrd_analysis_service.domain.document_context import document_fact_from_mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +30,7 @@ class UnderstandPage:
     vision_model: StructuredVisionModel
 
     num_predict: int
+    max_facts_per_page: int = 12
 
     async def execute(
         self,
@@ -37,20 +39,23 @@ class UnderstandPage:
         heuristic_page_type: str,
         extracted_text: str,
         image_bytes: bytes,
+        use_document_context: bool = True,
     ) -> tuple[
         PageFacts,
         GenerationMetrics,
     ]:
-        """Выполняет structured VLM understanding."""
+        """Извлекает сведения страницы; при выключенном D использует лёгкие промпт и схему."""
+        max_facts = self.max_facts_per_page if use_document_context else 0
         result = await self.vision_model.generate_json(
             prompt=(
                 build_page_understanding_prompt(
                     page_number=page_number,
                     heuristic_page_type=(heuristic_page_type),
                     extracted_text=(extracted_text),
+                    max_facts=max_facts,
                 )
             ),
-            schema=(build_page_facts_schema()),
+            schema=(build_page_facts_schema(max_facts)),
             num_predict=self.num_predict,
             seed=100,
             stage=(f"page_understanding:{page_number}"),
@@ -104,6 +109,11 @@ class UnderstandPage:
                     "normative_queries",
                 ),
                 limit=6,
+            ),
+            document_facts=tuple(
+                fact
+                for raw in payload.get("document_facts", [])[:max_facts]
+                if (fact := document_fact_from_mapping(raw)) is not None
             ),
         )
 

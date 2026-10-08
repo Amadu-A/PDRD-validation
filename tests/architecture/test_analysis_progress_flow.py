@@ -1,6 +1,6 @@
 # tests/architecture/test_analysis_progress_flow.py
 
-"""Architecture guards Stage 8.3 progress and cooperative cancellation."""
+"""Архитектурные проверки уведомлений о ходе анализа и его отмены."""
 
 import json
 from pathlib import Path
@@ -219,7 +219,7 @@ PDF_VISUALIZATION_PATHS = (
 def _workflow(
     path: Path,
 ) -> dict[str, Any]:
-    """Читает committed workflow JSON."""
+    """Читает сохранённый JSON workflow."""
     payload = json.loads(
         path.read_text(
             encoding="utf-8",
@@ -237,7 +237,7 @@ def _workflow(
 def _nodes(
     workflow: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    """Индексирует nodes по имени."""
+    """Индексирует узлы по имени."""
     raw_nodes = workflow.get(
         "nodes",
         [],
@@ -268,7 +268,7 @@ def _main_output_connections(
     source: str,
     output_index: int,
 ) -> list[dict[str, Any]]:
-    """Возвращает указанный main output source node."""
+    """Возвращает указанный основной выход исходного узла."""
     main = workflow["connections"][source]["main"]
 
     assert isinstance(
@@ -302,7 +302,7 @@ def _main_connections(
     workflow: dict[str, Any],
     source: str,
 ) -> list[dict[str, Any]]:
-    """Возвращает первый main output source node."""
+    """Возвращает первый основной выход исходного узла."""
     return _main_output_connections(
         workflow,
         source,
@@ -314,7 +314,7 @@ def _successors_in_order(
     workflow: dict[str, Any],
     source: str,
 ) -> list[str]:
-    """Возвращает main successors с сохранением execution order."""
+    """Возвращает следующие узлы основного выхода в порядке выполнения."""
     return [
         str(connection["node"])
         for connection in _main_connections(
@@ -333,7 +333,7 @@ def _incoming_connections(
         int,
     ]
 ]:
-    """Возвращает source node и target input index для всех входов target."""
+    """Возвращает исходный узел и индекс входа для всех входящих соединений."""
     result: set[
         tuple[
             str,
@@ -412,7 +412,7 @@ def _parameter(
     node: dict[str, Any],
     name: str,
 ) -> str:
-    """Возвращает строковый параметр n8n node."""
+    """Возвращает строковый параметр узла n8n."""
     parameters = node.get(
         "parameters",
         {},
@@ -432,7 +432,7 @@ def _parameter(
 
 
 def test_workflows_publish_progress_through_cancellation_gate() -> None:
-    """Callback завершает checkpoint до downstream и умеет остановить pipeline."""
+    """Обратный вызов завершает контрольную точку и может остановить последующие этапы."""
     for config in WORKFLOW_CASES:
         workflow = _workflow(
             config["path"],
@@ -583,7 +583,7 @@ def test_workflows_publish_progress_through_cancellation_gate() -> None:
 
 
 def test_progress_callbacks_remain_single_best_effort_requests() -> None:
-    """Infrastructure сбой progress API сам по себе не отменяет analysis."""
+    """Сбой API уведомлений о ходе выполнения сам по себе не отменяет анализ."""
     for config in WORKFLOW_CASES:
         workflow = _workflow(
             config["path"],
@@ -629,7 +629,7 @@ def test_progress_callbacks_remain_single_best_effort_requests() -> None:
 
 
 def test_cancelled_checkpoint_returns_explicit_webhook_response() -> None:
-    """Все checkpoint false branches завершаются единым cancelled response."""
+    """Все ветки отмены завершаются единым ответом об отменённом задании."""
     for config in WORKFLOW_CASES:
         workflow = _workflow(
             config["path"],
@@ -666,6 +666,14 @@ def test_cancelled_checkpoint_returns_explicit_webhook_response() -> None:
             ) in config["cases"]
         }
 
+        if config["path"].name == "analysis-v2-pdf.json":
+            expected_sources.update(
+                {
+                    ("Continue Build Document Context", 0),
+                    ("Continue Cross-Page Consistency", 0),
+                }
+            )
+
         assert (
             _incoming_connections(
                 workflow,
@@ -686,7 +694,7 @@ def test_cancelled_checkpoint_returns_explicit_webhook_response() -> None:
 
 
 def test_pdf_progress_keeps_stage7_visualization_persistence_order() -> None:
-    """Cancellation migration не разрывает Stage 7 extract -> persist -> cache."""
+    """Отмена и компактная проекция сохраняют порядок извлечения, записи и кеша."""
     for (
         path,
         extract_name,
@@ -702,16 +710,22 @@ def test_pdf_progress_keeps_stage7_visualization_persistence_order() -> None:
             "Persist Visualization Artifact",
         ], path
 
-        assert _successors_in_order(
-            workflow,
-            "Persist Visualization Artifact",
-        ) == [
-            "Resolve Project Context Cache",
+        expected_next = (
+            "Compact PDF Metadata"
+            if path.name == "analysis-v2-pdf.json"
+            else "Resolve Project Context Cache"
+        )
+        assert _successors_in_order(workflow, "Persist Visualization Artifact") == [
+            expected_next
         ], path
+        if expected_next == "Compact PDF Metadata":
+            assert _successors_in_order(workflow, expected_next) == [
+                "Resolve Project Context Cache"
+            ], path
 
 
 def test_completed_webhook_response_remains_explicit() -> None:
-    """Cancellation branch не меняет успешный HTTP response workflow."""
+    """Ветка отмены сохраняет явный успешный HTTP-ответ workflow."""
     for config in WORKFLOW_CASES:
         workflow = _workflow(
             config["path"],
@@ -742,7 +756,7 @@ def test_completed_webhook_response_remains_explicit() -> None:
 
 
 def test_workflows_use_v1_execution_order() -> None:
-    """Committed workflows сохраняют deterministic v1 semantics."""
+    """Сохранённые workflow используют детерминированный порядок выполнения v1."""
     for config in WORKFLOW_CASES:
         workflow = _workflow(
             config["path"],

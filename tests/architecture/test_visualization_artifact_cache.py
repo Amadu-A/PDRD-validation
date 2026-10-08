@@ -1,6 +1,6 @@
 # tests/architecture/test_visualization_artifact_cache.py
 
-"""Architecture guards Stage 7 reusable visualization artifact."""
+"""Архитектурные проверки повторного использования артефакта визуализации."""
 
 import json
 from pathlib import Path
@@ -94,7 +94,7 @@ DOCUMENT_COMBINED_ROUTER = (
 def _workflow(
     path: Path,
 ) -> dict[str, Any]:
-    """Читает committed n8n workflow."""
+    """Читает сохранённый workflow n8n."""
     payload = json.loads(
         path.read_text(
             encoding="utf-8",
@@ -112,7 +112,7 @@ def _workflow(
 def _nodes_by_name(
     workflow: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    """Индексирует workflow nodes по name."""
+    """Индексирует узлы workflow по имени."""
     nodes = workflow.get(
         "nodes",
         [],
@@ -142,7 +142,7 @@ def _next_nodes(
     workflow: dict[str, Any],
     source_name: str,
 ) -> list[str]:
-    """Возвращает direct main successors с сохранением порядка."""
+    """Возвращает прямые следующие узлы основного выхода с сохранением порядка."""
     connections = workflow.get(
         "connections",
         {},
@@ -192,7 +192,7 @@ def _next_nodes(
 
 
 def test_pdf_workflows_persist_initial_visualization_artifact() -> None:
-    """Initial extraction сохраняется до дальнейшего analysis pipeline."""
+    """Результат исходного извлечения сохраняется до дальнейших этапов анализа."""
     for (
         path,
         extract_name,
@@ -252,16 +252,18 @@ def test_pdf_workflows_persist_initial_visualization_artifact() -> None:
             extraction_successors,
         )
 
-        assert _next_nodes(
-            workflow,
-            "Persist Visualization Artifact",
-        ) == [
-            "Resolve Project Context Cache",
+        expected_next = (
+            "Compact PDF Metadata"
+            if path.name == "analysis-v2-pdf.json"
+            else "Resolve Project Context Cache"
+        )
+        assert _next_nodes(workflow, "Persist Visualization Artifact") == [
+            expected_next
         ], path
 
 
 def test_cad_only_workflow_does_not_create_pdf_visualization_artifact() -> None:
-    """CAD-only остаётся без фиктивного PDF artifact."""
+    """Режим только CAD не создаёт артефакт PDF."""
     workflow = _workflow(
         CAD_ONLY_WORKFLOW,
     )
@@ -274,7 +276,7 @@ def test_cad_only_workflow_does_not_create_pdf_visualization_artifact() -> None:
 
 
 def test_gateway_reads_artifact_before_legacy_pdf_rerender() -> None:
-    """Новый job не должен доходить до Document Service renderer."""
+    """Новое задание использует артефакт без повторного рендеринга в Document Service."""
     source = GATEWAY_USE_CASE.read_text(
         encoding="utf-8",
     )
@@ -299,7 +301,7 @@ def test_gateway_reads_artifact_before_legacy_pdf_rerender() -> None:
 
 
 def test_visualization_artifact_is_separate_from_analysis_result_json() -> None:
-    """PNG сохраняется binary files, а не base64 внутри result.json."""
+    """PNG сохраняется в отдельных двоичных файлах."""
     port = GATEWAY_ARTIFACT_PORT.read_text(
         encoding="utf-8",
     )
@@ -322,7 +324,7 @@ def test_visualization_artifact_is_separate_from_analysis_result_json() -> None:
 
 
 def test_internal_artifact_route_is_registered() -> None:
-    """n8n имеет отдельный internal ingress для initial extraction artifact."""
+    """n8n использует отдельный внутренний маршрут записи исходного артефакта."""
     router = GATEWAY_INTERNAL_ROUTER.read_text(
         encoding="utf-8",
     )
@@ -343,7 +345,7 @@ def test_internal_artifact_route_is_registered() -> None:
 
 
 def test_combined_extract_can_return_pdf_text_geometry() -> None:
-    """PDF+CAD initial extraction предоставляет ту же PDF geometry."""
+    """Исходное извлечение PDF+CAD предоставляет геометрию текста PDF."""
     source = DOCUMENT_COMBINED_ROUTER.read_text(
         encoding="utf-8",
     )
@@ -358,7 +360,7 @@ def test_combined_extract_can_return_pdf_text_geometry() -> None:
 
 
 def test_pdf_cad_result_does_not_persist_transient_visualization_images() -> None:
-    """PDF+CAD result не дублирует transient images внутри result.json."""
+    """Результат PDF+CAD не дублирует временные изображения внутри result.json."""
     workflow = _workflow(
         WORKFLOW_ROOT / "analysis-v2-pdf-cad.json",
     )

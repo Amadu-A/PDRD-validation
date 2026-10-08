@@ -59,6 +59,7 @@ class SubmitAnalysis:
         cad_file_name: str | None,
         pages: str | None,
         use_explanatory_note: bool = False,
+        use_document_context: bool = False,
         note_start_page: str | int | None = None,
         note_end_page: str | int | None = None,
         normative_section_id: UUID | None = None,
@@ -152,6 +153,7 @@ class SubmitAnalysis:
             pdf_file_name=pdf_file_name,
             cad_file_name=cad_file_name,
             use_explanatory_note=use_explanatory_note,
+            use_document_context=use_document_context,
             note_start_page=note_start_page,
             note_end_page=note_end_page,
         )

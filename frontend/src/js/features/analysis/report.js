@@ -4,10 +4,11 @@
  * Строит безопасное DOM-представление результата анализа.
  *
  * Пользовательские и модельные строки вставляются только через textContent.
- * N, T и U citations открывают managed PDF или PDF-preview
+ * Ссылки N, T и U открывают сохранённый PDF или его предварительный просмотр
  * на физической странице источника.
  */
 
+import { findingSourceDescription, preferredSourceArray, findingPageLabel, focusDocumentEvidence } from "./finding-provenance.js";
 import {
   sourceModeLabel,
   statusLabel,
@@ -27,6 +28,7 @@ const CATEGORY_LABELS = {
   completeness: "Комплектность",
   optimization: "Оптимизация",
   customer_requirements: "Требования заказчика",
+  document_consistency: "Согласованность документа",
   other: "Прочее",
 };
 
@@ -251,41 +253,20 @@ function uniqueSources(
 }
 
 
-function preferredSourceArray(
-  primary,
-  fallback,
-) {
-  if (
-    Array.isArray(
-      primary,
-    )
-    && primary.length
-  ) {
-    return primary;
-  }
-
-  if (Array.isArray(
-    fallback,
-  )) {
-    return fallback;
-  }
-
-  return [];
-}
-
-
+/** Возвращает неповторяющиеся сохранённые нормативные основания. */
 export function normativeSources(
   finding,
 ) {
   return uniqueSources(
     preferredSourceArray(
-      finding.normative_sources,
       finding.basis_sources,
+      finding.normative_sources,
     ),
   );
 }
 
 
+/** Возвращает сохранённые требования ТЗ с непустым резервным массивом. */
 function technicalAssignmentSources(
   finding,
 ) {
@@ -298,6 +279,7 @@ function technicalAssignmentSources(
 }
 
 
+/** Возвращает сохранённые пользовательские источники без повторов. */
 function userPackageSources(
   finding,
 ) {
@@ -310,6 +292,7 @@ function userPackageSources(
 }
 
 
+/** Строит адрес известного маршрута только при наличии идентификатора и физической страницы. */
 function managedCitationUrl(
   source,
   pathPrefix,
@@ -434,6 +417,7 @@ function createManagedCitation(
 }
 
 
+/** Создаёт ссылку на нормативный PDF либо текст при отсутствии адреса. */
 export function createNormativeCitation(
   source,
 ) {
@@ -449,6 +433,7 @@ export function createNormativeCitation(
 }
 
 
+/** Открывает ТЗ через существующий защищённый просмотр; без идентификатора возвращает текст. */
 function createTechnicalAssignmentCitation(
   source,
 ) {
@@ -513,6 +498,7 @@ function createTechnicalAssignmentCitation(
 }
 
 
+/** Создаёт ссылку на сохранённый пользовательский документ либо текст. */
 function createUserPackageCitation(
   source,
 ) {
@@ -747,7 +733,7 @@ function appendFinding(
     createElement(
       "h4",
       "analysis-result__finding-title",
-      `${index + 1}. Лист/страница ${page}`,
+      `№${index + 1} · ${findingPageLabel(finding, page)}`,
     ),
   );
 
@@ -807,11 +793,46 @@ function appendFinding(
   );
   reviewText.dataset.reviewText = "";
 
+  appendTextBlock(article, "Происхождение и подтверждение", findingSourceDescription(finding));
+
   appendTextBlock(
     article,
     "Основание на листе",
     finding.evidence,
   );
+
+  const evidenceLocations = Array.isArray(finding.evidence_locations)
+    ? finding.evidence_locations : [];
+  if (evidenceLocations.length) {
+    const details = createElement("div", "analysis-result__evidence-pages");
+    details.append(createElement("strong", "", "Страницы доказательств:"));
+    evidenceLocations.forEach((location) => {
+      const pageNumber = Number(location?.page);
+      if (!Number.isInteger(pageNumber) || pageNumber < 1) return;
+      const link = createElement("a", "analysis-result__evidence-link");
+      link.href = "#analysis-page-" + pageNumber;
+      link.append(document.createTextNode(
+        "Страница " + pageNumber + ": " + String(location.text ?? "")
+      ));
+      focusDocumentEvidence(link, finding.finding_id, pageNumber);
+      details.append(link);
+    });
+    article.append(details);
+  }
+
+  const documentSources = Array.isArray(finding.document_context_basis_sources) ? finding.document_context_basis_sources : [];
+  if (documentSources.length) {
+    const details = createElement("details", "analysis-result__sources");
+    details.append(createElement("summary", "", `Контекст проверяемого PDF [D] (${documentSources.length})`));
+    for (const source of documentSources) {
+      const link = createElement("a", "analysis-result__evidence-link");
+      link.href = `#analysis-page-${source.page}`;
+      link.textContent = `${source.source_id} · Страница ${source.page}: ${source.evidence_text || source.text || ""}`;
+      focusDocumentEvidence(link, finding.finding_id, source.page);
+      details.append(link);
+    }
+    article.append(details);
+  }
 
   const reviewBasis = appendTextBlock(
     article,
@@ -1330,6 +1351,10 @@ export function renderAnalysisReport(
     {
       normativeSources,
       createNormativeCitation,
+      technicalAssignmentSources,
+      createTechnicalAssignmentCitation,
+      userPackageSources,
+      createUserPackageCitation,
     },
   );
 

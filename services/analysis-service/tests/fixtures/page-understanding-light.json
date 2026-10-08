@@ -1,0 +1,68 @@
+{
+  "baseline_commit": "994b098bb12e80dd651842fec44b7bb70ee211cb",
+  "arguments": {
+    "page_number": 7,
+    "heuristic_page_type": "scheme",
+    "extracted_text": "Б-012 -37 °C"
+  },
+  "prompt": "Ты анализируешь один лист российской проектной\nили рабочей документации.\n\nФизический индекс PDF-страницы\n(transport metadata, НЕ проектное поле \"Лист\"):\n7\n\nПредварительный тип листа: scheme\n\n\n\nИзвлечённый текст:\n\n--- PAGE TEXT ---\nБ-012 -37 °C\n--- END PAGE TEXT ---\n\nЭТОТ ЭТАП НЕ ИЩЕТ ОШИБКИ.\n\nКратко и объективно опиши:\n- дисциплину или раздел;\n- тип листа;\n- основные устройства;\n- кабели;\n- линии;\n- таблицы;\n- видимые связи;\n- важные марки, теги и обозначения.\n\nЗатем сформулируй до 6 НЕЙТРАЛЬНЫХ тем,\nпо которым следует подобрать нормативные требования.\n\nНе утверждай наличие нарушения.\nНе вспоминай ГОСТ, СП или ПУЭ по памяти.\n\nВерни только JSON по схеме.",
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "discipline": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "page_type": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "summary": {
+        "type": "string",
+        "maxLength": 600
+      },
+      "objects": {
+        "type": "array",
+        "maxItems": 15,
+        "items": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
+      "connections": {
+        "type": "array",
+        "maxItems": 12,
+        "items": {
+          "type": "string",
+          "maxLength": 250
+        }
+      },
+      "labels": {
+        "type": "array",
+        "maxItems": 15,
+        "items": {
+          "type": "string",
+          "maxLength": 160
+        }
+      },
+      "normative_queries": {
+        "type": "array",
+        "maxItems": 6,
+        "items": {
+          "type": "string",
+          "maxLength": 240
+        }
+      }
+    },
+    "required": [
+      "discipline",
+      "page_type",
+      "summary",
+      "objects",
+      "connections",
+      "labels",
+      "normative_queries"
+    ]
+  }
+}

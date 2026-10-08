@@ -5,9 +5,12 @@
 import os
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from pdrd_api_gateway.core.settings import Settings
 from pdrd_api_gateway.domain.analysis_job import AnalysisJob
 from pdrd_api_gateway.infrastructure.database.engine import (
@@ -17,6 +20,8 @@ from pdrd_api_gateway.infrastructure.database.engine import (
 from pdrd_api_gateway.infrastructure.database.models import AnalysisJobModel
 from pdrd_api_gateway.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from sqlalchemy import delete, text
+
+ALEMBIC_CONFIG_PATH = Path(__file__).resolve().parents[2] / "alembic.ini"
 
 pytestmark = [
     pytest.mark.database,
@@ -51,9 +56,12 @@ async def test_history_migration_owner_filter_and_pagination():
     ]
     try:
         async with engine.connect() as connection:
+            migrations = ScriptDirectory.from_config(Config(str(ALEMBIC_CONFIG_PATH)))
+            expected_head = migrations.get_current_head()
+            assert expected_head is not None
             assert (
                 await connection.scalar(text("SELECT version_num FROM alembic_version"))
-                == "20261006_0007"
+                == expected_head
             )
             assert (
                 await connection.scalar(

@@ -17,7 +17,9 @@ from pdrd_experience_service.domain.review import (
     OriginalFinding,
     ProposedRegion,
     Rectangle,
+    ReviewDocumentSource,
     ReviewError,
+    ReviewEvidenceLocation,
 )
 
 
@@ -89,6 +91,28 @@ def _regions(location: dict[str, Any]) -> tuple[ProposedRegion, ...]:
             continue
 
     return tuple(regions)
+
+
+def _document_regions(raw: dict[str, Any]) -> tuple[ProposedRegion, ...]:
+    """Читает собственную геометрию доказательства, не подменяя её областью другого факта."""
+    return _regions(
+        {
+            "status": "located",
+            "method": "document_context",
+            "regions": [
+                {
+                    "bbox": {
+                        key: region.get(key)
+                        for key in ("x_min", "y_min", "x_max", "y_max")
+                    },
+                    "source": "vlm",
+                    "confidence": region.get("confidence", 0),
+                }
+                for region in raw.get("visual_regions", [])
+                if isinstance(region, dict)
+            ],
+        }
+    )
 
 
 def completed_analysis_from_visualization(
@@ -174,12 +198,73 @@ def completed_analysis_from_visualization(
         if not isinstance(normative_basis, str):
             raise ReviewError("Нормативное основание имеет неверный формат.")
 
+        evidence = []
+        for raw in finding.get("evidence_locations", []):
+            if not isinstance(raw, dict):
+                continue
+            evidence_page = _page(raw.get("page"))
+            evidence_key = (evidence_page, finding_id)
+            evidence.append(
+                ReviewEvidenceLocation(
+                    page=evidence_page,
+                    source_id=str(raw.get("source_id", "")),
+                    text=str(raw.get("text", "")),
+                    proposed_regions=(
+                        _document_regions(raw)
+                        if "visual_regions" in raw
+                        else ()
+                        if evidence_key in ambiguous
+                        else locations.get(evidence_key, ())
+                    ),
+                )
+            )
+        document_sources = []
+        for raw in finding.get("document_context_basis_sources", []):
+            if not isinstance(raw, dict):
+                continue
+            document_sources.append(
+                ReviewDocumentSource(
+                    **{
+                        key: raw[key]
+                        for key in (
+                            "source_id",
+                            "page",
+                            "evidence_text",
+                            "text",
+                            "fact_id",
+                            "chunk_index",
+                            "score",
+                            "match_type",
+                            "subject",
+                            "property",
+                            "scope",
+                        )
+                        if key in raw
+                    },
+                    visual_regions=_document_regions(raw),
+                )
+            )
+        kinds = tuple(
+            kind
+            for kind, arrays in (
+                ("D", document_sources),
+                ("N", finding.get("basis_sources", [])),
+                ("T", finding.get("technical_assignment_basis_sources", [])),
+                ("U", finding.get("user_package_basis_sources", [])),
+                ("E", finding.get("experience_sources", [])),
+            )
+            if arrays
+        )
+
         originals.append(
             OriginalFinding(
                 finding_id=finding_id,
                 page_number=page_number,
                 text=finding.get("comment"),
                 normative_basis=normative_basis,
+                evidence_locations=tuple(evidence),
+                document_context_basis_sources=tuple(document_sources),
+                source_kinds=kinds,
                 proposed_regions=(() if key in ambiguous else locations.get(key, ())),
             )
         )

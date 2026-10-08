@@ -147,7 +147,7 @@ def test_pdf_vlm_stages_are_document_scoped() -> None:
 
 
 def test_pdf_stage_batch_topology_is_ordered() -> None:
-    """Stage собирается и expand-ится в прежнем deterministic порядке."""
+    """Пакетный этап собирает и разворачивает страницы в прежнем детерминированном порядке."""
     workflow = _workflow(
         PDF_WORKFLOW,
     )
@@ -166,12 +166,11 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
         "Understand Pages Stage",
     ]
 
-    assert _successors(
-        workflow,
-        "Understand Pages Stage",
-    ) == [
-        "Understand Page",
+    assert _successors(workflow, "Understand Pages Stage") == ["Use Document Context"]
+    assert _successors(workflow, "Continue Build Document Context") == [
+        "Create Document Context"
     ]
+    assert _successors(workflow, "Create Document Context") == ["Understand Page"]
 
     assert _successors(
         workflow,
@@ -194,11 +193,15 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
         "Check Norms",
     ]
 
-    assert _successors(
-        workflow,
-        "Check Norms",
-    ) == [
-        "Gate Expand Norm Check Stage",
+    assert _successors(workflow, "Check Norms") == ["Use Cross-Page Consistency"]
+    assert _successors(workflow, "Continue Cross-Page Consistency") == [
+        "Check Cross-Page Consistency"
+    ]
+    assert _successors(workflow, "Check Cross-Page Consistency") == [
+        "Merge Cross-Page Checks"
+    ]
+    assert _successors(workflow, "Merge Cross-Page Checks") == [
+        "Gate Expand Norm Check Stage"
     ]
 
     assert _successors(

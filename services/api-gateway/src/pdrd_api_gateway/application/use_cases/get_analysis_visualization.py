@@ -669,7 +669,18 @@ class GetAnalysisVisualization:
                 )
             )
 
-            if finding_page != page_number:
+            evidence_locations = finding.get("evidence_locations", [])
+            matching_evidence = (
+                [
+                    item
+                    for item in evidence_locations
+                    if isinstance(item, dict)
+                    and cls._normalize_page(item.get("page")) == page_number
+                ]
+                if isinstance(evidence_locations, list)
+                else []
+            )
+            if finding_page != page_number and not matching_evidence:
                 continue
 
             finding_id = str(
@@ -695,16 +706,21 @@ class GetAnalysisVisualization:
                             "",
                         )
                     ),
-                    evidence=str(
-                        finding.get(
-                            "evidence",
-                            "",
+                    evidence=(
+                        " ".join(
+                            str(item.get("text", "")) for item in matching_evidence
                         )
+                        if matching_evidence
+                        else str(finding.get("evidence", ""))
                     ),
                     visual_regions=(
-                        cls._visual_regions_from_finding(
-                            finding,
+                        tuple(
+                            region
+                            for item in matching_evidence
+                            for region in cls._visual_regions_from_finding(item)
                         )
+                        if matching_evidence
+                        else cls._visual_regions_from_finding(finding)
                     ),
                 )
             )

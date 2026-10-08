@@ -32,6 +32,7 @@ export function createAnalysisForm({
   pagesInput,
   pagesHint,
   useExplanatoryNoteInput,
+  documentContextInput = null,
   noteStartPageInput,
   noteEndPageInput,
   getNormativeSelection = () => null,
@@ -273,6 +274,12 @@ export function createAnalysisForm({
 
     if (!available) {
       useExplanatoryNoteInput.checked = false;
+    }
+
+    if (documentContextInput) {
+      const documentAvailable = getMode() === "pdf_only";
+      documentContextInput.disabled = !documentAvailable;
+      if (!documentAvailable) documentContextInput.checked = false;
     }
 
     const enabled = (
@@ -668,6 +675,7 @@ export function createAnalysisForm({
 
   function toFormData() {
     const body = new FormData();
+    body.append("use_document_context", String(Boolean(documentContextInput?.checked && !documentContextInput.disabled && getMode() === "pdf_only")));
 
     const pdf = pdfInput.files[0];
 

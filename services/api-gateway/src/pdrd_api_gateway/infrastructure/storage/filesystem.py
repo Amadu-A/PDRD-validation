@@ -250,6 +250,7 @@ class LocalFilesystemAnalysisArtifactStore:
                 "pages": submission.pages,
                 "pdf_file_name": (submission.pdf_file_name),
                 "cad_file_name": (submission.cad_file_name),
+                "use_document_context": submission.use_document_context,
                 "use_explanatory_note": (submission.use_explanatory_note),
                 "note_start_page": (submission.note_start_page),
                 "note_end_page": (submission.note_end_page),
@@ -376,6 +377,7 @@ class LocalFilesystemAnalysisArtifactStore:
                 cad_file_name=manifest.get(
                     "cad_file_name",
                 ),
+                use_document_context=bool(manifest.get("use_document_context", False)),
                 use_explanatory_note=bool(
                     manifest.get(
                         "use_explanatory_note",

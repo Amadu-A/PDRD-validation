@@ -1,6 +1,6 @@
 # services/api-gateway/tests/integration/test_analysis_endpoints.py
 
-"""HTTP contract tests асинхронного analysis API."""
+"""Проверки HTTP-контракта асинхронного API анализа."""
 
 from collections.abc import (
     Awaitable,
@@ -32,7 +32,7 @@ from pdrd_api_gateway.main import create_app
 
 
 class StaticReadiness:
-    """Fake infrastructure readiness."""
+    """Тестовая проверка готовности инфраструктуры."""
 
     async def is_ready(
         self,
@@ -42,7 +42,7 @@ class StaticReadiness:
 
 
 class SubmitAnalysisStub:
-    """Fake SubmitAnalysis."""
+    """Тестовый сценарий отправки задания анализа."""
 
     def __init__(
         self,
@@ -94,6 +94,7 @@ class SubmitAnalysisStub:
         cad_file_name: str | None,
         pages: str | None,
         use_explanatory_note: bool = False,
+        use_document_context: bool = False,
         note_start_page: str | int | None = None,
         note_end_page: str | int | None = None,
         normative_section_id: UUID | None = None,
@@ -120,6 +121,7 @@ class SubmitAnalysisStub:
         self.pages = pages
 
         self.use_explanatory_note = use_explanatory_note
+        self.use_document_context = use_document_context
 
         self.note_start_page = note_start_page
         self.note_end_page = note_end_page
@@ -159,7 +161,7 @@ class SubmitAnalysisStub:
 
 
 class GetAnalysisStub:
-    """Fake GetAnalysisJob."""
+    """Тестовый сценарий чтения задания анализа."""
 
     def __init__(
         self,
@@ -549,3 +551,17 @@ def test_get_unknown_analysis_returns_404() -> None:
         )
 
     assert response.status_code == 404
+
+
+def test_create_pdf_analysis_forwards_whole_document_switch():
+    """HTTP-флаг достигает сценария создания задания без связи с ПЗ."""
+    submit = SubmitAnalysisStub()
+    with build_client(submit_stub=submit, get_stub=GetAnalysisStub(None)) as client:
+        response = client.post(
+            "/api/v1/analyses",
+            files={"pdf": ("drawing.pdf", b"pdf-content", "application/pdf")},
+            data={"use_document_context": "true"},
+        )
+    assert response.status_code == 202, response.text
+    assert submit.use_document_context is True
+    assert submit.use_explanatory_note is False

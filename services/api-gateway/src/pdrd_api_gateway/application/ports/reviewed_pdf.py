@@ -13,6 +13,14 @@ from pdrd_api_gateway.application.ports.review import ReviewContext
 
 
 @dataclass(frozen=True, slots=True)
+class ReviewedPdfEvidenceLocation:
+    """Подтверждённые области дополнительной страницы того же замечания."""
+
+    page: int
+    regions: tuple[AnalysisBoundingBox, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ReviewedPdfFinding:
     """Принятое замечание: полный текст и только проверенная сервером геометрия."""
 
@@ -25,6 +33,9 @@ class ReviewedPdfFinding:
     normative_basis: str
     regions: tuple[AnalysisBoundingBox, ...]
     callout_box: AnalysisBoundingBox | None
+    evidence_locations: tuple[ReviewedPdfEvidenceLocation, ...] = ()
+    document_context_basis_sources: tuple[str, ...] = ()
+    source_kinds: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

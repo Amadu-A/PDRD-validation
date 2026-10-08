@@ -1,6 +1,6 @@
 # services/analysis-service/src/pdrd_analysis_service/application/json_schemas.py
 
-"""JSON Schema для structured VLM pipeline."""
+"""Схемы структурированных ответов визуальной модели для этапов анализа."""
 
 from typing import Any
 
@@ -12,6 +12,7 @@ FINDING_CATEGORIES = (
     "completeness",
     "optimization",
     "customer_requirements",
+    "document_consistency",
     "other",
 )
 
@@ -27,9 +28,9 @@ FINDING_STATUSES = (
 )
 
 
-def build_page_facts_schema() -> dict[str, Any]:
-    """Возвращает schema понимания листа."""
-    return {
+def build_page_facts_schema(max_facts: int = 12) -> dict[str, Any]:
+    """Возвращает лёгкую схему листа; D-факты добавляет только при положительном лимите."""
+    schema = {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -89,9 +90,52 @@ def build_page_facts_schema() -> dict[str, Any]:
         ],
     }
 
+    if max_facts <= 0:
+        return schema
+
+    text_fields = (
+        "kind",
+        "subject_type",
+        "subject_name",
+        "identifier",
+        "property_type",
+        "property_name",
+        "value_raw",
+        "unit_raw",
+        "scope_system",
+        "scope_location",
+        "scope_segment",
+        "scope_operating_mode",
+        "scope_condition",
+        "relation",
+        "table_title",
+        "table_id",
+        "row_label",
+        "column_label",
+        "continuation_marker",
+        "evidence_text",
+    )
+    fact_properties = {
+        name: {"type": "string", "maxLength": 220} for name in text_fields
+    }
+    fact_properties["visual_regions"] = build_finding_visual_regions_schema()
+    fact_properties["visual_regions"]["maxItems"] = 2
+    schema["properties"]["document_facts"] = {
+        "type": "array",
+        "maxItems": max_facts,
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": fact_properties,
+            "required": [*text_fields, "visual_regions"],
+        },
+    }
+    schema["required"].append("document_facts")
+    return schema
+
 
 def build_finding_visual_regions_schema() -> dict[str, Any]:
-    """Возвращает schema VLM evidence regions одного finding."""
+    """Возвращает схему областей доказательств одного замечания визуальной модели."""
     return {
         "type": "array",
         "maxItems": 4,
@@ -181,9 +225,10 @@ def build_normative_check_schema(
         str,
         ...,
     ] = (),
+    document_context_source_ids: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """Возвращает компактную schema exhaustive N/T/U candidate check."""
-    return {
+    """Возвращает схему проверки кандидатов N/T/U с D только при наличии источников."""
+    schema = {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -253,6 +298,9 @@ def build_normative_check_schema(
                                 technical_assignment_source_ids,
                             )
                         ),
+                        "document_context_source_ids": _source_ids_schema(
+                            document_context_source_ids
+                        ),
                         "user_package_source_ids": (
                             _source_ids_schema(
                                 user_package_source_ids,
@@ -272,6 +320,7 @@ def build_normative_check_schema(
                         "normative_source_ids",
                         "technical_assignment_source_ids",
                         "user_package_source_ids",
+                        "document_context_source_ids",
                     ],
                 },
             },
@@ -281,6 +330,12 @@ def build_normative_check_schema(
             "violations",
         ],
     }
+
+    if not document_context_source_ids:
+        finding = schema["properties"]["violations"]["items"]
+        del finding["properties"]["document_context_source_ids"]
+        finding["required"].remove("document_context_source_ids")
+    return schema
 
 
 def build_finalization_schema(

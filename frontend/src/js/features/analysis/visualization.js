@@ -1,17 +1,18 @@
 // frontend/src/js/features/analysis/visualization.js
 
 /**
- * Визуализация findings поверх rendered PDF pages.
+ * Визуализация замечаний поверх изображений страниц PDF.
  *
  * BBox приходит в нормализованных координатах 0..1000.
- * Один finding может содержать несколько visual regions.
- * Несколько findings одного явно обозначенного объекта могут делить
- * одну карточку; каждый подпункт сохраняет свой ID, sources и подсветку.
+ * Одно замечание может содержать несколько областей доказательств.
+ * Несколько замечаний одного явно обозначенного объекта могут делить
+ * одну карточку; каждый подпункт сохраняет свой ID, источники и подсветку.
  * Карточки размещаются поверх листа автоматически.
  * Неподтверждённые гипотезы не получают рамки локализации.
- * Текст и source data вставляются только через textContent.
+ * Текст и сведения об источниках вставляются только через textContent.
  */
 
+import { preferredSourceArray, focusDocumentEvidence } from "./finding-provenance.js";
 import { registerVisualizationReview, reviewCalloutBox } from "./visualization-review.js";
 
 const CALLOUT_MARGIN_PX = 10;
@@ -254,10 +255,11 @@ function findingsForPage(
       ({
         finding,
       }) => (
-        normalizedPage(
-          finding.page
-          ?? finding.page_number,
-        ) === pageNumber
+        normalizedPage(finding.page ?? finding.page_number) === pageNumber
+        || (Array.isArray(finding.evidence_locations)
+          && finding.evidence_locations.some(
+            (item) => normalizedPage(item?.page) === pageNumber
+          ))
       ),
     )
     .map(
@@ -291,29 +293,6 @@ function findingsForPage(
         };
       },
     );
-}
-
-
-function preferredSourceArray(
-  primary,
-  fallback,
-) {
-  if (
-    Array.isArray(
-      primary,
-    )
-    && primary.length
-  ) {
-    return primary;
-  }
-
-  if (Array.isArray(
-    fallback,
-  )) {
-    return fallback;
-  }
-
-  return [];
 }
 
 
@@ -763,152 +742,51 @@ function createFindingDetailControl(
 }
 
 
-function appendNormativeLinks(
-  parent,
-  finding,
-  {
-    normativeSources,
-    createNormativeCitation,
-  },
-) {
-  const sources = normativeSources(
-    finding,
-  );
-
-  if (!sources.length) {
-    return;
+/** Добавляет компактные ссылки через общие с отчётом компоненты N/T/U и доказательства D.
+ * Источник без рабочего маршрута остаётся только в полном текстовом отчёте.
+ * У ПЗ нет публичного маршрута к исходному PDF, поэтому адрес не придумывается.
+ */
+function appendFindingLinks(parent, finding, dependencies) {
+  const sourcesBlock = createElement("div", "analysis-result__annotation-sources");
+  const groups = [
+    ["N", dependencies.normativeSources(finding), dependencies.createNormativeCitation],
+    ["T", dependencies.technicalAssignmentSources(finding), dependencies.createTechnicalAssignmentCitation],
+    ["U", dependencies.userPackageSources(finding), dependencies.createUserPackageCitation],
+  ];
+  for (const [kind, sources, createCitation] of groups) {
+    for (const source of sources) {
+      const link = createCitation(source);
+      if (link.tagName !== "A") continue;
+      const fileName = String(source.source_file || source.file_name || source.source || "")
+        .split(/[\\/]/).at(-1).replace(/\.(pdf|docx?|xlsx?)$/i, "");
+      const name = kind === "T" ? "ТЗ" : fileName || (kind === "N" ? "Норматив" : "Документ");
+      const page = normalizedPage(source.page ?? source.page_number);
+      link.setAttribute("aria-label", link.textContent);
+      link.removeAttribute("title");
+      link.textContent = `${name} · стр. ${page}`;
+      const wrapper = createElement("span", "analysis-result__annotation-source");
+      wrapper.append(link);
+      sourcesBlock.append(wrapper);
+    }
   }
-
-  const sourcesBlock = createElement(
-    "div",
-    "analysis-result__annotation-sources",
-  );
-
-  sourcesBlock.append(
-    createElement(
-      "span",
-      "analysis-result__annotation-source-label",
-      "Норматив:",
-    ),
-  );
-
-  const visibleSources = sources.slice(
-    0,
-    2,
-  );
-
-  visibleSources.forEach(
-    (source) => {
-      const wrapper = createElement(
-        "span",
-        "analysis-result__annotation-source",
-      );
-
-      const link = createNormativeCitation(
-        source,
-      );
-
-      const tooltip = createElement(
-        "span",
-        "analysis-result__annotation-tooltip",
-      );
-
-      tooltip.setAttribute(
-        "role",
-        "tooltip",
-      );
-
-      tooltipSequence += 1;
-
-      const tooltipId = (
-        `analysis-normative-tooltip-${tooltipSequence}`
-      );
-
-      tooltip.id = tooltipId;
-
-      if (
-        link.tagName === "A"
-      ) {
-        link.setAttribute(
-          "aria-describedby",
-          tooltipId,
-        );
-      }
-
-      const sourceTitle = [
-        (
-          source.source_file
-          || "Нормативный источник"
-        ),
-        (
-          source.page !== null
-          && source.page !== undefined
-          ? `стр. ${source.page}`
-          : null
-        ),
-      ]
-        .filter(
-          Boolean,
-        )
-        .join(
-          ", ",
-        );
-
-      tooltip.append(
-        createElement(
-          "strong",
-          "analysis-result__annotation-tooltip-title",
-          sourceTitle,
-        ),
-      );
-
-      tooltip.append(
-        createElement(
-          "span",
-          "analysis-result__annotation-tooltip-text",
-          (
-            source.text
-            || finding.basis
-            || (
-              "Текст нормативного фрагмента "
-              + "не передан."
-            )
-          ),
-        ),
-      );
-
-      wrapper.append(
-        link,
-        tooltip,
-      );
-
-      sourcesBlock.append(
-        wrapper,
-      );
-    },
-  );
-
-  if (
-    sources.length
-    > visibleSources.length
-  ) {
-    sourcesBlock.append(
-      createElement(
-        "span",
-        "analysis-result__annotation-source-more",
-        (
-          `+${sources.length - visibleSources.length}`
-        ),
-      ),
-    );
+  const documentPages = new Set();
+  for (const source of finding.document_context_basis_sources ?? []) {
+    const page = normalizedPage(source?.page);
+    if (page === null || documentPages.has(page)) continue;
+    documentPages.add(page);
+    const link = createElement("a", "analysis-result__source-link", `PDF · стр. ${page}`);
+    link.href = `#analysis-page-${page}`;
+    link.setAttribute("aria-label", `Доказательство замечания №${finding.finding_id} на странице ${page} проверяемого PDF`);
+    focusDocumentEvidence(link, finding.finding_id, page);
+    const wrapper = createElement("span", "analysis-result__annotation-source");
+    wrapper.append(link);
+    sourcesBlock.append(wrapper);
   }
-
-  parent.append(
-    sourcesBlock,
-  );
+  if (sourcesBlock.children.length) parent.append(sourcesBlock);
 }
 
 
+/** Строит карточку: номер, конкретный текст, раскрытие подробностей и рабочие ссылки. */
 function createCallout(
   finding,
   findingIndex,
@@ -961,11 +839,12 @@ function createCallout(
     ),
   );
 
+
   callout.append(
     header,
   );
 
-  appendNormativeLinks(
+  appendFindingLinks(
     callout,
     finding,
     dependencies,
@@ -2088,6 +1967,7 @@ function createHypothesisDetails(hypotheses) {
 }
 
 
+/** Создаёт общую карточку с самостоятельными текстом, ссылками и управлением каждого замечания. */
 function createGroupedCallout(group, dependencies) {
   const callout = createElement("article", "analysis-result__annotation analysis-result__annotation--group");
   callout.tabIndex = 0;
@@ -2101,10 +1981,12 @@ function createGroupedCallout(group, dependencies) {
     const row = createElement("div", "analysis-result__group-member");
     row.tabIndex = 0;
     row.dataset.findingId = String(finding.finding_id ?? "");
-    row.append(createElement("span", "analysis-result__annotation-number", findingIndex + 1));
-    row.append(createElement("span", "analysis-result__group-member-text", findingDisplayText(finding)));
-    row.append(createFindingDetailControl(finding, findingIndex, dependencies));
-    appendNormativeLinks(row, finding, dependencies);
+    const header = createElement("div", "analysis-result__annotation-header");
+    header.append(createElement("span", "analysis-result__annotation-number", findingIndex + 1));
+    header.append(createElement("span", "analysis-result__group-member-text analysis-result__annotation-title", findingDisplayText(finding)));
+    header.append(createFindingDetailControl(finding, findingIndex, dependencies));
+    row.append(header);
+    appendFindingLinks(row, finding, dependencies);
     callout.append(row);
     rows.push(row);
   });
@@ -2135,6 +2017,7 @@ function appendPageVisualization(
     "analysis-result__page-visualization",
   );
 
+  section.id = "analysis-page-" + pageNumber;
   section.append(
     createElement(
       "h4",
@@ -2259,6 +2142,7 @@ function appendPageVisualization(
           member.findingIndex,
         );
         const memberConnectors = memberBoxes.map(({ node }) => {
+          node.dataset.findingId = String(member.finding.finding_id ?? "");
           imagePane.append(node);
           const polyline = document.createElementNS(
             "http://www.w3.org/2000/svg",
@@ -2275,6 +2159,8 @@ function appendPageVisualization(
         reviewRecords.push({
           findingId: String(member.finding.finding_id ?? "").trim(),
           pageNumber, item: reviewItem, callout,
+          secondaryEvidence: Number(member.finding.page ?? member.finding.page_number) !== pageNumber,
+          documentEvidence: Array.isArray(member.finding.document_context_basis_sources) && member.finding.document_context_basis_sources.length > 0,
           bboxEntries: memberBoxes, connectorEntries: memberConnectors,
         });
         if (isGrouped) {
@@ -2432,7 +2318,7 @@ function appendPageVisualization(
 
 
 /**
- * Добавляет visual pages перед текстовой частью результата.
+ * Добавляет изображения страниц перед текстовой частью результата.
  */
 export function appendAnalysisVisualization(
   payload,

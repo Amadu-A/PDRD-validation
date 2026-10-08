@@ -1,6 +1,6 @@
 # tests/architecture/test_analysis_visualization.py
 
-"""Architecture guards hybrid end-to-end visualization wiring."""
+"""Архитектурные проверки сквозных связей гибридной визуализации."""
 
 import ast
 import json
@@ -242,8 +242,10 @@ def test_frontend_visualization_supports_inline_overlay_regions() -> None:
         "connectorEntries",
         "analysis-result__bbox",
         "analysis-result__annotation",
-        "analysis-result__annotation-tooltip",
-        "source.text",
+        "appendFindingLinks",
+        "createTechnicalAssignmentCitation",
+        "createUserPackageCitation",
+        "focusDocumentEvidence",
         "textContent",
     )
 

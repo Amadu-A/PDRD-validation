@@ -42,8 +42,10 @@ class AnalysisProgressStage(StrEnum):
     EXTRACTING_SOURCES = "extracting_sources"
     PREPARING_CONTEXT = "preparing_context"
     UNDERSTANDING_SHEET = "understanding_sheet"
+    BUILDING_DOCUMENT_CONTEXT = "building_document_context"
     RETRIEVING_REQUIREMENTS = "retrieving_requirements"
     CHECKING_REQUIREMENTS = "checking_requirements"
+    CHECKING_CROSS_PAGE_CONSISTENCY = "checking_cross_page_consistency"
     ENRICHING_FINDINGS = "enriching_findings"
     FINALIZING_FINDINGS = "finalizing_findings"
     BUILDING_RESULT = "building_result"
@@ -63,17 +65,19 @@ class AnalysisProgressStage(StrEnum):
         return _PROGRESS_STAGE_MESSAGES[self]
 
 
-ANALYSIS_PROGRESS_TOTAL = 8
+ANALYSIS_PROGRESS_TOTAL = 10
 
 _PROGRESS_STAGE_ORDER = {
     AnalysisProgressStage.EXTRACTING_SOURCES: 1,
     AnalysisProgressStage.PREPARING_CONTEXT: 2,
     AnalysisProgressStage.UNDERSTANDING_SHEET: 3,
-    AnalysisProgressStage.RETRIEVING_REQUIREMENTS: 4,
-    AnalysisProgressStage.CHECKING_REQUIREMENTS: 5,
-    AnalysisProgressStage.ENRICHING_FINDINGS: 6,
-    AnalysisProgressStage.FINALIZING_FINDINGS: 7,
-    AnalysisProgressStage.BUILDING_RESULT: 8,
+    AnalysisProgressStage.BUILDING_DOCUMENT_CONTEXT: 4,
+    AnalysisProgressStage.RETRIEVING_REQUIREMENTS: 5,
+    AnalysisProgressStage.CHECKING_REQUIREMENTS: 6,
+    AnalysisProgressStage.CHECKING_CROSS_PAGE_CONSISTENCY: 7,
+    AnalysisProgressStage.ENRICHING_FINDINGS: 8,
+    AnalysisProgressStage.FINALIZING_FINDINGS: 9,
+    AnalysisProgressStage.BUILDING_RESULT: 10,
 }
 
 _PROGRESS_STAGE_MESSAGES = {
@@ -86,11 +90,17 @@ _PROGRESS_STAGE_MESSAGES = {
     AnalysisProgressStage.UNDERSTANDING_SHEET: (
         "Разбираю структуру, объекты и связи на листе…"
     ),
+    AnalysisProgressStage.BUILDING_DOCUMENT_CONTEXT: (
+        "Строю контекст всех страниц PDF…"
+    ),
     AnalysisProgressStage.RETRIEVING_REQUIREMENTS: (
         "Подбираю применимые нормативные требования…"
     ),
     AnalysisProgressStage.CHECKING_REQUIREMENTS: (
         "Сверяю проектное решение с требованиями…"
+    ),
+    AnalysisProgressStage.CHECKING_CROSS_PAGE_CONSISTENCY: (
+        "Проверяю согласованность данных между страницами…"
     ),
     AnalysisProgressStage.ENRICHING_FINDINGS: (
         "Уточняю нормативные основания замечаний…"

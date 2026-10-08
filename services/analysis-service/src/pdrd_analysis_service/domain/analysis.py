@@ -1,12 +1,14 @@
 # services/analysis-service/src/pdrd_analysis_service/domain/analysis.py
 
-"""Domain-модели VLM-анализа."""
+"""Модели предметной области визуального анализа."""
 
 from dataclasses import dataclass
 from typing import (
     Any,
     Literal,
 )
+
+from pdrd_analysis_service.domain.document_context import DocumentFact
 
 FindingCategory = Literal[
     "normative_control",
@@ -16,6 +18,7 @@ FindingCategory = Literal[
     "completeness",
     "optimization",
     "customer_requirements",
+    "document_consistency",
     "other",
 ]
 
@@ -110,6 +113,8 @@ class PageFacts:
         ...,
     ]
 
+    document_facts: tuple[DocumentFact, ...] = ()
+
 
 @dataclass(frozen=True, slots=True)
 class FindingVisualRegion:
@@ -165,6 +170,46 @@ class FindingVisualRegion:
             "confidence": self.confidence,
             "label": self.label,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentContextSource:
+    """Сохранённый фрагмент проверяемого PDF, не нормативное основание."""
+
+    source_id: str
+    page: int
+    evidence_text: str = ""
+    text: str = ""
+    fact_id: str | None = None
+    chunk_index: int | None = None
+    score: float = 0.0
+    match_type: str = ""
+    subject: str = ""
+    property: str = ""
+    scope: str = ""
+    visual_regions: tuple[FindingVisualRegion, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Запрещает ссылки без физической страницы и стабильной идентичности."""
+        if self.page < 1 or not self.source_id.startswith(f"D-p{self.page:04d}-"):
+            raise ValueError("Источник D должен содержать физическую страницу в ID.")
+
+
+def saved_source_kinds(
+    *, document=(), normative=(), technical=(), user=(), experience=()
+) -> tuple[str, ...]:
+    """Вычисляет типы источников только из сохранённых оснований."""
+    return tuple(
+        kind
+        for kind, sources in (
+            ("D", document),
+            ("N", normative),
+            ("T", technical),
+            ("U", user),
+            ("E", experience),
+        )
+        if sources
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -338,6 +383,20 @@ class FindingDraft:
     origin_assertions: tuple[dict[str, Any], ...] = ()
 
     object_ref: str = ""
+    evidence_locations: tuple[dict[str, Any], ...] = ()
+    document_context_source_ids: tuple[str, ...] = ()
+    document_context_basis_sources: tuple[DocumentContextSource, ...] = ()
+
+    @property
+    def source_kinds(self) -> tuple[str, ...]:
+        """Возвращает происхождение замечания без доверия ответу модели."""
+        return saved_source_kinds(
+            document=self.document_context_basis_sources,
+            normative=self.basis_sources,
+            technical=self.technical_assignment_basis_sources,
+            user=self.user_package_basis_sources,
+            experience=getattr(self, "experience_sources", ()),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -384,11 +443,25 @@ class FinalFinding:
     origin_assertions: tuple[dict[str, Any], ...] = ()
 
     object_ref: str = ""
+    evidence_locations: tuple[dict[str, Any], ...] = ()
+    document_context_source_ids: tuple[str, ...] = ()
+    document_context_basis_sources: tuple[DocumentContextSource, ...] = ()
+
+    @property
+    def source_kinds(self) -> tuple[str, ...]:
+        """Возвращает происхождение замечания без доверия ответу модели."""
+        return saved_source_kinds(
+            document=self.document_context_basis_sources,
+            normative=self.basis_sources,
+            technical=self.technical_assignment_basis_sources,
+            user=self.user_package_basis_sources,
+            experience=getattr(self, "experience_sources", ()),
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class ReadinessReport:
-    """Readiness Analysis Service."""
+    """Готовность сервиса анализа."""
 
     vision_model: bool
 

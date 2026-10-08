@@ -16,8 +16,10 @@ from pdrd_experience_service.domain.review import (
     Origin,
     ProposedRegion,
     Rectangle,
+    ReviewDocumentSource,
     ReviewedFinding,
     ReviewEvent,
+    ReviewEvidenceLocation,
     ReviewSession,
 )
 
@@ -98,6 +100,23 @@ def finding_from_json(
         updated_at=_timestamp(value["updated_at"]),
         revision=value["revision"],
         proposed_regions=_proposed_regions(value.get("proposed_regions", [])),
+        evidence_locations=tuple(
+            ReviewEvidenceLocation(
+                page=item["page"],
+                source_id=item.get("source_id", ""),
+                text=item.get("text", ""),
+                proposed_regions=_proposed_regions(item.get("proposed_regions", [])),
+            )
+            for item in value.get("evidence_locations", [])
+        ),
+        document_context_basis_sources=tuple(
+            ReviewDocumentSource(
+                **{key: item[key] for key in item if key != "visual_regions"},
+                visual_regions=_proposed_regions(item.get("visual_regions", [])),
+            )
+            for item in value.get("document_context_basis_sources", [])
+        ),
+        source_kinds=tuple(value.get("source_kinds", [])),
         display_regions=(
             tuple(Rectangle(**box) for box in value["display_regions"])
             if value.get("display_regions") is not None

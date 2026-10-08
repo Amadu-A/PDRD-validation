@@ -1,6 +1,6 @@
 # services/knowledge-service/src/pdrd_knowledge_service/application/use_cases/project_context.py
 
-"""Use cases reusable Project Context cache."""
+"""Сценарии использования повторно применяемого кэша проектного контекста."""
 
 import asyncio
 import logging
@@ -1011,6 +1011,8 @@ class SearchProjectContext:
     embedding_model: str
 
     top_k: int
+    source_prefix: str = "PZ"
+    query_instruction: str = PROJECT_CONTEXT_QUERY_INSTRUCTION
 
     async def execute(
         self,
@@ -1039,7 +1041,7 @@ class SearchProjectContext:
 
         vectors = await self.embedding_provider.embed(
             (normalized,),
-            instruction=(PROJECT_CONTEXT_QUERY_INSTRUCTION),
+            instruction=self.query_instruction,
         )
 
         if (
@@ -1061,7 +1063,7 @@ class SearchProjectContext:
 
         sources = tuple(
             ProjectContextSource(
-                source_id=f"PZ{index}",
+                source_id=f"{self.source_prefix}{index}",
                 point_id=point.point_id,
                 score=round(
                     point.score,

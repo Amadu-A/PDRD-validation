@@ -1,6 +1,6 @@
 # tests/architecture/test_analysis_page_facts_flow.py
 
-"""Architecture guards provenance PageFacts после T-first веток."""
+"""Архитектурные проверки происхождения фактов страниц после веток T-first."""
 
 import json
 from pathlib import Path
@@ -43,7 +43,7 @@ WORKFLOW_CASES = (
 def _workflow(
     path: Path,
 ) -> dict[str, Any]:
-    """Читает committed n8n workflow."""
+    """Читает сохранённый workflow n8n."""
     payload = json.loads(
         path.read_text(
             encoding="utf-8",
@@ -61,7 +61,7 @@ def _workflow(
 def _nodes_by_name(
     workflow: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    """Индексирует workflow nodes по имени."""
+    """Индексирует узлы workflow по имени."""
     nodes = workflow.get(
         "nodes",
         [],
@@ -90,7 +90,7 @@ def _nodes_by_name(
 def _request_body(
     node: dict[str, Any],
 ) -> str:
-    """Возвращает expression HTTP request body."""
+    """Возвращает выражение тела HTTP-запроса."""
     parameters = node.get(
         "parameters",
         {},
@@ -117,7 +117,7 @@ def _request_body(
 def _node_code(
     node: dict[str, Any],
 ) -> str:
-    """Возвращает jsCode Code node."""
+    """Возвращает JavaScript-код узла Code."""
     parameters = node.get(
         "parameters",
         {},
@@ -142,7 +142,7 @@ def _node_code(
 
 
 def test_downstream_queries_use_explicit_page_understanding_facts() -> None:
-    """Batch/T-first output не должен затереть PageFacts."""
+    """Пакетный ответ и проход ТЗ сохраняют факты страницы."""
     for (
         path,
         expected_nodes,
@@ -170,7 +170,7 @@ def test_downstream_queries_use_explicit_page_understanding_facts() -> None:
 
 
 def test_pdf_stage_batch_keeps_image_for_understanding() -> None:
-    """PDF batch collector не теряет image перед understanding stage."""
+    """HTTP добавляет растр каждой страницы после компактного сборщика."""
     workflow = _workflow(
         WORKFLOW_ROOT / "analysis-v2-pdf.json",
     )
@@ -187,15 +187,17 @@ def test_pdf_stage_batch_keeps_image_for_understanding() -> None:
         nodes["Understand Pages Stage"],
     )
 
-    assert "image_base64" in collect_code
+    assert "image_base64" not in collect_code
 
-    assert "item.page.image_base64" in collect_code
+    assert "image_base64" in stage_body
 
-    assert "items: $json.items" in stage_body
+    assert "$('Document Extract PDF').first().json.pages" in stage_body
+
+    assert "Number(page.page_number) === Number(item.page_number)" in stage_body
 
 
 def test_pdf_stage_batch_keeps_image_for_normative_check() -> None:
-    """PDF norm-check collector сохраняет multimodal image каждой страницы."""
+    """Проверка нормативов получает растр напрямую из исходного HTTP-ответа."""
     workflow = _workflow(
         WORKFLOW_ROOT / "analysis-v2-pdf.json",
     )
@@ -212,15 +214,15 @@ def test_pdf_stage_batch_keeps_image_for_normative_check() -> None:
         nodes["Check Norms"],
     )
 
-    assert "image_base64" in collect_code
-
-    assert "page.expanded.page.image_base64" in collect_code
+    assert "image_base64" not in collect_code
 
     assert "image_base64" in stage_body
 
+    assert "Number(page.page_number) === Number(item.page_number)" in stage_body
+
 
 def test_cad_and_combined_workflows_keep_direct_vlm_images() -> None:
-    """Однолистовые CAD modes сохраняют direct multimodal contract."""
+    """Однолистовые режимы CAD сохраняют прямую передачу изображения в VLM."""
     cases = (
         (
             WORKFLOW_ROOT / "analysis-v2-cad.json",

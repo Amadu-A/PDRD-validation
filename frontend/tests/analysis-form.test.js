@@ -8,7 +8,7 @@ import { createAnalysisForm } from "../src/js/features/analysis/form.js";
 import { FakeElement } from "./helpers/fake-dom.js";
 
 /** Создаёт входы настоящего controller с минимальным DOM для диапазона ПЗ. */
-function buildForm(t, selection, kind = "pdf") {
+function buildForm(t, selection, kind = "pdf", documentContextInput = null) {
   const previousDocument = globalThis.document;
   globalThis.document = { createElement: (tag) => new FakeElement(tag) };
   t.after(() => { globalThis.document = previousDocument; });
@@ -23,7 +23,7 @@ function buildForm(t, selection, kind = "pdf") {
   noteStart.parentElement = { parentElement: new FakeElement() };
   return createAnalysisForm({ formElement: new FakeElement("form"), pdfInput, cadInput,
     technicalAssignmentInput: input(), pagesInput: input(), pagesHint: new FakeElement(),
-    useExplanatoryNoteInput: input(), noteStartPageInput: noteStart, noteEndPageInput: input(),
+    documentContextInput, useExplanatoryNoteInput: input(), noteStartPageInput: noteStart, noteEndPageInput: input(),
     getNormativeSelection: () => selection,
   });
 }
@@ -53,4 +53,20 @@ test("явный непустой выбор пакетов сериализуе
 test("анализ удаляемого раздела блокируется до отправки запроса", (t) => {
   const form = buildForm(t, { sectionId: "section", documentIds: [], deleting: true });
   assert.deepEqual(form.validate(), { valid: false, message: "Раздел удаляется. Выберите другой раздел или анализ без раздела." });
+});
+
+
+test("режим всего PDF по умолчанию выключен и включается отдельным чекбоксом", (t) => {
+  const toggle = Object.assign(new FakeElement("input"), { checked: false, disabled: false });
+  const form = buildForm(t, null, "pdf", toggle);
+  assert.equal(form.toFormData().get("use_document_context"), "false");
+  toggle.checked = true;
+  assert.equal(form.toFormData().get("use_document_context"), "true");
+});
+
+test("переключатель D выключается при смене режима на CAD", (t) => {
+  const toggle = Object.assign(new FakeElement("input"), { checked: true, disabled: false });
+  const form = buildForm(t, null, "cad", toggle);
+  form.validate();
+  assert.equal(form.toFormData().get("use_document_context"), "false");
 });

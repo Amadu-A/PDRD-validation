@@ -15,6 +15,11 @@ from pdrd_knowledge_service.application.ports.persistence import (
 from pdrd_knowledge_service.application.use_cases.applied_experience import (
     SearchAppliedExperience,
 )
+from pdrd_knowledge_service.application.use_cases.document_context import (
+    BuildDocumentContext,
+    DocumentContextIndex,
+    SearchDocumentContext,
+)
 from pdrd_knowledge_service.application.use_cases.experience import (
     SearchExperience,
 )
@@ -169,6 +174,10 @@ class ApplicationContainer:
     search_project_context: SearchProjectContext | None = None
 
     delete_project_context: DeleteProjectContext | None = None
+
+    build_document_context: BuildDocumentContext | None = None
+    search_document_context: SearchDocumentContext | None = None
+    document_context_index: DocumentContextIndex | None = None
 
 
 def build_container() -> ApplicationContainer:
@@ -398,6 +407,11 @@ def build_container() -> ApplicationContainer:
         reader=(technical_assignment_requirement_reader),
     )
 
+    document_settings = settings.document_context
+    document_index = DocumentContextIndex(
+        vector_store=vector_store, collection_prefix=document_settings.collection_prefix
+    )
+
     project_settings = settings.project_context
 
     resolve_project_context_cache = ResolveProjectContextCache(
@@ -448,6 +462,29 @@ def build_container() -> ApplicationContainer:
         ),
         list_technical_assignment_requirements=(list_technical_assignment_requirements),
         search_technical_assignment_guided=(search_technical_assignment_guided),
+        document_context_index=document_index,
+        build_document_context=(
+            BuildDocumentContext(
+                index=document_index,
+                embedding_provider=embedding_provider,
+                chunk_size=document_settings.chunk_size,
+                chunk_overlap=document_settings.chunk_overlap,
+                embed_batch_size=document_settings.embed_batch_size,
+                upsert_batch_size=document_settings.upsert_batch_size,
+            )
+            if document_settings.enabled
+            else None
+        ),
+        search_document_context=(
+            SearchDocumentContext(
+                index=document_index,
+                embedding_provider=embedding_provider,
+                embedding_model=settings.embedding_model,
+                top_k=document_settings.top_k,
+            )
+            if document_settings.enabled
+            else None
+        ),
         resolve_project_context_cache=(resolve_project_context_cache),
         create_project_context=(
             CreateProjectContext(
