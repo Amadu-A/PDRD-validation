@@ -3,6 +3,7 @@
 """Архитектурные границы контекста проверяемого PDF."""
 
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -82,3 +83,17 @@ def test_document_switch_controls_all_d_stages_and_single_merge():
         "Array.isArray($json.items)"
         in nodes["Merge Cross-Page Checks"]["parameters"]["jsCode"]
     )
+
+
+def test_http_expressions_do_not_spread_current_item_proxy():
+    """Прямое ...$json не должно превращать HTTP-тело в undefined в n8n 2.34.5."""
+    for path in (ROOT / "n8n/workflows").glob("analysis-v2-*.json"):
+        workflow = json.loads(path.read_text(encoding="utf-8"))
+        for node in workflow["nodes"]:
+            if node["type"] != "n8n-nodes-base.httpRequest":
+                continue
+            body = node["parameters"].get("body", "")
+            assert not re.search(r"\.\.\.\s*\$json\s*(?=[,}])", body), (
+                f"{path.name}: {node['name']} напрямую разворачивает $json; "
+                "n8n может отправить запрос без тела."
+            )

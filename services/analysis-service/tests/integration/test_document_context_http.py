@@ -2,7 +2,10 @@
 
 """HTTP-регрессии выбора D и единого межстраничного результата."""
 
+import json
+import subprocess
 from dataclasses import replace
+from pathlib import Path
 from uuid import uuid4
 
 import httpx
@@ -191,3 +194,88 @@ async def test_consistency_http_merges_d_and_n_and_preserves_fast_mode():
             item["result"]["findings"][0]["finding_id"]
             for item in disabled.json()["items"]
         ] == ["p7-f1", "p10-f1"]
+
+
+WORKFLOW_PATH = (
+    Path(__file__).resolve().parents[4] / "n8n/workflows/analysis-v2-pdf.json"
+)
+BODY_EXPRESSION_RUNNER = """
+const fs = require('node:fs');
+const vm = require('node:vm');
+const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+const context = {
+  $json: input.current,
+  $: () => ({first: () => ({json: {body: {use_document_context: input.enabled}}})}),
+};
+const body = vm.runInNewContext(input.expression.slice(3, -2), context, {timeout: 1000});
+if (typeof body !== 'string' || !body.length) {
+  throw new Error('Выражение Body не сформировало JSON-строку.');
+}
+process.stdout.write(body);
+"""
+
+
+def document_context_workflow_body(current, enabled):
+    """Выполняет публикуемое выражение Body без изменения его кода или входа."""
+    workflow = json.loads(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    node = next(
+        node
+        for node in workflow["nodes"]
+        if node["name"] == "Build Page Document Context"
+    )
+    parameters = node["parameters"]
+    assert parameters["sendBody"]
+    assert parameters["contentType"] == "raw"
+    assert parameters["rawContentType"] == "application/json"
+    assert parameters["body"].startswith("={{") and parameters["body"].endswith("}}")
+    result = subprocess.run(
+        ["node", "-e", BODY_EXPRESSION_RUNNER],
+        input=json.dumps(
+            {"current": current, "enabled": enabled, "expression": parameters["body"]},
+            ensure_ascii=False,
+        ),
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+        timeout=10,
+    )
+    return result.stdout
+
+
+@pytest.mark.parametrize("switch", [True, "true", False, "false", None, ""])
+async def test_workflow_raw_body_reaches_page_context_api_with_user_switch(switch):
+    """Тело из workflow сохраняет страницы и семантику, а API учитывает выбор без ПЗ."""
+    request = {
+        "pages": [
+            {
+                "page_number": number,
+                "extracted_text": f"Б-012 {value} °C",
+                "page_facts": {
+                    **facts_payload(),
+                    "document_facts": [fact_payload(value)],
+                },
+                "text_words": [{"text": value, "x0": 10, "y0": 20, "x1": 40, "y1": 30}],
+            }
+            for number, value in [(7, "-37"), (10, "-35")]
+        ],
+        "semantic": [
+            {"page_number": 7, "sources": [{"source_id": "D-test", "page": 10}]},
+            {"page_number": 10, "sources": []},
+        ],
+    }
+    enabled = switch is True or switch == "true"
+    body = document_context_workflow_body(request, switch)
+    assert json.loads(body) == {**request, "enabled": enabled}
+    app = build_app()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/v1/document-context/pages",
+            content=body.encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+    assert response.status_code == 200, response.text
+    items = response.json()["items"]
+    assert [item["page_number"] for item in items] == [7, 10]
+    assert all(bool(item["sources"]) == enabled for item in items)

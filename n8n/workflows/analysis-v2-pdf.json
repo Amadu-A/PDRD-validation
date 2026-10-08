@@ -1531,7 +1531,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ ...$json, enabled: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context) }) }}",
+        "body": "={{ JSON.stringify(Object.assign({}, $json, { enabled: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context) })) }}",
         "options": {
           "timeout": 1800000
         }
