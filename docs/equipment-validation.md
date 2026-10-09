@@ -54,6 +54,16 @@ Analysis Service сопоставляет только совместимые с
 URL, доверенность и значения проходят в отчёт, Review и PDF.
 При отказе EQ ветви основной анализ сохраняет результат и предупреждение.
 
+Каждый EQ-кандидат получает предметный `experience_query` для существующего
+общего N/E контракта: тип документа и оборудования, производитель, модель,
+исполнение, обозначение, характеристика, проектное и паспортное значения,
+исходный факт и степень определённости сравнения. Узел `Prepare Finding
+Normative Queries` передаёт запрос в finding-local поиск N. Полученные N
+кандидаты связываются с тем же `finding_id`; EQ snapshot остаётся отдельным
+основанием. Пустой ответ N сохраняет инженерное замечание и его EQ источник.
+Для `needs_review` запрос сохраняет необходимость проверки применимости.
+
+
 ## Проверка после развёртывания
 
 1. Без EQ повторите привычный PDF: состав замечаний и число EQ-вызовов
@@ -118,6 +128,14 @@ PostgreSQL реализует только порт чтения/сохране�
 [официальной документацией](https://docs.searxng.org/admin/installation-docker).
 Смена версии образа требует отдельной проверки поискового JSON API.
 
+Образ закреплён переменной `PDRD_SEARXNG_IMAGE` в `.env.example` и таким же
+Compose fallback по digest уже установленного серверного образа:
+`searxng/searxng@sha256:cc026dbee25b864d7f9731957cd5ef36ba2e2d61abd2996d57f1b863483e7409`.
+При пересборке он не меняется вслед за плавающим `latest`. Прежняя переменная
+`PDRD_SEARXNG_VERSION` больше не используется; новая настройка остаётся в
+`.env.example`, запись в приватный `.env` для неё не нужна.
+
+
 ## Автоматические проверки
 
 На Windows из корня репозитория:
@@ -144,29 +162,71 @@ User, Auth, Equipment Search.
 
 Сначала просмотрите diff и выполните Windows проверки. Коммит и отправку
 в оба настроенных push URL выполняет разработчик. Агент их не выполняет.
-В каталоге репозитория на сервере получите ветку из приватного репозитория:
-
-```bash
-set -euo pipefail
-git fetch https://github.com/neo-term-it/PDRD-validation.git feature/searXNG
-if git show-ref --verify --quiet refs/heads/feature/searXNG; then
-    git switch feature/searXNG
-else
-    git switch -c feature/searXNG FETCH_HEAD
-fi
-git pull --ff-only https://github.com/neo-term-it/PDRD-validation.git feature/searXNG
-mkdir -p .codex-test-temp/logs
-bash ops/check-quality.sh > .codex-test-temp/logs/quality-server.log 2>&1
-bash scripts/up.sh > .codex-test-temp/logs/rebuild-server.log 2>&1
-bash scripts/check-stack.sh > .codex-test-temp/logs/readiness-server.log 2>&1
-```
+На сервере используйте существующий SSH remote `origin`, который указывает
+на приватный `neo-term-it/PDRD-validation`. Не заменяйте его HTTPS URL:
+это вызывает отдельный запрос авторизации и при вставке блока может
+прочитать следующие строки команд как имя пользователя/пароль.
 
 Перед первым запуском добавьте только `PDRD_EQUIPMENT_INTERNAL_KEY`
 (случайный секрет не менее 32 символов) в приватный серверный `.env`.
-Остальные новые параметры остаются в `.env.example`. `scripts/up.sh`
-валидирует ключ, пересобирает стек и запускает миграции Equipment
-через Compose dependency. Проверка стека контролирует состояние
-SearXNG, готовность Equipment и текущую версию миграций.
+Остальные новые параметры остаются в `.env.example`. В корне репозитория
+следующая команда добавляет отсутствующий ключ или заменяет пустое/короткое
+значение, сохраняя уже настроенный ключ и остальные строки:
+
+```bash
+python3 - <<'PY'
+import re
+import secrets
+from pathlib import Path
+
+path = Path(".env")
+content = path.read_text(encoding="utf-8")
+pattern = re.compile(r"(?m)^[ \t]*(?:export[ \t]+)?PDRD_EQUIPMENT_INTERNAL_KEY[ \t]*=(.*)$")
+matches = list(pattern.finditer(content))
+if len(matches) > 1:
+    raise SystemExit("В .env несколько строк EQ ключа: оставьте одну перед повтором.")
+value = matches[0].group(1).strip().strip("\"'") if matches else ""
+if len(value) >= 32 and not value.startswith(("change-me", "CHANGE_ME")):
+    print("EQ ключ уже настроен; .env не изменён.")
+else:
+    line = "PDRD_EQUIPMENT_INTERNAL_KEY=" + secrets.token_hex(32)
+    content = pattern.sub(line, content, count=1) if matches else content.rstrip("\n") + "\n\n" + line + "\n"
+    path.write_text(content, encoding="utf-8")
+    print("EQ ключ сохранён в .env; значение не выводится.")
+PY
+```
+
+После настройки ключа получите ветку и выполните проверки. Блок запускается
+в отдельном Bash: ошибка останавливает этапы, сохраняя интерактивную SSH сессию.
+Полные логи остаются в файлах, после каждого успешного этапа выводится сводка.
+
+```bash
+bash -s <<'BASH'
+set -euo pipefail
+trap 'printf "Ошибка: проверьте .codex-test-temp/logs/\n" >&2' ERR
+git fetch origin feature/searXNG
+if git show-ref --verify --quiet refs/heads/feature/searXNG; then
+    git switch feature/searXNG
+else
+    git switch -c feature/searXNG origin/feature/searXNG
+fi
+git pull --ff-only origin feature/searXNG
+mkdir -p .codex-test-temp/logs
+bash ops/check-quality.sh > .codex-test-temp/logs/quality-server.log 2>&1
+printf 'quality: exit=0\n'
+bash scripts/up.sh > .codex-test-temp/logs/rebuild-server.log 2>&1
+printf 'rebuild: exit=0\n'
+bash scripts/check-stack.sh > .codex-test-temp/logs/readiness-server.log 2>&1
+printf 'readiness: exit=0\n'
+BASH
+```
+
+`scripts/up.sh` валидирует ключ, пересобирает стек и запускает миграции
+Equipment через Compose dependency. Проверка стека контролирует состояние
+SearXNG, готовность Equipment и текущую версию миграций. Остановка Compose
+на отсутствующем ключе означает, что этот запуск проверок/пересборки не
+выполнен. Для диагностики передавайте последние строки упавшего лога,
+сохраняя полный файл локально.
 
 В shared n8n обновите существующий PDF workflow содержимым
 `n8n/workflows/analysis-v2-pdf.json` и опубликуйте его. Пересборка контейнеров
@@ -201,3 +261,58 @@ shared infrastructure. Выполните по несколько повторо
 SSE после обновления страницы, закрытие прерванных заданий после рестарта,
 fail-open при отказе SearXNG/Knowledge, ограничение общей параллельности VLM
 и сохранение EQ provenance после Review, Gold export и скачивания PDF.
+
+
+### Нагрузочная проверка ограничителя Analysis
+
+Распределённый limiter в этой сборке не заявлен: общий семафор охватывает
+один процесс Analysis Service. Перед измерением подтвердите, что запущен
+один экземпляр сервиса, и выберите контрольные PDF с различающимся содержимым,
+чтобы VLM кэш не заменил нагрузочный прогон. Для проверки именно этого
+ограничителя не запускайте параллельные запросы других клиентов shared VLM.
+
+1. В отдельной SSH сессии сохраняйте GPU показатели раз в секунду:
+   `nvidia-smi --query-gpu=timestamp,index,utilization.gpu,memory.used,memory.total --format=csv -l 1 > .codex-test-temp/logs/eq-gpu-load.csv`.
+   После завершения измерения остановите сбор через Ctrl+C.
+2. Сохраните shared VLM метрики до и после нагрузки:
+   `curl -fsS http://192.168.55.3:8000/metrics > .codex-test-temp/logs/vlm-before.prom`
+   и аналогично `vlm-after.prom` после прогона.
+3. Через фронт одновременно запустите восемь контрольных анализов с EQ.
+   Сохраните их ID, итоговые состояния, задержки, EQ метрики и предупреждения.
+   Повторите с выключенным EQ и с тёплым кэшем при тех же N/T/U/D/E настройках.
+4. Для этой изолированной нагрузки число активных запросов к shared VLM
+   должно оставаться в пределах `ANALYSIS_SERVICE_PIPELINE__VLM_STAGE_CONCURRENCY`
+   (по умолчанию 4); ожидающие задания должны завершиться без OOM.
+   Отмените часть ожидающих заданий и убедитесь, что новые VLM шаги для них
+   не запускаются. Сопоставьте результаты с серверными логами и временными
+   рядами метрик, учитывая cache hits.
+
+Unit тест семафора проверяет параллельность и отмену без GPU. Он не заменяет
+этот серверный прогон. При добавлении реплик Analysis потребуется отдельное
+решение для распределённого ограничения и новая нагрузочная приёмка.
+
+
+### Gateway readiness: DNS shared RabbitMQ
+
+Если Gateway возвращает `database=ok, broker=unavailable`, сначала проверьте
+DNS/TCP/AMQP из самого контейнера Gateway, скрывая пароль и AMQP URL из
+диагностического вывода. Команда `getent`, выполненная на хосте, не проверяет
+Docker DNS приложения. Каждая команда после `docker compose exec` должна
+оставаться одной строкой.
+
+В серверной диагностике Gateway и RabbitMQ находились в `ai-shared`, но у
+RabbitMQ остался только alias `shared-rabbitmq-1`; штатное имя `rabbitmq`
+не разрешалось. Для восстановления service alias сначала проверьте постоянное имя
+узла в фактическом shared Compose. При нефиксированном имени узла
+пересоздание контейнера требует отдельной проверки сохранности состояния
+RabbitMQ. Приложение должно использовать штатный service alias `rabbitmq`.
+
+Если alias потерян у работающего контейнера, сетевой endpoint можно
+переподключить с нужным alias, сохраняя сам контейнер и имя его узла.
+Операция кратковременно прерывает соединения этого endpoint; её выполнение
+проверяется отдельно по фактической конфигурации сети. После восстановления
+проверьте DNS из Gateway и `/health/ready`: ожидается `HTTP:200` с `broker=ok`.
+
+Затем повторите полный quality gate и общую проверку стека; успешная
+готовность Gateway не означает, что изолированные интеграционные тесты
+уже выполнены.
