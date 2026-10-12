@@ -28,6 +28,13 @@ def safe_search_term(value: str) -> str:
     return re.sub(r"[^\w\-/+. ]+", " ", value, flags=re.UNICODE).strip()[:100]
 
 
+def equipment_token(value: str) -> str:
+    """Учитывает пробелы, типографские дефисы и обозначение исполнения."""
+    value = value.casefold().translate(str.maketrans("–—−", "---"))
+    value = re.sub(r"\bисп(?:олнение)?\.?\s*", "исп.", value)
+    return re.sub(r"\s+", "", value)
+
+
 @dataclass(frozen=True, slots=True)
 class EquipmentIdentity:
     """Дословно установленное оборудование с физического листа."""
@@ -38,23 +45,35 @@ class EquipmentIdentity:
     status: str = "resolved"
     confidence: float = 1.0
     properties: tuple[str, ...] = ()
+    manufacturer_status: str = "explicit"
+    model_status: str = "confirmed"
+    variant_kind: str = "execution"
+    article: str = ""
 
     @property
     def key(self) -> tuple[str, str, str]:
         """Возвращает ключ единственного поиска по модели."""
         return (
             normalized_token(self.manufacturer),
-            normalized_token(self.model),
-            normalized_token(self.variant),
+            equipment_token(self.model),
+            equipment_token(self.variant)
+            + ("/артикул" + equipment_token(self.article) if self.article else ""),
         )
 
     @property
     def searchable(self) -> bool:
         """Запрещает поиск по неполной или сомнительной идентификации."""
         return bool(
-            self.key[0]
-            and self.key[1]
-            and self.status == "resolved"
+            self.key[1]
+            and self.model_status == "confirmed"
+            and (
+                (self.status == "resolved" and self.key[0])
+                or (
+                    not self.key[0]
+                    and self.manufacturer_status == "unknown"
+                    and self.model_status == "confirmed"
+                )
+            )
             and self.confidence >= 0.75
         )
 
@@ -130,6 +149,10 @@ class DocumentInspection:
     pages: tuple[tuple[int, str], ...] = ()
     requires_vision: bool = False
     vision_facts: tuple[dict[str, Any], ...] = ()
+    reason_code: str = ""
+    manufacturer: str = ""
+    manufacturer_aliases: tuple[str, ...] = ()
+    vision_pages: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +172,7 @@ class DocumentSnapshot:
     revision_ambiguous: bool = False
     publication_date: str = ""
     fetched_at: str = ""
+    article: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,3 +186,8 @@ class ResolveResult:
     searched_urls: int = 0
     facts: tuple[dict[str, Any], ...] = ()
     facts_status: str = ""
+    reason_code: str = ""
+    attempts: tuple[dict[str, Any], ...] = ()
+    resolved_manufacturer: str = ""
+    tried_url_hashes: tuple[str, ...] = ()
+    retryable: bool = False

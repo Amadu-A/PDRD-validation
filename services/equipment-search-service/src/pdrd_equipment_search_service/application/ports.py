@@ -21,6 +21,9 @@ from pdrd_equipment_search_service.domain.equipment import (
 class EquipmentCatalog(Protocol):
     """Хранит доверие, локальные документы и версии."""
 
+    async def source_blocked(self, hostname: str) -> bool:
+        """Запрещает заблокированный домен при неизвестном производителе."""
+
     async def find_document(
         self, identity: EquipmentIdentity
     ) -> DocumentSnapshot | None:
@@ -31,6 +34,15 @@ class EquipmentCatalog(Protocol):
 
     async def trusted_hosts(self, manufacturer: str) -> tuple[str, ...]:
         """Возвращает подтверждённые hostname производителя."""
+
+    async def manufacturer_aliases(self, manufacturer: str) -> tuple[str, ...]:
+        """Читает серверный реестр подтверждённых написаний производителя."""
+
+    async def manufacturer_for_host(self, hostname: str) -> str | None:
+        """Возвращает производителя только при однозначном точном домене."""
+
+    async def manufacturer_profiles(self) -> tuple[dict[str, Any], ...]:
+        """Читает имена и aliases из собственного реестра."""
 
     async def register_pending(
         self, manufacturer: str, hostname: str, example_url: str, model: str
@@ -82,7 +94,11 @@ class DocumentDownloader(Protocol):
     """Безопасно загружает HTTP(S)-документ."""
 
     async def download(
-        self, url: str, *, allow_http: bool = False
+        self,
+        url: str,
+        *,
+        allow_http: bool = False,
+        allowed_redirect_hosts: tuple[str, ...] = (),
     ) -> DownloadedDocument:
         """Возвращает документ с проверкой URL, DNS, redirects и размера."""
 

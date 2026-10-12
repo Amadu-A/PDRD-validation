@@ -269,6 +269,8 @@ class ReviewEvent:
     session_revision: int
     before: ReviewedFinding | None = None
     after: ReviewedFinding | None = None
+    equipment_revision: int | None = None
+    added_findings: tuple[ReviewedFinding, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -437,6 +439,68 @@ class ReviewSession:
             ),
             revision=next_revision,
             approved_revision=None,
+        )
+
+    def add_equipment_update(
+        self,
+        *,
+        originals: tuple[OriginalFinding, ...],
+        equipment_revision: int,
+        actor: str,
+        at: datetime,
+        expected_revision: int,
+    ) -> "ReviewSession":
+        """Явно добавляет серверные EQ-находки одним CAS и одним полным событием аудита."""
+        self._expect(expected_revision)
+        actor, at = _actor(actor), _time(at)
+        if self.approved_revision is not None:
+            raise ReviewConflictError(
+                "Утверждённая редакция не принимает EQ-дополнения."
+            )
+        if (
+            not isinstance(equipment_revision, int)
+            or isinstance(equipment_revision, bool)
+            or equipment_revision < 1
+        ):
+            raise ReviewError("Не задана серверная версия EQ.")
+        existing = {item.finding_id for item in self.findings}
+        selected = tuple(item for item in originals if item.finding_id not in existing)
+        if not selected:
+            return self
+        if any(
+            not item.finding_id.startswith("EQ-")
+            or item.source_kinds != ("EQ",)
+            or item.page_number not in self.allowed_pages
+            for item in selected
+        ):
+            raise ReviewError(
+                "EQ-дополнение не соответствует источнику и листам анализа."
+            )
+        addition = ReviewSession.open(
+            job_id=self.job_id,
+            document_id=self.document_id,
+            source_filename=self.source_filename,
+            source_sha256=self.source_sha256,
+            originals=selected,
+            rendered_pages=self.allowed_pages,
+            actor=actor,
+            at=at,
+        )
+        revision = self.revision + 1
+        event = ReviewEvent(
+            Action.ADDED,
+            actor,
+            at,
+            revision,
+            after=addition.findings[0],
+            equipment_revision=equipment_revision,
+            added_findings=addition.findings,
+        )
+        return replace(
+            self,
+            findings=(*self.findings, *addition.findings),
+            revision=revision,
+            history=(*self.history, event),
         )
 
     def add_manual(

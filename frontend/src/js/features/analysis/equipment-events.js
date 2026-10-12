@@ -34,10 +34,10 @@ function parseFrame(frame) {
 
 export async function followEquipmentEvents(
   jobId,
-  { onEvent, signal, fetchImpl = globalThis.fetch, retryMilliseconds = 1000 },
+  { onEvent, signal, fetchImpl = globalThis.fetch, retryMilliseconds = 1000, afterEventId = 0 },
 ) {
   /** Повторяет соединение после разрыва и прекращает его при завершении анализа. */
-  let lastId = "";
+  let lastId = /^[1-9]\d*$/.test(String(afterEventId)) ? String(afterEventId) : "";
   const url = "/api/v1/analyses/" + encodeURIComponent(jobId)
     + "/equipment-search/events";
   while (!signal.aborted) {

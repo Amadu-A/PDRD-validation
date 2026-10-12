@@ -4,15 +4,29 @@
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from typing import Any
+
+from pdrd_analysis_service.domain.equipment_identification import identity_token
 
 
 def _token(value: str) -> str:
     """Нормализует ключ без восстановления отсутствующих обозначений."""
     return " ".join(value.casefold().split())
+
+
+def equipment_key(
+    manufacturer: str, model: str, variant: str, article: str = ""
+) -> tuple[str, str, str]:
+    """Сохраняет модель, исполнение и артикул при незначащих вариациях записи."""
+    return (
+        _token(manufacturer),
+        identity_token(model),
+        identity_token(variant)
+        + ("/артикул" + identity_token(article) if article else ""),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,11 +52,15 @@ class InventoryItem:
     status: str
     confidence: float
     occurrences: tuple[EquipmentOccurrence, ...]
+    variant_kind: str = "execution"
+    model_status: str = "confirmed"
+    manufacturer_status: str = "explicit"
+    article: str = ""
 
     @property
     def key(self) -> tuple[str, str, str]:
         """Возвращает ключ для единственного внешнего поиска."""
-        return (_token(self.manufacturer), _token(self.model), _token(self.variant))
+        return equipment_key(self.manufacturer, self.model, self.variant, self.article)
 
 
 def build_inventory(pages: Sequence[Mapping[str, Any]]) -> tuple[InventoryItem, ...]:
@@ -59,10 +77,13 @@ def build_inventory(pages: Sequence[Mapping[str, Any]]) -> tuple[InventoryItem, 
         for identity in identities:
             if not isinstance(identity, dict):
                 continue
+            if identity.get("entity_kind") in {"port", "interface", "line", "symbol"}:
+                continue
             manufacturer = str(identity.get("manufacturer") or "").strip()
             model = str(identity.get("model") or "").strip()
             variant = str(identity.get("variant") or "").strip()
-            key = (_token(manufacturer), _token(model), _token(variant))
+            article = str(identity.get("article") or "").strip()
+            key = equipment_key(manufacturer, model, variant, article)
             occurrence = EquipmentOccurrence(
                 page=page_number,
                 object_ref=str(identity.get("object_ref") or ""),
@@ -73,7 +94,7 @@ def build_inventory(pages: Sequence[Mapping[str, Any]]) -> tuple[InventoryItem, 
                 equipment_type=str(identity.get("equipment_type") or ""),
             )
             # Неполные обозначения остаются отдельными неоднозначными объектами.
-            if not manufacturer or not model:
+            if not model:
                 key = (*key, str(page_number), occurrence.object_ref)
             groups.setdefault(key, []).append((identity, occurrence))
 
@@ -93,6 +114,17 @@ def build_inventory(pages: Sequence[Mapping[str, Any]]) -> tuple[InventoryItem, 
                 status="resolved" if resolved else "needs_review",
                 confidence=confidence,
                 occurrences=tuple(occurrence for _, occurrence in entries),
+                variant_kind=str(first.get("variant_kind") or "execution"),
+                model_status=(
+                    "confirmed"
+                    if all(
+                        raw.get("model_status", "confirmed") == "confirmed"
+                        for raw, _ in entries
+                    )
+                    else "needs_review"
+                ),
+                manufacturer_status=str(first.get("manufacturer_status") or "explicit"),
+                article=str(first.get("article") or "").strip(),
             )
         )
 
@@ -105,10 +137,8 @@ def build_inventory(pages: Sequence[Mapping[str, Any]]) -> tuple[InventoryItem, 
                 variants.setdefault(base, set()).add(item.key[2])
     ambiguous = {base for base, values in variants.items() if len(values) > 1}
     return tuple(
-        InventoryItem(
-            manufacturer=item.manufacturer,
-            model=item.model,
-            variant=item.variant,
+        replace(
+            item,
             status=(
                 "needs_review"
                 if any(
@@ -118,8 +148,15 @@ def build_inventory(pages: Sequence[Mapping[str, Any]]) -> tuple[InventoryItem, 
                 )
                 else item.status
             ),
-            confidence=item.confidence,
-            occurrences=item.occurrences,
+            model_status=(
+                "needs_review"
+                if any(
+                    (*item.key[:2], _token(occurrence.object_ref)) in ambiguous
+                    for occurrence in item.occurrences
+                    if occurrence.object_ref
+                )
+                else item.model_status
+            ),
         )
         for item in inventory
     )
@@ -344,6 +381,8 @@ def compare_equipment(
         for parameter in occurrence.parameters:
             if not isinstance(parameter, dict):
                 continue
+            if parameter.get("evidence_status") == "needs_review":
+                continue
             property_name = _property(str(parameter.get("property_name") or ""))
             if not property_name:
                 continue
@@ -355,7 +394,9 @@ def compare_equipment(
             for fact in facts:
                 if _property(fact.property_name) != property_name:
                     continue
-                if fact.variant and _token(fact.variant) != item.key[2]:
+                if fact.variant and identity_token(fact.variant) != identity_token(
+                    item.variant
+                ):
                     continue
                 project_role = _token(str(parameter.get("role") or ""))
                 if fact.role and project_role != _token(fact.role):

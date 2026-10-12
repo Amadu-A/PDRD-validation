@@ -11,10 +11,17 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+from pdrd_api_gateway.application.ports.review import ReviewRequestError
 from pdrd_api_gateway.core.container import ApplicationContainer
+from pdrd_api_gateway.core.equipment_updates import build_equipment_update
 from pdrd_api_gateway.infrastructure.equipment_search import EquipmentSearchClient
 from pdrd_api_gateway.transport.http.dependencies import get_container
 from pdrd_api_gateway.transport.http.identity_authorization import VerifiedIdentity
+from pdrd_api_gateway.transport.http.request_actor import authenticated_actor
+from pdrd_api_gateway.transport.http.routers.review import (
+    invoke,
+    require_review_channel,
+)
 
 router = APIRouter(tags=["equipment-search"])
 
@@ -22,7 +29,7 @@ router = APIRouter(tags=["equipment-search"])
 class StartEquipmentRequest(BaseModel):
     """Подтверждённые модели из page Understanding."""
 
-    identities: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    identities: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
     allow_unverified: bool = False
 
 
@@ -35,6 +42,20 @@ class SourceUpdateRequest(BaseModel):
     enabled: bool = True
     allow_http: bool = False
     reason: str = Field(min_length=1, max_length=1000)
+
+
+class ResumeEquipmentRequest(BaseModel):
+    """Ожидаемая версия сохраняемого EQ состояния."""
+
+    revision: int = Field(ge=1)
+
+
+class ImportEquipmentRequest(BaseModel):
+    """Версии EQ и Review; содержание находок браузер не задаёт."""
+
+    model_config = {"extra": "forbid", "strict": True}
+    revision: int = Field(ge=1)
+    expected_revision: int = Field(ge=0)
 
 
 def _client(container: ApplicationContainer) -> EquipmentSearchClient:
@@ -66,8 +87,13 @@ def _manager(request: Request) -> UUID:
 
 def _upstream_error(error: httpx.HTTPError) -> HTTPException:
     """Сохраняет 404 внутреннего сервиса, остальные ошибки скрывает."""
-    if isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 404:
-        return HTTPException(404, "EQ-данные не найдены.")
+    if isinstance(error, httpx.HTTPStatusError):
+        if error.response.status_code == 404:
+            return HTTPException(404, "EQ-данные не найдены.")
+        if error.response.status_code == 409:
+            return HTTPException(
+                409, "EQ версия изменилась или продолжение недоступно."
+            )
     return HTTPException(503, "Equipment Search временно недоступен.")
 
 
@@ -114,6 +140,80 @@ async def equipment_result(
         if isinstance(error, httpx.HTTPError):
             raise _upstream_error(error) from error
         raise HTTPException(503, "Equipment Search не настроен.") from error
+
+
+@router.get("/api/v1/analyses/{job_id}/equipment-search/report")
+async def equipment_report(
+    job_id: UUID,
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+    revision: int | None = None,
+) -> dict:
+    """Читает отдельное дополнение; исходный отчёт и Review остаются сохранёнными."""
+    await _document_id(container, job_id)
+    try:
+        return await build_equipment_update(container).execute(
+            job_id=job_id, revision=revision
+        )
+    except ReviewRequestError as error:
+        raise HTTPException(error.status_code, error.detail) from error
+    except httpx.HTTPError as error:
+        raise _upstream_error(error) from error
+
+
+@router.post("/api/v1/analyses/{job_id}/review/equipment-updates")
+async def import_equipment_report(
+    job_id: UUID,
+    payload: ImportEquipmentRequest,
+    request: Request,
+    container: Annotated[ApplicationContainer, Depends(require_review_channel)],
+) -> dict:
+    """Явно прикрепляет выбранную неизменяемую EQ-версию, не принимая находки браузера."""
+    try:
+        proposal = await build_equipment_update(container).execute(
+            job_id=job_id, revision=payload.revision
+        )
+    except ReviewRequestError as error:
+        raise HTTPException(error.status_code, error.detail) from error
+    except httpx.HTTPError as error:
+        raise _upstream_error(error) from error
+    return await invoke(
+        container,
+        job_id,
+        "equipment_update",
+        {
+            "expected_revision": payload.expected_revision,
+            "equipment_revision": payload.revision,
+            "findings": proposal["findings"],
+        },
+        actor=authenticated_actor(request),
+    )
+
+
+@router.post("/api/v1/analyses/{job_id}/equipment-search/cancel")
+async def cancel_equipment(
+    job_id: UUID, container: Annotated[ApplicationContainer, Depends(get_container)]
+) -> dict:
+    """Отменяет только фоновую EQ-ветвь доступного задания."""
+    document_id = await _document_id(container, job_id)
+    try:
+        await _client(container).cancel(document_id)
+        return await _client(container).state(document_id)
+    except httpx.HTTPError as error:
+        raise _upstream_error(error) from error
+
+
+@router.post("/api/v1/analyses/{job_id}/equipment-search/resume")
+async def resume_equipment(
+    job_id: UUID,
+    payload: ResumeEquipmentRequest,
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+) -> dict:
+    """Продолжает неполную проверку, сохраняя готовые модели."""
+    document_id = await _document_id(container, job_id)
+    try:
+        return await _client(container).resume(document_id, payload.revision)
+    except httpx.HTTPError as error:
+        raise _upstream_error(error) from error
 
 
 @router.get("/api/v1/analyses/{job_id}/equipment-search/events")

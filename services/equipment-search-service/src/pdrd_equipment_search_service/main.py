@@ -53,12 +53,22 @@ from pdrd_equipment_search_service.infrastructure.vision_inspection import (
 class IdentityInput(BaseModel):
     """Подтверждённая идентификация одной физической модели."""
 
-    manufacturer: str = Field(min_length=1, max_length=200)
+    manufacturer: str = Field(default="", max_length=200)
     model: str = Field(min_length=1, max_length=200)
     variant: str = Field(default="", max_length=200)
     status: str = "resolved"
     confidence: float = Field(default=1.0, ge=0, le=1)
     properties: tuple[str, ...] = Field(default_factory=tuple, max_length=8)
+    manufacturer_status: str = "explicit"
+    model_status: str = "confirmed"
+    variant_kind: str = "execution"
+    article: str = Field(default="", max_length=200)
+
+
+class ResumeRequest(BaseModel):
+    """Версия состояния для безопасного продолжения задания."""
+
+    revision: int = Field(ge=1)
 
 
 class SourceUpdate(BaseModel):
@@ -75,7 +85,7 @@ class SourceUpdate(BaseModel):
 class StartRequest(BaseModel):
     """Запрос одного задания с ограниченным числом уникальных моделей."""
 
-    identities: list[IdentityInput] = Field(max_length=100)
+    identities: list[IdentityInput] = Field(max_length=1000)
     allow_unverified: bool = False
 
 
@@ -102,13 +112,16 @@ def create_app(
         engine = create_async_engine(config.database.url(), pool_pre_ping=True)
         client = httpx.AsyncClient(trust_env=False, follow_redirects=False)
         repository = PostgresJobRepository(engine)
+        await repository.is_ready()
         await repository.recover_interrupted()
         catalog = PostgresEquipmentCatalog(engine, config.storage_root)
         resolver = ResolveEquipment(
             catalog=catalog,
             search=SearxngSearch(client, config.searxng_url),
             downloader=SafeDocumentDownloader(max_bytes=config.max_download_bytes),
-            inspector=DocumentServiceInspector(client, config.document_service_url),
+            inspector=DocumentServiceInspector(
+                client, config.document_service_url, catalog=catalog
+            ),
             fact_index=KnowledgeEquipmentFactIndex(
                 client,
                 config.knowledge_service_url,
@@ -134,10 +147,17 @@ def create_app(
             max_vision_calls=config.max_vision_calls,
             max_queries=config.max_queries,
             max_downloads=config.max_downloads,
+            queries_per_model=config.queries_per_model,
+            downloads_per_model=config.downloads_per_model,
+            inline_models=config.inline_models,
+            batch_size=config.batch_size,
+            adaptive_vision_ceiling=config.adaptive_vision_ceiling,
+            max_resume_runs=config.max_resume_runs,
         )
         app.state.jobs = jobs
         app.state.sources = PostgresSourceManager(engine)
         app.state.catalog = catalog
+        await jobs.start_queue()
         try:
             yield
         finally:
@@ -278,6 +298,16 @@ def create_app(
             raise HTTPException(404, "Задание не найдено.")
         return jsonable_encoder(current)
 
+    @app.get(
+        prefix + "/{job_id}/versions/{revision}", dependencies=[Depends(authorize)]
+    )
+    async def version(job_id: UUID, revision: int, worker: Worker) -> dict:
+        """Возвращает неизменяемую завершённую редакцию EQ."""
+        saved = await worker.repository.version(job_id, revision)
+        if saved is None:
+            raise HTTPException(404, "Версия EQ не найдена.")
+        return saved
+
     @app.post(prefix + "/{job_id}/cancel", dependencies=[Depends(authorize)])
     async def cancel(
         job_id: UUID,
@@ -289,6 +319,16 @@ def create_app(
             raise HTTPException(404, "Задание не найдено.")
         accepted = await worker.cancel(job_id)
         return {"cancel_requested": accepted}
+
+    @app.post(prefix + "/{job_id}/resume", dependencies=[Depends(authorize)])
+    async def resume(job_id: UUID, body: ResumeRequest, worker: Worker) -> dict:
+        """Продолжает незавершённое задание по сохранённой версии."""
+        if await worker.repository.get(job_id) is None:
+            raise HTTPException(404, "Задание не найдено.")
+        try:
+            return jsonable_encoder(await worker.resume(job_id, body.revision))
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
 
     @app.get(prefix + "/{job_id}/events", dependencies=[Depends(authorize)])
     async def events(

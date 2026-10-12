@@ -4,6 +4,7 @@
 
 import asyncio
 import json
+from copy import deepcopy
 from dataclasses import asdict
 from uuid import uuid4
 
@@ -53,7 +54,67 @@ class FakeRepository:
     async def get(self, job_id):
         """Читает снимок статуса."""
         state = self.jobs.get(job_id)
-        return state.copy() if state else None
+        return deepcopy(state) if state else None
+
+    async def configure(self, job_id, policy):
+        """Закрепляет политику и начальную версию тестового задания."""
+        state = self.jobs[job_id]
+        state.setdefault("policy", policy)
+        state.setdefault("checkpoint", {})
+        state.setdefault("revision", 1)
+        state.setdefault("resume_count", 0)
+        state["background"] = state["policy"]["background"]
+        return state.copy()
+
+    async def checkpoint(self, job_id, results, checkpoint):
+        """Воспроизводит JSON-снимок прогресса после попытки модели."""
+        state = self.jobs[job_id]
+        if len(state["results"]) != len(results):
+            state["results"] = json.loads(json.dumps(results))
+        index = int(
+            (checkpoint.get("inflight") or {}).get(
+                "index",
+                checkpoint.get(
+                    "model_index", max(0, int(checkpoint.get("cursor") or 0) - 1)
+                ),
+            )
+        )
+        if index < len(results):
+            state["results"][index] = json.loads(json.dumps(results[index]))
+        state["checkpoint"] = json.loads(json.dumps(checkpoint))
+        state["revision"] += 1
+
+    async def queued_jobs(self):
+        """Читает ожидающие задания тестовой очереди."""
+        return tuple(
+            key for key, state in self.jobs.items() if state["status"] == "queued"
+        )
+
+    async def release(self, job_id):
+        """Возвращает сохранённую порцию в долговечную очередь."""
+        state = self.jobs[job_id]
+        if state["cancel_requested"]:
+            return False
+        state["status"] = "queued"
+        return True
+
+    async def resume(self, job_id, revision, max_runs):
+        """Проверяет версию и предел явных продолжений."""
+        state = self.jobs.get(job_id)
+        if (
+            not state
+            or state["revision"] != revision
+            or state["status"] not in {"incomplete", "cancelled"}
+            or state["resume_count"] >= max_runs
+        ):
+            return False
+        state.update(
+            status="queued",
+            cancel_requested=False,
+            revision=revision + 1,
+            resume_count=state["resume_count"] + 1,
+        )
+        return True
 
     async def claim(self, job_id):
         """Захватывает только ожидающее задание."""
@@ -127,6 +188,8 @@ class FakeResolver:
         should_stop=None,
         vision_budget=None,
         search_budget=None,
+        round_index=None,
+        previous=None,
     ):
         """Выполняет один поиск, если задание активно."""
         if should_stop and await should_stop():
@@ -251,6 +314,8 @@ async def test_cancel_running_job_interrupts_current_request() -> None:
             should_stop=None,
             vision_budget=None,
             search_budget=None,
+            round_index=None,
+            previous=None,
         ):
             """Блокируется до отмены текущей задачи."""
             self.calls.append(identity.model)
@@ -297,6 +362,8 @@ async def test_job_shares_bounded_vision_budget_across_models() -> None:
             should_stop=None,
             vision_budget=None,
             search_budget=None,
+            round_index=None,
+            previous=None,
         ):
             """Разрешает не больше настроенного числа VLM вызовов."""
             self.budgets.append(vision_budget)
@@ -320,3 +387,135 @@ async def test_job_shares_bounded_vision_budget_across_models() -> None:
     assert resolver.claims == [True, False]
     assert resolver.budgets[0] is resolver.budgets[1]
     assert (await repo.get(job_id))["status"] == "incomplete"
+
+
+class AttemptResolver:
+    """Воспроизводит отказ после одной загрузки, без внешних сети и GPU."""
+
+    def __init__(self, stop_at=None):
+        """Назначает модель аварийной остановки и журнал попыток."""
+        self.calls = []
+        self.stop_at = stop_at
+        self.stopped = asyncio.Event()
+
+    async def execute(
+        self, identity, *, search_budget, round_index, vision_budget, **kwargs
+    ):
+        """Расходует операции до остановки, чтобы проверить аварийный резерв."""
+        self.calls.append((round_index, identity.model))
+        assert search_budget.claim_query()
+        if round_index < 2:
+            assert search_budget.claim_download()
+        if self.stop_at == identity.model:
+            self.stopped.set()
+            await asyncio.Event().wait()
+        return ResolveResult(
+            identity,
+            "incomplete",
+            reason_code="model_mismatch",
+            retryable=True,
+            attempts=({"stage": "verify", "code": "model_mismatch"},),
+        )
+
+
+@pytest.mark.parametrize("count", [300, 500])
+async def test_every_model_precedes_retries_and_budgets_are_bounded(count):
+    """Все модели получают первый запрос раньше второго; GPU не масштабируется поштучно."""
+    repository, resolver = FakeRepository(), AttemptResolver()
+    service = SearchJobService(repository, resolver, max_vision_calls=0)
+    job_id = uuid4()
+    identities = [EquipmentIdentity("IEK", f"MODEL-{index}") for index in range(count)]
+    created = await service.start(job_id, identities, True)
+    await asyncio.gather(*service._tasks.values())
+    assert len(resolver.calls) == service.batch_size
+    while (await repository.get(job_id))["status"] == "queued":
+        await service._run(job_id)
+    state = await repository.get(job_id)
+    assert created["background"]
+    assert resolver.calls[:count] == [(0, item.model) for item in identities]
+    assert resolver.calls[count : 2 * count] == [(1, item.model) for item in identities]
+    assert len(state["results"]) == count
+    assert sum(row["metrics"]["queries"] for row in state["results"]) == 3 * count
+    assert sum(row["metrics"]["downloads"] for row in state["results"]) == 2 * count
+    assert state["checkpoint"]["queries_used"] == 3 * count
+    assert state["policy"]["vision_limit"] == 0
+    assert SearchJobService(repository, resolver).policy(count)["vision_limit"] <= 8
+
+
+async def test_restart_reuses_finished_models_and_keeps_inflight_reservation():
+    """Аварийный запрос повторяется ограниченно; подтверждённый checkpoint не теряется."""
+    repository, interrupted = FakeRepository(), AttemptResolver("MODEL-1")
+    first = SearchJobService(repository, interrupted, max_vision_calls=0)
+    job_id = uuid4()
+    identities = [EquipmentIdentity("IEK", f"MODEL-{index}") for index in range(3)]
+    await first.start(job_id, identities, False)
+    await asyncio.wait_for(interrupted.stopped.wait(), 2)
+    await first.shutdown()
+    state = repository.jobs[job_id]
+    assert state["status"] == "running"
+    assert state["checkpoint"]["inflight"] == {"index": 1}
+    assert state["checkpoint"]["queries_used"] == 2
+    assert state["results"][0]["metrics"]["queries"] == 1
+    state["status"] = "queued"  # В отдельном DB-тесте это делает recover_interrupted.
+    resolver = AttemptResolver()
+    second = SearchJobService(repository, resolver, max_vision_calls=0)
+    await second._run(job_id)
+    assert (0, "MODEL-0") not in resolver.calls
+    assert resolver.calls[0] == (0, "MODEL-1")
+    completed = await repository.get(job_id)
+    assert completed["checkpoint"]["queries_used"] <= completed["policy"]["query_limit"]
+    assert completed["results"][1]["metrics"]["interrupted_attempts"] == 1
+
+
+async def test_resume_requires_revision_and_is_bounded():
+    """Старая версия и четвёртое продолжение отклоняются, лимиты не бесконечны."""
+    repository, resolver = FakeRepository(), AttemptResolver()
+    service = SearchJobService(repository, resolver, max_vision_calls=0)
+    job_id = uuid4()
+    await service.start(job_id, [EquipmentIdentity("IEK", "MODEL-0")], False)
+    await asyncio.gather(*service._tasks.values())
+    for index in range(3):
+        state = await repository.get(job_id)
+        with pytest.raises(ValueError):
+            await service.resume(job_id, state["revision"] - 1)
+        await service.resume(job_id, state["revision"])
+        await asyncio.gather(*service._tasks.values())
+        assert (await repository.get(job_id))["resume_count"] == index + 1
+    with pytest.raises(ValueError):
+        await service.resume(job_id, (await repository.get(job_id))["revision"])
+
+
+async def test_confirmed_model_is_not_reprocessed_on_resume():
+    """Продолжение сохраняет документ и факты уже готовой модели."""
+    repository, resolver = FakeRepository(), AttemptResolver()
+    service = SearchJobService(repository, resolver, max_vision_calls=0)
+    job_id = uuid4()
+    identities = [
+        EquipmentIdentity("IEK", "MODEL-0"),
+        EquipmentIdentity("IEK", "MODEL-1"),
+    ]
+    await repository.create_or_get(job_id, [asdict(item) for item in identities], False)
+    await repository.configure(job_id, service.policy(2))
+    repository.jobs[job_id].update(
+        status="incomplete",
+        results=[
+            {
+                "identity": asdict(identities[0]),
+                "status": "found",
+                "document": {"source_id": "EQ-existing"},
+                "facts": [{"value_raw": "12"}],
+                "metrics": {},
+                "attempts": [],
+            },
+            {
+                "identity": asdict(identities[1]),
+                "status": "incomplete",
+                "metrics": {},
+                "attempts": [],
+            },
+        ],
+    )
+    await service.resume(job_id, repository.jobs[job_id]["revision"])
+    await asyncio.gather(*service._tasks.values())
+    assert all(model != "MODEL-0" for _, model in resolver.calls)
+    assert repository.jobs[job_id]["results"][0]["facts"] == [{"value_raw": "12"}]

@@ -3,20 +3,15 @@
 """Ограниченное выполнение EQ-поиска с восстановимой историей задания."""
 
 import asyncio
-from dataclasses import asdict, dataclass, field
-from time import perf_counter
+import logging
+from dataclasses import asdict, dataclass, field, replace
+from math import ceil
 from typing import Protocol
 from uuid import UUID
 
+from pdrd_equipment_search_service.application.job_execution import run_search_job
 from pdrd_equipment_search_service.application.resolve import (
     ResolveEquipment,
-    SearchCancelled,
-)
-from pdrd_equipment_search_service.application.search_budget import (
-    EquipmentSearchBudget,
-)
-from pdrd_equipment_search_service.application.vision_budget import (
-    EquipmentVisionBudget,
 )
 from pdrd_equipment_search_service.core.observability import log_execution_time
 from pdrd_equipment_search_service.domain.equipment import EquipmentIdentity
@@ -40,6 +35,10 @@ class JobRepository(Protocol):
 
     async def get(self, job_id: UUID) -> dict | None:
         """Читает текущее состояние."""
+        ...
+
+    async def version(self, job_id: UUID, revision: int) -> dict | None:
+        """Читает неизменяемую завершённую редакцию EQ."""
         ...
 
     async def claim(self, job_id: UUID) -> bool:
@@ -77,6 +76,28 @@ class JobRepository(Protocol):
         """Фиксирует итог задания."""
         ...
 
+    async def configure(self, job_id: UUID, policy: dict) -> dict:
+        """Однократно закрепляет квоты логической проверки."""
+        ...
+
+    async def checkpoint(
+        self, job_id: UUID, results: list[dict], checkpoint: dict
+    ) -> None:
+        """Сохраняет прогресс порции и версию атомарно."""
+        ...
+
+    async def queued_jobs(self) -> tuple[UUID, ...]:
+        """Читает ограниченную долговечную очередь с приоритетом коротких заданий."""
+        ...
+
+    async def release(self, job_id: UUID) -> bool:
+        """Возвращает фоновое задание в очередь после сохранённой порции."""
+        ...
+
+    async def resume(self, job_id: UUID, revision: int, max_runs: int) -> bool:
+        """Продолжает задание по актуальной версии и ограниченному числу запусков."""
+        ...
+
 
 @dataclass(slots=True)
 class SearchJobService:
@@ -84,12 +105,19 @@ class SearchJobService:
 
     repository: JobRepository
     resolver: ResolveEquipment
-    max_models: int = 12
+    max_models: int = 500
     max_seconds: float = 180.0
     max_concurrent: int = 2
     max_vision_calls: int = 2
     max_queries: int = 6
     max_downloads: int = 3
+    queries_per_model: int = 3
+    downloads_per_model: int = 2
+    inline_models: int = 20
+    batch_size: int = 10
+    adaptive_vision_ceiling: int = 8
+    max_resume_runs: int = 3
+    _watcher: asyncio.Task[None] | None = field(default=None, init=False)
     _tasks: dict[UUID, asyncio.Task[None]] = field(default_factory=dict, init=False)
     _semaphore: asyncio.Semaphore = field(init=False)
     _active: set[UUID] = field(default_factory=set, init=False)
@@ -115,7 +143,8 @@ class SearchJobService:
                 merged = tuple(
                     dict.fromkeys((*previous.properties, *identity.properties))
                 )[:8]
-                by_key[identity.key] = EquipmentIdentity(
+                by_key[identity.key] = replace(
+                    previous,
                     manufacturer=previous.manufacturer,
                     model=previous.model,
                     variant=previous.variant,
@@ -135,10 +164,9 @@ class SearchJobService:
             for identity in unique
         ]
         state = await self.repository.create_or_get(job_id, payload, allow_unverified)
-        if state["status"] == "queued" and job_id not in self._tasks:
-            task = asyncio.create_task(self._run(job_id))
-            self._tasks[job_id] = task
-            task.add_done_callback(lambda _task: self._tasks.pop(job_id, None))
+        state = await self.repository.configure(job_id, self.policy(len(unique)))
+        if state["status"] == "queued":
+            self._schedule(job_id)
         return state
 
     async def cancel(self, job_id: UUID) -> bool:
@@ -149,118 +177,117 @@ class SearchJobService:
         accepted = await self.repository.cancel(job_id)
         if not accepted:
             return False
-        if state["status"] == "queued":
+        task = self._tasks.get(job_id)
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        state = await self.repository.get(job_id)
+        if state["status"] in {"queued", "running"}:
             await self.repository.finish(
-                job_id, "cancelled", [], "Поиск отменён до запуска."
+                job_id,
+                "cancelled",
+                state.get("results", []),
+                "Поиск отменён пользователем.",
             )
             await self.repository.append_event(
-                job_id, "cancelled", "Поиск отменён до запуска."
+                job_id, "cancelled", "Поиск отменён пользователем."
             )
-        task = self._tasks.get(job_id)
-        if task is not None and job_id in self._active:
-            task.cancel()
         return True
 
     async def _run(self, job_id: UUID) -> None:
-        """Записывает частичный результат при отказе EQ без срыва основного анализа."""
-        async with self._semaphore:
-            if not await self.repository.claim(job_id):
-                return
-            state = await self.repository.get(job_id)
-            if state is None:
-                return
-            await self.repository.append_event(
-                job_id, "started", "Поиск документации начат."
+        """Выполняет справедливые порции через отдельный сценарий с checkpoint."""
+        await run_search_job(self, job_id)
+
+    def policy(self, models: int) -> dict:
+        """Ограничивает квоты числом моделей без выдачи каждому собственного GPU-бюджета."""
+        return {
+            "background": models > self.inline_models,
+            "models": models,
+            "query_limit": min(
+                1500, max(self.max_queries, models * self.queries_per_model)
+            ),
+            "download_limit": min(
+                1000, max(self.max_downloads, models * self.downloads_per_model)
+            ),
+            "vision_limit": min(
+                self.adaptive_vision_ceiling,
+                max(self.max_vision_calls, ceil(models / 50)),
             )
-            results: list[dict] = []
-            vision_budget = EquipmentVisionBudget(self.max_vision_calls)
-            search_budget = EquipmentSearchBudget(self.max_queries, self.max_downloads)
-            status = "completed"
-            warning = ""
-            try:
-                self._active.add(job_id)
-                async with asyncio.timeout(self.max_seconds):
-                    for data in state["identities"]:
-                        if await self.repository.is_cancelled(job_id):
-                            raise SearchCancelled
-                        identity = EquipmentIdentity(**data)
-                        await self.repository.append_event(
-                            job_id,
-                            "model_started",
-                            f"Поиск документации: {identity.manufacturer} {identity.model}"[
-                                :200
-                            ],
-                        )
-                        started = perf_counter()
-                        remaining_before = vision_budget.remaining
-                        metric_offset = len(vision_budget.metrics)
-                        queries_before = search_budget.queries_remaining
-                        downloads_before = search_budget.downloads_remaining
-                        result = await self.resolver.execute(
-                            identity,
-                            allow_unverified=state["allow_unverified"],
-                            should_stop=lambda: self.repository.is_cancelled(job_id),
-                            vision_budget=vision_budget,
-                            search_budget=search_budget,
-                        )
-                        model_metrics = vision_budget.metrics[metric_offset:]
-                        cached_calls = sum(
-                            metric.get("done_reason") == "cache_hit"
-                            for metric in model_metrics
-                        )
-                        results.append(
-                            {
-                                **asdict(result),
-                                "metrics": {
-                                    "duration_ms": round(
-                                        (perf_counter() - started) * 1000, 3
-                                    ),
-                                    "vision_calls": remaining_before
-                                    - vision_budget.remaining
-                                    - cached_calls,
-                                    "vision_cache_hits": cached_calls,
-                                    "prompt_tokens": sum(
-                                        int(metric.get("prompt_eval_count") or 0)
-                                        for metric in model_metrics
-                                    ),
-                                    "output_tokens": sum(
-                                        int(metric.get("eval_count") or 0)
-                                        for metric in model_metrics
-                                    ),
-                                    "queries": queries_before
-                                    - search_budget.queries_remaining,
-                                    "downloads": downloads_before
-                                    - search_budget.downloads_remaining,
-                                    "vision_metrics": model_metrics,
-                                },
-                            }
-                        )
-                        await self.repository.append_event(
-                            job_id,
-                            "model_finished",
-                            f"Модель {identity.model}: {result.status}"[:200],
-                        )
-                        if result.status == "incomplete":
-                            status = "incomplete"
-            except (SearchCancelled, asyncio.CancelledError):
-                status = "cancelled"
-                warning = "Поиск отменён пользователем."
-            except TimeoutError:
-                status = "incomplete"
-                warning = "Превышен бюджет времени поиска."
-            except Exception:
-                status = "incomplete"
-                warning = "Оборудование проверено не полностью из-за ошибки сервиса."
-            finally:
-                self._active.discard(job_id)
-            await self.repository.finish(job_id, status, results, warning)
-            await self.repository.append_event(
-                job_id, status, warning or "Поиск завершён."
+            if self.max_vision_calls
+            else 0,
+            "queries_per_model": self.queries_per_model,
+            "downloads_per_model": self.downloads_per_model,
+            "max_resume_runs": self.max_resume_runs,
+        }
+
+    async def resume(self, job_id: UUID, revision: int) -> dict:
+        """Проверяет версию и запускает продолжение сохранённого задания."""
+        active = self._tasks.get(job_id)
+        if active is not None and not active.done():
+            raise ValueError(
+                "Предыдущая порция ещё завершает запись. Повторите продолжение."
             )
+        saved = await self.repository.get(job_id)
+        limit = min(
+            self.max_resume_runs,
+            int(
+                (saved or {})
+                .get("policy", {})
+                .get("max_resume_runs", self.max_resume_runs)
+            ),
+        )
+        if not await self.repository.resume(job_id, revision, limit):
+            raise ValueError(
+                "Версия изменилась, задание завершено или лимит продолжений исчерпан."
+            )
+        state = await self.repository.get(job_id)
+        self._schedule(job_id)
+        return state
+
+    def _schedule(self, job_id: UUID) -> None:
+        """Старый callback завершения не удаляет новое продолжение из реестра."""
+        previous = self._tasks.get(job_id)
+        if previous is not None and not previous.done():
+            return
+        if previous is None and len(self._tasks) >= self.max_concurrent * 2:
+            return
+        task = asyncio.create_task(self._run(job_id))
+        self._tasks[job_id] = task
+
+        def finished(current: asyncio.Task) -> None:
+            """Удаляет только ту задачу, для которой зарегистрировано завершение."""
+            if self._tasks.get(job_id) is current:
+                self._tasks.pop(job_id, None)
+
+        task.add_done_callback(finished)
+
+    async def start_queue(self) -> None:
+        """Подбирает долговечные задания после перезапуска и поддерживает очередь."""
+
+        async def watch() -> None:
+            """Проверяет только собственную очередь с ограниченной частотой."""
+            while True:
+                try:
+                    queued = await self.repository.queued_jobs()
+                except Exception:
+                    logging.getLogger(__name__).warning(
+                        "event=equipment_queue_unavailable"
+                    )
+                    await asyncio.sleep(1)
+                    continue
+                for job_id in queued:
+                    self._schedule(job_id)
+                await asyncio.sleep(1)
+
+        if self._watcher is None:
+            self._watcher = asyncio.create_task(watch())
 
     async def shutdown(self) -> None:
         """Останавливает локальные задачи при завершении процесса."""
         tasks = list(self._tasks.values())
+        if self._watcher is not None:
+            tasks.append(self._watcher)
+            self._watcher = None
         for task in tasks:
             task.cancel()
         if tasks:

@@ -40,6 +40,7 @@ def _snapshot(row) -> DocumentSnapshot:
         trust_status=row.trust_status,
         revision_ambiguous=bool(getattr(row, "revision_ambiguous", False)),
         publication_date=getattr(row, "publication_date", "") or "",
+        article=getattr(row, "article", "") or "",
         fetched_at=(
             row.fetched_at.isoformat()
             if getattr(row, "fetched_at", None) is not None
@@ -83,7 +84,7 @@ class PostgresEquipmentCatalog:
             row = (
                 await connection.execute(
                     text("""
-                        SELECT d.source_id, d.manufacturer, d.model, d.variant,
+                        SELECT d.source_id, d.manufacturer, d.model, d.variant, d.article,
                                d.source_url, d.final_url, d.sha256,
                                d.storage_reference, d.revision, d.trust_status,
                                d.publication_date, d.fetched_at,
@@ -95,19 +96,94 @@ class PostgresEquipmentCatalog:
                                      AND prior.sha256 <> d.sha256
                                ) AS revision_ambiguous
                         FROM equipment_search.documents AS d
-                        WHERE d.manufacturer_key = :manufacturer_key
-                          AND d.model_key = :model_key
-                          AND d.variant_key = :variant_key
+                        WHERE (:manufacturer_key = '' OR d.manufacturer_key = :manufacturer_key)
+                          AND (:manufacturer_key <> '' OR NOT EXISTS (
+                              SELECT 1 FROM equipment_search.documents AS other
+                              WHERE other.model_key IN (:model_key, :legacy_model_key)
+                                AND other.variant_key IN (:variant_key, :legacy_variant_key)
+                                AND other.manufacturer_key <> d.manufacturer_key
+                          ))
+                          AND d.model_key IN (:model_key, :legacy_model_key)
+                          AND d.variant_key IN (:variant_key, :legacy_variant_key)
                         ORDER BY d.fetched_at DESC LIMIT 1
                     """),
                     {
                         "manufacturer_key": manufacturer_key,
                         "model_key": identity.key[1],
                         "variant_key": identity.key[2],
+                        "legacy_model_key": normalized_token(identity.model),
+                        "legacy_variant_key": normalized_token(identity.variant)
+                        if not identity.article
+                        else identity.key[2],
                     },
                 )
             ).first()
         return _snapshot(row) if row else None
+
+    async def manufacturer_aliases(self, manufacturer: str) -> tuple[str, ...]:
+        """Возвращает только серверные aliases существующего производителя."""
+        key = await self._canonical_key(manufacturer)
+        async with self.engine.connect() as connection:
+            row = (
+                await connection.execute(
+                    text(
+                        "SELECT name, aliases FROM equipment_search.manufacturers "
+                        "WHERE normalized_name = :key AND enabled = true"
+                    ),
+                    {"key": key},
+                )
+            ).first()
+        return (
+            tuple(dict.fromkeys((row.name, *row.aliases))) if row else (manufacturer,)
+        )
+
+    async def manufacturer_for_host(self, hostname: str) -> str | None:
+        """Не угадывает владельца по суффиксу домена или поисковому snippet."""
+        async with self.engine.connect() as connection:
+            rows = (
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT DISTINCT m.name FROM equipment_search.source_domains s "
+                            "JOIN equipment_search.manufacturers m ON m.normalized_name = s.manufacturer_key "
+                            "WHERE s.hostname = :host AND s.enabled = true AND s.status = 'trusted' "
+                            "AND m.enabled = true"
+                        ),
+                        {"host": hostname.casefold().rstrip(".")},
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return rows[0] if len(rows) == 1 else None
+
+    async def manufacturer_profiles(self) -> tuple[dict, ...]:
+        """Возвращает ограниченный реестр для подтверждения бренда текстом документа."""
+        async with self.engine.connect() as connection:
+            rows = (
+                await connection.execute(
+                    text(
+                        "SELECT name, aliases FROM equipment_search.manufacturers AS m WHERE m.enabled = true "
+                        "AND EXISTS (SELECT 1 FROM equipment_search.source_domains s "
+                        "WHERE s.manufacturer_key = m.normalized_name AND s.status = 'trusted' AND s.enabled = true) "
+                        "ORDER BY name LIMIT 1000"
+                    )
+                )
+            ).all()
+        return tuple({"name": row.name, "aliases": row.aliases} for row in rows)
+
+    async def source_blocked(self, hostname: str) -> bool:
+        """Не загружает заблокированный точный домен до уточнения производителя."""
+        async with self.engine.connect() as connection:
+            return bool(
+                await connection.scalar(
+                    text(
+                        "SELECT EXISTS(SELECT 1 FROM equipment_search.source_domains "
+                        "WHERE hostname = :host AND (status = 'blocked' OR enabled = false))"
+                    ),
+                    {"host": hostname.casefold().rstrip(".")},
+                )
+            )
 
     async def source_for(
         self,
@@ -303,13 +379,13 @@ class PostgresEquipmentCatalog:
                      model_key, model, variant_key, variant, source_url,
                      final_url, sha256, media_type, storage_reference,
                      revision, publication_date, trust_status, fetched_at,
-                     extracted_pages, vision_facts)
+                     extracted_pages, vision_facts, article)
                     VALUES (:id, :source_id, :source_domain_id, :manufacturer_key, :manufacturer,
                             :model_key, :model, :variant_key, :variant,
                             :source_url, :final_url, :sha256, :media_type,
                             :storage_reference, :revision, :publication_date,
                             :trust_status, :fetched_at,
-                            CAST(:extracted_pages AS JSONB), CAST(:vision_facts AS JSONB))
+                            CAST(:extracted_pages AS JSONB), CAST(:vision_facts AS JSONB), :article)
                     ON CONFLICT (manufacturer_key, model_key, variant_key, sha256)
                     DO NOTHING
                 """),
@@ -323,6 +399,7 @@ class PostgresEquipmentCatalog:
                     "model": identity.model,
                     "variant_key": identity.key[2],
                     "variant": identity.variant,
+                    "article": identity.article,
                     "source_url": source_url,
                     "final_url": downloaded.final_url,
                     "sha256": downloaded.sha256,
@@ -341,7 +418,7 @@ class PostgresEquipmentCatalog:
             row = (
                 await connection.execute(
                     text("""
-                        SELECT d.source_id, d.manufacturer, d.model, d.variant,
+                        SELECT d.source_id, d.manufacturer, d.model, d.variant, d.article,
                                d.source_url, d.final_url, d.sha256,
                                d.storage_reference, d.revision, d.trust_status,
                                d.publication_date, d.fetched_at,
@@ -377,7 +454,7 @@ class PostgresEquipmentCatalog:
             row = (
                 await connection.execute(
                     text("""
-                        SELECT source_id, manufacturer, model, variant,
+                        SELECT source_id, manufacturer, model, variant, article,
                                source_url, final_url, sha256, storage_reference,
                                revision, trust_status, media_type,
                                publication_date, fetched_at

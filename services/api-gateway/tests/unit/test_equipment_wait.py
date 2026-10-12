@@ -3,11 +3,25 @@
 """Жёсткое ожидание EQ, отмена и сохранение частичных результатов."""
 
 import asyncio
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 from pdrd_api_gateway.core.settings import EquipmentSearchSettings
 from pdrd_api_gateway.infrastructure.equipment_search import EquipmentSearchClient
+
+
+async def test_background_search_returns_without_cancel_or_full_wait(monkeypatch):
+    """Большое задание продолжает работу после завершения основной ветви."""
+    state = {"status": "queued", "background": True, "results": [], "revision": 2}
+    reader, cancel = AsyncMock(return_value=state), AsyncMock()
+    monkeypatch.setattr(EquipmentSearchClient, "state", reader)
+    monkeypatch.setattr(EquipmentSearchClient, "cancel", cancel)
+    client = EquipmentSearchClient(EquipmentSearchSettings(wait_seconds=0.01))
+    result = await asyncio.wait_for(client.wait(uuid4()), 0.5)
+    assert result["background"] and result["status"] == "queued"
+    assert "в фоне" in result["warning"]
+    cancel.assert_not_awaited()
 
 
 @pytest.mark.asyncio

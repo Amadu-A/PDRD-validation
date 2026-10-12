@@ -3,15 +3,20 @@
 """Подготовка EQ-кандидатов с сохранением источника для общего Finalization."""
 
 from collections import defaultdict
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any
 
+from pdrd_analysis_service.application.equipment_report import (
+    model_report,
+    report_statistics,
+)
 from pdrd_analysis_service.domain.equipment import (
     Comparison,
     EquipmentFact,
     InventoryItem,
     build_inventory,
     compare_equipment,
+    equipment_key,
     inventory_payload,
 )
 
@@ -55,11 +60,14 @@ def _finding_query(item: InventoryItem, comparison: Comparison, page_type: str) 
     manufacturer_value = (
         f"{comparison.manufacturer_value} {comparison.manufacturer_unit}".strip()
     )
+    variant_label = {"interface": "интерфейс", "model_name": "наименование модели"}.get(
+        item.variant_kind, "исполнение"
+    )
     return "\n".join(
         (
             "Выбор и применение оборудования в соответствии с техническими характеристиками производителя.",
             f"Тип проектного документа: {document_type}; тип оборудования: {equipment_type}.",
-            f"Оборудование: {item.manufacturer} {item.model}; исполнение: {item.variant or 'не указано'}; "
+            f"Оборудование: {item.manufacturer} {item.model}; {variant_label}: {item.variant or 'не указано'}; "
             f"обозначение в проекте: {comparison.object_ref or 'не указано'}.",
             f"Проверяемая характеристика: {property_label} ({comparison.property_name}).",
             f"Значение в проекте: {project_value}; значение в документации производителя: {manufacturer_value}.",
@@ -86,10 +94,11 @@ def compare_equipment_stage(
         identity = raw.get("identity")
         if not isinstance(identity, dict):
             continue
-        key = (
-            " ".join(str(identity.get("manufacturer") or "").casefold().split()),
-            " ".join(str(identity.get("model") or "").casefold().split()),
-            " ".join(str(identity.get("variant") or "").casefold().split()),
+        key = equipment_key(
+            *(
+                str(identity.get(field) or "")
+                for field in ("manufacturer", "model", "variant", "article")
+            )
         )
         by_key[key] = raw
 
@@ -101,16 +110,31 @@ def compare_equipment_stage(
     comparisons: list[dict] = []
     warnings: list[str] = []
     diagnostics: list[dict[str, Any]] = []
+    models: list[dict] = []
     if search.get("warning"):
         warnings.append(str(search["warning"])[:300])
 
     for item in inventory:
-        if item.status != "resolved":
+        result = by_key.get(item.key) or {}
+        row = model_report(item, result, [])
+        models.append(row)
+        verified_brand = result.get("resolved_manufacturer") or (
+            result.get("document") or {}
+        ).get("manufacturer")
+        if item.status != "resolved" and not (
+            not item.manufacturer
+            and item.manufacturer_status == "unknown"
+            and item.model_status == "confirmed"
+            and item.confidence >= 0.75
+            and verified_brand
+            and result.get("status") in {"found", "local"}
+        ):
             warnings.append(
                 f"Оборудование {item.manufacturer} {item.model}: требуется уточнение."
             )
             continue
-        result = by_key.get(item.key)
+        if not item.manufacturer and verified_brand:
+            item = replace(item, manufacturer=verified_brand, status="resolved")
         if not result:
             warnings.append(
                 f"Документация для {item.manufacturer} {item.model} недоступна."
@@ -169,6 +193,9 @@ def compare_equipment_stage(
             )
             continue
         model_comparisons = compare_equipment(item, facts)
+        row.update(
+            model_report(item, result, [asdict(part) for part in model_comparisons])
+        )
         if not model_comparisons and any(part.parameters for part in item.occurrences):
             diagnostics.append(
                 {
@@ -250,6 +277,8 @@ def compare_equipment_stage(
                         "manufacturer": item.manufacturer,
                         "model": item.model,
                         "variant": item.variant,
+                        "article": item.article,
+                        "variant_kind": item.variant_kind,
                         "object_ref": comparison.object_ref,
                         "property_name": comparison.property_name,
                         "project_value": comparison.project_value,
@@ -273,9 +302,16 @@ def compare_equipment_stage(
             "output_tokens",
             "queries",
             "downloads",
+            "verified_documents",
         )
     }
     return {
+        "models": models,
+        "statistics": report_statistics(models, inventory),
+        "background": bool(search.get("background")),
+        "revision": int(search.get("revision") or 0),
+        "search_status": str(search.get("status") or "incomplete"),
+        "policy": search.get("policy") or {},
         "metrics": metrics,
         "inventory": inventory_payload(inventory),
         "comparisons": comparisons,

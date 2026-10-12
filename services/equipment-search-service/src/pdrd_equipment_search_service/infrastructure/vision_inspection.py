@@ -11,6 +11,7 @@ import httpx
 from pdrd_equipment_search_service.application.vision_budget import (
     EquipmentVisionBudget,
 )
+from pdrd_equipment_search_service.domain.diagnostics import ReasonCode
 from pdrd_equipment_search_service.domain.equipment import (
     DocumentInspection,
     DownloadedDocument,
@@ -38,14 +39,18 @@ class TargetedVisionInspector:
         should_stop: Callable[[], Awaitable[bool]] | None = None,
     ) -> DocumentInspection:
         """Сохраняет визуальные факты только при точной идентификации модели."""
-        candidates = tuple(page for page, _ in inspection.pages)[: self.max_pages] or (
-            1,
-        )
+        candidates = (
+            inspection.vision_pages or tuple(page for page, _ in inspection.pages)
+        )[: self.max_pages] or (1,)
         for page in candidates:
             if should_stop is not None and await should_stop():
                 raise asyncio.CancelledError
             if budget.remaining <= 0:
-                return replace(inspection, reason="Исчерпан бюджет адресного EQ VLM.")
+                return replace(
+                    inspection,
+                    reason="Исчерпан бюджет адресного EQ VLM.",
+                    reason_code=ReasonCode.VISION_BUDGET,
+                )
             try:
                 raster = await self.client.post(
                     self.document_base_url.rstrip("/")
@@ -65,7 +70,9 @@ class TargetedVisionInspector:
                     raise asyncio.CancelledError
                 if not budget.claim():
                     return replace(
-                        inspection, reason="Исчерпан бюджет адресного EQ VLM."
+                        inspection,
+                        reason="Исчерпан бюджет адресного EQ VLM.",
+                        reason_code=ReasonCode.VISION_BUDGET,
                     )
                 response = await self.client.post(
                     self.analysis_base_url.rstrip("/")
@@ -73,7 +80,13 @@ class TargetedVisionInspector:
                     json={
                         "manufacturer": identity.manufacturer,
                         "model": identity.model,
-                        "variant": identity.variant,
+                        "variant": identity.variant
+                        if identity.variant_kind != "interface"
+                        else "",
+                        "article": identity.article,
+                        "manufacturer_aliases": list(
+                            inspection.manufacturer_aliases[:20]
+                        ),
                         "properties": list(identity.properties[:8]),
                         "page": page,
                         "image_base64": raster.json()["image_base64"],
@@ -86,22 +99,26 @@ class TargetedVisionInspector:
                 return replace(
                     inspection,
                     reason="Адресное визуальное извлечение временно недоступно.",
+                    reason_code=ReasonCode.EXTRACTION_ERROR,
                 )
             if not isinstance(payload, dict):
                 continue
             if isinstance(payload.get("metrics"), dict):
                 budget.metrics.append(payload["metrics"])
+                if payload["metrics"].get("done_reason") == "cache_hit":
+                    budget.remaining += 1
             facts = payload.get("facts")
             if (
                 payload.get("identified") is True
                 and isinstance(facts, list)
-                and any(isinstance(fact, dict) for fact in facts)
+                and all(isinstance(fact, dict) for fact in facts)
             ):
                 return replace(
                     inspection,
                     applicable=True,
                     requires_vision=False,
                     reason="",
+                    reason_code="",
                     vision_facts=tuple(
                         {**fact, "page": page}
                         for fact in facts[:8]

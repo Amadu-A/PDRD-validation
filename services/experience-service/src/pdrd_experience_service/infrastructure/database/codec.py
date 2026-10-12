@@ -175,6 +175,16 @@ def event_to_json(
     return {
         "before": (finding_to_json(event.before) if event.before else None),
         "after": (finding_to_json(event.after) if event.after else None),
+        **(
+            {
+                "equipment_revision": event.equipment_revision,
+                "added_findings": [
+                    finding_to_json(item) for item in event.added_findings
+                ],
+            }
+            if event.equipment_revision is not None
+            else {}
+        ),
     }
 
 
@@ -194,4 +204,8 @@ def event_from_json(
         session_revision=revision,
         before=(finding_from_json(details["before"]) if details["before"] else None),
         after=(finding_from_json(details["after"]) if details["after"] else None),
+        equipment_revision=details.get("equipment_revision"),
+        added_findings=tuple(
+            finding_from_json(item) for item in details.get("added_findings", [])
+        ),
     )

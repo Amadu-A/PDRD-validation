@@ -173,6 +173,11 @@ def _add_equipment_schema(schema: dict[str, Any], limit: int) -> dict[str, Any]:
         "status",
     )
     properties = dict.fromkeys(identity_fields, text)
+    properties["manufacturer_evidence_text"] = text
+    properties["entity_kind"] = {
+        "type": "string",
+        "enum": ["equipment", "port", "interface", "line", "symbol"],
+    }
     properties["status"] = {
         "type": "string",
         "enum": ["resolved", "needs_review"],

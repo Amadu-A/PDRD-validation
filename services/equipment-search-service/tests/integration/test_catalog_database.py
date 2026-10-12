@@ -3,6 +3,7 @@
 """Настоящий PostgreSQL: версии snapshot, визуальные строки и история SSE."""
 
 import asyncio
+import json
 import os
 from dataclasses import replace
 from types import SimpleNamespace
@@ -29,6 +30,153 @@ from pdrd_equipment_search_service.infrastructure.postgres_sources import (
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
+
+async def test_durable_checkpoint_recovery_cancel_resume_and_immutable_versions():
+    """Реальная БД сохраняет резерв, отмену, CAS и прежние версии после продолжения."""
+    engine = _isolated_engine()
+    repository = PostgresJobRepository(engine)
+    job_id, cancelled_id = uuid4(), uuid4()
+    payload = [{"manufacturer": "IEK", "model": "MODEL-1", "properties": []}]
+    saved_results = [
+        {"identity": payload[0], "status": "incomplete", "reason_code": "tls_error"}
+    ]
+    checkpoint = {
+        "round": 0,
+        "cursor": 0,
+        "queries_used": 1,
+        "downloads_used": 1,
+        "vision_used": 2,
+        "inflight": {"index": 0},
+    }
+    try:
+        assert await repository.is_ready()
+        for identifier in (job_id, cancelled_id):
+            await repository.create_or_get(identifier, payload, True)
+            await repository.configure(
+                identifier, {"background": True, "max_resume_runs": 3}
+            )
+            assert await repository.claim(identifier)
+            await repository.checkpoint(identifier, saved_results, checkpoint)
+        await repository.cancel(cancelled_id)
+        await repository.recover_interrupted()
+        recovered = await repository.get(job_id)
+        assert recovered["status"] == "queued"
+        assert recovered["checkpoint"] == checkpoint
+        assert recovered["results"] == saved_results
+        assert (await repository.get(cancelled_id))["status"] == "cancelled"
+        assert (await repository.get(cancelled_id))["results"] == saved_results
+        assert await repository.claim(job_id)
+        await repository.finish(job_id, "incomplete", saved_results)
+        current = await repository.get(job_id)
+        version = await repository.version(job_id, current["revision"])
+        encoded = json.dumps(version, sort_keys=True)
+        assert version["results"] == saved_results
+        won = await asyncio.gather(
+            repository.resume(job_id, current["revision"], 3),
+            repository.resume(job_id, current["revision"], 3),
+        )
+        assert sorted(won) == [False, True]
+        assert (await repository.get(job_id))["resume_count"] == 1
+        assert (
+            json.dumps(
+                await repository.version(job_id, current["revision"]), sort_keys=True
+            )
+            == encoded
+        )
+        assert not await repository.resume(job_id, current["revision"], 3)
+    finally:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "DELETE FROM equipment_search.equipment_jobs WHERE job_id IN (:first, :second)"
+                ),
+                {"first": job_id, "second": cancelled_id},
+            )
+        await engine.dispose()
+
+
+async def test_confirmed_security_registry_aliases_and_exact_domains(tmp_path):
+    """Включены подтверждённые производители; произвольным поддоменам доверие не выдаётся."""
+    engine = _isolated_engine()
+    catalog = PostgresEquipmentCatalog(engine, tmp_path)
+    try:
+        for maker, alias, host in (
+            ("Болид", "bolid", "bolid.ru"),
+            ("РИЭЛТА", "риелта", "rielta.ru"),
+            ("Аргус-Спектр", "argus-spectr", "catalog.argus-spectr.ru"),
+            ("Магнито-Контакт", "m-kontakt", "m-kontakt.ru"),
+            ("Электротехника и Автоматика", "omelta", "omelta.com"),
+        ):
+            assert (await catalog.source_for(alias, host)).status.value == "trusted"
+            assert await catalog.manufacturer_for_host(host) == maker
+            assert alias in await catalog.manufacturer_aliases(maker)
+            assert await catalog.manufacturer_for_host("unregistered." + host) is None
+            assert await catalog.source_for(alias, "unregistered." + host) is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("count", [300, 500])
+async def test_large_job_keeps_every_model_across_postgres_batches(count):
+    """Реальный JSONB и очередь сохраняют все 300/500 результатов между порциями."""
+    engine = _isolated_engine()
+    repository = PostgresJobRepository(engine)
+    calls = []
+
+    async def resolve(identity, *, search_budget, **kwargs):
+        """Расходует первый запрос без внешнего поисковика в изолированной БД."""
+        assert search_budget.claim_query()
+        calls.append(identity.model)
+        return ResolveResult(identity, "incomplete", reason_code="document_not_found")
+
+    service = SearchJobService(
+        repository,
+        SimpleNamespace(execute=resolve),
+        queries_per_model=1,
+        max_vision_calls=0,
+        batch_size=10,
+    )
+    job_id = uuid4()
+    identities = [
+        EquipmentIdentity("Test workload", f"MODEL-{index}") for index in range(count)
+    ]
+    try:
+        await service.start(job_id, identities, False)
+        await asyncio.gather(*service._tasks.values())
+        first = await repository.get(job_id)
+        assert first["status"] == "queued"
+        assert len(calls) == 10
+        assert job_id in await repository.queued_jobs()
+        while (await repository.get(job_id))["status"] == "queued":
+            await service._run(job_id)
+        final = await repository.get(job_id)
+        assert len(final["results"]) == count
+        assert calls == [identity.model for identity in identities]
+        assert sum(row["metrics"]["queries"] for row in final["results"]) == count
+        assert final["checkpoint"]["queries_used"] == count
+        assert final["policy"]["vision_limit"] == 0
+        version = await repository.version(job_id, final["revision"])
+        assert version["results"] == final["results"]
+        async with engine.connect() as connection:
+            assert (
+                await connection.scalar(
+                    text(
+                        "SELECT count(*) FROM equipment_search.job_models WHERE job_id = :id"
+                    ),
+                    {"id": job_id},
+                )
+                == count
+            )
+    finally:
+        await service.shutdown()
+        async with engine.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM equipment_search.equipment_jobs WHERE job_id = :id"),
+                {"id": job_id},
+            )
+        await engine.dispose()
+
 
 pytestmark = [
     pytest.mark.database,
@@ -177,6 +325,10 @@ async def test_job_service_start_and_replay_use_real_jsonb(
                 "status": "resolved",
                 "confidence": 0.95,
                 "properties": list(properties),
+                "manufacturer_status": "explicit",
+                "model_status": "confirmed",
+                "variant_kind": "execution",
+                "article": "",
             }
         ]
         assert created["identities"] == expected

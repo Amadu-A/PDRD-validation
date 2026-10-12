@@ -18,6 +18,7 @@ import {
   appendAnalysisVisualization,
 } from "./visualization.js";
 import { openTechnicalAssignmentCitation } from "../technical_assignment/citation.js";
+import { appendEquipmentReport } from "./equipment-report.js";
 
 
 const CATEGORY_LABELS = {
@@ -1155,8 +1156,9 @@ function appendOverview(
 
   if (payload.equipment_check?.enabled) {
     const check = payload.equipment_check;
-    appendMetaItem(list, "Проверка оборудования", check.status || "incomplete");
-    appendMetaItem(list, "Моделей оборудования", Array.isArray(check.inventory) ? check.inventory.length : 0);
+    appendMetaItem(list, "Проверка оборудования", ["queued", "running"].includes(check.search_status)
+      ? "Продолжается в фоне" : check.status === "completed" ? "Завершена" : "Частично выполнена");
+    appendMetaItem(list, "Уникальных моделей оборудования", check.statistics?.unique_models ?? (Array.isArray(check.inventory) ? check.inventory.length : 0));
   }
 
   appendProjectContextSummary(
@@ -1175,13 +1177,15 @@ function appendOverview(
     )
     && payload.pipeline.length
   ) {
-    appendMetaItem(
-      list,
-      "Pipeline",
-      payload.pipeline.join(
-        " → ",
-      ),
-    );
+    const pipeline = createElement("details", "analysis-result__pipeline");
+    pipeline.append(createElement("summary", "", "Этапы обработки (Pipeline)"));
+    const stages = createElement("ol");
+    for (const stage of payload.pipeline) stages.append(createElement("li", "", stage));
+    pipeline.append(stages);
+    const card = createElement("div", "analysis-result__meta-item");
+    card.append(createElement("dt", "", "Обработка"));
+    const value = createElement("dd"); value.append(pipeline); card.append(value);
+    list.append(card);
   }
 
   section.append(
@@ -1196,11 +1200,7 @@ function appendOverview(
     );
   }
 
-  if (payload.equipment_check?.enabled && Array.isArray(payload.equipment_check.warnings)) {
-    for (const warning of payload.equipment_check.warnings) {
-      appendTextBlock(section, "EQ: неполная проверка", String(warning));
-    }
-  }
+  if (payload.equipment_check?.enabled) appendEquipmentReport(section, payload.equipment_check, { jobId });
 
   parent.append(
     section,

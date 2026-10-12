@@ -2,6 +2,7 @@
 
 """Адресное визуальное чтение одной страницы документации производителя."""
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,9 +14,14 @@ from pdrd_analysis_service.core.observability import log_execution_time
 
 def _same_identifier(actual: object, expected: str) -> bool:
     """Не принимает семейство или соседнюю модель вместо точной маркировки."""
-    return " ".join(str(actual or "").casefold().split()) == " ".join(
-        expected.casefold().split()
-    )
+
+    def normalize(value: str) -> str:
+        """Учитывает типографские дефисы и обозначение исполнения без смены модели."""
+        value = value.casefold().translate(str.maketrans("–—−", "---"))
+        value = re.sub(r"\bисп(?:олнение)?\.?\s*", "исп.", value)
+        return re.sub(r"\s+", "", value)
+
+    return normalize(str(actual or "")) == normalize(expected)
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +41,8 @@ class ExtractEquipmentVision:
         properties: tuple[str, ...],
         page: int,
         image_bytes: bytes,
+        article: str = "",
+        manufacturer_aliases: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         """Возвращает только точную идентификацию и кандидаты EQ Facts."""
         schema: dict[str, Any] = {
@@ -44,6 +52,7 @@ class ExtractEquipmentVision:
                 "manufacturer": {"type": "string"},
                 "model": {"type": "string"},
                 "variant": {"type": "string"},
+                "article": {"type": "string"},
                 "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                 "facts": {
                     "type": "array",
@@ -79,6 +88,7 @@ class ExtractEquipmentVision:
                 "manufacturer",
                 "model",
                 "variant",
+                "article",
                 "confidence",
                 "facts",
             ],
@@ -90,6 +100,8 @@ class ExtractEquipmentVision:
             "видимые производителя, точную модель и исполнение. "
             "Не подставляй маркировку из запроса, если её нет на странице. "
             f"Искомая маркировка: {manufacturer} {model} {variant}. "
+            f"Артикул: {article or 'не указан'}. "
+            f"Подтверждённые aliases производителя: {', '.join(manufacturer_aliases[:20])}. "
             f"Интересующие свойства: {focus}. "
             "Для каждого явно привязанного к этой модели параметра верни "
             "исходное название, число или диапазон, единицу, роль, AC/DC, "
@@ -114,9 +126,14 @@ class ExtractEquipmentVision:
             and not isinstance(confidence, bool)
             and isinstance(raw_facts, list)
             and 0.8 <= confidence <= 1.0
-            and _same_identifier(payload.get("manufacturer"), manufacturer)
+            and any(
+                _same_identifier(payload.get("manufacturer"), alias)
+                for alias in (manufacturer, *manufacturer_aliases)
+                if alias
+            )
             and _same_identifier(payload.get("model"), model)
             and _same_identifier(payload.get("variant"), variant)
+            and _same_identifier(payload.get("article"), article)
         )
         facts = (
             [

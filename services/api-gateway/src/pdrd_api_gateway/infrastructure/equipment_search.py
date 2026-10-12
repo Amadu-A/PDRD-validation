@@ -82,6 +82,31 @@ class EquipmentSearchClient:
             if response.status_code != 404:
                 response.raise_for_status()
 
+    async def resume(self, document_id: UUID, revision: int) -> dict:
+        """Продолжает сохранённую проверку с CAS версии."""
+        async with httpx.AsyncClient(
+            timeout=self.settings.timeout_seconds, trust_env=False
+        ) as client:
+            response = await client.post(
+                f"{self._base()}/jobs/{document_id}/resume",
+                headers=self._headers(),
+                json={"revision": revision},
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def version(self, document_id: UUID, revision: int) -> dict:
+        """Читает серверную неизменяемую редакцию EQ без клиентских находок."""
+        async with httpx.AsyncClient(
+            timeout=self.settings.timeout_seconds, trust_env=False
+        ) as client:
+            response = await client.get(
+                f"{self._base()}/jobs/{document_id}/versions/{revision}",
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def wait(self, document_id: UUID) -> dict[str, Any]:
         """Ограниченно ждёт EQ, сохраняя основной анализ при ошибке."""
         state: dict[str, Any] = {"results": []}
@@ -95,6 +120,14 @@ class EquipmentSearchClient:
                             **state,
                             "status": "incomplete",
                             "warning": "Equipment Search временно недоступен.",
+                        }
+                    if state.get("background") and state.get("status") in {
+                        "queued",
+                        "running",
+                    }:
+                        return {
+                            **state,
+                            "warning": "Проверка оборудования продолжается в фоне.",
                         }
                     if state.get("status") in {"completed", "incomplete", "cancelled"}:
                         return state

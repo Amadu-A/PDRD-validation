@@ -11,15 +11,23 @@ from dataclasses import dataclass
 from threading import Event
 from urllib.parse import urljoin, urlsplit
 
+from pdrd_equipment_search_service.domain.diagnostics import (
+    DocumentOperationError,
+    ReasonCode,
+)
 from pdrd_equipment_search_service.domain.equipment import DownloadedDocument
 
 
-class UnsafeDocumentUrlError(ValueError):
+class UnsafeDocumentUrlError(DocumentOperationError):
     """URL ведёт во внутреннюю сеть или нарушает политику источника."""
 
+    default_code = ReasonCode.URL_BLOCKED
 
-class InvalidDocumentResponseError(ValueError):
+
+class InvalidDocumentResponseError(DocumentOperationError):
     """Ответ не является допустимым PDF/HTML документом."""
+
+    default_code = ReasonCode.UNSUPPORTED_FILE
 
 
 class _PinnedHttpConnection(http.client.HTTPConnection):
@@ -70,7 +78,9 @@ def _public_address(hostname: str, port: int) -> str:
             type=socket.SOCK_STREAM,
         )
     except OSError as error:
-        raise UnsafeDocumentUrlError("Не удалось проверить DNS источника.") from error
+        raise UnsafeDocumentUrlError(
+            "Не удалось проверить DNS источника.", code=ReasonCode.DNS_ERROR
+        ) from error
     addresses = tuple(dict.fromkeys(row[4][0] for row in answers))
     if not addresses or any(
         not ipaddress.ip_address(address).is_global for address in addresses
@@ -112,7 +122,11 @@ class SafeDocumentDownloader:
     timeout_seconds: float = 10.0
 
     async def download(
-        self, url: str, *, allow_http: bool = False
+        self,
+        url: str,
+        *,
+        allow_http: bool = False,
+        allowed_redirect_hosts: tuple[str, ...] = (),
     ) -> DownloadedDocument:
         """Запускает блокирующий сетевой код вне event loop."""
         cancel_event = Event()
@@ -122,7 +136,20 @@ class SafeDocumentDownloader:
                 url,
                 allow_http=allow_http,
                 cancel_event=cancel_event,
+                allowed_redirect_hosts=allowed_redirect_hosts,
             )
+        except ssl.SSLError as error:
+            raise DocumentOperationError(
+                "Ошибка проверки TLS источника.", code=ReasonCode.TLS_ERROR
+            ) from error
+        except TimeoutError as error:
+            raise DocumentOperationError(
+                "Превышено время загрузки.", code=ReasonCode.TIMEOUT
+            ) from error
+        except (OSError, http.client.HTTPException) as error:
+            raise DocumentOperationError(
+                "Сетевая ошибка загрузки.", code=ReasonCode.NETWORK_ERROR
+            ) from error
         finally:
             cancel_event.set()
 
@@ -132,6 +159,7 @@ class SafeDocumentDownloader:
         *,
         allow_http: bool,
         cancel_event: Event | None = None,
+        allowed_redirect_hosts: tuple[str, ...] = (),
     ) -> DownloadedDocument:
         """Проверяет каждый переход, закрепляет IP и читает ограниченное тело."""
         original_host = urlsplit(url).hostname
@@ -143,9 +171,13 @@ class SafeDocumentDownloader:
                 current,
                 allow_http=allow_http,
             )
-            if hostname != original_host:
+            if hostname != original_host and (
+                hostname not in allowed_redirect_hosts
+                or urlsplit(current).scheme != "https"
+            ):
                 raise UnsafeDocumentUrlError(
-                    "Redirect на другой hostname требует отдельного разрешения."
+                    "Redirect на другой hostname требует отдельного разрешения.",
+                    code=ReasonCode.REDIRECT_BLOCKED,
                 )
             connection_class = (
                 _PinnedHttpsConnection
@@ -172,18 +204,21 @@ class SafeDocumentDownloader:
                     location = response.getheader("Location")
                     if not location or redirect >= self.max_redirects:
                         raise InvalidDocumentResponseError(
-                            "Недопустимая цепочка redirect."
+                            "Недопустимая цепочка redirect.",
+                            code=ReasonCode.REDIRECT_BLOCKED,
                         )
                     current = urljoin(current, location)
                     continue
                 if response.status != 200:
                     raise InvalidDocumentResponseError(
-                        f"Источник вернул HTTP {response.status}."
+                        f"Источник вернул HTTP {response.status}.",
+                        code=ReasonCode.HTTP_ERROR,
                     )
                 declared = response.getheader("Content-Length")
                 if declared and int(declared) > self.max_bytes:
                     raise InvalidDocumentResponseError(
-                        "Документ превышает допустимый размер."
+                        "Документ превышает допустимый размер.",
+                        code=ReasonCode.FILE_TOO_LARGE,
                     )
                 chunks: list[bytes] = []
                 total = 0
@@ -196,7 +231,8 @@ class SafeDocumentDownloader:
                     total += len(chunk)
                     if total > self.max_bytes:
                         raise InvalidDocumentResponseError(
-                            "Документ превышает допустимый размер."
+                            "Документ превышает допустимый размер.",
+                            code=ReasonCode.FILE_TOO_LARGE,
                         )
                     chunks.append(chunk)
                 content = b"".join(chunks)

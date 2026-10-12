@@ -21,6 +21,9 @@ from pdrd_analysis_service.domain.analysis import (
     PageFacts,
 )
 from pdrd_analysis_service.domain.document_context import document_fact_from_mapping
+from pdrd_analysis_service.domain.equipment_identification import (
+    ground_equipment_records,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +50,7 @@ class UnderstandPage:
     ]:
         """Извлекает сведения страницы; при выключенном D использует лёгкие промпт и схему."""
         max_facts = self.max_facts_per_page if use_document_context else 0
-        max_equipment = 8 if use_equipment_web_search else 0
+        max_equipment = 40 if use_equipment_web_search else 0
         result = await self.vision_model.generate_json(
             prompt=(
                 build_page_understanding_prompt(
@@ -113,10 +116,12 @@ class UnderstandPage:
                 ),
                 limit=6,
             ),
-            equipment_identities=tuple(
-                raw
-                for raw in payload.get("equipment_identities", [])[:max_equipment]
-                if isinstance(raw, dict)
+            equipment_identities=(
+                ground_equipment_records(
+                    payload.get("equipment_identities", []), extracted_text
+                )
+                if use_equipment_web_search
+                else ()
             ),
             document_facts=tuple(
                 fact

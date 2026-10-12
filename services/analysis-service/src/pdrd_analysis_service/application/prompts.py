@@ -628,7 +628,12 @@ reference, requirement, table_record, other.
         f"""Дополнительно найди до {max_equipment} явно обозначенных моделей оборудования.
 Для каждого объекта верни equipment_identities: manufacturer, model, variant,
 article, equipment_type, object_ref, evidence_text, visual_regions,
-confidence, status и параметры проекта в parameters.
+confidence, status и параметры проекта в parameters. В entity_kind различай
+equipment, port, interface, line и symbol. Порт Touch Memory и линии RS-485
+не являются самостоятельными моделями оборудования.
+В manufacturer_evidence_text сохраняй дословную строку, связывающую производителя
+с конкретной моделью. Без такой строки manufacturer должен оставаться пустым.
+Наличие АРМ «Орион» или знакомое название модели не доказывает производителя.
 Идентификаторы переписывай дословно. Не угадывай производителя, модель
 или исполнение. При достоверном точном обозначении ставь status=resolved.
 При сомнении ставь status=needs_review и оставляй

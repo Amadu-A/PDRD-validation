@@ -706,6 +706,8 @@ class EquipmentVisionRequest(BaseModel):
     manufacturer: str = Field(min_length=1, max_length=200)
     model: str = Field(min_length=1, max_length=200)
     variant: str = Field(default="", max_length=200)
+    article: str = Field(default="", max_length=200)
+    manufacturer_aliases: tuple[str, ...] = Field(default_factory=tuple, max_length=20)
     properties: tuple[str, ...] = Field(default_factory=tuple, max_length=8)
     page: int = Field(ge=1, le=40)
     image_base64: str = Field(max_length=27_000_000)
@@ -734,6 +736,8 @@ async def equipment_document_vision(
             properties=request.properties,
             page=request.page,
             image_bytes=image,
+            article=request.article,
+            manufacturer_aliases=request.manufacturer_aliases,
         )
     except VisionModelError as error:
         raise HTTPException(503, "Адресная VLM-проверка недоступна.") from error

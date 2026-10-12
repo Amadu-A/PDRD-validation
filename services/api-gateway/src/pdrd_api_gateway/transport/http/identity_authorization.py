@@ -66,6 +66,8 @@ def required_permission(
         if segments[4] == "reviewed-pdf":
             return ("review.pdf.download",)
         if segments[4] == "review":
+            if len(segments) == 6 and segments[5] == "equipment-updates":
+                return ("review.findings.decide",)
             if len(segments) == 6 and segments[5] == "commands":
                 action = payload.get("action")
                 if action == "add":
