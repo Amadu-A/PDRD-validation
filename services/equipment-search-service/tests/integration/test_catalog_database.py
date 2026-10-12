@@ -4,14 +4,19 @@
 
 import asyncio
 import os
+from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from pdrd_equipment_search_service.application.jobs import SearchJobService
 from pdrd_equipment_search_service.core.settings import Settings
 from pdrd_equipment_search_service.domain.equipment import (
     DocumentInspection,
     DownloadedDocument,
     EquipmentIdentity,
+    ResolveResult,
 )
 from pdrd_equipment_search_service.infrastructure.postgres_catalog import (
     PostgresEquipmentCatalog,
@@ -135,6 +140,73 @@ async def test_job_event_sequence_is_atomic_and_replayable() -> None:
         assert state["results"][0]["metrics"]["vision_calls"] == 0
         assert not await repository.cancel(job_id)
     finally:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "DELETE FROM equipment_search.equipment_jobs WHERE job_id = :job_id"
+                ),
+                {"job_id": job_id},
+            )
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("properties", [(), ("voltage",)])
+@pytest.mark.parametrize("allow_unverified", [False, True])
+async def test_job_service_start_and_replay_use_real_jsonb(
+    properties, allow_unverified
+):
+    """Сценарий запуска переживает JSONB; изменённая команда сохраняет конфликт."""
+    engine = _isolated_engine()
+    repository = PostgresJobRepository(engine)
+    identity = EquipmentIdentity(
+        "Рубеж", "РИП-12", "исп. 51", confidence=0.95, properties=properties
+    )
+    resolver = SimpleNamespace(
+        execute=AsyncMock(return_value=ResolveResult(identity, "not_found"))
+    )
+    service = SearchJobService(repository, resolver)
+    job_id = uuid4()
+    try:
+        created = await service.start(job_id, [identity], allow_unverified)
+        assert created["status"] == "queued"
+        expected = [
+            {
+                "manufacturer": "Рубеж",
+                "model": "РИП-12",
+                "variant": "исп. 51",
+                "status": "resolved",
+                "confidence": 0.95,
+                "properties": list(properties),
+            }
+        ]
+        assert created["identities"] == expected
+        assert created["allow_unverified"] is allow_unverified
+        repeated = await service.start(job_id, [identity], allow_unverified)
+        assert repeated["identities"] == expected
+        await asyncio.gather(*service._tasks.values())
+        finished = await repository.get(job_id)
+        assert finished["status"] == "completed"
+        assert finished["identities"] == expected
+        resolver.execute.assert_awaited_once()
+        assert (
+            resolver.execute.await_args.kwargs["allow_unverified"] is allow_unverified
+        )
+        assert (await service.start(job_id, [identity], allow_unverified))[
+            "status"
+        ] == "completed"
+        resolver.execute.assert_awaited_once()
+        for changed in (
+            replace(identity, properties=("power",)),
+            replace(identity, variant="исп. 52"),
+            replace(identity, model="РИП-24"),
+        ):
+            with pytest.raises(ValueError, match="другими параметрами"):
+                await service.start(job_id, [changed], allow_unverified)
+        with pytest.raises(ValueError, match="другими параметрами"):
+            await service.start(job_id, [identity], not allow_unverified)
+        assert (await repository.get(job_id))["identities"] == expected
+    finally:
+        await service.shutdown()
         async with engine.begin() as connection:
             await connection.execute(
                 text(

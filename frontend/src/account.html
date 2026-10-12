@@ -24,6 +24,7 @@
         <li><a href="#profile">Профиль</a></li>
         <li><a href="#rights">Мой доступ</a></li>
         <li><a href="#history" data-account-history-link hidden>История проверок</a></li>
+        <li><a href="#equipment-sources" data-account-equipment-sources-link hidden>Источники документации оборудования</a></li>
         <li><a href="#security">Безопасность</a></li>
         <li><a href="/admin.html" data-account-admin-link hidden>Админка</a></li>
       </ul></nav>
@@ -77,7 +78,6 @@
             <label>Hostname <input name="hostname" required maxlength="253" placeholder="www.example.com"></label>
             <label>Статус <select name="status"><option value="pending">Ожидает</option><option value="trusted">Доверенный</option><option value="blocked">Заблокирован</option></select></label>
             <label><input type="checkbox" name="allow_http"> Разрешить HTTP</label>
-            <label>Причина <input name="reason" required maxlength="1000"></label>
             <button type="submit">Сохранить</button>
           </div>
         </form>

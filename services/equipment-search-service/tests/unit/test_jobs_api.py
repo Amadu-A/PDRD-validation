@@ -3,6 +3,7 @@
 """Проверка идемпотентности заданий и восстановления потока событий."""
 
 import asyncio
+import json
 from dataclasses import asdict
 from uuid import uuid4
 
@@ -98,6 +99,19 @@ class FakeRepository:
         self.jobs[job_id].update(status=status, results=results, warning=warning)
 
 
+class JsonbRepository(FakeRepository):
+    """Воспроизводит преобразование JSONB и проверку запроса после INSERT."""
+
+    async def create_or_get(self, job_id, identities, allow_unverified):
+        """Возвращает списки из JSON и сравнивает их с исходной командой."""
+        await super().create_or_get(job_id, identities, allow_unverified)
+        state = self.jobs[job_id]
+        state["identities"] = json.loads(json.dumps(state["identities"]))
+        if state["identities"] != identities:
+            raise ValueError("Задание с этим ID уже создано с другими параметрами.")
+        return state.copy()
+
+
 class FakeResolver:
     """Возвращает доказуемый результат с контролем вызовов."""
 
@@ -138,9 +152,31 @@ async def test_job_deduplicates_models_and_replays_same_request() -> None:
     assert [event["sequence"] for event in repo.events[job_id]] == [1, 2, 3, 4]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("properties", [(), ("voltage",), ("voltage", "power")])
+@pytest.mark.parametrize("allow_unverified", [False, True])
+async def test_job_payload_survives_jsonb_round_trip(properties, allow_unverified):
+    """Пустые и непустые характеристики не вызывают конфликт нового задания."""
+    repo, resolver = JsonbRepository(), FakeResolver()
+    service = SearchJobService(repo, resolver)
+    job_id = uuid4()
+    identity = EquipmentIdentity("IEK", "KM20", properties=properties)
+    try:
+        first = await service.start(job_id, [identity], allow_unverified)
+        assert first["identities"][0]["properties"] == list(properties)
+        await asyncio.gather(*service._tasks.values())
+        repeated = await service.start(job_id, [identity], allow_unverified)
+        assert repeated["status"] == "completed"
+        assert resolver.calls == ["KM20"]
+        with pytest.raises(ValueError, match="Конфликт параметров"):
+            await service.start(job_id, [identity], not allow_unverified)
+    finally:
+        await service.shutdown()
+
+
 def test_internal_api_auth_idempotency_and_sse_replay() -> None:
     """API защищён ключом, а Last-Event-ID не повторяет старые события."""
-    repo = FakeRepository()
+    repo = JsonbRepository()
     resolver = FakeResolver()
     service = SearchJobService(repo, resolver)
     app = create_app(Settings(internal_key="test-secret"), service)

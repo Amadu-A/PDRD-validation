@@ -26,8 +26,11 @@ export function listEquipmentManufacturers() {
 }
 
 export function saveEquipmentSource(payload) {
-  /** Сохраняет решение с CSRF токеном текущей сессии. */
-  return authenticatedRequest("/api/v1/equipment-sources", "PUT", payload);
+  /** Сохраняет решение с CSRF и автоматической записью действия для аудита. */
+  return authenticatedRequest("/api/v1/equipment-sources", "PUT", {
+    ...payload,
+    reason: payload.reason || "Сохранение источника через личный кабинет",
+  });
 }
 
 export function readEquipmentSourceAudit(sourceId) {
@@ -71,19 +74,9 @@ function sourceRow(source, reload, status) {
   http.checked = Boolean(source.allow_http);
   const httpLabel = element("label", " Разрешить HTTP");
   httpLabel.prepend(http);
-  const reason = element("input");
-  reason.type = "text";
-  reason.required = true;
-  reason.maxLength = 1000;
-  reason.placeholder = "Причина изменения";
-  reason.setAttribute("aria-label", "Причина изменения источника " + source.hostname);
   const save = element("button", "Сохранить");
   save.type = "button";
   save.onclick = async () => {
-    if (!reason.value.trim()) {
-      status.textContent = "Укажите причину изменения.";
-      return;
-    }
     save.disabled = true;
     try {
       await saveEquipmentSource({
@@ -92,7 +85,6 @@ function sourceRow(source, reload, status) {
         status: selection.value,
         enabled: enabled.checked,
         allow_http: http.checked,
-        reason: reason.value.trim(),
       });
       await reload();
     } catch (error) {
@@ -121,19 +113,21 @@ function sourceRow(source, reload, status) {
       history.disabled = false;
     }
   };
-  controls.append(selection, enabledLabel, httpLabel, reason, save, history);
+  controls.append(selection, enabledLabel, httpLabel, save, history);
   row.append(heading, meta, controls, audit);
   return row;
 }
 
 export async function renderEquipmentSources(root, session) {
   /** Обновляет каталог без показа старого ответа после смены пользователя. */
+  const allowed = canManageEquipmentSources(session);
+  const navigationLink = root.querySelector("[data-account-equipment-sources-link]");
+  if (navigationLink) navigationLink.hidden = !allowed;
   const section = root.querySelector("[data-equipment-sources]");
   if (!section) return;
   const version = (versions.get(section) ?? 0) + 1;
   versions.set(section, version);
   const current = () => versions.get(section) === version;
-  const allowed = canManageEquipmentSources(session);
   section.hidden = !allowed;
   if (!allowed) return;
   const status = root.querySelector("[data-equipment-source-status]");
@@ -178,7 +172,6 @@ export async function renderEquipmentSources(root, session) {
         status: String(values.get("status") || "pending"),
         enabled: true,
         allow_http: values.get("allow_http") === "on",
-        reason: String(values.get("reason") || "").trim(),
       });
       if (!current()) return;
       form.reset();

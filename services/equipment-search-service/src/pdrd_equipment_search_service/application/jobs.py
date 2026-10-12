@@ -35,7 +35,7 @@ class JobRepository(Protocol):
         identities: list[dict],
         allow_unverified: bool,
     ) -> dict:
-        """Создаёт или читает то же задание."""
+        """Создаёт или читает то же задание с JSON-совместимыми характеристиками."""
         ...
 
     async def get(self, job_id: UUID) -> dict | None:
@@ -130,7 +130,10 @@ class SearchJobService:
         unique = list(by_key.values())
         if len(unique) > self.max_models:
             raise ValueError("Превышен лимит уникальных моделей в задании.")
-        payload = [asdict(identity) for identity in unique]
+        payload = [
+            {**asdict(identity), "properties": list(identity.properties)}
+            for identity in unique
+        ]
         state = await self.repository.create_or_get(job_id, payload, allow_unverified)
         if state["status"] == "queued" and job_id not in self._tasks:
             task = asyncio.create_task(self._run(job_id))
