@@ -43,6 +43,14 @@ export function changeNormativeAccess(userId, enabled, authorizationVersion) {
   );
 }
 
+/** Меняет отдельное право управления источниками оборудования с CSRF и ожидаемой версией полномочий. */
+export function changeEquipmentSourcesAccess(userId, enabled, authorizationVersion) {
+  return authenticatedRequest(
+    `${ROOT}/users/${encodeURIComponent(userId)}/equipment-sources-access`,
+    "PATCH", { enabled, authorization_version: authorizationVersion },
+  );
+}
+
 /** Справочники и членство изменяются через отдельные контракты admin-service. */
 export function listOrganizations({ limit = 100, offset = 0 } = {}) {
   return authenticatedRequest(`${ROOT}/organizations?limit=${limit}&offset=${offset}`);

@@ -1038,6 +1038,7 @@ export function createAnalysisForm({
     pdfInput.addEventListener(
       "change",
       () => {
+        resetUnverifiedSources();
         resetProjectContextPreflight();
 
         sync();
@@ -1046,7 +1047,10 @@ export function createAnalysisForm({
 
     cadInput.addEventListener(
       "change",
-      sync,
+      () => {
+        resetUnverifiedSources();
+        sync();
+      },
     );
 
     pagesInput.addEventListener(

@@ -2,9 +2,13 @@
 
 """Проверяет путь от текста PDF производителя до EQ-кандидата проекта."""
 
+import json
+import subprocess
 from hashlib import sha256
+from pathlib import Path
 
 import fitz
+import pytest
 from pdrd_analysis_service.application.equipment_pipeline import compare_equipment_stage
 from pdrd_document_service.infrastructure.equipment_document import (
     PyMuPdfEquipmentDocumentReader,
@@ -213,3 +217,123 @@ def test_pdf_table_geometry_keeps_neighbor_models_separate() -> None:
     assert len(facts) == 1
     assert facts[0]["value_raw"] == "21...29"
     assert facts[0]["applicability"] == "exact_model_column"
+
+
+_N8N_RUNNER = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+const context = {
+  $json: input.current,
+  $itemIndex: 0,
+  $input: { first: () => ({ json: input.current }) },
+  $: (name) => ({
+    first: () => ({ json: input.parents[name] }),
+    all: () => [{ json: input.parents[name] }],
+  }),
+};
+const result = vm.runInNewContext(`(() => {\n${input.code}\n})()`, context, { timeout: 1000 });
+process.stdout.write(JSON.stringify(result));
+"""
+
+
+def _n8n(code: str, current: dict, parents: dict | None = None) -> dict | list:
+    """Исполняет настоящий JS узла workflow без сервера n8n и сети."""
+    result = subprocess.run(
+        ["node", "-e", _N8N_RUNNER],
+        input=json.dumps(
+            {"code": code, "current": current, "parents": parents or {}},
+            ensure_ascii=False,
+        ),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+@pytest.mark.parametrize(
+    "line, status",
+    [
+        ("DRC-100B Output voltage 21...29 V DC", "confirmed"),
+        ("DRC-100B Output voltage 24 V DC", "needs_review"),
+    ],
+)
+@pytest.mark.parametrize("has_normative_source", [False, True])
+def test_eq_pdf_finding_reaches_normative_query_and_keeps_source_scope(
+    line: str,
+    status: str,
+    has_normative_source: bool,
+) -> None:
+    """PDF → EQ → реальные JS узлы N: ID и источники сохраняются при пустом ответе."""
+    root = Path(__file__).resolve().parents[2]
+    workflow = json.loads(
+        (root / "n8n/workflows/analysis-v2-pdf.json").read_text(encoding="utf-8")
+    )
+    codes = {
+        node["name"]: node["parameters"].get("jsCode", "") for node in workflow["nodes"]
+    }
+    comparison = _compare(line, "30")
+    original = {
+        "page_index": 0,
+        "page_number": 3,
+        "findings": [
+            {"finding_id": "T-empty-query", "experience_query": ""},
+            {
+                "finding_id": "N-existing",
+                "experience_query": "Existing engineering fact",
+            },
+        ],
+    }
+    merged = _n8n(
+        codes["Merge Equipment Candidates"],
+        comparison,
+        {
+            "Collect Equipment Candidates": {"pages": [original]},
+        },
+    )[0]["json"]
+    eq_finding = merged["findings"][-1]
+    assert eq_finding["status"] == status
+    prepared = _n8n(codes["Prepare Finding Normative Queries"], merged)["json"]
+    items = prepared["normative_query_items"]
+    assert [item["finding_id"] for item in items] == [
+        "N-existing",
+        eq_finding["finding_id"],
+    ]
+    assert "выходное напряжение" in items[1]["query"] and "30 V" in items[1]["query"]
+    eq_sources = [
+        {
+            "source_id": "raw-N",
+            "document_id": "normative-document",
+            "text": "Selected requirement",
+        }
+    ]
+    results = [
+        {
+            "query": item["query"],
+            "sources": eq_sources if has_normative_source and index == 1 else [],
+        }
+        for index, item in enumerate(items)
+    ]
+    enriched = _n8n(
+        codes["Prepare Experience Queries"],
+        {"results": results},
+        {
+            "Prepare Finding Normative Queries": prepared,
+        },
+    )["json"]
+    assert enriched["findings"] == merged["findings"]
+    mapping = enriched["normative_candidates_by_finding"]
+    assert mapping["T-empty-query"] == mapping["N-existing"] == []
+    eq_norms = mapping[eq_finding["finding_id"]]
+    assert len(eq_norms) == int(has_normative_source)
+    if has_normative_source:
+        assert eq_norms[0]["source_id"] == "NQ2_1"
+    assert eq_finding["normative_source_ids"] == []
+    assert eq_finding["equipment_documentation_source_ids"][0].startswith("EQ-")
+    assert (
+        enriched["experience_query_items"][-1]["finding_id"] == eq_finding["finding_id"]
+    )

@@ -120,7 +120,7 @@ services:
       - app-net
 
   searxng:
-    image: searxng/searxng:${PDRD_SEARXNG_VERSION:-latest}
+    image: ${PDRD_SEARXNG_IMAGE:-searxng/searxng@sha256:cc026dbee25b864d7f9731957cd5ef36ba2e2d61abd2996d57f1b863483e7409}
     restart: unless-stopped
     environment:
       SEARXNG_SECRET: ${PDRD_EQUIPMENT_INTERNAL_KEY:?PDRD_EQUIPMENT_INTERNAL_KEY must be set in .env}

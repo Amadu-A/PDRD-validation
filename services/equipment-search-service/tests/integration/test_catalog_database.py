@@ -19,6 +19,9 @@ from pdrd_equipment_search_service.infrastructure.postgres_catalog import (
 from pdrd_equipment_search_service.infrastructure.postgres_jobs import (
     PostgresJobRepository,
 )
+from pdrd_equipment_search_service.infrastructure.postgres_sources import (
+    PostgresSourceManager,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -139,4 +142,98 @@ async def test_job_event_sequence_is_atomic_and_replayable() -> None:
                 ),
                 {"job_id": job_id},
             )
+        await engine.dispose()
+
+
+async def test_original_trusted_registry_is_visible_by_manufacturer(tmp_path):
+    """Все семь исходных сайтов доступны в БД и в каталоге производителя."""
+    engine = _isolated_engine()
+    catalog = PostgresEquipmentCatalog(engine, tmp_path)
+    expected = {
+        "Segnetics": "segnetics.com",
+        "CHINT": "chint.ru",
+        "Shenler": "shenler.com",
+        "IEK": "iek.ru",
+        "TDM": "tdme.ru",
+        "CNC": "cncele.com",
+        "MeanWell": "meanwell.com",
+    }
+    try:
+        for maker, hostname in expected.items():
+            source = await catalog.source_for(maker, hostname)
+            assert source.status.value == "trusted"
+            assert source.enabled
+            assert not source.allow_http
+            assert hostname in await catalog.trusted_hosts(maker)
+            assert await catalog.source_for(maker, "unknown." + hostname) is None
+        manager = PostgresSourceManager(engine)
+        all_sources = await manager.list_sources()
+        confirmed = await manager.list_sources("trusted")
+        assert set(expected.values()).issubset({row["hostname"] for row in all_sources})
+        assert set(expected.values()).issubset({row["hostname"] for row in confirmed})
+        filtered = await manager.list_sources("trusted", "chint.ru")
+        assert [row["hostname"] for row in filtered] == ["chint.ru"]
+        assert filtered[0]["manufacturer"] == "CHINT"
+        assert (
+            await manager.list_sources(None, "definitely-absent-domain.invalid") == []
+        )
+    finally:
+        await engine.dispose()
+
+
+async def test_registry_upgrade_preserves_manual_decisions_and_audit(monkeypatch):
+    """Повтор bootstrap не снимает блокировку и не дублирует историю."""
+    from importlib.util import module_from_spec, spec_from_file_location
+    from pathlib import Path
+
+    filename = (
+        Path(__file__).parents[2]
+        / "alembic/versions/20261009_0003_original_trusted_sources.py"
+    )
+    specification = spec_from_file_location("original_eq_registry", filename)
+    migration = module_from_spec(specification)
+    specification.loader.exec_module(migration)
+    engine = _isolated_engine()
+    try:
+        async with engine.connect() as connection:
+            transaction = await connection.begin()
+            try:
+                await connection.execute(
+                    text(
+                        "UPDATE equipment_search.source_domains "
+                        "SET status = 'blocked', enabled = false, allow_http = true, "
+                        "updated_by = 'manual-test' WHERE hostname = 'chint.ru'"
+                    )
+                )
+
+                async def count_audit():
+                    """Читает число событий до и после повторной миграции."""
+                    return await connection.scalar(
+                        text("SELECT count(*) FROM equipment_search.source_audit")
+                    )
+
+                before = await count_audit()
+
+                def rerun(sync_connection):
+                    """Исполняет реальную миграцию в откатываемой транзакции тестовой БД."""
+                    monkeypatch.setattr(
+                        migration.op, "get_bind", lambda: sync_connection
+                    )
+                    migration.upgrade()
+                    migration.upgrade()
+
+                await connection.run_sync(rerun)
+                assert await count_audit() == before
+                row = (
+                    await connection.execute(
+                        text(
+                            "SELECT status, enabled, allow_http, updated_by FROM equipment_search.source_domains "
+                            "WHERE hostname = 'chint.ru'"
+                        )
+                    )
+                ).one()
+                assert tuple(row) == ("blocked", False, True, "manual-test")
+            finally:
+                await transaction.rollback()
+    finally:
         await engine.dispose()

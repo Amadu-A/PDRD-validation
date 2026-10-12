@@ -57,3 +57,17 @@ test("повреждённый список параметров не остан
   const result = code(() => ({ first: () => ({ json: { items: pages } }) }));
   assert.deepEqual(result[0].json.identities[0].properties, []);
 });
+
+
+for (const value of ["true", true, "false", false, undefined]) {
+  test(`workflow передаёт unsafe=${String(value)} в Equipment Search`, () => {
+    const start = workflow.nodes.find((entry) => entry.name === "Start Equipment Search");
+    const expression = start.parameters.body.slice(3, -3).trim();
+    const execute = new Function("$", "$json", "return " + expression);
+    const body = JSON.parse(execute(() => ({ first: () => ({ json: {
+      body: { allow_unverified_equipment_sources: value },
+    } }) }), { identities: [{ manufacturer: "CHINT", model: "NXB-63" }] }));
+    assert.equal(body.allow_unverified, value === "true" || value === true);
+    assert.equal(body.identities[0].model, "NXB-63");
+  });
+}

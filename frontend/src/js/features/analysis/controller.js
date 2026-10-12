@@ -396,7 +396,6 @@ export function createAnalysisController({
         );
       }
 
-      analysisForm.resetUnverifiedSources?.();
       const guestAccess = rememberAcceptedAnalysis(accepted);
       const url = new URL(window.location.href);
       url.searchParams.set("job_id", jobId);

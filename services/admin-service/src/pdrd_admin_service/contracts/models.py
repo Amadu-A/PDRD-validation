@@ -46,6 +46,9 @@ class AdminUserResponse(UserResponse):
     normative_access: bool
     normative_access_automatic: bool
     normative_access_editable: bool
+    equipment_sources_access: bool
+    equipment_sources_access_automatic: bool
+    equipment_sources_access_editable: bool
 
 
 class UserPage(StrictModel):

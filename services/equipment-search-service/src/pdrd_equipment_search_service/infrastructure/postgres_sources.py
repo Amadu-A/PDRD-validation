@@ -66,7 +66,8 @@ class PostgresSourceManager:
                         FROM equipment_search.source_domains s
                         JOIN equipment_search.manufacturers m
                           ON m.normalized_name = s.manufacturer_key
-                        WHERE (:status IS NULL OR s.status = :status)
+                        WHERE (CAST(:status AS TEXT) IS NULL
+                               OR s.status = CAST(:status AS TEXT))
                           AND (:query = '' OR m.name ILIKE :pattern
                                OR s.hostname ILIKE :pattern)
                         ORDER BY m.name, s.hostname

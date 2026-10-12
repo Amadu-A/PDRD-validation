@@ -31,6 +31,7 @@ from pdrd_user_service.infrastructure.database.models import (
     AdminBootstrapModel,
     CatalogSectionDistributionModel,
     DepartmentModel,
+    EquipmentSourcesAccessEventModel,
     ExternalIdentityModel,
     MembershipModel,
     NormativeAccessEventModel,
@@ -63,6 +64,7 @@ def _user_from_model(row: UserModel) -> UserAccount:
         authorization_version=row.authorization_version,
         review_access_enabled=row.review_access_enabled,
         normative_access_enabled=row.normative_access_enabled,
+        equipment_sources_access_enabled=row.equipment_sources_access_enabled,
     )
 
 
@@ -193,6 +195,7 @@ class SqlAlchemyUserRepository:
                         authorization_version=user.authorization_version,
                         review_access_enabled=user.review_access_enabled,
                         normative_access_enabled=user.normative_access_enabled,
+                        equipment_sources_access_enabled=user.equipment_sources_access_enabled,
                     )
                 )
                 # Без ORM-связи SQLAlchemy может вставить identity раньше accounts.
@@ -608,6 +611,36 @@ class SqlAlchemyUserRepository:
                     user_id=updated_user.user_id,
                     actor_user_id=actor_user_id,
                     enabled=updated_user.normative_access_enabled,
+                    authorization_version=updated_user.authorization_version,
+                    created_at=created_at,
+                )
+            )
+            await self._session.flush()
+
+    async def replace_equipment_sources_access(
+        self,
+        updated_user: UserAccount,
+        *,
+        expected_authorization_version: int,
+        actor_user_id: UUID,
+        created_at: datetime,
+    ) -> None:
+        """Одной транзакцией сохраняет флаг, CAS-версию и событие аудита."""
+        async with self._session.begin_nested():
+            await self._bump_version(updated_user, expected_authorization_version)
+            await self._session.execute(
+                update(UserModel)
+                .where(UserModel.user_id == updated_user.user_id)
+                .values(
+                    equipment_sources_access_enabled=updated_user.equipment_sources_access_enabled
+                )
+            )
+            self._session.add(
+                EquipmentSourcesAccessEventModel(
+                    event_id=uuid4(),
+                    user_id=updated_user.user_id,
+                    actor_user_id=actor_user_id,
+                    enabled=updated_user.equipment_sources_access_enabled,
                     authorization_version=updated_user.authorization_version,
                     created_at=created_at,
                 )

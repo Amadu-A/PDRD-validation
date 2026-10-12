@@ -2,6 +2,7 @@
 
 """Контролирует изоляцию настоящих Equipment DB тестов от рабочего стека."""
 
+import re
 from pathlib import Path
 
 import yaml
@@ -35,3 +36,16 @@ def test_equipment_database_stack_is_isolated_and_migrates_before_tests() -> Non
         "for suite in gateway knowledge experience user auth equipment; do" in quality
     )
     assert "ops/compose.${suite}-test.yaml" in quality
+
+
+def test_searxng_default_image_is_pinned_and_consistent() -> None:
+    """Ни Compose fallback, ни env.example не используют плавающий образ."""
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    image = compose["services"]["searxng"]["image"]
+    match = re.fullmatch(
+        r"\$\{PDRD_SEARXNG_IMAGE:-(searxng/searxng@sha256:[0-9a-f]{64})\}", image
+    )
+    assert match is not None
+    settings = (ROOT / ".env.example").read_text(encoding="utf-8")
+    default = re.search(r"(?m)^PDRD_SEARXNG_IMAGE=(.+)$", settings)
+    assert default is not None and default.group(1) == match.group(1)

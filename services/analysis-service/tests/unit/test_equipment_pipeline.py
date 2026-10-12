@@ -172,3 +172,33 @@ def test_partial_eq_reason_reaches_common_report_diagnostics() -> None:
     result = compare_equipment_stage(_pages(), search)
     assert result["status"] == "incomplete"
     assert "Исчерпан общий бюджет загрузки документов." in result["warnings"]
+
+
+def test_equipment_finding_query_keeps_property_values_and_project_context() -> None:
+    """EQ расхождение запускает N/E поиск по конкретному инженерному факту."""
+    pages = _pages()
+    pages[0]["facts"]["equipment_identities"][0]["equipment_type"] = "блок питания"
+    candidate = compare_equipment_stage(pages, _search())["candidates_by_page"]["2"][0]
+    query = candidate["experience_query"]
+    assert "выходное напряжение" in query and "output_voltage" in query
+    assert "MEAN WELL DRC-100B" in query and "PS1" in query
+    assert "30 V" in query and "21...29 V" in query
+    assert "PS1 30 V DC" in query and "блок питания" in query and "схема" in query
+    assert candidate["normative_source_ids"] == []
+    assert (
+        FindingDraftPayload.model_validate(candidate).to_domain().experience_query
+        == query
+    )
+
+
+def test_review_equipment_query_does_not_assert_confirmed_mismatch() -> None:
+    """Неоднозначная характеристика остаётся вопросом для нормативного поиска."""
+    search = _search()
+    search["results"][0]["facts"][0]["applicability"] = "single_model_block"
+    candidate = compare_equipment_stage(_pages(), search)["candidates_by_page"]["2"][0]
+    assert candidate["status"] == "needs_review"
+    assert (
+        "Применимость характеристики требует проверки инженером"
+        in candidate["experience_query"]
+    )
+    assert "Обнаружено расхождение" not in candidate["experience_query"]

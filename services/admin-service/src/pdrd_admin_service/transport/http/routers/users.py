@@ -7,6 +7,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Cookie, Header, Query
 
+from pdrd_admin_service.contracts.equipment_sources_access_models import (
+    ChangeEquipmentSourcesAccessRequest,
+    EquipmentSourcesAccessChangeResponse,
+)
 from pdrd_admin_service.contracts.models import (
     ReplaceRoleRequest,
     RoleDetailResponse,
@@ -113,5 +117,22 @@ async def change_normative_access(
 ) -> NormativeAccessChangeResponse:
     """Меняет доступ к удалению нормативных объектов после проверки административной сессии и CSRF."""
     return await admin.change_normative_access(
+        pdrd_session, user_id, command, csrf=csrf_token
+    )
+
+
+@router.patch(
+    "/{user_id}/equipment-sources-access",
+    response_model=EquipmentSourcesAccessChangeResponse,
+)
+async def change_equipment_sources_access(
+    user_id: UUID,
+    command: ChangeEquipmentSourcesAccessRequest,
+    admin: Admin,
+    pdrd_session: SessionCookie = None,
+    csrf_token: CsrfHeader = None,
+) -> EquipmentSourcesAccessChangeResponse:
+    """Меняет доступ к удалению нормативных объектов после проверки административной сессии и CSRF."""
+    return await admin.change_equipment_sources_access(
         pdrd_session, user_id, command, csrf=csrf_token
     )

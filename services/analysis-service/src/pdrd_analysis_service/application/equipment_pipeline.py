@@ -7,11 +7,70 @@ from dataclasses import asdict
 from typing import Any
 
 from pdrd_analysis_service.domain.equipment import (
+    Comparison,
     EquipmentFact,
+    InventoryItem,
     build_inventory,
     compare_equipment,
     inventory_payload,
 )
+
+_PROPERTY_LABELS = {
+    "input_voltage": "входное напряжение",
+    "output_voltage": "выходное напряжение",
+    "rated_voltage": "номинальное напряжение",
+    "input_current": "входной ток",
+    "output_current": "выходной ток",
+    "rated_current": "номинальный ток",
+    "power": "мощность",
+    "frequency": "частота",
+    "ambient_temperature": "температура окружающей среды",
+    "operating_mode": "режим работы",
+    "contact_configuration": "конфигурация контактов",
+    "trip_curve": "характеристика расцепления",
+    "protection_degree": "степень защиты",
+    "requires_earthing": "необходимость заземления",
+}
+
+
+def _finding_query(item: InventoryItem, comparison: Comparison, page_type: str) -> str:
+    """Готовит предметный запрос N/E, сохраняя неоднозначность EQ сравнения."""
+    property_label = _PROPERTY_LABELS.get(
+        comparison.property_name, comparison.property_name
+    )
+    equipment_type = next(
+        (
+            occurrence.equipment_type
+            for occurrence in item.occurrences
+            if occurrence.page == comparison.page
+            and occurrence.object_ref == comparison.object_ref
+            and occurrence.equipment_type
+        ),
+        "не указан",
+    )
+    document_type = {"schematic": "схема", "drawing": "чертёж", "table": "таблица"}.get(
+        page_type, page_type or "не указан"
+    )
+    project_value = f"{comparison.project_value} {comparison.project_unit}".strip()
+    manufacturer_value = (
+        f"{comparison.manufacturer_value} {comparison.manufacturer_unit}".strip()
+    )
+    return "\n".join(
+        (
+            "Выбор и применение оборудования в соответствии с техническими характеристиками производителя.",
+            f"Тип проектного документа: {document_type}; тип оборудования: {equipment_type}.",
+            f"Оборудование: {item.manufacturer} {item.model}; исполнение: {item.variant or 'не указано'}; "
+            f"обозначение в проекте: {comparison.object_ref or 'не указано'}.",
+            f"Проверяемая характеристика: {property_label} ({comparison.property_name}).",
+            f"Значение в проекте: {project_value}; значение в документации производителя: {manufacturer_value}.",
+            f"Факт на листе проекта: {comparison.project_evidence}",
+            f"Результат сопоставления: {comparison.explanation}",
+            "Применимость характеристики требует проверки инженером."
+            if comparison.status == "needs_review"
+            else "Обнаружено расхождение проектного значения с характеристикой производителя.",
+            "Техническая документация производителя является EQ основанием; нормативное требование ищется отдельно.",
+        )
+    )
 
 
 def compare_equipment_stage(
@@ -172,7 +231,9 @@ def compare_equipment_stage(
                     "normative_source_ids": [],
                     "basis": "Техническая документация производителя",
                     "basis_sources": [],
-                    "experience_query": "",
+                    "experience_query": _finding_query(
+                        item, comparison, page_types.get(comparison.page, "")
+                    ),
                     "technical_assignment_source_ids": [],
                     "technical_assignment_basis_sources": [],
                     "user_package_source_ids": [],

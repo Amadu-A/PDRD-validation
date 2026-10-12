@@ -17,6 +17,9 @@ class AdminUserResponse(UserResponse):
     normative_access: bool
     normative_access_automatic: bool
     normative_access_editable: bool
+    equipment_sources_access: bool
+    equipment_sources_access_automatic: bool
+    equipment_sources_access_editable: bool
 
 
 class UserPageResponse(StrictSchema):
@@ -36,11 +39,13 @@ class UserPageResponse(StrictSchema):
                     **UserResponse.from_domain(user).model_dump(),
                     **asdict(state),
                     **asdict(normative),
+                    **asdict(equipment),
                 )
-                for user, state, normative in zip(
+                for user, state, normative, equipment in zip(
                     page.items,
                     page.review_access_states,
                     page.normative_access_states,
+                    page.equipment_sources_access_states,
                     strict=True,
                 )
             ),
