@@ -303,7 +303,7 @@ async def test_job_event_sequence_is_atomic_and_replayable() -> None:
 async def test_job_service_start_and_replay_use_real_jsonb(
     properties, allow_unverified
 ):
-    """Сценарий запуска переживает JSONB; изменённая команда сохраняет конфликт."""
+    """JSONB сохраняет команду и неполный поиск; явное продолжение не меняет старую версию."""
     engine = _isolated_engine()
     repository = PostgresJobRepository(engine)
     identity = EquipmentIdentity(
@@ -337,15 +337,21 @@ async def test_job_service_start_and_replay_use_real_jsonb(
         assert repeated["identities"] == expected
         await asyncio.gather(*service._tasks.values())
         finished = await repository.get(job_id)
-        assert finished["status"] == "completed"
+        assert finished["status"] == "incomplete"
         assert finished["identities"] == expected
+        assert finished["results"][0]["status"] == "not_found"
+        saved_version = await repository.version(job_id, finished["revision"])
+        assert saved_version["status"] == "incomplete"
+        assert saved_version["results"] == finished["results"]
+        events = await repository.events_after(job_id, 0)
+        assert events[-1]["event_type"] == "incomplete"
         resolver.execute.assert_awaited_once()
         assert (
             resolver.execute.await_args.kwargs["allow_unverified"] is allow_unverified
         )
         assert (await service.start(job_id, [identity], allow_unverified))[
             "status"
-        ] == "completed"
+        ] == "incomplete"
         resolver.execute.assert_awaited_once()
         for changed in (
             replace(identity, properties=("power",)),
@@ -357,6 +363,17 @@ async def test_job_service_start_and_replay_use_real_jsonb(
         with pytest.raises(ValueError, match="другими параметрами"):
             await service.start(job_id, [identity], not allow_unverified)
         assert (await repository.get(job_id))["identities"] == expected
+        await service.resume(job_id, finished["revision"])
+        await asyncio.gather(*service._tasks.values())
+        resumed = await PostgresJobRepository(engine).get(job_id)
+        assert resumed["status"] == "incomplete"
+        assert resumed["resume_count"] == 1
+        assert resumed["revision"] > finished["revision"]
+        assert resumed["identities"] == expected
+        assert resumed["allow_unverified"] is allow_unverified
+        assert resumed["results"][0]["status"] == "not_found"
+        assert resolver.execute.await_count == 2
+        assert await repository.version(job_id, finished["revision"]) == saved_version
     finally:
         await service.shutdown()
         async with engine.begin() as connection:
