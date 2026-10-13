@@ -50,6 +50,10 @@
             {
               "name": "include_text_geometry",
               "value": "true"
+            },
+            {
+              "name": "include_equipment_specification",
+              "value": "={{ $json.body?.use_equipment_web_search ?? 'false' }}"
             }
           ]
         },
@@ -293,7 +297,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ document_id: $json.document_id, items: $json.items.map((item) => ({ use_document_context: item.use_document_context, use_equipment_web_search: item.use_equipment_web_search, page_number: item.page_number, heuristic_page_type: item.heuristic_page_type, extracted_text: item.extracted_text, image_base64: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.page_number))?.image_base64 ?? '' })) }) }}",
+        "body": "={{ JSON.stringify({ document_id: $json.document_id, items: $json.items.map((item) => ({ use_document_context: item.use_document_context, use_equipment_web_search: item.use_equipment_web_search, page_number: item.page_number, heuristic_page_type: item.heuristic_page_type, extracted_text: item.extracted_text, equipment_specification: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.page_number))?.equipment_specification ?? null, image_base64: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.page_number))?.image_base64 ?? '' })) }) }}",
         "options": {
           "timeout": 3300000
         }
@@ -1916,7 +1920,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const original = $('Collect Equipment Candidates').first().json.pages;\nconst equipment = $input.first()?.json ?? {};\nconst byPage = equipment.candidates_by_page ?? {};\nconst equipmentCheck = {\n  enabled: true,\n  metrics: equipment.metrics ?? {},\n  statistics: equipment.statistics ?? {},\n  models: equipment.models ?? [],\n  background: equipment.background === true,\n  revision: equipment.revision ?? 1,\n  search_status: equipment.search_status ?? 'incomplete',\n  policy: equipment.policy ?? {},\n  diagnostics: Array.isArray(equipment.diagnostics) ? equipment.diagnostics : [],\n  status: String(equipment.status ?? 'incomplete'),\n  inventory: Array.isArray(equipment.inventory) ? equipment.inventory : [],\n  comparisons: Array.isArray(equipment.comparisons) ? equipment.comparisons : [],\n  warnings: Array.isArray(equipment.warnings) ? equipment.warnings : ['Equipment Search не завершился.'],\n};\nreturn original.map((page) => ({\n  json: {\n    ...page,\n    equipment_check: equipmentCheck,\n    findings: [\n      ...(page.findings ?? []),\n      ...(Array.isArray(byPage[String(page.page_number)])\n        ? byPage[String(page.page_number)]\n        : []),\n    ],\n  },\n}));"
+        "jsCode": "const original = $('Collect Equipment Candidates').first().json.pages;\nconst equipment = $input.first()?.json ?? {};\nconst byPage = equipment.candidates_by_page ?? {};\nconst equipmentCheck = {\n  enabled: true,\n  metrics: equipment.metrics ?? {},\n  statistics: equipment.statistics ?? {},\n  models: equipment.models ?? [],\n  background: equipment.background === true,\n  revision: equipment.revision ?? 1,\n  search_status: equipment.search_status ?? 'incomplete',\n  policy: equipment.policy ?? {},\n  diagnostics: Array.isArray(equipment.diagnostics) ? equipment.diagnostics : [],\n  status: String(equipment.status ?? 'incomplete'),\n  specification: equipment.specification ?? null,\n  inventory: Array.isArray(equipment.inventory) ? equipment.inventory : [],\n  comparisons: Array.isArray(equipment.comparisons) ? equipment.comparisons : [],\n  warnings: Array.isArray(equipment.warnings) ? equipment.warnings : ['Equipment Search не завершился.'],\n};\nreturn original.map((page) => ({\n  json: {\n    ...page,\n    equipment_check: equipmentCheck,\n    findings: [\n      ...(page.findings ?? []),\n      ...(Array.isArray(byPage[String(page.page_number)])\n        ? byPage[String(page.page_number)]\n        : []),\n    ],\n  },\n}));"
       },
       "id": "53308c95-8db6-4a3f-9122-5b32cc579c81",
       "name": "Merge Equipment Candidates",

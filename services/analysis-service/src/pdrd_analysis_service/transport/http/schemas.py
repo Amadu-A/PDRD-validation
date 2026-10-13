@@ -49,6 +49,7 @@ class PageFactsPayload(BaseModel):
     normative_queries: list[str]
     document_facts: list[dict[str, Any]] = Field(default_factory=list)
     equipment_identities: list[dict[str, Any]] | None = None
+    equipment_specification: dict[str, Any] | None = None
 
     def to_domain(
         self,
@@ -71,6 +72,7 @@ class PageFactsPayload(BaseModel):
                 self.normative_queries,
             ),
             equipment_identities=tuple(self.equipment_identities or ()),
+            equipment_specification=self.equipment_specification,
             document_facts=tuple(
                 fact
                 for raw in self.document_facts
@@ -574,6 +576,7 @@ class UnderstandPageRequest(BaseModel):
     use_document_context: bool = True
     use_equipment_web_search: bool = False
     extracted_text: str
+    equipment_specification: dict[str, Any] | None = None
 
     image_base64: str = Field(
         min_length=1,

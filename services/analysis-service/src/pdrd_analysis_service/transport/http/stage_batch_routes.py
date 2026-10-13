@@ -28,7 +28,7 @@ from pdrd_analysis_service.transport.http.dependencies import (
 from pdrd_analysis_service.transport.http.routes import (
     check_norms,
     finalize_findings,
-    understand_page,
+    understand_page_controlled,
 )
 from pdrd_analysis_service.transport.http.schemas import (
     CheckNormsRequest,
@@ -302,9 +302,23 @@ async def understand_pages_stage(
     async def process(
         item: UnderstandPageRequest,
     ) -> UnderstandPageResponse:
-        return await understand_page(
+        async def should_stop() -> bool:
+            """Не запускает следующую порцию строк после отмены владельцем задания."""
+            return await _is_stage_cancelled(
+                container=container,
+                document_id=request.document_id,
+                stage=_UNDERSTANDING_STAGE,
+                current=request.items.index(item) + 1,
+                total=len(request.items),
+            )
+
+        return await understand_page_controlled(
             request=item,
             container=container,
+            should_stop=should_stop
+            if container.analysis_progress_probe is not None
+            and item.equipment_specification is not None
+            else None,
         )
 
     responses = await _run_stage_items(

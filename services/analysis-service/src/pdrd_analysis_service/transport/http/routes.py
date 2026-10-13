@@ -4,6 +4,7 @@
 
 import base64
 import binascii
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from typing import Annotated, Any
 
@@ -33,6 +34,10 @@ from pdrd_analysis_service.domain.analysis import (
     PageFacts,
     TechnicalAssignmentSource,
     UserPackageSource,
+)
+from pdrd_analysis_service.domain.equipment_specification import (
+    SpecificationCancelled,
+    SpecificationContractError,
 )
 from pdrd_analysis_service.transport.http.dependencies import (
     get_container,
@@ -129,6 +134,9 @@ def _page_facts_payload(
         equipment_identities=(
             list(facts.equipment_identities) if include_equipment else None
         ),
+        equipment_specification=facts.equipment_specification
+        if include_equipment
+        else None,
     )
 
 
@@ -443,6 +451,16 @@ async def understand_page(
     ],
 ) -> UnderstandPageResponse:
     """Получает объективные факты листа."""
+    return await understand_page_controlled(request=request, container=container)
+
+
+async def understand_page_controlled(
+    *,
+    request: UnderstandPageRequest,
+    container: ApplicationContainer,
+    should_stop: Callable[[], Awaitable[bool]] | None = None,
+) -> UnderstandPageResponse:
+    """Общий transport mapping позволяет stage проверять отмену между уточнениями строк."""
     image = _decode_image(
         encoded=request.image_base64,
         max_bytes=(container.settings.pipeline.max_image_bytes),
@@ -455,9 +473,25 @@ async def understand_page(
             page_number=request.page_number,
             heuristic_page_type=(request.heuristic_page_type),
             extracted_text=(request.extracted_text),
+            **(
+                {"equipment_specification": request.equipment_specification}
+                if request.equipment_specification is not None
+                else {}
+            ),
+            **({"should_stop": should_stop} if should_stop is not None else {}),
             image_bytes=image,
         )
 
+    except SpecificationCancelled as error:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "analysis_cancelled",
+                "message": "Анализ отменён между уточнениями спецификации.",
+            },
+        ) from error
+    except SpecificationContractError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except VisionModelError as error:
         raise HTTPException(
             status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),

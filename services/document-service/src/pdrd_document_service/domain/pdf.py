@@ -6,6 +6,7 @@ import math
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 
 class PdfPageType(StrEnum):
@@ -91,6 +92,8 @@ class PdfPage:
         PdfTextWord,
         ...,
     ] = ()
+
+    equipment_specification: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

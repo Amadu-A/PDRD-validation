@@ -40,6 +40,11 @@ class EquipmentOccurrence:
     parameters: tuple[dict[str, Any], ...]
     article: str = ""
     equipment_type: str = ""
+    source_row_ids: tuple[str, ...] = ()
+    quantity: str = ""
+    units: str = ""
+    project_code: str = ""
+    under: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,11 +97,40 @@ def build_inventory(pages: Sequence[Mapping[str, Any]]) -> tuple[InventoryItem, 
                 parameters=tuple(identity.get("parameters") or ()),
                 article=str(identity.get("article") or ""),
                 equipment_type=str(identity.get("equipment_type") or ""),
+                source_row_ids=tuple(identity.get("source_row_ids") or ()),
+                quantity=str(identity.get("quantity") or ""),
+                units=str(identity.get("units") or ""),
+                project_code=str(identity.get("project_code") or ""),
+                under=str(identity.get("under") or ""),
             )
             # Неполные обозначения остаются отдельными неоднозначными объектами.
             if not model:
                 key = (*key, str(page_number), occurrence.object_ref)
-            groups.setdefault(key, []).append((identity, occurrence))
+            if identity.get("extraction_method") == "pdf_table":
+                regions = identity.get("source_regions") or []
+                for source_page in sorted(
+                    set(identity.get("source_pages") or [page_number])
+                ):
+                    local = [
+                        region
+                        for region in regions
+                        if region.get("page") == source_page
+                    ]
+                    physical = replace(
+                        occurrence,
+                        page=int(source_page),
+                        visual_regions=tuple(
+                            {
+                                name: region[name]
+                                for name in ("x_min", "y_min", "x_max", "y_max")
+                            }
+                            for region in local
+                        ),
+                        source_row_ids=tuple(region["row_id"] for region in local),
+                    )
+                    groups.setdefault(key, []).append((identity, physical))
+            else:
+                groups.setdefault(key, []).append((identity, occurrence))
 
     inventory: list[InventoryItem] = []
     for entries in groups.values():

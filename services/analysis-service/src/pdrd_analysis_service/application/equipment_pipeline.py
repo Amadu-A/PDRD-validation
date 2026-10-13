@@ -19,6 +19,7 @@ from pdrd_analysis_service.domain.equipment import (
     equipment_key,
     inventory_payload,
 )
+from pdrd_analysis_service.domain.equipment_specification import specification_report
 
 _PROPERTY_LABELS = {
     "input_voltage": "входное напряжение",
@@ -306,6 +307,7 @@ def compare_equipment_stage(
         )
     }
     return {
+        "specification": specification_report(pages),
         "models": models,
         "statistics": report_statistics(models, inventory),
         "background": bool(search.get("background")),

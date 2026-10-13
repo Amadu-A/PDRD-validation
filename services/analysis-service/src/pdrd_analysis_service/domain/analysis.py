@@ -115,6 +115,7 @@ class PageFacts:
 
     document_facts: tuple[DocumentFact, ...] = ()
     equipment_identities: tuple[dict[str, Any], ...] = ()
+    equipment_specification: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

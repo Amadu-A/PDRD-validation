@@ -19,6 +19,8 @@ from pdrd_document_service.domain.pdf import (
 from pdrd_document_service.domain.project_context import (
     PdfTextPage,
 )
+from pdrd_document_service.domain.specification import join_specification_pages
+from pdrd_document_service.infrastructure.pdf.specification import extract_specification
 
 
 class PyMuPdfReader:
@@ -59,6 +61,7 @@ class PyMuPdfReader:
             int,
             ...,
         ],
+        include_equipment_specification: bool = False,
     ) -> PdfDocument:
         """Извлекает текст, text geometry и PNG выбранных страниц."""
         try:
@@ -70,9 +73,15 @@ class PyMuPdfReader:
                     self._extract_page(
                         document[page_number - 1],
                         page_number=page_number,
+                        include_equipment_specification=include_equipment_specification,
                     )
                     for page_number in selected_pages
                 )
+
+                if include_equipment_specification:
+                    join_specification_pages(
+                        [page.equipment_specification for page in pages]
+                    )
 
                 return PdfDocument(
                     total_pages=document.page_count,
@@ -128,13 +137,15 @@ class PyMuPdfReader:
         page: fitz.Page,
         *,
         page_number: int,
+        include_equipment_specification: bool = False,
     ) -> PdfPage:
-        text = (
-            page.get_text(
-                "text",
-                sort=True,
-            )[: self._text_limit]
-        ).strip()
+        full_text = page.get_text("text", sort=True)
+        text = full_text[: self._text_limit].strip()
+        specification = (
+            extract_specification(page, page_number, full_text)
+            if include_equipment_specification
+            else None
+        )
 
         text_words = self._extract_text_words(
             page,
@@ -165,6 +176,7 @@ class PyMuPdfReader:
             ),
             rendered_png=rendered_png,
             text_words=text_words,
+            equipment_specification=specification,
         )
 
     def _extract_text_words(
