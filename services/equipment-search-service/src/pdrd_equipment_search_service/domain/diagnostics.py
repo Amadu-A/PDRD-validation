@@ -19,6 +19,7 @@ class ReasonCode(StrEnum):
     MANUFACTURER_MISMATCH = "manufacturer_mismatch"
     MANUFACTURER_UNKNOWN = "manufacturer_unknown"
     MODEL_MISMATCH = "model_mismatch"
+    LINK_MODEL_MISMATCH = "link_model_mismatch"
     VARIANT_MISMATCH = "variant_mismatch"
     ARTICLE_MISMATCH = "article_mismatch"
     EXTRACTION_ERROR = "extraction_error"

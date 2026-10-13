@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { FakeElement } from "./helpers/fake-dom.js";
-import { appendEquipmentReport, equipmentModels, filterEquipmentModels } from "../src/js/features/analysis/equipment-report.js";
+import { appendEquipmentReport, equipmentModels, filterEquipmentModels, equipmentReason } from "../src/js/features/analysis/equipment-report.js";
 
 function collect(node) { return [node, ...node.children.flatMap(collect)]; }
 
@@ -49,4 +49,34 @@ test("синтетические 500 моделей остаются досту�
   assert.equal(filterEquipmentModels(models, "all").length, 500);
   assert.equal(filterEquipmentModels(models, "incomplete").length, 300);
   assert.equal(filterEquipmentModels(models, "not_checked").length, 200);
+});
+
+test("лимит объясняет попытки текущего запуска и не объявляет два паспорта проверенными", () => {
+  const text = equipmentReason({ reason_code: "download_budget_exhausted", metrics: {
+    downloads: 6, downloads_in_run: 2, download_limit_per_run: 2, verified_documents: 0,
+  } });
+  assert.match(text, /2 из 2 разрешённых попыток/);
+  assert.match(text, /не подтверждена/);
+  assert.match(text, /продолжить поиск/);
+  assert.doesNotMatch(text, /Проверены 2 документа/);
+  assert.match(equipmentReason({ reason_code: "download_budget_exhausted", metrics: { downloads: 2 } }), /Попыток загрузки: 2/);
+  assert.match(equipmentReason({ status: "incomplete", reason_code: "tls_error", metrics: {
+    downloads_in_run: 2, download_limit_per_run: 2,
+  } }), /Ошибка TLS\. Использованы 2 из 2/);
+});
+
+test("таблица доступна с клавиатуры и показывает назначение столбцов", () => {
+  const previous = globalThis.document;
+  globalThis.document = { createElement: (tag) => new FakeElement(tag) };
+  try {
+    const component = appendEquipmentReport(new FakeElement(), { models: [{ model: "NXB-63", status: "incomplete", metrics: {} }] }, { autoUpdates: false });
+    const nodes = collect(component.root);
+    const scroll = nodes.find((node) => node.className === "equipment-report__scroll");
+    assert.equal(scroll.tabIndex, 0);
+    assert.match(scroll.getAttribute("aria-label"), /прокрутите/);
+    assert.ok(nodes.some((node) => node.tagName === "CAPTION"));
+    assert.ok(nodes.filter((node) => node.tagName === "TH").every((node) => node.getAttribute("scope") === "col"));
+    assert.ok(nodes.some((node) => node.textContent === "Попытки загрузки"));
+    component.dispose();
+  } finally { globalThis.document = previous; }
 });

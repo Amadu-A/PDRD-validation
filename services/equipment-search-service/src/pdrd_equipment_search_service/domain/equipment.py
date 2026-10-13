@@ -87,6 +87,7 @@ class SourceDomain:
     status: SourceStatus
     enabled: bool = True
     allow_http: bool = False
+    registry_official: bool = False
 
     def matches(self, manufacturer: str, hostname: str) -> bool:
         """Не распространяет доверие на произвольные поддомены."""

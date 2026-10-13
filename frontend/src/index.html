@@ -613,7 +613,7 @@
 
         <p class="analysis-panel__description">
           Загрузите PDF, DWG/DXF или PDF вместе с соответствующим CAD-файлом.
-          Анализ выполняется асинхронно через API Gateway.
+          Выберите нужные источники и дополнительные проверки, затем запустите анализ.
         </p>
 
         <form
@@ -639,8 +639,7 @@
             >
 
             <p class="analysis-form__hint">
-              Для PDF-only можно анализировать одну или несколько физических
-              страниц документа.
+              Можно проверить весь документ или указанные страницы PDF.
             </p>
           </div>
 
@@ -662,7 +661,7 @@
             >
 
             <p class="analysis-form__hint">
-              CAD-only считается одним анализируемым листом.
+              CAD-чертёж рассматривается как один лист.
             </p>
           </div>
 
@@ -681,22 +680,30 @@
               type="text"
               name="pages"
               autocomplete="off"
-              placeholder="PDF-only: 3,5,8-12. Пусто = весь PDF"
+              placeholder="Например: 3,5,8-12. Пусто = весь PDF"
             >
 
             <p
               class="analysis-form__hint"
               data-pages-hint
             >
-              Для PDF-only можно анализировать до 200 страниц за одну проверку. Для большого PDF укажите диапазон, например 1-200.
+              До 200 страниц за одну проверку. Для большого PDF укажите диапазон, например 1-200.
             </p>
+          </div>
+
+          <div class="analysis-form__sources-note">
+            <strong>Источники проверки</strong>
+            <p>N — готовые нормативы выбранного раздела. T — подготовленное ТЗ этого раздела.
+              U — отмеченные дополнительные документы. Эти источники выбираются в блоке слева.</p>
+            <a href="/help.html#sources">Как работают источники и их сочетания?</a>
           </div>
 
           <fieldset class="analysis-form__context">
             <legend class="analysis-form__context-title">
-              Контекст проекта
+              Дополнительные проверки
             </legend>
 
+            <div class="analysis-form__setting" data-setting-help="explanatory-note">
             <label class="analysis-form__toggle">
               <input
                 class="analysis-form__toggle-control"
@@ -709,14 +716,20 @@
                 Использовать пояснительную записку
               </span>
             </label>
+            <p class="analysis-form__hint">Описание проекта с указанного ниже диапазона PDF. Не заменяет нормативное основание.</p>
+            </div>
 
+            <div class="analysis-form__setting" data-setting-help="document-context">
             <label class="analysis-form__toggle">
               <input class="analysis-form__toggle-control" data-document-context-input
                 type="checkbox" name="use_document_context">
               <span class="analysis-form__toggle-label">
-                Учитывать контекст всего проекта (Увеличивает длительность анализа в ~2,5 раза)
+                Учитывать контекст всего проекта
               </span>
             </label>
+            <p class="analysis-form__hint">D — связи между листами этого PDF. Обычно дольше; оценка около 2,5 раза приблизительна.</p>
+            </div>
+            <div class="analysis-form__setting" data-setting-help="equipment-search">
             <label class="analysis-form__toggle">
               <input class="analysis-form__toggle-control" data-equipment-search-input
                 type="checkbox" name="use_equipment_web_search">
@@ -724,6 +737,9 @@
                 Искать документацию на оборудование в интернете
               </span>
             </label>
+            <p class="analysis-form__hint">EQ — паспорта и характеристики конкретных моделей. Доступно только для PDF без CAD.</p>
+            </div>
+            <div class="analysis-form__setting" data-setting-help="unverified-sources">
             <label class="analysis-form__toggle">
               <input class="analysis-form__toggle-control" data-unverified-sources-input
                 type="checkbox" name="allow_unverified_equipment_sources" disabled>
@@ -732,17 +748,9 @@
               </span>
             </label>
             <p class="analysis-form__hint">
-              Неподтверждённые технические данные могут быть ошибочными.
-              Разрешение действует только для текущего задания.
+              Доступно при включённом EQ. Данные остаются помеченными; разрешение действует только для этого задания.
             </p>
-            <p class="analysis-form__hint">
-              В режиме PDF-only сопоставляются страницы проверяемого PDF. По умолчанию выключено.
-            </p>
-
-            <p class="analysis-form__hint">
-              Пояснительная записка используется только как контекст проекта
-              и не является нормативным доказательством.
-            </p>
+            </div>
 
             <div class="analysis-form__note-range">
               <div class="analysis-form__field">

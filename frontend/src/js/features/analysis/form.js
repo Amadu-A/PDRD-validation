@@ -10,6 +10,7 @@ import {
 import {
   appendTechnicalAssignmentPayload, technicalAssignmentAccessError,
 } from "../technical_assignment/form-payload.js";
+import { analysisSettingAvailability } from "../help/settings.js";
 
 
 const TECHNICAL_ASSIGNMENT_FILE_PATTERN = (
@@ -264,11 +265,11 @@ export function createAnalysisForm({
   function syncExplanatoryNote() {
     const mode = getMode();
 
-    const available = (
-      EXPLANATORY_NOTE_ENABLED
-      && mode !== "cad_only"
-      && mode !== "empty"
-    );
+    const availability = analysisSettingAvailability(mode, {
+      equipmentEnabled: Boolean(equipmentSearchInput?.checked),
+      explanatoryEnabled: EXPLANATORY_NOTE_ENABLED,
+    });
+    const available = availability["explanatory-note"];
 
     useExplanatoryNoteInput.disabled = (
       !available
@@ -279,19 +280,19 @@ export function createAnalysisForm({
     }
 
     if (documentContextInput) {
-      const documentAvailable = getMode() === "pdf_only";
+      const documentAvailable = availability["document-context"];
       documentContextInput.disabled = !documentAvailable;
       if (!documentAvailable) documentContextInput.checked = false;
     }
 
     if (equipmentSearchInput) {
-      const equipmentAvailable = getMode() === "pdf_only";
+      const equipmentAvailable = availability["equipment-search"];
       equipmentSearchInput.disabled = !equipmentAvailable;
       if (!equipmentAvailable) equipmentSearchInput.checked = false;
     }
 
     if (unverifiedSourcesInput) {
-      const allowUnverified = Boolean(equipmentSearchInput?.checked && !equipmentSearchInput.disabled);
+      const allowUnverified = availability["unverified-sources"];
       unverifiedSourcesInput.disabled = !allowUnverified;
       if (!allowUnverified) unverifiedSourcesInput.checked = false;
     }

@@ -17,17 +17,34 @@ export const EQUIPMENT_REASON_LABELS = {
   redirect_blocked: "Перенаправление запрещено", file_too_large: "Превышен размер файла",
   unsupported_file: "Неподдерживаемый формат", manufacturer_mismatch: "Другой производитель",
   manufacturer_unknown: "Производитель не подтверждён", model_mismatch: "Другая модель",
+  link_model_mismatch: "Ссылка пропущена: явно другая модель; попытка загрузки не потрачена",
   variant_mismatch: "Исполнение не подтверждено", extraction_error: "Ошибка извлечения",
   article_mismatch: "Артикул не подтверждён", operation_interrupted: "Попытка прервана перезапуском",
   project_properties_missing: "В проекте нет подтверждённых характеристик для сравнения",
   revision_ambiguous: "Несколько редакций документа; нужна проверка применимости",
   facts_unavailable: "Недостаточно сравнимых характеристик", query_budget_exhausted: "Бюджет поиска исчерпан",
-  download_budget_exhausted: "Бюджет загрузки исчерпан", vision_budget_exhausted: "Бюджет VLM исчерпан",
+  download_budget_exhausted: "Лимит попыток загрузки исчерпан", vision_budget_exhausted: "Лимит визуального чтения исчерпан",
   source_unverified: "Источник не подтверждён", source_blocked: "Источник заблокирован",
   document_not_found: "Документ не найден", not_checked: "Поиск не выполнялся",
   model_uncertain: "Маркировка требует уточнения", operation_timeout: "Время попытки истекло",
   cancelled: "Отменено", internal_error: "Ошибка обработки", scan_requires_vision: "Нужен адресный VLM",
 };
+
+/** Попытки загрузки не выдаются за документы, прошедшие проверку применимости. */
+export function equipmentReason(row) {
+  const metrics = row.metrics || {};
+  const used = metrics.downloads_in_run;
+  const limit = metrics.download_limit_per_run;
+  const reason = EQUIPMENT_REASON_LABELS[row.reason_code] || row.reason || "";
+  const exhausted = Number.isInteger(used) && Number.isInteger(limit) && limit > 0 && used >= limit;
+  if (row.reason_code !== "download_budget_exhausted"
+      && !(exhausted && !row.document?.source_id && ["incomplete", "not_checked"].includes(row.status))) return reason;
+  const count = Number.isInteger(used) && Number.isInteger(limit)
+    ? `Использованы ${used} из ${limit} разрешённых попыток загрузки в этом запуске.`
+    : `Попыток загрузки: ${metrics.downloads || 0}. Лимит исчерпан.`;
+  const cause = row.reason_code === "download_budget_exhausted" ? "" : `${reason}. `;
+  return `${cause}${count} Подходящая документация не подтверждена. Можно продолжить поиск, если доступны продолжения.`;
+}
 
 function element(tag, text = null, className = "") {
   const node = document.createElement(tag);
@@ -63,6 +80,9 @@ export function appendEquipmentReport(parent, initial, {
   const controls = element("div", null, "equipment-report__controls");
   const filters = element("div", null, "equipment-report__filters");
   const scroll = element("div", null, "equipment-report__scroll");
+  scroll.tabIndex = 0;
+  scroll.setAttribute("role", "region");
+  scroll.setAttribute("aria-label", "Таблица оборудования; прокрутите вправо для всех столбцов");
   root.append(title, summary, message, controls, filters, scroll);
   parent.append(root);
   let check = initial, search = { status: initial.search_status, revision: initial.revision };
@@ -132,8 +152,11 @@ export function appendEquipmentReport(parent, initial, {
       button.addEventListener("click", () => { filter = key; paint(); }); filters.append(button);
     }
     const table = element("table", null, "equipment-report__table");
+    table.append(element("caption", "По каждой модели: результат, причины, попытки загрузки и сохранённый документ. Таблицу можно прокрутить вправо."));
     const head = element("thead"), heading = element("tr");
-    for (const label of ["№", "Производитель", "Модель", "Исполнение", "Результат", "Причина / доказательства", "Запросы", "Загрузки", "Документ"]) heading.append(element("th", label));
+    for (const label of ["№", "Производитель", "Модель", "Исполнение", "Результат", "Причина / доказательства", "Запросы", "Попытки загрузки", "Документ"]) {
+      const cell = element("th", label); cell.setAttribute("scope", "col"); heading.append(cell);
+    }
     head.append(heading); table.append(head);
     const body = element("tbody");
     for (const row of filterEquipmentModels(models, filter)) {
@@ -145,10 +168,10 @@ export function appendEquipmentReport(parent, initial, {
       status.append(element("span", EQUIPMENT_STATUS_LABELS[row.status] || "Частично выполнено", `equipment-report__status equipment-report__status--${EQUIPMENT_STATUS_LABELS[row.status] ? row.status : "incomplete"}`));
       tr.append(status);
       const reason = element("td");
-      reason.append(element("p", EQUIPMENT_REASON_LABELS[row.reason_code] || row.reason || ""));
+      reason.append(element("p", equipmentReason(row)));
       const details = element("details"); details.append(element("summary", "Подробнее"));
       if (row.article) details.append(element("p", `Артикул: ${row.article}`));
-      details.append(element("p", `Листы: ${(row.pages || []).join(", ") || "—"}. VLM: ${row.metrics?.vision_calls || 0}. Проверено документов: ${row.metrics?.verified_documents || 0}.`));
+      details.append(element("p", `Листы: ${(row.pages || []).join(", ") || "—"}. Визуальных чтений: ${row.metrics?.vision_calls || 0}. Документов, прошедших проверку применимости: ${row.metrics?.verified_documents || 0}.`));
       for (const attempt of row.attempts || []) details.append(element("p", `${attempt.hostname || ""}: ${EQUIPMENT_REASON_LABELS[attempt.code] || (attempt.code === "verified" ? "Документ проверен" : "Обработка не завершена")}`));
       for (const comparison of row.comparisons || []) details.append(element("p", `Документ, стр. ${comparison.source_page}: ${comparison.manufacturer_evidence || ""}`));
       reason.append(details); tr.append(reason);
@@ -162,6 +185,7 @@ export function appendEquipmentReport(parent, initial, {
       tr.append(documentCell); body.append(tr);
     }
     table.append(body); scroll.replaceChildren(table);
+    message.textContent = "";
     if (!jobId) return;
     if (["queued", "running"].includes(search.status)) {
       message.textContent = "EQ продолжается в фоне. Основной анализ завершён; результаты других источников доступны.";

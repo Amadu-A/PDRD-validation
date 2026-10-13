@@ -196,7 +196,8 @@ class PostgresEquipmentCatalog:
             row = (
                 await connection.execute(
                     text("""
-                        SELECT status, enabled, allow_http
+                        SELECT status, enabled, allow_http,
+                               registration_source ~ '^https?://' AS registry_official
                         FROM equipment_search.source_domains
                         WHERE manufacturer_key = :manufacturer_key
                           AND hostname = :hostname
@@ -214,6 +215,7 @@ class PostgresEquipmentCatalog:
                 SourceStatus(row.status),
                 enabled=row.enabled,
                 allow_http=row.allow_http,
+                registry_official=row.registry_official,
             )
             if row
             else None
@@ -229,7 +231,8 @@ class PostgresEquipmentCatalog:
                         SELECT hostname FROM equipment_search.source_domains
                         WHERE manufacturer_key = :manufacturer_key
                           AND status = 'trusted' AND enabled = true
-                        ORDER BY hostname LIMIT 20
+                        ORDER BY (registration_source ~ '^https?://') DESC,
+                                 hostname LIMIT 20
                     """),
                     {"manufacturer_key": manufacturer_key},
                 )

@@ -30,9 +30,11 @@ from pdrd_equipment_search_service.domain.equipment import (
     EquipmentIdentity,
     ResolveResult,
     SearchHit,
+    SourceDomain,
     SourceStatus,
     safe_search_term,
 )
+from pdrd_equipment_search_service.domain.search_candidates import clearly_other_model
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,6 +316,36 @@ class ResolveEquipment:
             f"{base} паспорт руководство{suffix}",
         )[: self.limits.queries_per_stage]
 
+    async def _rank_hits(
+        self, identity: EquipmentIdentity, hits: tuple[SearchHit, ...]
+    ) -> list[tuple[SearchHit, EquipmentIdentity, SourceDomain | None]]:
+        """Ставит официальные записи реестра перед другими trusted и pending.
+
+        Приоритет не выдаёт доверие. Источник проверяется перед загрузкой и после
+        redirect; происхождение из реестра читается из существующих данных БД.
+        """
+        candidates = []
+        for hit in hits[: self.limits.urls_per_query]:
+            if not hit.hostname:
+                continue
+            effective = identity
+            if not identity.manufacturer:
+                lookup = getattr(self.catalog, "manufacturer_for_host", None)
+                manufacturer = (
+                    await lookup(hit.hostname) if lookup is not None else None
+                )
+                effective = replace(identity, manufacturer=manufacturer or "")
+            source = await self.catalog.source_for(effective.manufacturer, hit.hostname)
+            trusted = bool(
+                source
+                and source.matches(effective.manufacturer, hit.hostname)
+                and source.status is SourceStatus.TRUSTED
+            )
+            priority = (0 if source.registry_official else 1) if trusted else 2
+            candidates.append((priority, hit, effective, source))
+        candidates.sort(key=lambda candidate: candidate[0])
+        return [(hit, effective, source) for _, hit, effective, source in candidates]
+
     async def _try_hits(
         self,
         identity: EquipmentIdentity,
@@ -329,20 +361,24 @@ class ResolveEquipment:
         """Проверяет доверие, скачивает и валидирует ограниченные кандидаты."""
         inspection_warning = ""
         attempts = attempts if attempts is not None else []
-        for hit in hits[: self.limits.urls_per_query]:
+        for hit, effective, source in await self._rank_hits(identity, hits):
             await _check_stop(should_stop)
             if downloads >= self.limits.downloads:
                 break
             fingerprint = sha256(hit.url.encode()).hexdigest()
             if not hit.hostname or fingerprint in tried:
                 continue
-            effective = identity
-            if not identity.manufacturer:
-                lookup = getattr(self.catalog, "manufacturer_for_host", None)
-                manufacturer = (
-                    await lookup(hit.hostname) if lookup is not None else None
+            if clearly_other_model(identity, hit):
+                tried.add(fingerprint)
+                attempts.append(
+                    {
+                        "stage": "candidate",
+                        "code": ReasonCode.LINK_MODEL_MISMATCH,
+                        "hostname": hit.hostname,
+                    }
                 )
-                effective = replace(identity, manufacturer=manufacturer or "")
+                continue
+            if not identity.manufacturer:
                 blocker = getattr(self.catalog, "source_blocked", None)
                 if blocker is not None and await blocker(hit.hostname):
                     attempts.append(
@@ -353,7 +389,6 @@ class ResolveEquipment:
                         }
                     )
                     continue
-            source = await self.catalog.source_for(effective.manufacturer, hit.hostname)
             if source is None and effective.manufacturer:
                 await self.catalog.register_pending(
                     effective.manufacturer, hit.hostname, hit.url, identity.model

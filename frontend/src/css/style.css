@@ -20,6 +20,8 @@
 @import url("./blocks/normative-sidebar.css");
 @import url("./blocks/analysis-panel.css");
 @import url("./blocks/analysis-form.css");
+@import url("./blocks/setting-help.css");
+@import url("./blocks/help-center.css");
 @import url("./blocks/analysis-result.css");
 @import url("./blocks/equipment-report.css");
 @import url("./blocks/analysis-annotation-detail.css");

@@ -47,6 +47,7 @@ import { bindMainIdentity } from "./features/auth/main-page.js";
 import { currentSession } from "./features/auth/session.js";
 import { hasPermission } from "./features/auth/access.js";
 import { mountAuthorizedReview, reviewCapabilities } from "./features/review/access.js";
+import { mountAnalysisHints } from "./features/help/context-hints.js";
 
 import {
   createTechnicalAssignmentFilePicker,
@@ -60,6 +61,8 @@ const analysisFormElement = requireElement(
 const submitButton = requireElement(
   "[data-submit-button]",
 );
+
+mountAnalysisHints(analysisFormElement);
 
 const normativeRoot = requireElement(
   "[data-normative-sidebar]",

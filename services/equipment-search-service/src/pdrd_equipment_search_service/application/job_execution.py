@@ -192,6 +192,13 @@ async def run_search_job(service: "SearchJobService", job_id: UUID) -> None:
                                 per_model_downloads.get(str(index), 0) + downloads
                             )
                             metrics = dict(previous.get("metrics") or {})
+                            metrics["downloads_in_run"] = per_model_downloads[
+                                str(index)
+                            ]
+                            metrics["download_limit_per_run"] = policy[
+                                "downloads_per_model"
+                            ]
+                            metrics["run_number"] = generation + 1
                             delta = {
                                 "duration_ms": round(
                                     (perf_counter() - started) * 1000, 3
@@ -285,7 +292,7 @@ async def run_search_job(service: "SearchJobService", job_id: UUID) -> None:
     except Exception:
         status, warning = "incomplete", "Ошибка обработки порции оборудования."
     if status == "completed" and any(
-        row.get("status") in {"incomplete", "not_checked", "needs_review"}
+        row.get("status") in {"incomplete", "not_checked", "needs_review", "not_found"}
         for row in results
     ):
         status = "incomplete"

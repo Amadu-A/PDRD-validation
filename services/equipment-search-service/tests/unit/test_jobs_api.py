@@ -174,7 +174,7 @@ class JsonbRepository(FakeRepository):
 
 
 class FakeResolver:
-    """Возвращает доказуемый результат с контролем вызовов."""
+    """Возвращает отсутствие документа с контролем вызовов."""
 
     def __init__(self) -> None:
         """Запоминает модели."""
@@ -210,7 +210,7 @@ async def test_job_deduplicates_models_and_replays_same_request() -> None:
     await asyncio.gather(*service._tasks.values())
     state = await service.start(job_id, [identity, identity], False)
     assert resolver.calls == ["KM20"]
-    assert state["status"] == "completed"
+    assert state["status"] == "incomplete"
     assert len(state["results"]) == 1
     assert [event["sequence"] for event in repo.events[job_id]] == [1, 2, 3, 4]
 
@@ -229,7 +229,7 @@ async def test_job_payload_survives_jsonb_round_trip(properties, allow_unverifie
         assert first["identities"][0]["properties"] == list(properties)
         await asyncio.gather(*service._tasks.values())
         repeated = await service.start(job_id, [identity], allow_unverified)
-        assert repeated["status"] == "completed"
+        assert repeated["status"] == "incomplete"
         assert resolver.calls == ["KM20"]
         with pytest.raises(ValueError, match="Конфликт параметров"):
             await service.start(job_id, [identity], not allow_unverified)
@@ -258,7 +258,7 @@ def test_internal_api_auth_idempotency_and_sse_replay() -> None:
         )
         assert conflict.status_code == 409
         for _ in range(20):
-            if client.get(path, headers=headers).json()["status"] == "completed":
+            if client.get(path, headers=headers).json()["status"] == "incomplete":
                 break
             import time
 
