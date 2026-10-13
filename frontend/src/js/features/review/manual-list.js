@@ -5,6 +5,9 @@
  * Данные и решения передаются снаружи; здесь только безопасные DOM-узлы.
  */
 
+import { focusPageEvidence } from "../analysis/finding-provenance.js";
+import { notifyFindingList } from "../analysis/finding-list.js";
+
 function element(tagName, className, text = null) {
   const node = document.createElement(tagName);
   node.className = className;
@@ -75,6 +78,7 @@ export function createManualTextList() {
 
   function ensureSummary() {
     if (!section || summary) return;
+    if (section.querySelector("[data-finding-list]")) return;
     summary = element("p", "manual-review-list__summary");
     summary.setAttribute("role", "status");
     summary.dataset.manualReviewSummary = "";
@@ -103,6 +107,9 @@ export function createManualTextList() {
     );
     article.dataset.manualFindingId = note.findingId;
     article.dataset.manualPage = String(note.pageNumber);
+    article.dataset.findingReportCard = "";
+    article.dataset.findingCategory = "other";
+    article.dataset.findingStatus = "manual";
 
     const header = element("div", "analysis-result__finding-header");
     const title = element(
@@ -120,15 +127,25 @@ export function createManualTextList() {
       "span",
       "analysis-result__badge manual-review-list__decision",
     );
+    decision.dataset.findingReviewLabel = "";
     badges.append(gold, decision);
     header.append(title, badges);
     article.append(header);
 
     field(article, "Категория", "Замечание пользователя");
+    const link = element("a", "analysis-result__evidence-link", "Показать на листе");
+    link.href = `#analysis-page-${note.pageNumber}`;
+    link.addEventListener("click", async (event) => { event?.preventDefault?.(); await focusPageEvidence(note.pageNumber, { regions: [note.issueBox] }); });
+    article.append(link);
     const text = field(article, "Замечание", review.text);
     field(article, "Основание на листе", "Область отмечена пользователем на листе.");
     const normative = field(article, "Нормативное основание", "Не указано");
-    section.append(article);
+    const feedback = element("p", "analysis-result__review-feedback"); feedback.dataset.reviewFeedback = "";
+    const history = element("details", "analysis-result__review-history");
+    history.append(element("summary", "", "История решений"));
+    const historyBody = element("div", "", "Сохранённые решения отсутствуют."); historyBody.dataset.reviewHistory = "";
+    history.append(historyBody); article.append(feedback, history);
+    (section.querySelector("[data-finding-list]") || section).append(article);
 
     const item = { article, text, normative, decision, title, pageNumber: note.pageNumber };
     items.set(note.findingId, item);
@@ -152,11 +169,12 @@ export function createManualTextList() {
       accepted: "Принято пользователем",
       rejected: "Отклонено пользователем",
     }[review.decision] ?? "Ожидает решения";
-    item.article.classList.toggle("is-hidden", review.decision === "rejected");
+    item.article.classList.toggle("is-hidden", review.decision === "rejected" && !section.querySelector("[data-finding-list]"));
     if (empty) empty.textContent = [...items.values()].some((entry) => entry.article.dataset.manualDecision !== "rejected")
       ? "Автоматические замечания не сформированы. Ниже приведены замечания пользователя."
       : emptyText;
     updateSummary();
+    notifyFindingList(section.parentElement || section.parent || section);
   }
 
   /** Убирает Gold-карточку и пересчитывает номера и счётчики общего отчёта. */
@@ -173,6 +191,7 @@ export function createManualTextList() {
       if (empty) empty.textContent = emptyText;
     }
     updateSummary();
+    notifyFindingList(section.parentElement || section.parent || section);
   }
 
   return { mount, add, sync, remove };

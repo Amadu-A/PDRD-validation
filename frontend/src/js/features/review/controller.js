@@ -13,6 +13,8 @@ import { createManualTextList } from "./manual-list.js";
 import { createManualRecords } from "./manual-records.js";
 import { createAutomaticReview } from "./automatic.js";
 import { createReviewState, REVIEW_DECISIONS, REVIEW_ORIGINS } from "./state.js";
+import { DECISION_LABELS, notifyFindingList } from "../analysis/finding-list.js";
+import { REJECTION_REASONS } from "./rejection-reasons.js";
 
 const TEXT_SELECTOR = (
   ".analysis-result__annotation-title, .analysis-result__group-member-text"
@@ -270,7 +272,14 @@ export function createReviewController({
       view.item.dataset.reviewOrigin = entry.origin;
       view.item.dataset.reviewTag = entry.experienceTag ?? "";
       view.item.dataset.reviewEdited = String(entry.edited);
-      view.item.classList.toggle("is-hidden", entry.decision === REVIEW_DECISIONS.REJECTED);
+      const textCard = view.item.dataset.findingReportCard !== undefined;
+      view.item.classList.toggle("is-hidden", !textCard && entry.decision === REVIEW_DECISIONS.REJECTED);
+      for (const decision of Object.values(REVIEW_DECISIONS)) view.item.classList.toggle(`analysis-result__finding--${decision}`, textCard && entry.decision === decision);
+      const decisionLabel = view.item.querySelector("[data-finding-review-label]");
+      if (decisionLabel) decisionLabel.textContent = DECISION_LABELS[entry.decision];
+      const feedback = view.item.querySelector("[data-review-feedback]");
+      if (feedback) feedback.textContent = entry.decision === REVIEW_DECISIONS.REJECTED
+        ? [REJECTION_REASONS[entry.reasonCategory] || "Причина не указана", entry.comment].filter(Boolean).join(" · ") : "";
 
       view.controls.status.textContent = (
         `${tag} · ${decisionLabels[entry.decision]}`
@@ -305,6 +314,7 @@ export function createReviewController({
     const note = manualNotes.get(findingId);
     if (note) markManualOnPage(note.pageNumber);
     updatePreview();
+    notifyFindingList(reportRoot);
     if (!hydrating) onChange();
   }
 
@@ -411,7 +421,8 @@ export function createReviewController({
       ".analysis-result__page-visualization",
     );
 
-    if (!items.length && !pages.length) {
+    const textItems = root.querySelectorAll(".analysis-result__finding[data-finding-id]");
+    if (!items.length && !pages.length && !textItems.length) {
       return;
     }
 
@@ -442,8 +453,8 @@ export function createReviewController({
     });
     root.append(editor.dialog, rejectionEditor.dialog);
 
-    const textItems = root.querySelectorAll(".analysis-result__finding[data-finding-id]");
     for (const item of [...textItems, ...items]) {
+      if (item.dataset.findingStatus === "hypothesis") continue;
       const findingId = String(
         item.dataset.findingId ?? "",
       ).trim();
@@ -511,8 +522,31 @@ export function createReviewController({
       automatic.restore(session.findings.filter((row) => row.origin === "vlm"));
       manual.restore(session.findings.filter((row) => row.origin === "manual"));
       for (const entry of state.snapshot()) refresh(entry.findingId);
+      setHistory(session.decision_history || []);
     } finally {
       hydrating = false;
+    }
+  }
+
+  /** Показывает компактный серверный журнал; локальные решения не выдумывают аудит. */
+  function setHistory(events) {
+    const grouped = new Map();
+    for (const event of Array.isArray(events) ? events : []) {
+      const entries = grouped.get(event.finding_id) || []; entries.push(event); grouped.set(event.finding_id, entries);
+    }
+    for (const [id, rows] of views) for (const view of rows) {
+      const target = view.item.querySelector("[data-review-history]");
+      if (!target) continue;
+      target.replaceChildren();
+      const history = grouped.get(id) || [];
+      if (!history.length) target.textContent = "Сохранённые решения для этого замечания отсутствуют.";
+      for (const event of history) {
+        const text = document.createElement("p");
+        const action = { added: "Добавлено", edited: "Отредактировано", geometry: "Изменена область", reset: "Возвращено на рассмотрение" }[event.action];
+        text.textContent = [event.occurred_at, event.actor, action || DECISION_LABELS[event.decision] || "Изменено",
+          REJECTION_REASONS[event.reason_category], event.comment, `редакция ${event.session_revision}`].filter(Boolean).join(" · ");
+        target.append(text);
+      }
     }
   }
 
@@ -535,7 +569,7 @@ export function createReviewController({
   }
 
   return {
-    mount, getManualSnapshot, getReviewSnapshot, hydrate, setConnection,
+    mount, getManualSnapshot, getReviewSnapshot, hydrate, setConnection, setHistory,
     dispose() { manual.dispose(); automatic.dispose(); editor?.dialog.remove(); rejectionEditor?.dialog.remove(); },
   };
 }

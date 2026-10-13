@@ -102,8 +102,26 @@ class ResolveEquipment:
             local.final_url,
             allow_unverified,
         ):
+            try:
+                local_source = (
+                    await self.catalog.source_for(
+                        identity.manufacturer, SearchHit(local.final_url).hostname
+                    )
+                    if identity.manufacturer
+                    else None
+                )
+            except Exception:
+                local_source = None
+            manufacturer_site = _manufacturer_site(
+                identity, local.final_url, local_source
+            )
             if self.fact_index is None:
-                return ResolveResult(identity, "local", document=local)
+                return ResolveResult(
+                    identity,
+                    "local",
+                    document=local,
+                    manufacturer_site=manufacturer_site,
+                )
             try:
                 pages = await self.catalog.document_pages(local.source_id)
                 visual = await self.catalog.document_vision_facts(local.source_id)
@@ -119,6 +137,7 @@ class ResolveEquipment:
                     document=local,
                     facts=facts,
                     facts_status=fact_status,
+                    manufacturer_site=manufacturer_site,
                 )
             except Exception:
                 return ResolveResult(
@@ -127,6 +146,7 @@ class ResolveEquipment:
                     document=local,
                     warning="EQ Facts сохранённого документа недоступны.",
                     facts_status="incomplete",
+                    manufacturer_site=manufacturer_site,
                 )
 
         hosts = await self.catalog.trusted_hosts(identity.manufacturer)
@@ -581,6 +601,9 @@ class ResolveEquipment:
                                 reason_code=ReasonCode.FACTS_UNAVAILABLE,
                                 attempts=tuple(attempts),
                                 resolved_manufacturer=effective.manufacturer,
+                                manufacturer_site=_manufacturer_site(
+                                    identity, snapshot.final_url, final_source
+                                ),
                             ),
                             downloads,
                             inspection_warning,
@@ -595,6 +618,9 @@ class ResolveEquipment:
                         facts_status=fact_status,
                         attempts=tuple(attempts),
                         resolved_manufacturer=effective.manufacturer,
+                        manufacturer_site=_manufacturer_site(
+                            identity, snapshot.final_url, final_source
+                        ),
                     ),
                     downloads,
                     inspection_warning,
@@ -619,3 +645,25 @@ class ResolveEquipment:
                 )
                 continue
         return None, downloads, inspection_warning
+
+
+def _manufacturer_site(
+    identity: EquipmentIdentity, final_url: str, source: SourceDomain | None
+) -> dict[str, str] | None:
+    """Публикует официальный сайт только для явно установленного проектного изготовителя."""
+    host = SearchHit(final_url).hostname
+    if (
+        not identity.manufacturer
+        or not source
+        or not source.matches(identity.manufacturer, host)
+    ):
+        return None
+    if source.status is not SourceStatus.TRUSTED or not source.registry_official:
+        return None
+    parsed = urlsplit(final_url)
+    return {
+        "name": source.manufacturer,
+        "url": f"{parsed.scheme}://{parsed.netloc}/",
+        "relationship": "project",
+        "verified": "registry_official",
+    }

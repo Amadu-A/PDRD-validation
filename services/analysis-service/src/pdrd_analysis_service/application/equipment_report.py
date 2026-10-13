@@ -70,6 +70,7 @@ def model_report(item: InventoryItem, result: dict, comparisons: list[dict]) -> 
         "metrics": result.get("metrics") or {},
         "attempts": result.get("attempts") or [],
         "document": document or None,
+        "manufacturer_site": result.get("manufacturer_site"),
         "comparisons": comparisons,
         "pages": sorted({part.page for part in item.occurrences}),
         "occurrences": [asdict(part) for part in item.occurrences],

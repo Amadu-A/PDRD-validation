@@ -50,6 +50,22 @@ def snapshot(session: ReviewSession) -> dict:
     """Возвращает текущее состояние; полный аудит остаётся в серверном хранилище."""
     result = jsonable_encoder(asdict(session), exclude={"history"})
     result["pending_count"] = session.pending_count
+    result["decision_history"] = jsonable_encoder(
+        [
+            {
+                "finding_id": event.after.finding_id,
+                "action": event.action,
+                "actor": event.actor,
+                "occurred_at": event.occurred_at,
+                "session_revision": event.session_revision,
+                "decision": event.after.decision,
+                "reason_category": event.after.reason_category,
+                "comment": event.after.comment,
+            }
+            for event in session.history
+            if event.after is not None
+        ]
+    )
     for row, finding in zip(result["findings"], session.findings, strict=True):
         row["experience_tag"] = finding.experience_tag
     return result

@@ -192,3 +192,4 @@ class ResolveResult:
     resolved_manufacturer: str = ""
     tried_url_hashes: tuple[str, ...] = ()
     retryable: bool = False
+    manufacturer_site: dict[str, str] | None = None

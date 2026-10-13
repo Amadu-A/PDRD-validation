@@ -82,6 +82,7 @@ export function createReviewPersistence({
     root.querySelector("[data-review-preview]").after(actions);
     function applyStatus(status = latestStatus) {
       latestStatus = status;
+      if (status.session?.decision_history) controller.setHistory(status.session.decision_history);
       controller.setConnection({
         isPersistent: status.mode !== "local",
         isLocked: busy || ["loading", "error", "conflict"].includes(status.mode),

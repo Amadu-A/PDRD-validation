@@ -11,18 +11,15 @@
 .equipment-report__filter, .equipment-report__action { padding: .45rem .7rem; border: 1px solid #ccdcf1; border-radius: 7px; background: #f5f8fd; color: #183963; cursor: pointer; }
 .equipment-report__filter[aria-pressed="true"] { background: #0877ed; border-color: #0877ed; color: #fff; }
 .equipment-report__action:disabled { opacity: .6; cursor: wait; }
-.equipment-report__scroll { overflow-x: auto; min-width: 0; border-radius: 8px; }
-.equipment-report__table { width: 100%; min-width: 1120px; table-layout: fixed; border-collapse: collapse; font-size: .8125rem; line-height: 1.45; }
-.equipment-report__table caption { text-align: left; padding: .5rem 0; color: #536a8d; }
-.equipment-report__table th:nth-child(1) { width: 40px; }
-.equipment-report__table th:nth-child(2) { width: 125px; }
-.equipment-report__table th:nth-child(3) { width: 150px; }
-.equipment-report__table th:nth-child(4) { width: 105px; }
-.equipment-report__table th:nth-child(5) { width: 180px; }
-.equipment-report__table th:nth-child(6) { width: 260px; }
-.equipment-report__table th:nth-child(7), .equipment-report__table th:nth-child(8) { width: 70px; }
-.equipment-report__table th:nth-child(9) { width: 170px; }
-.equipment-report__table td:nth-child(6), .equipment-report__table td:nth-child(9) { overflow-wrap: anywhere; }
+.equipment-report__scroll { overflow: auto; min-width: 0; border-radius: 8px; border: 1px solid #e4ecf7; }
+.equipment-report__table { width: 100%; min-width: 840px; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: .85rem; line-height: 1.45; }
+.equipment-report__table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.equipment-report__table th:nth-child(1) { width: 48px; }
+.equipment-report__table th:nth-child(2) { width: 42%; }
+.equipment-report__table th:nth-child(3) { width: 78px; }
+.equipment-report__table th:nth-child(4) { width: 20%; }
+.equipment-report__table th:nth-child(5) { width: 24%; }
+.equipment-report__table th { position: sticky; top: 0; z-index: 2; }
 .equipment-report__table th { background: #f3f7fd; color: #536a8d; text-align: left; }
 .equipment-report__table th, .equipment-report__table td { padding: .6rem .65rem; border: 1px solid #e4ecf7; vertical-align: top; }
 .equipment-report__table tbody tr:nth-child(even) { background: #fafcff; }
@@ -31,7 +28,18 @@
 .equipment-report__table small { display: block; margin-top: .4rem; }
 .equipment-report__table details { max-width: 400px; }
 .equipment-report__table summary { cursor: pointer; color: #0969c9; }
-.equipment-report__status { display: inline-block; white-space: nowrap; padding: .25rem .5rem; border-radius: 20px; background: #edf1f6; color: #5b6578; }
+.equipment-report__table .equipment-report__spacer td { padding: 0; border: 0; }
+.equipment-report__spacer { pointer-events: none; }
+.equipment-report__name { display: block; word-break: normal; overflow-wrap: normal; }
+.equipment-report__link, .equipment-report__page-link { color: #075eb8; text-decoration: underline; text-underline-offset: 2px; }
+.equipment-report__link { display: block; overflow-wrap: anywhere; }
+.equipment-report__page-link { display: inline-block; margin: 0 .35rem .25rem 0; }
+.equipment-report__details-button { display: block; margin-top: .35rem; padding: 0; border: 0; background: transparent; color: #075eb8; text-decoration: underline; cursor: pointer; font: inherit; font-size: .78rem; }
+.equipment-report__inspection { min-width: 0; padding: .65rem; border: 1px solid #e4ecf7; border-radius: 8px; overflow-wrap: anywhere; }
+.equipment-report__inspection summary { cursor: pointer; color: #183963; }
+.equipment-report__inspection p { margin-block: .5rem; }
+.equipment-report__link:focus-visible, .equipment-report__page-link:focus-visible, .equipment-report__details-button:focus-visible, .equipment-report__scroll:focus-visible { outline: 2px solid #0877ed; outline-offset: 2px; }
+.equipment-report__status { display: inline-block; white-space: normal; padding: .25rem .5rem; border-radius: 20px; background: #edf1f6; color: #5b6578; }
 .equipment-report__status--confirmed { background: #ddf7e8; color: #14723b; }
 .equipment-report__status--incomplete, .equipment-report__status--needs_identification { background: #fff0d7; color: #885200; }
 .equipment-report__status--mismatch { background: #ffdfdf; color: #ad2020; }

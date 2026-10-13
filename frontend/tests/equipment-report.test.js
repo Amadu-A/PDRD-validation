@@ -23,8 +23,10 @@ test("таблица EQ показывает модели и фильтрует 
     let nodes = collect(component.root);
     assert.equal(nodes.filter((node) => node.tagName === "TR").length, 5);
     assert.ok(nodes.some((node) => node.textContent === "Сигнал-10 2RS485"));
-    assert.ok(nodes.some((node) => node.textContent === "ИО 309-30 Пирон-Ш"));
-    assert.ok(nodes.some((node) => node.textContent === "исп. 51"));
+    assert.ok(nodes.some((node) => node.textContent.includes("ИО 309-30 Пирон-Ш")));
+    assert.ok(nodes.some((node) => node.textContent.includes("исп. 51")));
+    nodes.find((node) => node.textContent === "Подробности проверки" && node.tagName === "BUTTON").click();
+    nodes = collect(component.root);
     assert.ok(nodes.some((node) => node.textContent === "Ошибка TLS"));
     assert.ok(nodes.some((node) => node.className.endsWith("--incomplete")));
     assert.equal(nodes.filter((node) => node.tagName === "IMG").length, 0);
@@ -76,7 +78,8 @@ test("таблица доступна с клавиатуры и показыв�
     assert.match(scroll.getAttribute("aria-label"), /прокрутите/);
     assert.ok(nodes.some((node) => node.tagName === "CAPTION"));
     assert.ok(nodes.filter((node) => node.tagName === "TH").every((node) => node.getAttribute("scope") === "col"));
-    assert.ok(nodes.some((node) => node.textContent === "Попытки загрузки"));
+    assert.deepEqual(nodes.filter((node) => node.tagName === "TH").map((node) => node.textContent),
+      ["№ п/п", "Наименование материала/оборудования", "Листы", "Сайт производителя", "Документ"]);
     component.dispose();
   } finally { globalThis.document = previous; }
 });

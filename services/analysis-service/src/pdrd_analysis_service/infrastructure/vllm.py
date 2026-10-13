@@ -14,6 +14,7 @@ import httpx
 
 from pdrd_analysis_service.application.ports.vision_model import (
     VisionModelError,
+    VisionModelOutputBudgetError,
 )
 from pdrd_analysis_service.domain.analysis import (
     GenerationMetrics,
@@ -321,7 +322,7 @@ class VllmStructuredVisionModel:
                         attempt >= self._max_attempts
                         or next_num_predict <= attempt_num_predict
                     ):
-                        raise VisionModelError(
+                        raise VisionModelOutputBudgetError(
                             (
                                 "shared-vlm исчерпал "
                                 "output budget "
@@ -335,6 +336,7 @@ class VllmStructuredVisionModel:
                                 "Повтор с тем же output "
                                 "budget запрещён."
                             ),
+                            metrics=metrics,
                         ) from error
 
                     logger.warning(

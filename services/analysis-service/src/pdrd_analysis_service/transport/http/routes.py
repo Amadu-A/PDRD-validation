@@ -552,6 +552,16 @@ async def check_norms(
     ],
 ) -> CheckNormsResponse:
     """Проверяет лист по N/T/U sources."""
+    return await check_norms_controlled(request=request, container=container)
+
+
+async def check_norms_controlled(
+    *,
+    request: CheckNormsRequest,
+    container: ApplicationContainer,
+    check_cancellation: Callable[[], Awaitable[None]] | None = None,
+) -> CheckNormsResponse:
+    """Передаёт проверку отмены между порциями без нового HTTP-контракта."""
     image = _decode_image(
         encoded=request.image_base64,
         max_bytes=(container.settings.pipeline.max_image_bytes),
@@ -583,6 +593,11 @@ async def check_norms(
             ),
             image_bytes=image,
             normative_system_prompt=(request.normative_system_prompt),
+            **(
+                {"check_cancellation": check_cancellation}
+                if check_cancellation is not None
+                else {}
+            ),
         )
 
     except VisionModelError as error:

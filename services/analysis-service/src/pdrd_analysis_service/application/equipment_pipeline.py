@@ -119,6 +119,17 @@ def compare_equipment_stage(
         result = by_key.get(item.key) or {}
         row = model_report(item, result, [])
         models.append(row)
+        site = result.get("manufacturer_site") or {}
+        if (isinstance(site, dict) and site.get("relationship") == "analog") or (
+            result.get("document") or {}
+        ).get("applicability") == "analog":
+            row.update(
+                status="needs_identification",
+                reason_code="manufacturer_unknown",
+                reason="Аналог не подтверждает выбор проектного изделия; требуется идентификация производителя.",
+            )
+            warnings.append(row["reason"])
+            continue
         verified_brand = result.get("resolved_manufacturer") or (
             result.get("document") or {}
         ).get("manufacturer")

@@ -26,7 +26,7 @@ from pdrd_analysis_service.transport.http.dependencies import (
     get_container,
 )
 from pdrd_analysis_service.transport.http.routes import (
-    check_norms,
+    check_norms_controlled,
     finalize_findings,
     understand_page_controlled,
 )
@@ -459,9 +459,29 @@ async def check_norms_stage(
     async def process(
         item: CheckNormsRequest,
     ) -> CheckNormsResponse:
-        return await check_norms(
+        async def check_cancellation() -> None:
+            """Отмена перед продолжением не запускает следующую GPU-порцию листа."""
+            if await _is_stage_cancelled(
+                container=container,
+                document_id=request.document_id,
+                stage=_CHECKING_STAGE,
+                current=request.items.index(item) + 1,
+                total=len(request.items),
+            ):
+                raise HTTPException(
+                    409,
+                    detail={
+                        "code": "analysis_cancelled",
+                        "message": "Анализ отменён между порциями нормативной проверки.",
+                    },
+                )
+
+        return await check_norms_controlled(
             request=item,
             container=container,
+            check_cancellation=check_cancellation
+            if container.analysis_progress_probe is not None
+            else None,
         )
 
     responses = await _run_stage_items(

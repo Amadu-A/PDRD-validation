@@ -376,7 +376,7 @@ async def test_duplicate_saturation_requests_distinct_continuation() -> None:
     assert metrics.total_duration_ms == 20.0
 
 
-async def test_dense_probe_switches_to_one_bulk_continuation() -> None:
+async def test_dense_probe_switches_to_bounded_continuation() -> None:
     """Distinct-heavy лист не режется probe batch size."""
     first_batch = [
         _candidate(
@@ -438,7 +438,7 @@ async def test_dense_probe_switches_to_one_bulk_continuation() -> None:
 
     assert first_call["schema"]["properties"]["violations"]["maxItems"] == 10
 
-    assert second_call["schema"]["properties"]["violations"]["maxItems"] == 40
+    assert second_call["schema"]["properties"]["violations"]["maxItems"] == 10
 
     assert first_call["num_predict"] == 4000
 
