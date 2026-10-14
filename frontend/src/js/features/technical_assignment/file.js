@@ -690,6 +690,7 @@ export function createTechnicalAssignmentFilePicker(
   }
 
 
+  /** Обновляет раздел и блокировку анализа, даже если необязательное ТЗ не выбрано. */
   async function setSection(
     sectionId,
   ) {
@@ -709,6 +710,7 @@ export function createTechnicalAssignmentFilePicker(
     state.sectionId = normalized;
 
     if (!hasFile()) {
+      syncSubmitGuard();
       return;
     }
 
