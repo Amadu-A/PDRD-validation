@@ -14,6 +14,7 @@ REPOSITORY_ROOT = (
 )
 
 BACKEND_PACKAGES = (
+    ("equipment-search-service", "pdrd_equipment_search_service"),
     (
         "api-gateway",
         "pdrd_api_gateway",

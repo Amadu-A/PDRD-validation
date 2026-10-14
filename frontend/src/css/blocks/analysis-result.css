@@ -902,8 +902,34 @@
 
 /* Подсветка доказательства при переходе из D-источника. */
 .analysis-result__bbox.is-document-evidence-focus {
+  display: block !important;
+  opacity: 1 !important;
   outline: 4px solid #f59e0b;
   background: rgb(245 158 11 / 20%);
   z-index: 5;
 }
+.analysis-result__annotation.is-document-evidence-focus,
+.analysis-result__group-member.is-document-evidence-focus {
+  display: grid !important;
+  opacity: 1 !important;
+  outline: 2px solid #f59e0b;
+}
 .analysis-result__evidence-link { display: block; margin-block: 0.25rem; }
+
+/* Представление всех решений сохраняется в списке, включая отклонённые карточки. */
+.analysis-result__finding-list { display: grid; gap: var(--space-4); }
+.analysis-result__finding-list > [hidden] { display: none; }
+.analysis-result__finding--pending { border-left: 4px solid #e5a321; background: #fffaf0; }
+.analysis-result__finding--accepted { border-left: 4px solid #2d9b62; background: var(--color-surface); }
+.analysis-result__finding--rejected { border-left: 4px solid #8793a5; background: #f4f5f7; color: #526176; }
+.analysis-result__finding-navigation { display: flex; flex-wrap: wrap; gap: .5rem 1rem; }
+.analysis-result__finding-navigation .analysis-result__evidence-link { font-weight: 600; color: #075eb8; text-decoration: underline; }
+.analysis-result__finding-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: .75rem; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); }
+.analysis-result__finding-control { display: grid; align-content: start; gap: .4rem; font-size: .85rem; }
+.analysis-result__finding-control select { width: 100%; min-width: 0; padding: .5rem; border: 1px solid var(--color-border); border-radius: var(--radius-control); font: inherit; background: var(--color-surface); color: var(--color-text-primary); }
+.analysis-result__finding-reset { align-self: end; padding: .5rem; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface-muted); cursor: pointer; font: inherit; }
+.analysis-result__finding-counter, .analysis-result__review-feedback { margin: 0; font-size: .85rem; }
+.analysis-result__review-history summary { cursor: pointer; color: #075eb8; }
+.analysis-result__finding-navigation a:focus-visible, .analysis-result__finding-control select:focus-visible, .analysis-result__finding-reset:focus-visible { outline: 2px solid #0877ed; outline-offset: 2px; }
+.analysis-result__equipment-evidence { pointer-events: none; }
+.analysis-result__evidence-navigation-message { margin: .5rem 0 0; color: #6e5424; font-size: .85rem; }

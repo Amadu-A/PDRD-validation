@@ -8,12 +8,24 @@ from typing import (
 )
 
 from pdrd_analysis_service.domain.analysis import (
+    GenerationMetrics,
     GenerationResult,
 )
 
 
 class VisionModelError(RuntimeError):
     """Ошибка structured VLM provider."""
+
+
+class VisionModelOutputBudgetError(VisionModelError):
+    """Полный ответ не поместился; повтор требует изменения размера задания."""
+
+    def __init__(
+        self, message: str, *, metrics: GenerationMetrics | None = None
+    ) -> None:
+        """Сохраняет метрики исчерпанной попытки без публикации обрезанного JSON."""
+        super().__init__(message)
+        self.metrics = metrics
 
 
 class StructuredVisionModel(Protocol):

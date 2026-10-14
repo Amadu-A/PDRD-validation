@@ -90,6 +90,9 @@ class UserModel(Base):
     normative_access_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    equipment_sources_access_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     review_access_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
@@ -440,6 +443,35 @@ class NormativeAccessEventModel(Base):
     __table_args__ = (
         CheckConstraint(
             "authorization_version >= 2", name="ck_normative_access_version"
+        ),
+        {"schema": "users"},
+    )
+
+    event_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.accounts.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    actor_user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.accounts.user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    authorization_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class EquipmentSourcesAccessEventModel(Base):
+    """Аудит выдачи и отзыва управления источниками оборудования с актёром и версией полномочий."""
+
+    __tablename__ = "equipment_sources_access_events"
+    __table_args__ = (
+        CheckConstraint(
+            "authorization_version >= 2", name="ck_equipment_sources_access_version"
         ),
         {"schema": "users"},
     )

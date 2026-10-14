@@ -14,6 +14,9 @@ from pdrd_document_service.transport.http.routers.cad import (
 from pdrd_document_service.transport.http.routers.combined import (
     router as combined_router,
 )
+from pdrd_document_service.transport.http.routers.equipment_document import (
+    router as equipment_document_router,
+)
 from pdrd_document_service.transport.http.routers.health import (
     router as health_router,
 )
@@ -53,6 +56,7 @@ def create_app(
     application.include_router(
         pdf_router,
     )
+    application.include_router(equipment_document_router)
 
     application.include_router(
         pdf_annotation_router,

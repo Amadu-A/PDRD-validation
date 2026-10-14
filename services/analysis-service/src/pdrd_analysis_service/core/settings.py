@@ -139,7 +139,7 @@ class PipelineSettings(BaseModel):
     )
 
     technical_assignment_max_requirements_per_page: int = Field(
-        default=1000,
+        default=2000,
         ge=1,
         le=10000,
     )

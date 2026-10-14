@@ -1,0 +1,8 @@
+/* frontend/src/css/blocks/setting-help.css */
+/* Клавиатурная подсказка раскрывается в потоке, не перекрывая поля формы. */
+.setting-help { font-weight: var(--font-weight-normal); }
+.setting-help__icon { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid #9bb9df; border-radius: 50%; color: var(--color-accent); background: var(--color-surface); list-style: none; cursor: pointer; }
+.setting-help__icon::-webkit-details-marker { display: none; }
+.setting-help__content { max-width: 520px; margin-top: var(--space-3); padding: var(--space-4); border: 1px solid #b6c9e5; border-radius: var(--radius-control); background: var(--color-accent-soft); font-size: .9rem; line-height: 1.5; }
+.setting-help__content p { margin-bottom: var(--space-3); }
+.setting-help__content a { color: var(--color-accent); }

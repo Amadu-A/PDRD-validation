@@ -12,9 +12,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel, ConfigDict, Field
 
 from pdrd_experience_service.application.ports.analysis_source import (
     AnalysisSourceUnavailableError,
+)
+from pdrd_experience_service.application.use_cases.equipment_update import (
+    import_equipment_update,
 )
 from pdrd_experience_service.core.container import ApplicationContainer
 from pdrd_experience_service.domain.review import (
@@ -33,10 +37,35 @@ from pdrd_experience_service.transport.http.schemas.review import ReviewCommand
 router = APIRouter(prefix="/internal/v1/reviews", tags=["review-internal"])
 
 
+class EquipmentUpdateRequest(BaseModel):
+    """Серверное дополнение из Gateway; клиентские оригиналы не принимаются публично."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_revision: int = Field(ge=0)
+    equipment_revision: int = Field(ge=1)
+    findings: list[dict] = Field(max_length=5000)
+
+
 def snapshot(session: ReviewSession) -> dict:
     """Возвращает текущее состояние; полный аудит остаётся в серверном хранилище."""
     result = jsonable_encoder(asdict(session), exclude={"history"})
     result["pending_count"] = session.pending_count
+    result["decision_history"] = jsonable_encoder(
+        [
+            {
+                "finding_id": event.after.finding_id,
+                "action": event.action,
+                "actor": event.actor,
+                "occurred_at": event.occurred_at,
+                "session_revision": event.session_revision,
+                "decision": event.after.decision,
+                "reason_category": event.after.reason_category,
+                "comment": event.after.comment,
+            }
+            for event in session.history
+            if event.after is not None
+        ]
+    )
     for row, finding in zip(result["findings"], session.findings, strict=True):
         row["experience_tag"] = finding.experience_tag
     return result
@@ -128,6 +157,29 @@ async def change_review(
         raise HTTPException(404, "Human Review ещё не открыт.") from error
     except ReviewError as error:
         raise HTTPException(422, str(error)) from error
+
+
+@router.post("/{job_id}/equipment-updates")
+async def equipment_update(
+    job_id: UUID,
+    command: EquipmentUpdateRequest,
+    actor: Annotated[str, Depends(trusted_actor)],
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+) -> dict:
+    """По явному действию добавляет EQ-находки в текущую неутверждённую редакцию."""
+    try:
+        session = await import_equipment_update(
+            container.reviews, job_id=job_id, actor=actor, **command.model_dump()
+        )
+        return await current_snapshot(container, session)
+    except ReviewConflictError as error:
+        raise HTTPException(
+            409, "Review изменён или утверждён. Обновите редакцию."
+        ) from error
+    except LookupError as error:
+        raise HTTPException(404, "Human Review ещё не открыт.") from error
+    except (ReviewError, ValueError, KeyError, TypeError) as error:
+        raise HTTPException(422, "Некорректное серверное EQ-дополнение.") from error
 
 
 @router.get("/{job_id}/pdf-manifest")

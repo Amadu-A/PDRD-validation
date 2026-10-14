@@ -5,8 +5,10 @@ import { logout } from "./api.js";
 import { isAdmin } from "./access.js";
 import { bindAuthDialog } from "./dialog.js";
 import { clearSession, refreshSession, subscribeSession } from "./session.js";
+import { mountHelpNavigation } from "../help/navigation.js";
 
 export function bindSiteHeader(root, { navigate = (url) => { window.location.href = url; } } = {}) {
+  mountHelpNavigation(root);
   const loginButton = root.querySelector("[data-open-login]");
   const registerButton = root.querySelector("[data-open-register]");
   const logoutButton = root.querySelector("[data-header-logout]");

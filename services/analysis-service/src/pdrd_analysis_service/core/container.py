@@ -4,6 +4,8 @@
 
 from dataclasses import dataclass
 
+from pdrd_analysis_service.application.equipment_vision import ExtractEquipmentVision
+from pdrd_analysis_service.application.limited_vision import LimitedVisionModel
 from pdrd_analysis_service.application.ports.analysis_progress import (
     AnalysisProgressProbe,
 )
@@ -67,6 +69,7 @@ class ApplicationContainer:
     augment_project_context: AugmentProjectContext | None = None
 
     analysis_progress_probe: AnalysisProgressProbe | None = None
+    extract_equipment_vision: ExtractEquipmentVision | None = None
 
 
 def build_container() -> ApplicationContainer:
@@ -85,7 +88,10 @@ def build_container() -> ApplicationContainer:
     )
 
     vision_model = CachedStructuredVisionModel(
-        delegate=shared_vlm,
+        delegate=LimitedVisionModel(
+            shared_vlm,
+            max_concurrent=settings.pipeline.vlm_stage_concurrency,
+        ),
         provider_identity=(f"{settings.vlm.base_url.rstrip('/')}|{settings.vlm.model}"),
         root_path=(settings.vlm.cache.root_path),
         namespace=(settings.vlm.cache.namespace),
@@ -101,6 +107,7 @@ def build_container() -> ApplicationContainer:
 
     return ApplicationContainer(
         settings=settings,
+        extract_equipment_vision=ExtractEquipmentVision(vision_model),
         check_cross_page_consistency=(
             CheckCrossPageConsistency(
                 vision_model=vision_model,

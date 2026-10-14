@@ -68,6 +68,11 @@ if (( ${#PDRD_RETENTION_INTERNAL_KEY} < 32 )); then
     die "PDRD_RETENTION_INTERNAL_KEY должен содержать не менее 32 символов."
 fi
 
+validate_secret "PDRD_EQUIPMENT_INTERNAL_KEY"
+if (( ${#PDRD_EQUIPMENT_INTERNAL_KEY} < 32 )); then
+    die "PDRD_EQUIPMENT_INTERNAL_KEY должен содержать не менее 32 символов."
+fi
+
 validate_secret "PDRD_POSTGRES_PASSWORD"
 validate_secret "PDRD_RABBITMQ_PASSWORD"
 if profile_enabled "identity"; then
@@ -371,6 +376,9 @@ while true; do
             knowledge-indexer
             technical-assignment-indexer
             analysis-service
+            equipment-search-service
+            equipment-search-migrate
+            searxng
         )
 
         if profile_enabled "review"; then

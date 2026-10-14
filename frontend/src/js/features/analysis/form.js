@@ -10,6 +10,7 @@ import {
 import {
   appendTechnicalAssignmentPayload, technicalAssignmentAccessError,
 } from "../technical_assignment/form-payload.js";
+import { analysisSettingAvailability } from "../help/settings.js";
 
 
 const TECHNICAL_ASSIGNMENT_FILE_PATTERN = (
@@ -33,6 +34,8 @@ export function createAnalysisForm({
   pagesHint,
   useExplanatoryNoteInput,
   documentContextInput = null,
+  equipmentSearchInput = null,
+  unverifiedSourcesInput = null,
   noteStartPageInput,
   noteEndPageInput,
   getNormativeSelection = () => null,
@@ -262,11 +265,11 @@ export function createAnalysisForm({
   function syncExplanatoryNote() {
     const mode = getMode();
 
-    const available = (
-      EXPLANATORY_NOTE_ENABLED
-      && mode !== "cad_only"
-      && mode !== "empty"
-    );
+    const availability = analysisSettingAvailability(mode, {
+      equipmentEnabled: Boolean(equipmentSearchInput?.checked),
+      explanatoryEnabled: EXPLANATORY_NOTE_ENABLED,
+    });
+    const available = availability["explanatory-note"];
 
     useExplanatoryNoteInput.disabled = (
       !available
@@ -277,9 +280,21 @@ export function createAnalysisForm({
     }
 
     if (documentContextInput) {
-      const documentAvailable = getMode() === "pdf_only";
+      const documentAvailable = availability["document-context"];
       documentContextInput.disabled = !documentAvailable;
       if (!documentAvailable) documentContextInput.checked = false;
+    }
+
+    if (equipmentSearchInput) {
+      const equipmentAvailable = availability["equipment-search"];
+      equipmentSearchInput.disabled = !equipmentAvailable;
+      if (!equipmentAvailable) equipmentSearchInput.checked = false;
+    }
+
+    if (unverifiedSourcesInput) {
+      const allowUnverified = availability["unverified-sources"];
+      unverifiedSourcesInput.disabled = !allowUnverified;
+      if (!allowUnverified) unverifiedSourcesInput.checked = false;
     }
 
     const enabled = (
@@ -676,6 +691,9 @@ export function createAnalysisForm({
   function toFormData() {
     const body = new FormData();
     body.append("use_document_context", String(Boolean(documentContextInput?.checked && !documentContextInput.disabled && getMode() === "pdf_only")));
+    const equipmentEnabled = Boolean(equipmentSearchInput?.checked && !equipmentSearchInput.disabled && getMode() === "pdf_only");
+    body.append("use_equipment_web_search", String(equipmentEnabled));
+    body.append("allow_unverified_equipment_sources", String(Boolean(equipmentEnabled && unverifiedSourcesInput?.checked && !unverifiedSourcesInput.disabled)));
 
     const pdf = pdfInput.files[0];
 
@@ -1021,6 +1039,7 @@ export function createAnalysisForm({
     pdfInput.addEventListener(
       "change",
       () => {
+        resetUnverifiedSources();
         resetProjectContextPreflight();
 
         sync();
@@ -1029,7 +1048,10 @@ export function createAnalysisForm({
 
     cadInput.addEventListener(
       "change",
-      sync,
+      () => {
+        resetUnverifiedSources();
+        sync();
+      },
     );
 
     pagesInput.addEventListener(
@@ -1038,6 +1060,8 @@ export function createAnalysisForm({
         pagesInput.setCustomValidity("");
       },
     );
+
+    equipmentSearchInput?.addEventListener("change", syncExplanatoryNote);
 
     useExplanatoryNoteInput.addEventListener(
       "change",
@@ -1086,7 +1110,12 @@ export function createAnalysisForm({
   }
 
 
+  function resetUnverifiedSources() {
+    if (unverifiedSourcesInput) unverifiedSourcesInput.checked = false;
+  }
+
   return {
+    resetUnverifiedSources,
     applyProjectContextPreflight,
     bind,
     getMode,

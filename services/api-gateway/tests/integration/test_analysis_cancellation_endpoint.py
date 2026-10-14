@@ -24,11 +24,13 @@ from pdrd_api_gateway.core.container import (
 )
 from pdrd_api_gateway.core.settings import (
     DatabaseSettings,
+    EquipmentSearchSettings,
     Settings,
 )
 from pdrd_api_gateway.domain.analysis_job import (
     AnalysisJob,
 )
+from pdrd_api_gateway.infrastructure.equipment_search import EquipmentSearchClient
 from pdrd_api_gateway.main import create_app
 
 
@@ -83,6 +85,7 @@ async def noop_shutdown() -> None:
 def build_client(
     *,
     cancel_stub: CancelAnalysisStub,
+    equipment_enabled: bool = False,
 ) -> TestClient:
     """Создаёт HTTP client с fake cancellation use case."""
     settings = Settings(
@@ -90,6 +93,10 @@ def build_client(
         environment="test",
         database=DatabaseSettings(
             password="test-password",
+        ),
+        equipment_search=EquipmentSearchSettings(
+            enabled=equipment_enabled,
+            internal_key="test-key",
         ),
     )
 
@@ -191,3 +198,24 @@ def test_cancel_terminal_analysis_returns_409() -> None:
     assert response.json()["detail"] == (
         f"Analysis job {job_id} cannot be cancelled from status completed."
     )
+
+
+def test_cancel_analysis_stops_equipment_search(monkeypatch) -> None:
+    """Отмена основного задания передаётся EQ-ветви по document ID."""
+    job = AnalysisJob.create(document_id=uuid4())
+    job.mark_queued()
+    job.mark_cancelled()
+    cancelled_documents: list[UUID] = []
+
+    async def fake_cancel(self: EquipmentSearchClient, document_id: UUID) -> None:
+        cancelled_documents.append(document_id)
+
+    monkeypatch.setattr(EquipmentSearchClient, "cancel", fake_cancel)
+    with build_client(
+        cancel_stub=CancelAnalysisStub(job=job),
+        equipment_enabled=True,
+    ) as client:
+        response = client.post(f"/api/v1/analyses/{job.id}/cancel")
+
+    assert response.status_code == 200
+    assert cancelled_documents == [job.document_id]

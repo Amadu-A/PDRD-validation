@@ -112,6 +112,7 @@ def _auth_preflight_environment(**overrides: str) -> str:
     values = {
         "PDRD_POSTGRES_PASSWORD": "test-postgres-password",
         "PDRD_RETENTION_INTERNAL_KEY": "r" * 32,
+        "PDRD_EQUIPMENT_INTERNAL_KEY": "e" * 32,
         "PDRD_RABBITMQ_PASSWORD": "test-rabbitmq-password",
         "COMPOSE_PROFILES": "identity,auth",
         "USER_SERVICE_INTERNAL_KEY": "u" * 32,
@@ -384,3 +385,20 @@ def test_startup_rejects_missing_retention_key(tmp_path: Path) -> None:
     )
     assert result.returncode == 1
     assert "PDRD_RETENTION_INTERNAL_KEY должен быть задан" in result.stderr
+
+
+@pytest.mark.parametrize("key", ["", "short"])
+def test_startup_rejects_missing_or_short_equipment_key(
+    tmp_path: Path, key: str
+) -> None:
+    """Новый внутренний API нельзя запустить без полноценного закрытого ключа."""
+    result = _run_startup_preflight(
+        tmp_path, _auth_preflight_environment(PDRD_EQUIPMENT_INTERNAL_KEY=key)
+    )
+    assert result.returncode == 1
+    assert "PDRD_EQUIPMENT_INTERNAL_KEY" in result.stderr
+    assert (
+        "должен быть задан" in result.stderr
+        if not key
+        else "не менее 32" in result.stderr
+    )

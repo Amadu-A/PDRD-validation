@@ -355,6 +355,8 @@ async def create_analysis(
         Form(),
     ] = None,
     use_document_context: Annotated[bool, Form()] = False,
+    use_equipment_web_search: Annotated[bool, Form()] = False,
+    allow_unverified_equipment_sources: Annotated[bool, Form()] = False,
     use_explanatory_note: Annotated[
         bool,
         Form(),
@@ -499,6 +501,8 @@ async def create_analysis(
         "pages": pages,
         "use_explanatory_note": (use_explanatory_note),
         "use_document_context": use_document_context,
+        "use_equipment_web_search": use_equipment_web_search,
+        "allow_unverified_equipment_sources": allow_unverified_equipment_sources,
         "note_start_page": (note_start_page),
         "note_end_page": (note_end_page),
         "normative_section_id": (normative_section_id),

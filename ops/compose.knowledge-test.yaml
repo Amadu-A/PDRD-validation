@@ -34,6 +34,7 @@ services:
       knowledge-test-qdrant:
         condition: service_started
     environment:
+      PDRD_RUN_DATABASE_TESTS: "1"
       PDRD_RUN_KNOWLEDGE_VECTOR_TESTS: "1"
       KNOWLEDGE_TEST_QDRANT_URL: http://knowledge-test-qdrant:6333
       PDRD_RUN_KNOWLEDGE_OWNER_DATABASE_TESTS: "1"
@@ -52,7 +53,7 @@ services:
         python -m alembic -c alembic.ini upgrade head
         python -m alembic -c alembic.ini current --check-heads --verbose
         cd /workspace
-        python -m pytest -q services/knowledge-service/tests/integration/test_package_owner_database.py services/knowledge-service/tests/integration/test_section_vector_cleanup.py services/knowledge-service/tests/integration/test_technical_assignment_retention_database.py
+        python -m pytest -q services/knowledge-service/tests/integration
     networks: [knowledge-test-only]
 networks:
   knowledge-test-only:

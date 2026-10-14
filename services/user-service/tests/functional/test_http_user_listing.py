@@ -11,6 +11,9 @@ from pdrd_user_service.application.use_cases.users import AdminRequired
 from pdrd_user_service.core.container import ApplicationContainer
 from pdrd_user_service.core.settings import DatabaseSettings, Settings
 from pdrd_user_service.domain.access import AccessTier
+from pdrd_user_service.domain.equipment_sources_access import (
+    EquipmentSourcesAccessState,
+)
 from pdrd_user_service.domain.identity import UserAccount, UserKind, UserStatus
 from pdrd_user_service.domain.normative_access import NormativeAccessState
 from pdrd_user_service.domain.review_access import ReviewAccessState
@@ -58,6 +61,7 @@ class Listing:
             values["offset"],
             (ReviewAccessState(False, False, False),),
             (NormativeAccessState(False, False, False),),
+            (EquipmentSourcesAccessState(False, False, True),),
         )
 
 
@@ -113,6 +117,8 @@ def test_user_listing_requires_key_actor_and_valid_page() -> None:
     assert response.json()["limit"] == 1
     assert response.json()["offset"] == 4
     assert response.json()["items"][0]["user_id"] == str(USER_ID)
+    assert response.json()["items"][0]["equipment_sources_access_editable"]
+    assert not response.json()["items"][0]["equipment_sources_access"]
     assert "password" not in response.text
     assert listing.calls == [{"actor_user_id": ADMIN_ID, "limit": 1, "offset": 4}]
 

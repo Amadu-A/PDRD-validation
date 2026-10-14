@@ -39,6 +39,9 @@ def required_permission(
     if len(segments) < 3 or segments[:2] != ["api", "v1"]:
         return None
 
+    if segments[2] == "equipment-sources":
+        return ("equipment_sources.manage",)
+
     if segments[2] == "normative":
         if "technical-assignments" in segments:
             return None
@@ -63,6 +66,8 @@ def required_permission(
         if segments[4] == "reviewed-pdf":
             return ("review.pdf.download",)
         if segments[4] == "review":
+            if len(segments) == 6 and segments[5] == "equipment-updates":
+                return ("review.findings.decide",)
             if len(segments) == 6 and segments[5] == "commands":
                 action = payload.get("action")
                 if action == "add":

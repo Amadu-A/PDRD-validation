@@ -1,0 +1,30 @@
+# services/equipment-search-service/pyproject.toml
+# Зависимости отдельного сервиса поиска документации оборудования.
+
+[build-system]
+requires = ["setuptools>=80,<82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdrd-equipment-search-service"
+version = "0.1.0"
+description = "Поиск и проверка документации производителей оборудования."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.141.1",
+    "httpx==0.28.1",
+    "pydantic-settings==2.15.0",
+    "SQLAlchemy==2.0.52",
+    "asyncpg==0.31.0",
+    "alembic==1.19.1",
+    "uvicorn[standard]==0.52.4",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.4,<10.0",
+    "pytest-asyncio>=1.1,<2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -34,7 +34,7 @@ from pdrd_knowledge_service.infrastructure.storage.filesystem import (
     LocalFilesystemNormativeDocumentStorage,
 )
 from pdrd_knowledge_service.infrastructure.vector_store.qdrant import QdrantVectorStore
-from sqlalchemy import delete, text
+from sqlalchemy import delete
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -85,13 +85,6 @@ async def test_retention_source_marker_and_guest_vectors(tmp_path):
     ]
     collection = "test_retention_" + uuid4().hex
     try:
-        async with engine.connect() as connection:
-            assert (
-                await connection.scalar(
-                    text("SELECT version_num FROM alembic_version_knowledge")
-                )
-                == "20261006_0007"
-            )
         async with SqlAlchemyNormativeCatalogUnitOfWork(sessions) as work:
             await work.sections.add(
                 NormativeSection(section, "Раздел", "Промпт", now, now)

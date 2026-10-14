@@ -3,6 +3,7 @@
 """Подготовка источников и инженерная проверка физической страницы проекта."""
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +12,7 @@ from pdrd_analysis_service.application.json_schemas import (
 )
 from pdrd_analysis_service.application.ports.vision_model import (
     StructuredVisionModel,
+    VisionModelOutputBudgetError,
 )
 from pdrd_analysis_service.application.prompts import (
     build_experience_query,
@@ -528,285 +530,167 @@ class CheckPageAgainstNorms:
         *,
         page_number: int,
         prompt: str,
-        normative_source_ids: tuple[
-            str,
-            ...,
-        ],
-        technical_assignment_source_ids: tuple[
-            str,
-            ...,
-        ],
-        user_package_source_ids: tuple[
-            str,
-            ...,
-        ],
+        normative_source_ids: tuple[str, ...],
+        technical_assignment_source_ids: tuple[str, ...],
+        user_package_source_ids: tuple[str, ...],
         image_bytes: bytes,
         document_context_source_ids: tuple[str, ...] = (),
-    ) -> tuple[
-        str,
-        ViolationCandidateSelection,
-        GenerationMetrics,
-    ]:
-        """Adaptive discovery не даёт дублям занять весь output budget."""
-        raw_candidates: list[
-            dict[
-                str,
-                Any,
-            ]
-        ] = []
-
-        all_metrics: list[GenerationMetrics,] = []
-
+        check_cancellation: Callable[[], Awaitable[None]] | None = None,
+    ) -> tuple[str, ViolationCandidateSelection, GenerationMetrics]:
+        """Продолжает полные порции; исчерпанный ответ заменяет меньшим заданием."""
+        raw_candidates: list[dict[str, Any]] = []
+        all_metrics: list[GenerationMetrics] = []
         summary = ""
-
-        candidate_selection = select_violation_candidates(
-            [],
-        )
-
-        mode = "probe"
-        probe_round = 0
-        call_index = 0
-
-        while candidate_selection.consolidated_count < self.max_issues:
-            remaining_capacity = (
-                self.max_issues - candidate_selection.consolidated_count
+        selection = select_violation_candidates([])
+        mode, probe_round, bulk_round, call_index = "probe", 0, 0, 0
+        capacity_limit = _NORMATIVE_PROBE_BATCH_SIZE
+        sparse_bulk_rounds = 0
+        while selection.consolidated_count < self.max_issues:
+            capacity = min(
+                capacity_limit, self.max_issues - selection.consolidated_count
             )
-
-            if mode == "bulk":
-                current_capacity = remaining_capacity
-                current_num_predict = self.num_predict
-                stage_suffix = "bulk"
-
-            else:
-                probe_round += 1
-
-                current_capacity = min(
-                    _NORMATIVE_PROBE_BATCH_SIZE,
-                    remaining_capacity,
+            num_predict = (
+                self.num_predict
+                if mode == "bulk"
+                else min(_NORMATIVE_PROBE_NUM_PREDICT, self.num_predict)
+            )
+            suffix = (
+                ("bulk" if bulk_round == 0 else f"bulk{bulk_round + 1}")
+                if mode == "bulk"
+                else f"probe{probe_round + 1}"
+            )
+            if capacity_limit < _NORMATIVE_PROBE_BATCH_SIZE:
+                suffix += f":split{capacity_limit}"
+            if call_index and check_cancellation is not None:
+                await check_cancellation()
+            instruction = _candidate_batch_instruction(
+                capacity=capacity, existing_candidates=selection.candidates
+            )
+            batch_prompt = f"{prompt}\n\n{_HIGH_RECALL_FINDING_POLICY}\n\n{instruction}"
+            try:
+                generation = await self.vision_model.generate_json(
+                    prompt=batch_prompt,
+                    schema=build_normative_check_schema(
+                        source_ids=normative_source_ids,
+                        technical_assignment_source_ids=technical_assignment_source_ids,
+                        user_package_source_ids=user_package_source_ids,
+                        document_context_source_ids=document_context_source_ids,
+                        max_issues=capacity,
+                    ),
+                    num_predict=num_predict,
+                    seed=200 + call_index,
+                    stage=f"normative_check:{page_number}:{suffix}",
+                    image_bytes=image_bytes,
                 )
-
-                current_num_predict = min(
-                    _NORMATIVE_PROBE_NUM_PREDICT,
-                    self.num_predict,
+            except VisionModelOutputBudgetError as error:
+                call_index += 1
+                if error.metrics is not None:
+                    all_metrics.append(error.metrics)
+                if capacity <= 1:
+                    raise
+                capacity_limit = max(1, capacity // 2)
+                logger.warning(
+                    "normative_batch_reduced page=%s previous_capacity=%s next_capacity=%s retained=%s",
+                    page_number,
+                    capacity,
+                    capacity_limit,
+                    selection.consolidated_count,
                 )
-
-                stage_suffix = f"probe{probe_round}"
-
-            existing_candidates = candidate_selection.candidates
-
-            batch_prompt = (
-                f"{prompt}\n\n"
-                f"{_HIGH_RECALL_FINDING_POLICY}\n\n"
-                f"{
-                    _candidate_batch_instruction(
-                        capacity=current_capacity,
-                        existing_candidates=existing_candidates,
-                    )
-                }"
-            )
-
-            generation = await self.vision_model.generate_json(
-                prompt=batch_prompt,
-                schema=build_normative_check_schema(
-                    source_ids=normative_source_ids,
-                    technical_assignment_source_ids=(technical_assignment_source_ids),
-                    user_package_source_ids=(user_package_source_ids),
-                    document_context_source_ids=document_context_source_ids,
-                    max_issues=current_capacity,
-                ),
-                num_predict=current_num_predict,
-                seed=200 + call_index,
-                stage=(f"normative_check:{page_number}:{stage_suffix}"),
-                image_bytes=image_bytes,
-            )
-
+                continue
             call_index += 1
-
-            all_metrics.append(
-                generation.metrics,
-            )
-
+            if mode == "probe":
+                probe_round += 1
+            else:
+                bulk_round += 1
+            all_metrics.append(generation.metrics)
             if not summary:
-                summary = str(
-                    generation.payload.get(
-                        "summary",
-                        "",
-                    )
-                ).strip()
-
-            violations = generation.payload.get(
-                "violations",
-                [],
-            )
-
-            round_selection = select_violation_candidates(
-                violations,
-            )
-
-            if not isinstance(
-                violations,
-                list,
-            ):
-                raise ValueError(
-                    "Поле violations должно быть JSON array.",
-                )
-
-            before_unique = candidate_selection.consolidated_count
-
-            raw_candidates.extend(
-                dict(
-                    candidate,
-                )
-                for candidate in violations
-            )
-
-            candidate_selection = select_violation_candidates(
-                raw_candidates,
-            )
-
-            new_unique = candidate_selection.consolidated_count - before_unique
-
+                summary = str(generation.payload.get("summary", "")).strip()
+            violations = generation.payload.get("violations", [])
+            if not isinstance(violations, list):
+                raise ValueError("Поле violations должно быть JSON array.")
+            round_selection = select_violation_candidates(violations)
+            before_unique = selection.consolidated_count
+            raw_candidates.extend(dict(candidate) for candidate in violations)
+            selection = select_violation_candidates(raw_candidates)
+            new_unique = selection.consolidated_count - before_unique
             generated = round_selection.generated_count
-
-            unique_ratio = new_unique / generated if generated > 0 else 0.0
-
-            duplicate_ratio = 1.0 - unique_ratio if generated > 0 else 0.0
-
+            unique_ratio = new_unique / generated if generated else 0.0
             logger.info(
-                (
-                    "normative_discovery_round "
-                    "page=%s mode=%s "
-                    "round=%s capacity=%s "
-                    "num_predict=%s "
-                    "generated=%s "
-                    "round_distinct=%s "
-                    "new_unique=%s "
-                    "total_unique=%s "
-                    "unique_ratio=%.3f "
-                    "duplicate_ratio=%.3f"
-                ),
+                "normative_discovery_round page=%s mode=%s round=%s capacity=%s "
+                "num_predict=%s generated=%s round_distinct=%s new_unique=%s "
+                "total_unique=%s unique_ratio=%.3f duplicate_ratio=%.3f",
                 page_number,
                 mode,
-                probe_round,
-                current_capacity,
-                current_num_predict,
+                call_index,
+                capacity,
+                num_predict,
                 generated,
                 round_selection.consolidated_count,
                 new_unique,
-                candidate_selection.consolidated_count,
+                selection.consolidated_count,
                 unique_ratio,
-                duplicate_ratio,
+                1 - unique_ratio if generated else 0.0,
             )
-
-            if candidate_selection.consolidated_count >= self.max_issues:
+            reason = ""
+            if selection.consolidated_count >= self.max_issues:
+                reason = "max_issues"
+            elif generation.metrics.done_reason == "length":
+                # Полный JSON, даже пустой, на границе токенов не доказывает полноту проверки.
+                if capacity <= 1:
+                    raise VisionModelOutputBudgetError(
+                        f"shared-vlm исчерпал output budget единичной порции normative_check:{page_number}.",
+                        metrics=generation.metrics,
+                    )
+                capacity_limit = max(1, capacity // 2)
+                mode = "bulk"
+                continue
+            elif generated < capacity:
+                reason = "batch_not_full"
+            elif new_unique == 0:
+                reason = "no_new_distinct"
+            if reason:
                 logger.info(
-                    (
-                        "normative_discovery_stop "
-                        "page=%s reason=max_issues "
-                        "unique=%s raw=%s"
-                    ),
+                    "normative_discovery_stop page=%s reason=%s unique=%s raw=%s",
                     page_number,
-                    candidate_selection.consolidated_count,
-                    len(
-                        raw_candidates,
-                    ),
+                    reason,
+                    selection.consolidated_count,
+                    len(raw_candidates),
                 )
-
                 break
-
-            if generated < current_capacity:
-                logger.info(
-                    (
-                        "normative_discovery_stop "
-                        "page=%s reason=batch_not_full "
-                        "generated=%s capacity=%s "
-                        "unique=%s raw=%s"
-                    ),
-                    page_number,
-                    generated,
-                    current_capacity,
-                    candidate_selection.consolidated_count,
-                    len(
-                        raw_candidates,
-                    ),
-                )
-
-                break
-
-            if new_unique == 0:
-                logger.info(
-                    (
-                        "normative_discovery_stop "
-                        "page=%s reason=no_new_distinct "
-                        "unique=%s raw=%s"
-                    ),
-                    page_number,
-                    candidate_selection.consolidated_count,
-                    len(
-                        raw_candidates,
-                    ),
-                )
-
-                break
-
             if mode == "bulk":
-                logger.info(
-                    (
-                        "normative_discovery_stop "
-                        "page=%s reason=bulk_complete "
-                        "unique=%s raw=%s"
-                    ),
-                    page_number,
-                    candidate_selection.consolidated_count,
-                    len(
-                        raw_candidates,
-                    ),
+                sparse_bulk_rounds = (
+                    sparse_bulk_rounds + 1
+                    if unique_ratio < _NORMATIVE_DENSE_UNIQUE_RATIO
+                    else 0
                 )
-
-                break
-
+                if sparse_bulk_rounds >= _NORMATIVE_MAX_PROBE_ROUNDS:
+                    logger.info(
+                        "normative_discovery_stop page=%s reason=duplicate_saturation unique=%s raw=%s",
+                        page_number,
+                        selection.consolidated_count,
+                        len(raw_candidates),
+                    )
+                    break
+                continue
             if unique_ratio >= _NORMATIVE_DENSE_UNIQUE_RATIO:
                 mode = "bulk"
-
                 logger.info(
-                    (
-                        "normative_discovery_expand "
-                        "page=%s reason=dense_probe "
-                        "unique_ratio=%.3f "
-                        "unique=%s"
-                    ),
+                    "normative_discovery_expand page=%s reason=dense_probe unique_ratio=%.3f unique=%s",
                     page_number,
                     unique_ratio,
-                    candidate_selection.consolidated_count,
+                    selection.consolidated_count,
                 )
-
                 continue
-
             if probe_round >= _NORMATIVE_MAX_PROBE_ROUNDS:
                 logger.info(
-                    (
-                        "normative_discovery_stop "
-                        "page=%s reason=duplicate_saturation "
-                        "probe_rounds=%s "
-                        "unique=%s raw=%s"
-                    ),
+                    "normative_discovery_stop page=%s reason=duplicate_saturation probe_rounds=%s unique=%s raw=%s",
                     page_number,
                     probe_round,
-                    candidate_selection.consolidated_count,
-                    len(
-                        raw_candidates,
-                    ),
+                    selection.consolidated_count,
+                    len(raw_candidates),
                 )
-
                 break
-
-        return (
-            summary,
-            candidate_selection,
-            _combine_generation_metrics(
-                all_metrics,
-            ),
-        )
+        return summary, selection, _combine_generation_metrics(all_metrics)
 
     async def execute(
         self,
@@ -833,6 +717,7 @@ class CheckPageAgainstNorms:
             ...,
         ] = (),
         document_context_sources: tuple[DocumentContextSource, ...] = (),
+        check_cancellation: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[
         str,
         tuple[
@@ -886,6 +771,7 @@ class CheckPageAgainstNorms:
             user_package_source_ids=(user_package_source_ids),
             image_bytes=image_bytes,
             document_context_source_ids=document_context_source_ids,
+            check_cancellation=check_cancellation,
         )
 
         # Восстановление факта повторения маркировки не зависит от того,

@@ -95,6 +95,8 @@ class SubmitAnalysisStub:
         pages: str | None,
         use_explanatory_note: bool = False,
         use_document_context: bool = False,
+        use_equipment_web_search: bool = False,
+        allow_unverified_equipment_sources: bool = False,
         note_start_page: str | int | None = None,
         note_end_page: str | int | None = None,
         normative_section_id: UUID | None = None,
@@ -122,6 +124,8 @@ class SubmitAnalysisStub:
 
         self.use_explanatory_note = use_explanatory_note
         self.use_document_context = use_document_context
+        self.use_equipment_web_search = use_equipment_web_search
+        self.allow_unverified_equipment_sources = allow_unverified_equipment_sources
 
         self.note_start_page = note_start_page
         self.note_end_page = note_end_page
@@ -565,3 +569,20 @@ def test_create_pdf_analysis_forwards_whole_document_switch():
     assert response.status_code == 202, response.text
     assert submit.use_document_context is True
     assert submit.use_explanatory_note is False
+
+
+def test_create_pdf_analysis_forwards_equipment_switches() -> None:
+    """HTTP-заявка передаёт настройки EQ в сценарий создания задания."""
+    submit = SubmitAnalysisStub()
+    with build_client(submit_stub=submit, get_stub=GetAnalysisStub(None)) as client:
+        response = client.post(
+            "/api/v1/analyses",
+            files={"pdf": ("drawing.pdf", b"pdf-content", "application/pdf")},
+            data={
+                "use_equipment_web_search": "true",
+                "allow_unverified_equipment_sources": "true",
+            },
+        )
+    assert response.status_code == 202, response.text
+    assert submit.use_equipment_web_search is True
+    assert submit.allow_unverified_equipment_sources is True

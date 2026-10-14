@@ -33,9 +33,16 @@ class ExtractPdfDocument:
         *,
         content: bytes,
         page_spec: str | None,
+        include_equipment_specification: bool = False,
     ) -> PdfDocument:
         """Проверяет выбор перед рендерингом и извлечением страниц."""
         selection = self.inspect(content=content, page_spec=page_spec)
+        if include_equipment_specification:
+            return self.reader.extract(
+                content,
+                selected_pages=selection.selected_pages,
+                include_equipment_specification=True,
+            )
         return self.reader.extract(content, selected_pages=selection.selected_pages)
 
     def inspect(self, *, content: bytes, page_spec: str | None) -> PdfSelection:

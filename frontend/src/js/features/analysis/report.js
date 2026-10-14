@@ -8,7 +8,8 @@
  * на физической странице источника.
  */
 
-import { findingSourceDescription, preferredSourceArray, findingPageLabel, focusDocumentEvidence } from "./finding-provenance.js";
+import { findingSourceDescription, preferredSourceArray, findingPageLabel, findingPages, focusDocumentEvidence, equipmentSnapshotUrl } from "./finding-provenance.js";
+import { mountFindingList, CATEGORY_LABELS, SEVERITY_LABELS, DECISION_LABELS } from "./finding-list.js";
 import {
   sourceModeLabel,
   statusLabel,
@@ -18,26 +19,7 @@ import {
   appendAnalysisVisualization,
 } from "./visualization.js";
 import { openTechnicalAssignmentCitation } from "../technical_assignment/citation.js";
-
-
-const CATEGORY_LABELS = {
-  normative_control: "Нормоконтроль",
-  equipment: "Оборудование",
-  scheme_logic: "Логика схемы",
-  marking: "Маркировка",
-  completeness: "Комплектность",
-  optimization: "Оптимизация",
-  customer_requirements: "Требования заказчика",
-  document_consistency: "Согласованность документа",
-  other: "Прочее",
-};
-
-
-const SEVERITY_LABELS = {
-  info: "Информация",
-  warning: "Предупреждение",
-  error: "Ошибка",
-};
+import { appendEquipmentReport } from "./equipment-report.js";
 
 
 function createElement(
@@ -695,6 +677,7 @@ function appendFinding(
   index,
   defaultPage,
   parent,
+  jobId,
 ) {
   const page = (
     finding.page
@@ -723,6 +706,13 @@ function appendFinding(
   article.dataset.findingId = String(finding.finding_id ?? "");
   article.dataset.reviewPage = String(page);
   article.dataset.reviewBasis = String(finding.basis ?? "");
+  article.dataset.findingReportCard = "";
+  article.dataset.findingCategory = String(finding.category || "other");
+  article.dataset.findingSeverity = String(finding.severity || "");
+  article.dataset.findingStatus = String(finding.status || "needs_review");
+  article.dataset.findingDiscoveryIndex = String(index);
+  article.dataset.reviewDecision = "pending";
+  article.classList.add("analysis-result__finding--pending");
 
   const header = createElement(
     "div",
@@ -757,7 +747,7 @@ function appendFinding(
       "span",
       "analysis-result__badge",
       (
-        SEVERITY_LABELS[
+        finding.severity === "error" && finding.status !== "confirmed" ? "Возможная ошибка" : SEVERITY_LABELS[
           finding.severity
         ]
         || finding.severity
@@ -773,6 +763,17 @@ function appendFinding(
   article.append(
     header,
   );
+
+  const decision = createElement("span", "analysis-result__badge", finding.status === "hypothesis"
+    ? "Гипотеза — не включена в Review" : DECISION_LABELS.pending);
+  decision.dataset.findingReviewLabel = ""; badges.append(decision);
+  const navigation = createElement("div", "analysis-result__finding-navigation");
+  const pages = findingPages(finding, page);
+  for (const number of pages) {
+    const link = createElement("a", "analysis-result__evidence-link", pages.length === 1 ? "Показать на листе" : `Показать на листе ${number}`);
+    link.href = `#analysis-page-${number}`; focusDocumentEvidence(link, finding.finding_id, number); navigation.append(link);
+  }
+  article.append(navigation);
 
   appendTextBlock(
     article,
@@ -832,6 +833,43 @@ function appendFinding(
       details.append(link);
     }
     article.append(details);
+  }
+
+  const equipmentSources = Array.isArray(finding.equipment_documentation_basis_sources)
+    ? finding.equipment_documentation_basis_sources : [];
+  if (equipmentSources.length) {
+    const details = createElement("details", "analysis-result__sources");
+    details.append(createElement("summary", "", `Документация производителя [EQ] (${equipmentSources.length})`));
+    for (const source of equipmentSources) {
+      const row = createElement("div", "analysis-result__source-item");
+      const label = `${source.manufacturer || ""} ${source.model || ""} · ревизия ${source.document_revision || "не указана"} · стр. ${source.page || "?"} · ${source.trust_status || "unknown"}: ${source.snippet || ""}`;
+      const url = String(source.source_url || "");
+      if (/^https?:\/\//i.test(url)) {
+        const link = createElement("a", "analysis-result__source-link", label);
+        link.href = url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        row.append(link);
+      } else {
+        row.textContent = label;
+      }
+      details.append(row);
+      const snapshot = equipmentSnapshotUrl(jobId, source.source_id);
+      if (snapshot) {
+        const saved = createElement("a", "analysis-result__source-link", "Сохранённая копия документа");
+        saved.href = snapshot;
+        saved.target = "_blank";
+        saved.rel = "noopener noreferrer";
+        details.append(saved);
+      }
+    }
+    article.append(details);
+    const eq = finding.equipment_details ?? {};
+    appendTextBlock(
+      article, "Сопоставление оборудования",
+      `${eq.manufacturer || ""} ${eq.model || ""} ${eq.variant || ""} · ${eq.object_ref || ""}
+${eq.property_name || ""}: проект ${eq.project_value || ""} ${eq.project_unit || ""}; производитель ${eq.manufacturer_value || ""} ${eq.manufacturer_unit || ""}.`,
+    );
   }
 
   const reviewBasis = appendTextBlock(
@@ -903,9 +941,12 @@ function appendFinding(
     );
   }
 
-  parent.append(
-    article,
-  );
+  const feedback = createElement("p", "analysis-result__review-feedback"); feedback.dataset.reviewFeedback = "";
+  const history = createElement("details", "analysis-result__review-history");
+  history.append(createElement("summary", "", "История решений"));
+  const historyBody = createElement("div", "", "История решений появится после подключения Review.");
+  historyBody.dataset.reviewHistory = ""; history.append(historyBody); article.append(feedback, history);
+  parent.append(article);
 }
 
 
@@ -1115,6 +1156,13 @@ function appendOverview(
     payload.findings_count ?? 0,
   );
 
+  if (payload.equipment_check?.enabled) {
+    const check = payload.equipment_check;
+    appendMetaItem(list, "Проверка оборудования", ["queued", "running"].includes(check.search_status)
+      ? "Продолжается в фоне" : check.status === "completed" ? "Завершена" : "Частично выполнена");
+    appendMetaItem(list, "Уникальных моделей оборудования", check.statistics?.unique_models ?? (Array.isArray(check.inventory) ? check.inventory.length : 0));
+  }
+
   appendProjectContextSummary(
     payload,
     list,
@@ -1131,13 +1179,15 @@ function appendOverview(
     )
     && payload.pipeline.length
   ) {
-    appendMetaItem(
-      list,
-      "Pipeline",
-      payload.pipeline.join(
-        " → ",
-      ),
-    );
+    const pipeline = createElement("details", "analysis-result__pipeline");
+    pipeline.append(createElement("summary", "", "Этапы обработки (Pipeline)"));
+    const stages = createElement("ol");
+    for (const stage of payload.pipeline) stages.append(createElement("li", "", stage));
+    pipeline.append(stages);
+    const card = createElement("div", "analysis-result__meta-item");
+    card.append(createElement("dt", "", "Обработка"));
+    const value = createElement("dd"); value.append(pipeline); card.append(value);
+    list.append(card);
   }
 
   section.append(
@@ -1152,6 +1202,8 @@ function appendOverview(
     );
   }
 
+  if (payload.equipment_check?.enabled) appendEquipmentReport(section, payload.equipment_check, { jobId });
+
   parent.append(
     section,
   );
@@ -1161,6 +1213,7 @@ function appendOverview(
 function appendFindings(
   payload,
   parent,
+  jobId,
 ) {
   const section = createElement(
     "section",
@@ -1183,73 +1236,10 @@ function appendFindings(
       : []
   );
 
-  const mainFindings = findings.filter(
-    (finding) => finding.status !== "hypothesis",
-  );
-  const hypotheses = findings.filter(
-    (finding) => finding.status === "hypothesis",
-  );
-
-  if (!mainFindings.length) {
-    section.append(
-      createElement(
-        "p",
-        "analysis-result__empty",
-        "Замечания не сформированы.",
-      ),
-    );
-
-  } else {
-    const defaultPage = (
-      payload.page?.page_number
-      ?? payload.selected_pages?.[0]
-      ?? 1
-    );
-
-    mainFindings.forEach(
-      (finding, index) => {
-        appendFinding(finding, index, defaultPage, section);
-      },
-    );
-  }
-
-  parent.append(
-    section,
-  );
-
-  if (hypotheses.length) {
-    const details = createElement(
-      "details",
-      "analysis-result__hypotheses",
-    );
-    details.append(
-      createElement(
-        "summary",
-        "analysis-result__hypotheses-summary",
-        `Неподтверждённые гипотезы (${hypotheses.length})`,
-      ),
-    );
-    hypotheses.forEach((finding) => {
-      const item = createElement("article", "analysis-result__hypothesis");
-      item.append(
-        createElement("strong", "", `Лист ${finding.page ?? finding.page_number ?? "—"}: ${finding.comment ?? "Гипотеза"}`),
-      );
-      appendTextBlock(item, "Исходное основание", finding.evidence);
-      appendTextBlock(item, "Исходные области VLM (не проверены)", JSON.stringify(finding.visual_regions ?? []));
-      const origins = Array.isArray(finding.origin_assertions)
-        ? finding.origin_assertions
-        : [];
-      origins.forEach((origin) => {
-        appendTextBlock(item, "Исходные N/T/U ID", [
-          ...(origin.normative_source_ids ?? []),
-          ...(origin.technical_assignment_source_ids ?? []),
-          ...(origin.user_package_source_ids ?? []),
-        ].join(", "));
-      });
-      details.append(item);
-    });
-    parent.append(details);
-  }
+  const defaultPage = payload.page?.page_number ?? payload.selected_pages?.[0] ?? 1;
+  findings.forEach((finding, index) => appendFinding(finding, index, defaultPage, section, jobId));
+  mountFindingList(section);
+  parent.append(section);
 }
 
 
@@ -1355,6 +1345,7 @@ export function renderAnalysisReport(
       createTechnicalAssignmentCitation,
       userPackageSources,
       createUserPackageCitation,
+      equipmentSnapshotUrl: (sourceId) => equipmentSnapshotUrl(jobId, sourceId),
     },
   );
 
@@ -1367,6 +1358,7 @@ export function renderAnalysisReport(
   appendFindings(
     payload,
     fragment,
+    jobId,
   );
 
   appendLimitations(

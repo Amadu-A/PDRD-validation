@@ -74,10 +74,13 @@ class UserAccount:
     authorization_version: int = 1
     review_access_enabled: bool = False
     normative_access_enabled: bool = False
+    equipment_sources_access_enabled: bool = False
 
     def __post_init__(self) -> None:
         """Проверяет профиль, способ регистрации и хронологию входов."""
         _require_uuid(self.user_id, "user_id")
+        if not isinstance(self.equipment_sources_access_enabled, bool):
+            raise TypeError("equipment_sources_access_enabled должен быть bool")
         if not isinstance(self.normative_access_enabled, bool):
             raise TypeError("normative_access_enabled должен быть bool")
         if not isinstance(self.review_access_enabled, bool):

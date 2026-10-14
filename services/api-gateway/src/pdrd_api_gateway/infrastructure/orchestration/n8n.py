@@ -186,6 +186,12 @@ class N8nAnalysisOrchestrator:
             "use_document_context": "true"
             if submission.use_document_context
             else "false",
+            "use_equipment_web_search": (
+                "true" if submission.use_equipment_web_search else "false"
+            ),
+            "allow_unverified_equipment_sources": (
+                "true" if submission.allow_unverified_equipment_sources else "false"
+            ),
             "use_explanatory_note": (
                 "true" if submission.use_explanatory_note else "false"
             ),

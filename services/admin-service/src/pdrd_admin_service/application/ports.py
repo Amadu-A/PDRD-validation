@@ -5,6 +5,10 @@
 from typing import Protocol
 from uuid import UUID
 
+from pdrd_admin_service.contracts.equipment_sources_access_models import (
+    ChangeEquipmentSourcesAccessRequest,
+    EquipmentSourcesAccessChangeResponse,
+)
 from pdrd_admin_service.contracts.models import (
     ReplaceRoleRequest,
     RoleDetailResponse,
@@ -78,6 +82,15 @@ class UserDirectory(Protocol):
         command: ChangeNormativeAccessRequest,
     ) -> NormativeAccessChangeResponse:
         """Передаёт назначение удаление нормативных объектов доверенному владельцу профилей с CAS."""
+        ...
+
+    async def change_equipment_sources_access(
+        self,
+        actor_user_id: UUID,
+        target_user_id: UUID,
+        command: ChangeEquipmentSourcesAccessRequest,
+    ) -> EquipmentSourcesAccessChangeResponse:
+        """Передаёт назначение управление источниками оборудования доверенному владельцу профилей с CAS."""
         ...
 
     async def replace_role(

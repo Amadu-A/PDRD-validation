@@ -251,6 +251,10 @@ class LocalFilesystemAnalysisArtifactStore:
                 "pdf_file_name": (submission.pdf_file_name),
                 "cad_file_name": (submission.cad_file_name),
                 "use_document_context": submission.use_document_context,
+                "use_equipment_web_search": submission.use_equipment_web_search,
+                "allow_unverified_equipment_sources": (
+                    submission.allow_unverified_equipment_sources
+                ),
                 "use_explanatory_note": (submission.use_explanatory_note),
                 "note_start_page": (submission.note_start_page),
                 "note_end_page": (submission.note_end_page),
@@ -378,6 +382,12 @@ class LocalFilesystemAnalysisArtifactStore:
                     "cad_file_name",
                 ),
                 use_document_context=bool(manifest.get("use_document_context", False)),
+                use_equipment_web_search=bool(
+                    manifest.get("use_equipment_web_search", False)
+                ),
+                allow_unverified_equipment_sources=bool(
+                    manifest.get("allow_unverified_equipment_sources", False)
+                ),
                 use_explanatory_note=bool(
                     manifest.get(
                         "use_explanatory_note",

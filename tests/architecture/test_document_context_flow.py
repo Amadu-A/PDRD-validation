@@ -25,7 +25,11 @@ def test_document_context_is_built_once_and_used_before_page_check() -> None:
     workflow = _workflow()
     names = {node["name"] for node in workflow["nodes"]}
     assert len(names) == len(workflow["nodes"])
-    assert _next(workflow, "Understand Pages Stage") == ["Use Document Context"]
+    assert _next(workflow, "Understand Pages Stage") == ["Use Equipment Search"]
+    assert (
+        workflow["connections"]["Use Equipment Search"]["main"][1][0]["node"]
+        == "Use Document Context"
+    )
     assert _next(workflow, "Create Document Context") == ["Understand Page"]
     assert _next(workflow, "Search Document Context") == [
         "Gate Collect Page Document Context"

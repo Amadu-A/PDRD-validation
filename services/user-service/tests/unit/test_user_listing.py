@@ -178,3 +178,18 @@ async def test_user_listing_exposes_effective_review_state(
         state.review_access_automatic,
         state.review_access_editable,
     ) == (allowed, automatic, editable)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_equipment_sources_assignment_is_exposed_in_admin_row(enabled):
+    """Галочка обычного пользователя отражает серверное назначение каталога."""
+    users = Users()
+    users.target = replace(users.target, equipment_sources_access_enabled=enabled)
+    page = await AdminUserListing(lambda: Work(users), clock=lambda: AT).page(
+        actor_user_id=ADMIN_ID, limit=1, offset=1
+    )
+    state = page.equipment_sources_access_states[0]
+    assert state.equipment_sources_access is enabled
+    assert not state.equipment_sources_access_automatic
+    assert state.equipment_sources_access_editable

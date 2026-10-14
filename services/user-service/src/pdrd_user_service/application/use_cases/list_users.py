@@ -11,6 +11,10 @@ from pdrd_user_service.application.ports.repository import UnitOfWorkFactory
 from pdrd_user_service.application.use_cases.users import AdminRequired
 from pdrd_user_service.core.observability import log_execution_time
 from pdrd_user_service.domain.access import Role
+from pdrd_user_service.domain.equipment_sources_access import (
+    EquipmentSourcesAccessState,
+    equipment_sources_access_state,
+)
 from pdrd_user_service.domain.identity import UserAccount
 from pdrd_user_service.domain.normative_access import (
     NormativeAccessState,
@@ -36,6 +40,7 @@ class UserPage:
     offset: int
     review_access_states: tuple[ReviewAccessState, ...]
     normative_access_states: tuple[NormativeAccessState, ...]
+    equipment_sources_access_states: tuple[EquipmentSourcesAccessState, ...]
 
 
 class AdminUserListing:
@@ -72,7 +77,7 @@ class AdminUserListing:
             ):
                 raise AdminRequired("Требуется действующая роль администратора")
             items, total = await work.users.list_users(limit=limit, offset=offset)
-            states, normative_states = [], []
+            states, normative_states, equipment_states = [], [], []
             at = self._clock()
             for user in items:
                 subject = access_subject_for(
@@ -83,6 +88,7 @@ class AdminUserListing:
                 )
                 states.append(review_access_state(subject))
                 normative_states.append(normative_access_state(subject))
+                equipment_states.append(equipment_sources_access_state(subject))
             return UserPage(
                 items=items,
                 total=total,
@@ -90,4 +96,5 @@ class AdminUserListing:
                 offset=offset,
                 review_access_states=tuple(states),
                 normative_access_states=tuple(normative_states),
+                equipment_sources_access_states=tuple(equipment_states),
             )

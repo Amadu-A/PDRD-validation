@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
+from pdrd_knowledge_service.application.equipment_fact_index import EquipmentFactIndex
+from pdrd_knowledge_service.application.equipment_semantic_index import (
+    EquipmentSemanticIndex,
+)
 from pdrd_knowledge_service.application.normative_catalog_defaults import (
     DEFAULT_SECTION_SYSTEM_PROMPT,
 )
@@ -93,6 +97,9 @@ from pdrd_knowledge_service.infrastructure.database.engine import (
     build_async_engine,
     build_session_factory,
 )
+from pdrd_knowledge_service.infrastructure.database.equipment_facts import (
+    PostgresEquipmentFactIndex,
+)
 from pdrd_knowledge_service.infrastructure.database.health import (
     DatabaseReadinessProbe,
 )
@@ -178,6 +185,7 @@ class ApplicationContainer:
     build_document_context: BuildDocumentContext | None = None
     search_document_context: SearchDocumentContext | None = None
     document_context_index: DocumentContextIndex | None = None
+    equipment_fact_index: EquipmentFactIndex | None = None
 
 
 def build_container() -> ApplicationContainer:
@@ -463,6 +471,13 @@ def build_container() -> ApplicationContainer:
         list_technical_assignment_requirements=(list_technical_assignment_requirements),
         search_technical_assignment_guided=(search_technical_assignment_guided),
         document_context_index=document_index,
+        equipment_fact_index=EquipmentFactIndex(
+            cache=PostgresEquipmentFactIndex(database_engine),
+            semantic_index=EquipmentSemanticIndex(
+                embedding_provider=embedding_provider,
+                vector_store=vector_store,
+            ),
+        ),
         build_document_context=(
             BuildDocumentContext(
                 index=document_index,

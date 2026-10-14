@@ -27,6 +27,7 @@ class PdfReader(Protocol):
         content: bytes,
         *,
         selected_pages: tuple[int, ...],
+        include_equipment_specification: bool = False,
     ) -> PdfDocument:
         """Извлекает и рендерит выбранные страницы."""
         ...

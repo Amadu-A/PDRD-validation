@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 QUALITY_SCRIPT = Path(__file__).resolve().parents[2] / "ops" / "check-quality.sh"
-SUITES = ("gateway", "knowledge", "experience", "user", "auth")
+SUITES = ("gateway", "knowledge", "experience", "user", "auth", "equipment")
 
 
 @pytest.fixture
@@ -102,7 +102,7 @@ def _operations(commands):
 
 
 def test_linux_quality_gate_runs_all_suites_and_cleans_each(run_quality_gate):
-    """Успешный запуск проверяет шесть этапов и очищает каждый тестовый проект."""
+    """Успешный запуск проверяет семь этапов и очищает каждый тестовый проект."""
     result, commands = run_quality_gate()
     assert result.returncode == 0, result.stderr
     assert _operations(commands) == [
@@ -110,7 +110,7 @@ def test_linux_quality_gate_runs_all_suites_and_cleans_each(run_quality_gate):
         "quality",
         *(f"{suite}:{operation}" for suite in SUITES for operation in ("up", "down")),
     ]
-    assert "[6/6]" in result.stdout
+    assert "[7/7]" in result.stdout
     assert "Все проверки прошли" in result.stdout
     for suite in SUITES:
         up, down = [command for command in commands if f"pdrd-{suite}-test" in command]
@@ -133,7 +133,7 @@ def test_linux_quality_gate_stops_before_integration_on_initial_failure(
     assert "Все проверки прошли" not in result.stdout
 
 
-@pytest.mark.parametrize("suite", ["gateway", "knowledge"])
+@pytest.mark.parametrize("suite", SUITES)
 def test_linux_quality_gate_cleans_failed_runner_and_stops(run_quality_gate, suite):
     """Сбой runner очищает его проект, сохраняет код и не запускает следующий набор."""
     result, commands = run_quality_gate(f"{suite}:up", exit_code=23)

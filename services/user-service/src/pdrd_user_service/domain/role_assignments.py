@@ -271,6 +271,7 @@ def access_subject_for(
         active=user.status is UserStatus.ACTIVE,
         review_access_enabled=user.review_access_enabled,
         normative_access_enabled=user.normative_access_enabled,
+        equipment_sources_access_enabled=user.equipment_sources_access_enabled,
     )
 
 

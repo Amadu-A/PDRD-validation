@@ -2,6 +2,8 @@
 
 """HTTP-схемы извлечения PDF."""
 
+from typing import Any
+
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -64,6 +66,7 @@ class PdfPageResponse(BaseModel):
     text_words: list[PdfTextWordResponse] = Field(
         default_factory=list,
     )
+    equipment_specification: dict[str, Any] | None = None
 
 
 class ProjectContextTextPageResponse(

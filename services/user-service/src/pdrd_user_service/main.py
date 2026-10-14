@@ -11,6 +11,9 @@ from pdrd_user_service.core.container import ApplicationContainer, build_contain
 from pdrd_user_service.transport.http.routers.admin_users import (
     router as admin_users_router,
 )
+from pdrd_user_service.transport.http.routers.equipment_sources_access import (
+    router as equipment_sources_access_router,
+)
 from pdrd_user_service.transport.http.routers.external_accounts import (
     router as external_accounts_router,
 )
@@ -92,6 +95,7 @@ def create_app(container: ApplicationContainer | None = None) -> FastAPI:
         app.include_router(review_scope_router)
         app.include_router(review_access_router)
         app.include_router(normative_access_router)
+        app.include_router(equipment_sources_access_router)
     return app
 
 

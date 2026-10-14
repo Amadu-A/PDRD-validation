@@ -472,6 +472,16 @@ class ReviewSettings(BaseModel):
         return self
 
 
+class EquipmentSearchSettings(BaseModel):
+    """Внутренний адрес и ключ отдельной EQ-ветви."""
+
+    enabled: bool = False
+    base_url: str = "http://equipment-search-service:8601"
+    internal_key: SecretStr = SecretStr("")
+    timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    wait_seconds: float = Field(default=190.0, gt=0, le=600)
+
+
 class Settings(BaseSettings):
     """Настройки работающего API Gateway."""
 
@@ -555,6 +565,9 @@ class Settings(BaseSettings):
     )
 
     review: ReviewSettings = Field(default_factory=ReviewSettings)
+    equipment_search: EquipmentSearchSettings = Field(
+        default_factory=EquipmentSearchSettings
+    )
 
     identity_proxy: IdentityProxySettings = Field(default_factory=IdentityProxySettings)
 

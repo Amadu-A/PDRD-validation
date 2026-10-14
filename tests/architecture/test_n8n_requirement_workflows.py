@@ -441,10 +441,16 @@ def test_requirement_flow_order_is_consistent() -> None:
                 workflow,
                 source,
             )
+            expected = (
+                "Collect Equipment Candidates"
+                if path.name == "analysis-v2-pdf.json"
+                and source == "Merge Finding Candidates"
+                else target
+            )
 
-            assert actual == target, (
+            assert actual == expected, (
                 path,
                 source,
                 actual,
-                target,
+                expected,
             )

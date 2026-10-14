@@ -19,6 +19,10 @@ from pdrd_admin_service.application.ports import (
     UserDirectory,
 )
 from pdrd_admin_service.application.session_authorization import authorize_session
+from pdrd_admin_service.contracts.equipment_sources_access_models import (
+    ChangeEquipmentSourcesAccessRequest,
+    EquipmentSourcesAccessChangeResponse,
+)
 from pdrd_admin_service.contracts.models import (
     ReplaceRoleRequest,
     RoleDetailResponse,
@@ -143,6 +147,21 @@ class AdminUsers:
         """Проверяет живую сессию и CSRF перед отдельным назначением удаление нормативных объектов."""
         identity = await self._authorize(token, "users.roles.assign", csrf or "")
         return await self._users.change_normative_access(
+            identity.user_id, target_user_id, command
+        )
+
+    @log_execution_time(operation="admin_equipment_sources_access_change")
+    async def change_equipment_sources_access(
+        self,
+        token: str | None,
+        target_user_id: UUID,
+        command: ChangeEquipmentSourcesAccessRequest,
+        *,
+        csrf: str | None,
+    ) -> EquipmentSourcesAccessChangeResponse:
+        """Проверяет живую сессию и CSRF перед отдельным назначением управление источниками оборудования."""
+        identity = await self._authorize(token, "users.roles.assign", csrf or "")
+        return await self._users.change_equipment_sources_access(
             identity.user_id, target_user_id, command
         )
 

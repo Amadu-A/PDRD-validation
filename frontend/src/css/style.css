@@ -15,12 +15,16 @@
 @import url("./blocks/auth-dialog.css");
 @import url("./blocks/portal-shell.css");
 @import url("./blocks/account.css");
+@import url("./blocks/equipment-sources.css");
 @import url("./blocks/admin.css");
 @import url("./blocks/admin-directory.css");
 @import url("./blocks/normative-sidebar.css");
 @import url("./blocks/analysis-panel.css");
 @import url("./blocks/analysis-form.css");
+@import url("./blocks/setting-help.css");
+@import url("./blocks/help-center.css");
 @import url("./blocks/analysis-result.css");
+@import url("./blocks/equipment-report.css");
 @import url("./blocks/analysis-annotation-detail.css");
 @import url("./blocks/analysis-export.css");
 @import url("./blocks/analysis-share.css");

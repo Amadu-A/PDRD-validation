@@ -5,6 +5,7 @@ import { createRoleForm } from "./role-form.js";
 import { getUserRoles } from "./api.js";
 import { createReviewAccessControl } from "./review-access.js";
 import { createNormativeAccessControl } from "./normative-access.js";
+import { createEquipmentSourcesAccessControl } from "./equipment-sources-access.js";
 
 const statusLabels = {
   active: "Активен",
@@ -44,7 +45,7 @@ export function renderUsers(root, users, onChanged) {
     const status = document.createElement("span");
     status.className = "admin-user__status";
     status.textContent = statusLabels[user.status] ?? user.status;
-    heading.append(name, status, createReviewAccessControl(user, { onChanged }), createNormativeAccessControl(user, { onChanged }));
+    heading.append(name, status, createReviewAccessControl(user, { onChanged }), createNormativeAccessControl(user, { onChanged }), createEquipmentSourcesAccessControl(user, { onChanged }));
     const meta = document.createElement("p");
     meta.className = "admin-user__meta";
     meta.textContent = [user.login, user.email, user.tier].filter(Boolean).join(" · ");

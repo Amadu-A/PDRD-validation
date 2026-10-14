@@ -122,7 +122,7 @@ def test_every_workflow_loads_complete_atomic_t_feed() -> None:
 
         assert "$pageCount * 200" in serialized, path
 
-        assert '"maxRequests": 5' in serialized, path
+        assert '"maxRequests": 10' in serialized, path
 
         feed = _serialized_node(
             nodes,
@@ -133,7 +133,7 @@ def test_every_workflow_loads_complete_atomic_t_feed() -> None:
 
         assert "new Set(requirementIds).size" in feed, path
 
-        assert "total > 1000" in feed, path
+        assert "total > 2000" in feed, path
 
         assert "analysis_document_id" in feed, path
 

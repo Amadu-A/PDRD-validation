@@ -229,6 +229,18 @@ def test_pdf_workflow_has_finding_local_normative_enrichment() -> None:
             workflow,
             "Merge Finding Candidates",
         )
+        == "Collect Equipment Candidates"
+    )
+    assert (
+        workflow["connections"]["Merge Equipment Candidates"]["main"][0][0]["node"]
+        == "Gate Enrich Findings"
+    )
+    assert (
+        workflow["connections"]["Restore Equipment Pages"]["main"][0][0]["node"]
+        == "Gate Enrich Findings"
+    )
+    assert (
+        _functional_successor(workflow, "Gate Enrich Findings")
         == "Prepare Finding Normative Queries"
     )
 

@@ -24,6 +24,7 @@
         <li><a href="#profile">Профиль</a></li>
         <li><a href="#rights">Мой доступ</a></li>
         <li><a href="#history" data-account-history-link hidden>История проверок</a></li>
+        <li><a href="#equipment-sources" data-account-equipment-sources-link hidden>Источники оборудования</a></li>
         <li><a href="#security">Безопасность</a></li>
         <li><a href="/admin.html" data-account-admin-link hidden>Админка</a></li>
       </ul></nav>
@@ -59,6 +60,13 @@
       <section class="account-card account-card--spaced analysis-history" id="history" data-analysis-history hidden aria-labelledby="historyTitle">
         <h2 class="account-card__title" id="historyTitle">История проверок</h2>
         <p class="account-card__description">Ваши сохранённые задания. Открытие результата не запускает анализ повторно.</p>
+      </section>
+      <section class="account-card account-card--spaced equipment-sources" id="equipment-sources" data-equipment-sources hidden aria-labelledby="equipmentSourcesTitle">
+        <h2 class="account-card__title" id="equipmentSourcesTitle">Источники оборудования</h2>
+        <p class="account-card__description">Разрешённые сайты используются для поиска паспортов, руководств и характеристик оборудования. Каждый найденный документ дополнительно проверяется на соответствие модели и исполнению.</p>
+        <p class="equipment-sources__notice"><strong>Важно.</strong> Разрешение сайта не подтверждает применимость каждого его документа к вашему оборудованию. Решения сохраняются в истории; www и основной домен учитываются отдельно.</p>
+        <div data-equipment-source-app></div>
+        <p class="portal-status" data-equipment-source-status role="status" aria-live="polite"></p>
       </section>
       <section class="account-card account-card--spaced" id="security" aria-labelledby="securityTitle">
         <p class="account-card__overline">Учётная запись</p><h2 class="account-card__title" id="securityTitle">Безопасность и устройства</h2>

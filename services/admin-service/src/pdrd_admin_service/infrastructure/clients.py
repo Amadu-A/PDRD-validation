@@ -16,6 +16,10 @@ from pdrd_admin_service.application.admin_users import (
     TargetNotFound,
     UpstreamUnavailable,
 )
+from pdrd_admin_service.contracts.equipment_sources_access_models import (
+    ChangeEquipmentSourcesAccessRequest,
+    EquipmentSourcesAccessChangeResponse,
+)
 from pdrd_admin_service.contracts.models import (
     ReplaceRoleRequest,
     RoleDetailResponse,
@@ -181,6 +185,21 @@ class UserServiceClient:
             json=command.model_dump(mode="json"),
         )
         return _validated(NormativeAccessChangeResponse, response)
+
+    async def change_equipment_sources_access(
+        self,
+        actor_user_id: UUID,
+        target_user_id: UUID,
+        command: ChangeEquipmentSourcesAccessRequest,
+    ) -> EquipmentSourcesAccessChangeResponse:
+        """Передаёт служебный ключ и актёра из проверенной сессии."""
+        response = await self._request(
+            "PATCH",
+            f"/internal/v1/users/{target_user_id}/equipment-sources-access",
+            actor_user_id=actor_user_id,
+            json=command.model_dump(mode="json"),
+        )
+        return _validated(EquipmentSourcesAccessChangeResponse, response)
 
     async def replace_role(
         self, actor_user_id: UUID, target_user_id: UUID, command: ReplaceRoleRequest

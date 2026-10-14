@@ -101,6 +101,7 @@ async def extract_pdf(
         bool,
         Form(),
     ] = False,
+    include_equipment_specification: Annotated[bool, Form()] = False,
     note_start_page: Annotated[
         str | None,
         Form(),
@@ -122,6 +123,11 @@ async def extract_pdf(
             document = container.extract_pdf.execute(
                 content=content,
                 page_spec=pages,
+                **(
+                    {"include_equipment_specification": True}
+                    if include_equipment_specification
+                    else {}
+                ),
             )
 
             if container.extract_pdf_project_context is None:
@@ -191,6 +197,7 @@ async def extract_pdf(
                 page_number=page.number,
                 page_type=page.page_type,
                 text=page.text,
+                equipment_specification=page.equipment_specification,
                 width_points=(page.width_points),
                 height_points=(page.height_points),
                 image_base64=(

@@ -180,3 +180,37 @@ def test_explanatory_note_end_must_be_greater() -> None:
             note_start_page="5",
             note_end_page="5",
         )
+
+
+def test_equipment_flags_require_pdf_and_explicit_search() -> None:
+    """EQ доступен только для PDF и не допускает unsafe без проверки."""
+    common = {
+        "pdf_present": True,
+        "cad_present": False,
+        "pages": None,
+        "pdf_file_name": "drawing.pdf",
+        "cad_file_name": None,
+    }
+    submission = AnalysisSubmission.create(
+        **common,
+        use_equipment_web_search=True,
+        allow_unverified_equipment_sources=True,
+    )
+    assert submission.use_equipment_web_search is True
+    assert submission.allow_unverified_equipment_sources is True
+
+    with pytest.raises(InvalidAnalysisSubmissionError, match="только при проверке"):
+        AnalysisSubmission.create(
+            **common,
+            allow_unverified_equipment_sources=True,
+        )
+
+    with pytest.raises(InvalidAnalysisSubmissionError, match="PDF-only"):
+        AnalysisSubmission.create(
+            pdf_present=False,
+            cad_present=True,
+            pages=None,
+            pdf_file_name=None,
+            cad_file_name="drawing.dxf",
+            use_equipment_web_search=True,
+        )

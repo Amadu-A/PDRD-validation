@@ -1,0 +1,40 @@
+<!-- frontend/src/help.html -->
+<!-- Публичный справочный центр: текст и поиск работают без сессии и API. -->
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Руководство пользователя · PDRD</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script type="module" src="/js/features/help/page.js" defer></script>
+</head>
+<body class="page">
+  <a class="help-center__skip" href="#helpReading">К тексту руководства</a>
+  <header class="site-header">
+    <a class="site-header__brand" href="/" aria-label="PDRD — анализ документов"><span class="site-header__mark" aria-hidden="true">P</span><span>PDRD <small>Validation</small></span></a>
+    <nav class="site-header__nav" aria-label="Основная навигация">
+      <a href="/">Анализ</a><a href="/account.html">Личный кабинет</a>
+      <a href="/help.html" aria-current="page"><span aria-hidden="true">?</span> Справка</a>
+    </nav>
+  </header>
+  <main class="help-center" data-help-center>
+    <div class="help-center__heading">
+      <div><p class="help-center__eyebrow">Справка и инструкции</p><h1>Руководство пользователя</h1><p>Как проверить проект, подобрать настройки и разобраться в результате — с примерами.</p><small data-help-updated></small></div>
+      <a class="help-center__back" href="/">← Вернуться к анализу</a>
+    </div>
+    <div class="help-center__layout">
+      <aside class="help-center__sidebar">
+        <label class="help-center__search-label" for="helpSearch">Поиск по руководству</label>
+        <input class="help-center__search" id="helpSearch" type="search" maxlength="200" data-help-search placeholder="Например: ТЗ, EQ, галочка" aria-controls="helpReading">
+        <button class="help-center__clear" type="button" data-help-clear hidden>Сбросить поиск</button>
+        <p class="help-center__search-status" data-help-status role="status" aria-live="polite"></p>
+        <nav class="help-center__toc" data-help-toc aria-label="Разделы руководства"></nav>
+        <div class="help-center__tip"><strong>Начните с задачи</strong><p>Галочки N/T/U/E выбирать не нужно. Подготовьте нужные документы и включайте только полезные дополнительные проверки.</p><a href="#scenarios">Подобрать настройки →</a></div>
+      </aside>
+      <div class="help-center__reading" id="helpReading" tabindex="-1" data-help-articles></div>
+    </div>
+    <noscript><p>Для поиска и просмотра встроенной справки включите JavaScript. Читаемая версия руководства хранится в документации проекта: docs/user-guide.md.</p></noscript>
+  </main>
+</body>
+</html>

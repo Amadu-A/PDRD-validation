@@ -166,7 +166,11 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
         "Understand Pages Stage",
     ]
 
-    assert _successors(workflow, "Understand Pages Stage") == ["Use Document Context"]
+    assert _successors(workflow, "Understand Pages Stage") == ["Use Equipment Search"]
+    assert (
+        workflow["connections"]["Use Equipment Search"]["main"][1][0]["node"]
+        == "Use Document Context"
+    )
     assert _successors(workflow, "Continue Build Document Context") == [
         "Create Document Context"
     ]

@@ -50,6 +50,7 @@ class Permission(StrEnum):
     NORMATIVE_CATALOG_READ = "normative.catalog.read"
     NORMATIVE_WRITE = "normative.write"
     NORMATIVE_DELETE = "normative.delete"
+    EQUIPMENT_SOURCES_MANAGE = "equipment_sources.manage"
     EXPERIENCE_CATALOG_READ = "experience.catalog.read"
     EXPERIENCE_CAPTURE = "experience.capture"
     EXPERIENCE_VERSION_CREATE = "experience.version.create"
@@ -77,6 +78,7 @@ class AccessSubject:
     active: bool = True
     review_access_enabled: bool = False
     normative_access_enabled: bool = False
+    equipment_sources_access_enabled: bool = False
 
     def __post_init__(self) -> None:
         """Отвергает некорректный или изменяемый доверенный контекст."""
@@ -88,6 +90,8 @@ class AccessSubject:
             raise TypeError("roles должен содержать только Role")
         if not isinstance(self.active, bool):
             raise TypeError("active должен быть bool")
+        if not isinstance(self.equipment_sources_access_enabled, bool):
+            raise TypeError("equipment_sources_access_enabled должен быть bool")
         if not isinstance(self.normative_access_enabled, bool):
             raise TypeError("normative_access_enabled должен быть bool")
         if not isinstance(self.review_access_enabled, bool):
@@ -157,6 +161,7 @@ _ADMIN_PERMISSIONS = frozenset(
         *_PROFILE_PERMISSIONS,
         *_HEAD_PERMISSIONS,
         Permission.NORMATIVE_DELETE,
+        Permission.EQUIPMENT_SOURCES_MANAGE,
         Permission.EXPERIENCE_VERSION_CREATE,
         Permission.EXPERIENCE_VERSION_APPLY,
         Permission.SYSTEM_PROMPT_MANAGE,
@@ -191,6 +196,8 @@ def effective_permissions(subject: AccessSubject) -> frozenset[Permission]:
     permissions = set(_PUBLIC_PERMISSIONS)
     if subject.tier is not AccessTier.GUEST:
         permissions.update(_PROFILE_PERMISSIONS)
+        if subject.equipment_sources_access_enabled:
+            permissions.add(Permission.EQUIPMENT_SOURCES_MANAGE)
     if subject.tier is AccessTier.MEMBER:
         if subject.normative_access_enabled and subject.roles & {
             Role.DESIGNER,

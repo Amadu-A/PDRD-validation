@@ -467,12 +467,16 @@ def test_workflows_publish_progress_through_cancellation_gate() -> None:
             assert config["webhook"] in progress_url
             assert f"stage: '{stage}'" in progress_body
 
+            eq_merge = (
+                config["path"].name == "analysis-v2-pdf.json"
+                and source_name == "Merge Finding Candidates"
+            )
             assert _successors_in_order(
                 workflow,
                 source_name,
             ) == [
                 progress_name,
-                gate_name,
+                "Collect Equipment Candidates" if eq_merge else gate_name,
             ], (
                 config["path"],
                 source_name,
@@ -567,19 +571,19 @@ def test_workflows_publish_progress_through_cancellation_gate() -> None:
                 ),
             }
 
-            assert _incoming_connections(
-                workflow,
-                gate_name,
-            ) == {
-                (
-                    source_name,
-                    0,
-                ),
-                (
-                    continue_name,
-                    1,
-                ),
+            expected_gate_inputs = {
+                (continue_name, 1),
             }
+            if eq_merge:
+                expected_gate_inputs.update(
+                    {
+                        ("Merge Equipment Candidates", 0),
+                        ("Restore Equipment Pages", 0),
+                    }
+                )
+            else:
+                expected_gate_inputs.add((source_name, 0))
+            assert _incoming_connections(workflow, gate_name) == expected_gate_inputs
 
 
 def test_progress_callbacks_remain_single_best_effort_requests() -> None:

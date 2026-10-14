@@ -48,6 +48,7 @@ class HttpReviewService:
             "read": "",
             "command": "/commands",
             "export": "/pdf-manifest",
+            "equipment_update": "/equipment-updates",
         }[context.operation]
         method = "GET" if context.operation in {"read", "export"} else "POST"
         try:
@@ -64,7 +65,9 @@ class HttpReviewService:
                         "Authorization": f"Bearer {self.internal_key}",
                         "X-Review-Actor": context.actor,
                     },
-                    json=command if context.operation == "command" else None,
+                    json=command
+                    if context.operation in {"command", "equipment_update"}
+                    else None,
                 )
         except httpx.HTTPError as error:
             raise ReviewRequestError(

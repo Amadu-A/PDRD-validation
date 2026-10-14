@@ -70,7 +70,7 @@ def test_retention_migrations_have_one_head_and_preserve_existing_chain():
         graph = ScriptDirectory.from_config(
             Config(str(ROOT / "services" / service / "alembic.ini"))
         )
-        expected_head = "20261006_0008" if service == "api-gateway" else "20261006_0007"
+        expected_head = "20261006_0008" if service == "api-gateway" else "20261008_0008"
         assert graph.get_heads() == [expected_head]
         revisions = list(graph.walk_revisions())
         assert len({node.revision for node in revisions}) == len(revisions)

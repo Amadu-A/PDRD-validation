@@ -1,0 +1,47 @@
+# ops/compose.equipment-test.yaml
+# Изолированная проверка миграций, snapshot и SSE Equipment Search.
+
+name: pdrd-equipment-service-test
+services:
+  equipment-test-postgres:
+    image: postgres:16-alpine
+    restart: 'no'
+    environment:
+      POSTGRES_DB: pdrd_equipment_test
+      POSTGRES_USER: equipment_test
+      POSTGRES_PASSWORD: equipment-test-only
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U equipment_test -d pdrd_equipment_test']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks: [equipment-test-only]
+  equipment-test-runner:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.quality
+    restart: 'no'
+    depends_on:
+      equipment-test-postgres:
+        condition: service_healthy
+    environment:
+      PDRD_RUN_DATABASE_TESTS: '1'
+      EQUIPMENT_SEARCH_SERVICE_DATABASE__HOST: equipment-test-postgres
+      EQUIPMENT_SEARCH_SERVICE_DATABASE__PORT: 5432
+      EQUIPMENT_SEARCH_SERVICE_DATABASE__NAME: pdrd_equipment_test
+      EQUIPMENT_SEARCH_SERVICE_DATABASE__USER: equipment_test
+      EQUIPMENT_SEARCH_SERVICE_DATABASE__PASSWORD: equipment-test-only
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        set -eu
+        cd /workspace/services/equipment-search-service
+        python -m alembic -c alembic.ini upgrade head
+        python -m alembic -c alembic.ini current --check-heads --verbose
+        cd /workspace
+        python -m pytest -q services/equipment-search-service/tests
+    networks: [equipment-test-only]
+networks:
+  equipment-test-only:
+    internal: true

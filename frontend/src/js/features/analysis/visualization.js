@@ -696,6 +696,22 @@ function createFindingDetailControl(
     ),
   );
 
+  const equipmentSources = Array.isArray(finding.equipment_documentation_basis_sources)
+    ? finding.equipment_documentation_basis_sources : [];
+  if (equipmentSources.length) {
+    const eq = finding.equipment_details ?? {};
+    appendDetailField(
+      tooltip, "Документация производителя [EQ]",
+      equipmentSources.map((source) =>
+        `${source.manufacturer || ""} ${source.model || ""} · ревизия ${source.document_revision || "?"} · стр. ${source.page || "?"}: ${source.snippet || ""}`
+      ).join("\n"),
+    );
+    appendDetailField(
+      tooltip, "Сравнение оборудования",
+      `${eq.property_name || ""}: проект ${eq.project_value || ""} ${eq.project_unit || ""}; производитель ${eq.manufacturer_value || ""} ${eq.manufacturer_unit || ""}.`,
+    );
+  }
+
   appendDetailField(
     tooltip,
     "Контекст ПЗ",
@@ -768,6 +784,22 @@ function appendFindingLinks(parent, finding, dependencies) {
       wrapper.append(link);
       sourcesBlock.append(wrapper);
     }
+  }
+  for (const source of finding.equipment_documentation_basis_sources ?? []) {
+    const saved = dependencies.equipmentSnapshotUrl?.(source.source_id);
+    const external = String(source.source_url || "");
+    const url = saved || (/^https?:\/\//i.test(external) ? external : "");
+    if (!url) continue;
+    const link = createElement(
+      "a", "analysis-result__source-link",
+      `EQ · ${source.manufacturer || ""} ${source.model || ""} · стр. ${source.page || "?"}`,
+    );
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    const wrapper = createElement("span", "analysis-result__annotation-source");
+    wrapper.append(link);
+    sourcesBlock.append(wrapper);
   }
   const documentPages = new Set();
   for (const source of finding.document_context_basis_sources ?? []) {
