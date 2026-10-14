@@ -230,11 +230,11 @@ def test_high_recall_budget_is_committed_in_settings_and_env() -> None:
     )
 
     assert (
-        "max_retry_num_predict: int = Field(\n        default=14000," in settings_source
+        "max_retry_num_predict: int = Field(\n        default=16000," in settings_source
     )
 
     assert (
         "ANALYSIS_SERVICE_PIPELINE__NORM_CHECK_NUM_PREDICT=14000" in environment_source
     )
 
-    assert "ANALYSIS_SERVICE_VLM__MAX_RETRY_NUM_PREDICT=14000" in environment_source
+    assert "ANALYSIS_SERVICE_VLM__MAX_RETRY_NUM_PREDICT=16000" in environment_source

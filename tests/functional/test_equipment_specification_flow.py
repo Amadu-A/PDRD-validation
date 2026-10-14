@@ -181,10 +181,15 @@ async def test_all_31_pages_and_specification_survive_http_and_final_workflow(
             if item["model"]
         }
         assert [page["page_number"] for page in pages] == list(range(1, 32))
-        assert all(
-            PageFactsPayload.model_validate(page["facts"]).to_domain().normative_queries
-            for page in pages
-        )
+        for page, source in zip(pages, extracted["pages"], strict=True):
+            # Программные PageFacts не выдумывают запросы: следующий прежний этап
+            # строит их из всех объектов и исходного текста, без ещё одного VLM.
+            queries = await client.post(
+                "/internal/v1/pages/normative-queries",
+                json={"page_facts": page["facts"], "extracted_text": source["text"]},
+            )
+            assert queries.status_code == 200 and queries.json()["queries"]
+            assert PageFactsPayload.model_validate(page["facts"]).to_domain().objects
         for request in vision.generate_json.await_args_list:
             kwargs = request.kwargs
             if kwargs["stage"].startswith("page_understanding:"):

@@ -92,14 +92,22 @@ def test_finalization_output_budget_is_sufficient_for_large_batch() -> None:
         _env_value(
             "ANALYSIS_SERVICE_PIPELINE__FINAL_NUM_PREDICT",
         )
-        == "4000"
+        == "6000"
     )
 
-    settings = PipelineSettings(
-        final_num_predict=4000,
-    )
+    assert PipelineSettings().final_num_predict == 6000
 
-    assert settings.final_num_predict == 4000
+
+def test_page_budget_and_retry_defaults_match_committed_example():
+    """Контролируемые бюджеты совпадают в Python и Compose; начальные N/T сохранены."""
+    assert _env_value("ANALYSIS_SERVICE_PIPELINE__PAGE_FACTS_NUM_PREDICT") == "4000"
+    assert _env_value("ANALYSIS_SERVICE_VLM__MAX_ATTEMPTS") == "3"
+    assert _env_value("ANALYSIS_SERVICE_VLM__MAX_RETRY_NUM_PREDICT") == "16000"
+    assert PipelineSettings().page_facts_num_predict == 4000
+    assert VllmSettings().max_attempts == 3
+    assert VllmSettings().max_retry_num_predict == 16000
+    assert PipelineSettings().norm_check_num_predict == 14000
+    assert PipelineSettings().technical_assignment_num_predict == 4000
 
 
 def test_shared_vlm_uses_stable_logical_contract() -> None:

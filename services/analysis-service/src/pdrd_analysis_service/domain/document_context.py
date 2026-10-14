@@ -35,6 +35,11 @@ class DocumentFact:
     continuation_marker: str
     evidence_text: str
     visual_regions: tuple[dict[str, Any], ...] = ()
+    source_item_id: str = ""
+    source_row_ids: tuple[str, ...] = ()
+    source_pages: tuple[int, ...] = ()
+    source_regions: tuple[dict[str, Any], ...] = ()
+    extraction_method: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,7 +257,7 @@ def document_fact_from_mapping(raw: object) -> DocumentFact | None:
         return None
     regions = raw.get("visual_regions", [])
     safe_regions: list[dict[str, Any]] = []
-    if isinstance(regions, list):
+    if isinstance(regions, (list, tuple)):
         for region in regions[:2]:
             if not isinstance(region, dict):
                 continue
@@ -270,4 +275,30 @@ def document_fact_from_mapping(raw: object) -> DocumentFact | None:
                 and 0 <= confidence <= 1
             ):
                 safe_regions.append({**box, "confidence": confidence})
-    return DocumentFact(**values, visual_regions=tuple(safe_regions))
+    return DocumentFact(
+        **values,
+        visual_regions=tuple(safe_regions),
+        source_item_id=str(raw.get("source_item_id") or ""),
+        source_row_ids=tuple(
+            value
+            for value in _provenance_values(raw, "source_row_ids")
+            if isinstance(value, str)
+        ),
+        source_pages=tuple(
+            value
+            for value in _provenance_values(raw, "source_pages")
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        ),
+        source_regions=tuple(
+            dict(region)
+            for region in _provenance_values(raw, "source_regions")
+            if isinstance(region, dict)
+        ),
+        extraction_method=str(raw.get("extraction_method") or ""),
+    )
+
+
+def _provenance_values(raw: dict, key: str) -> tuple | list:
+    """Не допускает обхода строки или None как массива происхождения."""
+    value = raw.get(key)
+    return value if isinstance(value, (list, tuple)) else ()

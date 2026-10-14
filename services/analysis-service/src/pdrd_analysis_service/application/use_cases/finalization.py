@@ -14,6 +14,7 @@ from pdrd_analysis_service.application.json_schemas import (
 from pdrd_analysis_service.application.ports.vision_model import (
     StructuredVisionModel,
     VisionModelError,
+    VisionModelOutputBudgetError,
 )
 from pdrd_analysis_service.application.prompts import (
     build_finalization_prompt,
@@ -377,6 +378,8 @@ def _can_split_finalization_error(
     error: VisionModelError,
 ) -> bool:
     """Разрешает split только для ошибок, зависящих от размера batch."""
+    if isinstance(error, VisionModelOutputBudgetError):
+        return True
     message = str(
         error,
     )
@@ -880,6 +883,10 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                 ),
                 image_bytes=None,
             )
+            if generation.metrics.done_reason == "length":
+                raise VisionModelOutputBudgetError(
+                    "Финализация достигла предела вывода.", metrics=generation.metrics
+                )
 
         except VisionModelError as error:
             if len(
@@ -934,6 +941,12 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                             "error": str(
                                 error,
                             )[:1200],
+                            **(
+                                error.metrics.as_dict()
+                                if isinstance(error, VisionModelOutputBudgetError)
+                                and error.metrics
+                                else {}
+                            ),
                         },
                         *left.metrics,
                         *right.metrics,
@@ -953,6 +966,8 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                     ),
                 )
 
+            if isinstance(error, VisionModelOutputBudgetError):
+                raise
             fallback_findings = tuple(
                 self._fallback(
                     finding,

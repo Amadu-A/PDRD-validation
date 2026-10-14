@@ -69,7 +69,7 @@ class VllmSettings(BaseModel):
     )
 
     max_attempts: int = Field(
-        default=2,
+        default=3,
         ge=1,
         le=5,
     )
@@ -81,7 +81,7 @@ class VllmSettings(BaseModel):
     )
 
     max_retry_num_predict: int = Field(
-        default=14000,
+        default=16000,
         ge=1,
         le=32000,
     )
@@ -115,7 +115,7 @@ class PipelineSettings(BaseModel):
     max_facts_per_page: int = Field(default=12, ge=1, le=40)
 
     page_facts_num_predict: int = Field(
-        default=3200,
+        default=4000,
         ge=1,
         le=10000,
     )
@@ -151,7 +151,7 @@ class PipelineSettings(BaseModel):
     )
 
     final_num_predict: int = Field(
-        default=1800,
+        default=6000,
         ge=1,
         le=10000,
     )

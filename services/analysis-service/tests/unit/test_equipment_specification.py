@@ -151,8 +151,8 @@ async def test_more_than_forty_table_items_bypass_vlm_equipment_array_and_keep_o
     assert report["raw_row_count"] == 65
 
 
-async def test_unavailable_table_uses_original_vision_route_and_disabled_eq_ignores_specification():
-    """Скан или ненадёжная таблица использует существующий визуальный маршрут."""
+async def test_unavailable_table_uses_vision_and_both_disabled_flags_ignore_specification():
+    """Скан сохраняет визуальный маршрут; без D и EQ спецификация не используется."""
     provider = model()
     source = specification()
     source.update(status="unavailable", coverage_complete=False)
@@ -177,6 +177,7 @@ async def test_unavailable_table_uses_original_vision_route_and_disabled_eq_igno
         extracted_text="",
         image_bytes=b"scan",
         use_equipment_web_search=False,
+        use_document_context=False,
         equipment_specification={"invalid": True},
     )
     assert facts.equipment_specification is None and facts.equipment_identities == ()

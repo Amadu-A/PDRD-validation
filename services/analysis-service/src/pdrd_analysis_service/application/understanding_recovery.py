@@ -29,6 +29,7 @@ async def recover_page_understanding(
     max_equipment: int,
     initial_error: VisionModelOutputBudgetError,
     should_stop: Callable[[], Awaitable[bool]] | None = None,
+    prompt_suffix: str = "",
 ) -> tuple[dict, GenerationMetrics]:
     """Разделяет основной ответ, D и EQ; лимиты фактов и правила идентификации сохраняет."""
     metrics = [initial_error.metrics] if initial_error.metrics is not None else []
@@ -58,12 +59,15 @@ async def recover_page_understanding(
 
     def prompt(facts: int = 0, equipment: int = 0):
         """Оставляет исходные инструкции grounding и исходный контекст изображения."""
-        return build_page_understanding_prompt(
-            page_number=page_number,
-            heuristic_page_type=heuristic_page_type,
-            extracted_text=extracted_text,
-            max_facts=facts,
-            max_equipment=equipment,
+        return (
+            build_page_understanding_prompt(
+                page_number=page_number,
+                heuristic_page_type=heuristic_page_type,
+                extracted_text=extracted_text,
+                max_facts=facts,
+                max_equipment=equipment,
+            )
+            + prompt_suffix
         )
 
     core_schema = build_page_facts_schema(0, 0)

@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import time
+from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -75,6 +76,7 @@ class VllmStructuredVisionModel:
         self._retry_backoff_seconds = retry_backoff_seconds
 
         self._max_retry_num_predict = max_retry_num_predict
+        self._max_model_len: int | None = None
 
     async def generate_json(
         self,
@@ -93,6 +95,7 @@ class VllmStructuredVisionModel:
         )
 
         last_content = ""
+        attempt_metrics: list[GenerationMetrics] = []
 
         for attempt in range(
             1,
@@ -122,6 +125,28 @@ class VllmStructuredVisionModel:
 
             started_at = time.perf_counter()
 
+            def record_failure(
+                reason: str,
+                attempt=attempt,
+                budget=attempt_num_predict,
+                started=started_at,
+            ) -> GenerationMetrics:
+                """Учитывает время и запрос; неизвестный расход GPU остаётся неизвестным."""
+                attempt_metrics.append(
+                    GenerationMetrics(
+                        attempt,
+                        reason,
+                        budget,
+                        round((time.perf_counter() - started) * 1000, 2),
+                        0.0,
+                        None,
+                        None,
+                        0,
+                        0,
+                    )
+                )
+                return self._combined_metrics(attempt_metrics)
+
             try:
                 async with httpx.AsyncClient(
                     timeout=httpx.Timeout(
@@ -137,6 +162,7 @@ class VllmStructuredVisionModel:
                     response.raise_for_status()
 
             except httpx.HTTPStatusError as error:
+                failure_metrics = record_failure("http_status")
                 if self._can_retry_transport_error(
                     attempt=attempt,
                     status_code=(error.response.status_code),
@@ -162,9 +188,9 @@ class VllmStructuredVisionModel:
                     (
                         "shared-vlm вернул HTTP ошибку "
                         f"на этапе {stage}: "
-                        f"{error.response.status_code}: "
-                        f"{error.response.text[:1500]}"
+                        f"{error.response.status_code}."
                     ),
+                    metrics=failure_metrics,
                 ) from error
 
             except (
@@ -172,6 +198,7 @@ class VllmStructuredVisionModel:
                 httpx.NetworkError,
                 httpx.RemoteProtocolError,
             ) as error:
+                failure_metrics = record_failure("transport")
                 if attempt < self._max_attempts:
                     logger.warning(
                         (
@@ -194,12 +221,19 @@ class VllmStructuredVisionModel:
                     continue
 
                 raise VisionModelError(
-                    (f"Не удалось обратиться к shared-vlm на этапе {stage}: {error}"),
+                    (
+                        f"Не удалось обратиться к shared-vlm на этапе {stage}: {type(error).__name__}"
+                    ),
+                    metrics=failure_metrics,
                 ) from error
 
             except httpx.HTTPError as error:
+                failure_metrics = record_failure("transport")
                 raise VisionModelError(
-                    (f"Не удалось обратиться к shared-vlm на этапе {stage}: {error}"),
+                    (
+                        f"Не удалось обратиться к shared-vlm на этапе {stage}: {type(error).__name__}"
+                    ),
+                    metrics=failure_metrics,
                 ) from error
 
             total_duration_ms = round(
@@ -211,6 +245,7 @@ class VllmStructuredVisionModel:
                 response_payload = response.json()
 
             except ValueError as error:
+                failure_metrics = record_failure("invalid_http_json")
                 if attempt < self._max_attempts:
                     logger.warning(
                         (
@@ -230,6 +265,7 @@ class VllmStructuredVisionModel:
 
                 raise VisionModelError(
                     (f"shared-vlm вернул не-JSON HTTP-ответ на этапе {stage}."),
+                    metrics=failure_metrics,
                 ) from error
 
             try:
@@ -244,6 +280,7 @@ class VllmStructuredVisionModel:
                 )
 
             except ValueError as error:
+                failure_metrics = record_failure("invalid_completion_payload")
                 if attempt < self._max_attempts:
                     logger.warning(
                         (
@@ -266,8 +303,9 @@ class VllmStructuredVisionModel:
                     (
                         "shared-vlm вернул "
                         "некорректный completion payload "
-                        f"на этапе {stage}: {error}"
+                        f"на этапе {stage}."
                     ),
+                    metrics=failure_metrics,
                 ) from error
 
             metrics = GenerationMetrics(
@@ -285,6 +323,7 @@ class VllmStructuredVisionModel:
                     thinking,
                 ),
             )
+            attempt_metrics.append(metrics)
 
             logger.info(
                 (
@@ -307,20 +346,36 @@ class VllmStructuredVisionModel:
             )
 
             try:
+                if finish_reason == "length":
+                    raise json.JSONDecodeError(
+                        "Ответ достиг предела вывода", last_content, len(last_content)
+                    )
                 parsed = json.loads(
                     last_content,
                 )
 
             except json.JSONDecodeError as error:
                 if finish_reason == "length":
+                    retry_limit = self._max_retry_num_predict
+                    if self._max_model_len is not None and prompt_tokens is not None:
+                        retry_limit = min(
+                            retry_limit,
+                            max(0, self._max_model_len - prompt_tokens - 512),
+                        )
                     next_num_predict = min(
                         attempt_num_predict * 2,
-                        self._max_retry_num_predict,
+                        retry_limit,
                     )
 
                     if (
                         attempt >= self._max_attempts
                         or next_num_predict <= attempt_num_predict
+                        or (
+                            stage.startswith("page_understanding:")
+                            and ":recovery:" not in stage
+                            and "document_facts" in schema.get("properties", {})
+                            and "equipment_identities" in schema.get("properties", {})
+                        )
                     ):
                         raise VisionModelOutputBudgetError(
                             (
@@ -336,7 +391,7 @@ class VllmStructuredVisionModel:
                                 "Повтор с тем же output "
                                 "budget запрещён."
                             ),
-                            metrics=metrics,
+                            metrics=self._combined_metrics(attempt_metrics),
                         ) from error
 
                     logger.warning(
@@ -379,13 +434,8 @@ class VllmStructuredVisionModel:
                     continue
 
                 raise VisionModelError(
-                    (
-                        "shared-vlm не сформировал "
-                        "корректный JSON "
-                        f"на этапе {stage}. "
-                        "response="
-                        f"{last_content[:1800]}"
-                    ),
+                    (f"shared-vlm не сформировал корректный JSON на этапе {stage}. "),
+                    metrics=self._combined_metrics(attempt_metrics),
                 ) from error
 
             if not isinstance(
@@ -394,11 +444,12 @@ class VllmStructuredVisionModel:
             ):
                 raise VisionModelError(
                     ("Structured shared-vlm вернул JSON не объектного типа."),
+                    metrics=self._combined_metrics(attempt_metrics),
                 )
 
             return GenerationResult(
                 payload=parsed,
-                metrics=metrics,
+                metrics=self._combined_metrics(attempt_metrics),
             )
 
         raise VisionModelError(
@@ -437,6 +488,7 @@ class VllmStructuredVisionModel:
         except ValueError:
             return False
 
+        self._max_model_len = None
         models = payload.get(
             "data",
             [],
@@ -448,6 +500,12 @@ class VllmStructuredVisionModel:
         ):
             return False
 
+        for item in models:
+            if isinstance(item, dict) and str(item.get("id", "")) == self._model:
+                length = self._optional_int(item.get("max_model_len"))
+                self._max_model_len = (
+                    length if length is not None and length > 0 else None
+                )
         return any(
             (
                 isinstance(
@@ -463,6 +521,26 @@ class VllmStructuredVisionModel:
                 == self._model
             )
             for item in models
+        )
+
+    @staticmethod
+    def _combined_metrics(attempts: list[GenerationMetrics]) -> GenerationMetrics:
+        """Считает затраты всех полученных ответов, включая неудачные JSON/length попытки."""
+
+        def total(field):
+            """Не подменяет неизвестный token usage нулём."""
+            values = [getattr(item, field) for item in attempts]
+            return None if any(value is None for value in values) else sum(values)
+
+        return replace(
+            attempts[-1],
+            requested_num_predict=total("requested_num_predict"),
+            total_duration_ms=total("total_duration_ms"),
+            load_duration_ms=total("load_duration_ms"),
+            prompt_eval_count=total("prompt_eval_count"),
+            eval_count=total("eval_count"),
+            content_length=total("content_length"),
+            thinking_length=total("thinking_length"),
         )
 
     def _request_payload(

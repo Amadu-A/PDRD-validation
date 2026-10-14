@@ -16,6 +16,13 @@ from pdrd_analysis_service.domain.analysis import (
 class VisionModelError(RuntimeError):
     """Ошибка structured VLM provider."""
 
+    def __init__(
+        self, message: str, *, metrics: GenerationMetrics | None = None
+    ) -> None:
+        """Сохраняет известные затраты, не сохраняя исходный ответ провайдера."""
+        super().__init__(message)
+        self.metrics = metrics
+
 
 class VisionModelOutputBudgetError(VisionModelError):
     """Полный ответ не поместился; повтор требует изменения размера задания."""

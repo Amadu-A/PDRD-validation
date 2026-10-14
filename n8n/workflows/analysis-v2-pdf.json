@@ -53,7 +53,7 @@
             },
             {
               "name": "include_equipment_specification",
-              "value": "={{ $json.body?.use_equipment_web_search ?? 'false' }}"
+            "value": "={{ String(String($json.body?.use_equipment_web_search ?? 'false') === 'true' || String($json.body?.use_document_context ?? 'false') === 'true') }}"
             }
           ]
         },

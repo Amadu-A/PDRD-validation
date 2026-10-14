@@ -12,6 +12,7 @@ from pdrd_document_service.domain.specification import (
     project_code_from_text,
     specification_columns,
 )
+from pdrd_document_service.infrastructure.pdf.page_content import page_content_metadata
 
 
 def _box(rect: tuple | fitz.Rect, page: fitz.Page) -> dict[str, int]:
@@ -38,8 +39,10 @@ def extract_specification(page: fitz.Page, page_number: int, text: str) -> dict 
         return None
     project_code = project_code_from_text(text)
     result = []
+    row_boxes = {}
     try:
-        for table_number, table in enumerate(page.find_tables().tables, 1):
+        tables = page.find_tables().tables
+        for table_number, table in enumerate(tables, 1):
             values = table.extract()
             header_index, columns = next(
                 (
@@ -72,6 +75,12 @@ def extract_specification(page: fitz.Page, page_number: int, text: str) -> dict 
             result.append(
                 {"header_index": header_index, "columns": columns, "rows": rows}
             )
+            row_boxes.update(
+                {
+                    row["row_id"]: geometry.bbox
+                    for row, geometry in zip(rows, table.rows, strict=True)
+                }
+            )
     except Exception:
         if result:
             partial = normalize_specification(
@@ -95,8 +104,29 @@ def extract_specification(page: fitz.Page, page_number: int, text: str) -> dict 
                 "Таблица не распознана надёжно; требуется визуальное извлечение."
             ],
         }
-    return (
-        normalize_specification(result, page=page_number, project_code=project_code)
-        if result
-        else None
+    if not result:
+        return None
+    specification = normalize_specification(
+        result, page=page_number, project_code=project_code
     )
+    boxes_by_table = {}
+    for row in specification["raw_rows"]:
+        if row["kind"] in {"blank", "footer"}:
+            continue
+        box = fitz.Rect(row_boxes[row["row_id"]])
+        if row["table_id"] in boxes_by_table:
+            boxes_by_table[row["table_id"]] |= box
+        else:
+            boxes_by_table[row["table_id"]] = box
+    try:
+        specification["page_content"] = page_content_metadata(
+            page, list(boxes_by_table.values()), tables
+        )
+    except Exception:
+        specification["page_content"] = {
+            "version": 1,
+            "route": "mixed",
+            "requires_vision": True,
+            "reason": "page_content_inspection_failed",
+        }
+    return specification

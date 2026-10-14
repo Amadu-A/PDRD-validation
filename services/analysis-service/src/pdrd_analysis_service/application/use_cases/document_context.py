@@ -109,14 +109,17 @@ def build_page_document_context(
             )
 
         related: list[tuple[LocatedDocumentFact, str]] = []
+        related_keys: set[tuple[str, str]] = set()
         for current in page.facts:
             key = subject_key(current)
-            if key:
+            if key and ("subject", key) not in related_keys:
+                related_keys.add(("subject", key))
                 related.extend(
                     (item, "exact_identifier") for item in by_subject.get(key, [])
                 )
             table_key = normalize_label(current.table_id)
-            if table_key:
+            if table_key and ("table", table_key) not in related_keys:
+                related_keys.add(("table", table_key))
                 related.extend(
                     (item, "table_identifier") for item in by_table.get(table_key, [])
                 )

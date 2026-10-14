@@ -134,9 +134,7 @@ def _page_facts_payload(
         equipment_identities=(
             list(facts.equipment_identities) if include_equipment else None
         ),
-        equipment_specification=facts.equipment_specification
-        if include_equipment
-        else None,
+        equipment_specification=facts.equipment_specification,
     )
 
 
@@ -696,30 +694,25 @@ async def finalize_findings(
         for finding in request.findings
     }
 
-    (
-        summary,
-        findings,
-        metrics,
-    ) = await container.finalize_findings.execute(
-        findings=tuple(finding.to_domain() for finding in request.findings),
-        experience_by_finding={
-            finding_id: tuple(source.to_domain() for source in sources)
-            for (
-                finding_id,
-                sources,
-            ) in request.experience_by_finding.items()
-        },
-        normative_candidates=tuple(
-            source.to_domain() for source in request.normative_candidates
-        ),
-        normative_candidates_by_finding={
-            finding_id: tuple(source.to_domain() for source in sources)
-            for (
-                finding_id,
-                sources,
-            ) in request.normative_candidates_by_finding.items()
-        },
-    )
+    try:
+        summary, findings, metrics = await container.finalize_findings.execute(
+            findings=tuple(finding.to_domain() for finding in request.findings),
+            experience_by_finding={
+                finding_id: tuple(source.to_domain() for source in sources)
+                for finding_id, sources in request.experience_by_finding.items()
+            },
+            normative_candidates=tuple(
+                source.to_domain() for source in request.normative_candidates
+            ),
+            normative_candidates_by_finding={
+                finding_id: tuple(source.to_domain() for source in sources)
+                for finding_id, sources in request.normative_candidates_by_finding.items()
+            },
+        )
+    except VisionModelError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
 
     return FinalizeResponse(
         summary=summary,

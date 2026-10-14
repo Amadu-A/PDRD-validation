@@ -65,8 +65,8 @@ def test_short_refinement_shares_production_model_cache_and_gpu_limiter(monkeypa
     assert vision is container.finalize_findings.vision_model
 
 
-def test_pdf_workflow_enables_tables_only_with_eq_and_keeps_one_understanding_stage():
-    """n8n передаёт optional данные; решение о надёжности остаётся в Python."""
+def test_pdf_workflow_enables_shared_tables_with_d_or_eq_and_keeps_one_stage():
+    """D и EQ читают общий контракт; решение о надёжности остаётся в Python."""
     workflow = json.loads(
         (ROOT / "n8n/workflows/analysis-v2-pdf.json").read_text(encoding="utf-8")
     )
@@ -80,6 +80,7 @@ def test_pdf_workflow_enables_tables_only_with_eq_and_keeps_one_understanding_st
         if parameter["name"] == "include_equipment_specification"
     )
     assert "use_equipment_web_search" in setting["value"]
+    assert "use_document_context" in setting["value"] and "||" in setting["value"]
     assert [name for name in nodes if name == "Understand Pages Stage"] == [
         "Understand Pages Stage"
     ]
