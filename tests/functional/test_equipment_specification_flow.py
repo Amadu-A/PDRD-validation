@@ -267,7 +267,9 @@ async def test_bad_specification_is_http_422_before_any_gpu(extracted):
     vision.generate_json.assert_not_awaited()
 
 
-async def test_stage_cancellation_between_refinement_and_main_is_http_409(extracted):
+async def test_stage_cancellation_between_refinement_and_main_is_regular_response(
+    extracted,
+):
     """Отмена после короткого уточнения не начинает следующий GPU-запрос."""
     payload = stage_body(extracted, False)
     item = payload["items"][26]
@@ -287,8 +289,8 @@ async def test_stage_cancellation_between_refinement_and_main_is_http_409(extrac
         response = await client.post(
             "/internal/v1/stages/understand-pages", json=payload
         )
-    assert (
-        response.status_code == 409
-        and response.json()["detail"]["code"] == "analysis_cancelled"
-    )
+    assert response.status_code == 200 and response.json() == {
+        "items": [],
+        "cancelled": True,
+    }
     assert vision.generate_json.await_count == 1

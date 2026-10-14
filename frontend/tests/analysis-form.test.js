@@ -1,6 +1,6 @@
 // frontend/tests/analysis-form.test.js
 
-/** Регрессия обычного PDF/CAD без обязательного раздела и пустого поля пакетов. */
+/** Регрессии обязательного раздела PDF/CAD и сериализации пользовательских пакетов. */
 import assert from "node:assert/strict";
 import test from "node:test";
 import { File } from "node:buffer";
@@ -31,9 +31,9 @@ function buildForm(t, selection, kind = "pdf", documentContextInput = null, equi
 }
 
 for (const kind of ["pdf", "cad"]) {
-  test(`${kind}: обычный анализ разрешён без нормативного раздела`, (t) => {
+  test(`${kind}: анализ без раздела блокируется до HTTP-запроса`, (t) => {
     const form = buildForm(t, null, kind);
-    assert.equal(form.validate().valid, true);
+    assert.deepEqual(form.validate(), { valid: false, message: "Выберите раздел, чтобы запустить анализ." });
     const body = form.toFormData();
     assert.equal(body.has(kind), true);
     assert.equal(body.has("normative_section_id"), false);
@@ -54,7 +54,7 @@ test("явный непустой выбор пакетов сериализуе
 
 test("анализ удаляемого раздела блокируется до отправки запроса", (t) => {
   const form = buildForm(t, { sectionId: "section", documentIds: [], deleting: true });
-  assert.deepEqual(form.validate(), { valid: false, message: "Раздел удаляется. Выберите другой раздел или анализ без раздела." });
+  assert.deepEqual(form.validate(), { valid: false, message: "Раздел удаляется. Выберите другой раздел." });
 });
 
 
@@ -77,7 +77,7 @@ test("переключатель D выключается при смене ре
 test("EQ отключён по умолчанию; unsafe зависит от EQ и не сохраняется", (t) => {
   const equipment = Object.assign(new FakeElement("input"), { checked: false, disabled: false });
   const unsafe = Object.assign(new FakeElement("input"), { checked: false, disabled: true });
-  const form = buildForm(t, null, "pdf", null, equipment, unsafe);
+  const form = buildForm(t, { sectionId: "section", documentIds: [] }, "pdf", null, equipment, unsafe);
   form.sync();
   assert.equal(form.toFormData().get("use_equipment_web_search"), "false");
   equipment.checked = true;
@@ -108,7 +108,7 @@ test("EQ в CAD режиме недоступен", (t) => {
 test("после принятия анализа unsafe остаётся виден и передаётся в запрос", async (t) => {
   const equipment = Object.assign(new FakeElement("input"), { checked: true, disabled: false });
   const unsafe = Object.assign(new FakeElement("input"), { checked: true, disabled: false });
-  const form = buildForm(t, null, "pdf", null, equipment, unsafe);
+  const form = buildForm(t, { sectionId: "section", documentIds: [] }, "pdf", null, equipment, unsafe);
   form.bind();
   const previous = { fetch: globalThis.fetch, window: globalThis.window };
   t.after(() => Object.assign(globalThis, previous));

@@ -166,7 +166,12 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
         "Understand Pages Stage",
     ]
 
-    assert _successors(workflow, "Understand Pages Stage") == ["Use Equipment Search"]
+    assert _successors(workflow, "Understand Pages Stage") == [
+        "Continue Understand Pages Stage Response"
+    ]
+    assert _successors(workflow, "Continue Understand Pages Stage Response") == [
+        "Use Equipment Search"
+    ]
     assert (
         workflow["connections"]["Use Equipment Search"]["main"][1][0]["node"]
         == "Use Document Context"
@@ -197,11 +202,17 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
         "Check Norms",
     ]
 
-    assert _successors(workflow, "Check Norms") == ["Use Cross-Page Consistency"]
+    assert _successors(workflow, "Check Norms") == ["Continue Check Norms Response"]
+    assert _successors(workflow, "Continue Check Norms Response") == [
+        "Use Cross-Page Consistency"
+    ]
     assert _successors(workflow, "Continue Cross-Page Consistency") == [
         "Check Cross-Page Consistency"
     ]
     assert _successors(workflow, "Check Cross-Page Consistency") == [
+        "Continue Check Cross-Page Consistency Response"
+    ]
+    assert _successors(workflow, "Continue Check Cross-Page Consistency Response") == [
         "Merge Cross-Page Checks"
     ]
     assert _successors(workflow, "Merge Cross-Page Checks") == [
@@ -232,6 +243,10 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
     assert _successors(
         workflow,
         "Finalize Findings",
+    ) == ["Continue Finalize Findings Response"]
+    assert _successors(
+        workflow,
+        "Continue Finalize Findings Response",
     ) == [
         "Progress Build Result",
         "Gate Build Result",

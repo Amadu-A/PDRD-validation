@@ -113,6 +113,7 @@ class PipelineSettings(BaseModel):
     """Настройки VLM pipeline."""
 
     max_facts_per_page: int = Field(default=12, ge=1, le=40)
+    max_graphical_crops: int = Field(default=2, ge=0, le=4)
 
     page_facts_num_predict: int = Field(
         default=4000,

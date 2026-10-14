@@ -13,7 +13,10 @@ from pdrd_api_gateway.application.use_cases.create_analysis_job import (
 )
 from pdrd_api_gateway.core.settings import Settings
 from pdrd_api_gateway.domain.analysis_access import can_access_analysis_job
-from pdrd_api_gateway.domain.analysis_job import AnalysisJobStatus
+from pdrd_api_gateway.domain.analysis_job import (
+    AnalysisJobStatus,
+    AnalysisProgressStage,
+)
 from pdrd_api_gateway.infrastructure.database.engine import (
     build_async_engine,
     build_session_factory,
@@ -98,6 +101,27 @@ async def test_database_health_job_and_outbox() -> None:
         assert loaded_job.document_id == document_id
         assert loaded_job.status is AnalysisJobStatus.PENDING
         assert loaded_job.attempt_count == 0
+
+        # Новая миграция допускает T-first и хранит очередь отдельно от этапа.
+        async with unit_of_work_factory() as unit_of_work:
+            stored = await unit_of_work.analysis_jobs.get_for_update(created_job.id)
+            assert stored is not None
+            stored.mark_queued()
+            stored.mark_processing()
+            stored.update_progress(
+                stage=AnalysisProgressStage.CHECKING_TECHNICAL_ASSIGNMENT,
+                gpu={"waiting": 2, "running": 1},
+            )
+            await unit_of_work.analysis_jobs.update(stored)
+            await unit_of_work.commit()
+        async with unit_of_work_factory() as unit_of_work:
+            stored = await unit_of_work.analysis_jobs.get(created_job.id)
+            assert stored is not None
+            assert (
+                stored.progress_stage
+                is AnalysisProgressStage.CHECKING_TECHNICAL_ASSIGNMENT
+            )
+            assert stored.progress_gpu == {"waiting": 2, "running": 1}
 
         job_messages = [
             message

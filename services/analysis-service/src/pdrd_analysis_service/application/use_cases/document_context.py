@@ -318,7 +318,7 @@ class CheckCrossPageConsistency:
         pages: tuple[DocumentPage, ...],
         cancel_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> tuple[FindingDraft, ...]:
-        """Создаёт по одному замечанию на подтверждённую группу."""
+        """Сохраняет подтверждённые группы и конкретные подозрения с обеими сторонами evidence."""
         groups = discover_conflicts(
             _located(pages),
             max_candidates=self.options.max_cross_page_candidates,
@@ -329,6 +329,7 @@ class CheckCrossPageConsistency:
             )
             return ()
         decisions: dict[str, str] = {}
+        reasons: dict[str, str] = {}
         batch_size = self.options.validation_batch_size
         for start in range(0, len(groups), batch_size):
             if cancel_check is not None and await cancel_check():
@@ -391,11 +392,17 @@ class CheckCrossPageConsistency:
                     decisions[str(decision.get("candidate_id", ""))] = str(
                         decision.get("status", "")
                     )
+                    reasons[str(decision.get("candidate_id", ""))] = str(
+                        decision.get("reason", "")
+                    ).strip()
 
         by_number = {page.page: page for page in pages}
         findings: list[FindingDraft] = []
         for index, group in enumerate(groups, start=1):
-            if decisions.get(f"C{index}") != "confirmed":
+            decision = decisions.get(f"C{index}")
+            if decision not in {"confirmed", "needs_review"}:
+                continue
+            if decision == "needs_review" and not reasons.get(f"C{index}"):
                 continue
             selected = group.facts[
                 : self.options.max_saved_evidence_sources_per_finding
@@ -421,6 +428,16 @@ class CheckCrossPageConsistency:
             first = selected[0]
             subject = first.fact.subject_name or first.fact.identifier
             prop = first.fact.property_name
+            description = (
+                "В документации обнаружено противоречие"
+                if decision == "confirmed"
+                else "Требует проверки возможное расхождение"
+            )
+            review_reason = (
+                f" Причина проверки: {reasons[f'C{index}']}"
+                if decision == "needs_review"
+                else ""
+            )
             findings.append(
                 FindingDraft(
                     finding_id=f"cross-page-{index:04d}",
@@ -428,19 +445,19 @@ class CheckCrossPageConsistency:
                     page_type="document",
                     category="document_consistency",
                     severity="warning",
-                    status="confirmed",
+                    status="confirmed" if decision == "confirmed" else "needs_review",
                     comment=(
-                        f"В документации обнаружено противоречие для {subject} "
+                        f"{description} для {subject} "
                         f"по параметру «{prop}»: {locations}. "
                         "Требуется определить корректное значение и привести "
-                        "документацию к единому значению."
+                        "документацию к единому значению." + review_reason
                     ),
                     evidence=locations,
                     recommendation_draft=(
                         "Сопоставить исходные данные и привести значения "
                         "на указанных страницах к единому решению."
                     ),
-                    confidence=0.85,
+                    confidence=0.85 if decision == "confirmed" else 0.65,
                     normative_source_ids=(),
                     basis="",
                     basis_sources=(),
@@ -483,7 +500,7 @@ class CheckCrossPageConsistency:
         logger.info(
             "cross_page_candidates generated=%s confirmed=%s rejected=%s needs_review=%s",
             len(groups),
-            len(findings),
+            sum(finding.status == "confirmed" for finding in findings),
             sum(value == "rejected" for value in decisions.values()),
             sum(value == "needs_review" for value in decisions.values()),
         )

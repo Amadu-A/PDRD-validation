@@ -449,6 +449,8 @@ def test_workflows_publish_progress_through_cancellation_gate() -> None:
             gate_name,
             stage,
         ) in config["cases"]:
+            if f"Continue {source_name} Response" in nodes:
+                source_name = f"Continue {source_name} Response"
             progress_node = nodes[progress_name]
             continue_node = nodes[continue_name]
             gate_node = nodes[gate_name]
@@ -669,12 +671,33 @@ def test_cancelled_checkpoint_returns_explicit_webhook_response() -> None:
                 _stage,
             ) in config["cases"]
         }
+        expected_sources.add(("Continue Technical Assignment", 0))
+        if config["path"].name != "analysis-v2-pdf.json":
+            expected_sources.update(
+                {
+                    ("Continue Check Technical Assignment Response", 0),
+                    ("Continue Check Norms Response", 0),
+                    ("Continue Finalize Findings Response", 0),
+                    (
+                        "Continue Understand CAD Response"
+                        if config["path"].name == "analysis-v2-cad.json"
+                        else "Continue Understand Combined Page Response",
+                        0,
+                    ),
+                }
+            )
 
         if config["path"].name == "analysis-v2-pdf.json":
             expected_sources.update(
                 {
                     ("Continue Build Document Context", 0),
                     ("Continue Cross-Page Consistency", 0),
+                    ("Continue Understand Pages Stage Response", 0),
+                    ("Continue Check Technical Assignment Response", 0),
+                    ("Continue Check Norms Response", 0),
+                    ("Continue Check Cross-Page Consistency Response", 0),
+                    ("Continue Finalize Findings Response", 0),
+                    ("Continue Compare Equipment Response", 0),
                 }
             )
 

@@ -68,8 +68,9 @@ from pdrd_analysis_service.transport.http.schemas import (
     UnderstandPageResponse,
     UserPackageSourcePayload,
 )
+from pdrd_analysis_service.transport.http.vision_execution import page_execution_context
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(page_execution_context)])
 
 
 def _decode_image(

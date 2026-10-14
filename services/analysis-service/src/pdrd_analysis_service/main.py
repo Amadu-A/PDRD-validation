@@ -2,8 +2,10 @@
 
 """Точка входа FastAPI сервиса анализа."""
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
+from pdrd_analysis_service.application.vision_execution import AnalysisCancelledError
 from pdrd_analysis_service.core.container import (
     ApplicationContainer,
     build_container,
@@ -42,6 +44,13 @@ def create_app(
     )
 
     application.state.container = application_container
+
+    @application.exception_handler(AnalysisCancelledError)
+    async def cancelled_response(
+        request: Request, error: AnalysisCancelledError
+    ) -> JSONResponse:
+        """Завершает штатную отмену page-вызова без ложной ошибки HTTP-узла n8n."""
+        return JSONResponse({"cancelled": True, "reason": "analysis_cancelled"})
 
     application.include_router(
         router,

@@ -7,6 +7,7 @@
 import {
   requireElementWithin,
 } from "../../dom.js";
+import { setAnalysisSubmitBlock } from "../analysis/submit-guard.js";
 import {
   forgetTechnicalAssignmentAccess,
   rememberPreparedTechnicalAssignment,
@@ -260,6 +261,7 @@ export function createTechnicalAssignmentFilePicker(
   }
 
 
+  /** Сохраняет независимые ограничения раздела и подготовки технического задания. */
   function syncSubmitGuard() {
     if (!submitButton) {
       return;
@@ -270,7 +272,8 @@ export function createTechnicalAssignmentFilePicker(
       && state.status !== "ready"
     );
 
-    submitButton.disabled = blocked;
+    setAnalysisSubmitBlock(submitButton, "section", state.sectionId
+      ? "" : "Выберите раздел, чтобы запустить анализ.");
 
     const message = (
       blocked
@@ -278,13 +281,7 @@ export function createTechnicalAssignmentFilePicker(
         : ""
     );
 
-    submitButton.title = message;
-
-    const parent = submitButton.parentElement;
-
-    if (parent) {
-      parent.title = message;
-    }
+    setAnalysisSubmitBlock(submitButton, "technical_assignment", message);
   }
 
 

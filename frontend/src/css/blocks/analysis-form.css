@@ -200,9 +200,19 @@
 }
 
 .analysis-form__submit:disabled {
+  pointer-events: none;
   opacity: 0.6;
 
-  cursor: wait;
+  cursor: not-allowed;
+}
+
+.analysis-form__submit-guard {
+  width: fit-content;
+}
+
+.analysis-form__submit-guard:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: var(--space-1);
 }
 
 @media (max-width: 640px) {

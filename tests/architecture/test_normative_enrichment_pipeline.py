@@ -178,8 +178,9 @@ def _functional_successor(
             current_name,
         )
 
-        if not successor.startswith(
-            "Gate ",
+        if not (
+            successor.startswith("Gate ")
+            or (successor.startswith("Continue ") and successor.endswith(" Response"))
         ):
             return successor
 

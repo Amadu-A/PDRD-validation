@@ -8,9 +8,11 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
 
+from pdrd_analysis_service.application.graphical_refinement import RefineGraphicalFacts
 from pdrd_analysis_service.application.json_schemas import (
     build_page_facts_schema,
 )
+from pdrd_analysis_service.application.ports.image_cropper import ImageCropper
 from pdrd_analysis_service.application.ports.vision_model import (
     StructuredVisionModel,
     VisionModelOutputBudgetError,
@@ -59,6 +61,8 @@ class UnderstandPage:
 
     num_predict: int
     max_facts_per_page: int = 12
+    image_cropper: ImageCropper | None = None
+    max_graphical_crops: int = 2
 
     async def execute(
         self,
@@ -365,6 +369,13 @@ class UnderstandPage:
 
         if table_facts is not None:
             facts = merge_specification_facts(table_facts, facts)
+
+        if self.image_cropper is not None and self.max_graphical_crops > 0:
+            facts = await RefineGraphicalFacts(
+                self.vision_model,
+                self.image_cropper,
+                self.max_graphical_crops,
+            ).execute(facts, page_number=page_number, image_bytes=image_bytes)
 
         return (
             facts,

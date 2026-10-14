@@ -5,6 +5,10 @@
 import json
 from dataclasses import asdict
 
+from pdrd_analysis_service.application.engineering_review import (
+    ENGINEERING_EVIDENCE_RULES,
+    engineering_questions,
+)
 from pdrd_analysis_service.domain.analysis import (
     DocumentContextSource,
     ExperienceSource,
@@ -618,6 +622,11 @@ reference, requirement, table_record, other.
 невидимые значения. Если уверенно видна область evidence,
 верни visual_regions в координатах 0..1000, иначе [].
 Не считай похожие теги одним объектом без явного совпадения.
+Приоритет фактов: назначение системы, расчётные параметры и их обоснование,
+состав/количество/расположение объектов, материал, ссылки на расчёты и смежные листы.
+Сохраняй отношения текста, плана, схемы и спецификации по явным объектам.
+У DN, наружного диаметра и толщины стенки должны быть разные property_name.
+Карту сейсмичности, режим, участок и назначение параметра сохраняй в scope.
 
 """
         if max_facts > 0
@@ -874,6 +883,11 @@ D-source — факт из этого же проверяемого PDF, а не
 
     return f"""
 {NORMATIVE_SUPER_SYSTEM_PROMPT}
+
+{ENGINEERING_EVIDENCE_RULES}
+
+КОНТЕКСТНЫЕ ПРОВЕРОЧНЫЕ ВОПРОСЫ:
+{chr(10).join(engineering_questions(page_facts, extracted_text))}
 
 {combined_mode}
 

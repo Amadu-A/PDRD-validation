@@ -11,6 +11,7 @@ from uuid import (
 )
 
 import httpx
+from pdrd_analysis_service.application.limited_vision import LimitedVisionModel
 from pdrd_analysis_service.application.use_cases import (
     BuildNormativeQueries,
     CheckPageAgainstNorms,
@@ -381,9 +382,8 @@ async def test_cancellation_stops_new_items_but_allows_inflight_calls_to_finish(
             ),
         )
 
-    assert response.status_code == 409
-
-    assert response.json()["detail"]["code"] == "analysis_cancelled"
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "cancelled": True}
 
     assert sorted(
         model.page_calls,
@@ -444,3 +444,121 @@ async def test_over_limit_stage_is_rejected_before_any_vlm_call() -> None:
         )
     assert response.status_code == 413
     assert model.page_calls == []
+
+
+async def test_cad_page_header_uses_durable_cancellation_before_provider() -> None:
+    """Page API CAD использует идентичность задания и штатную отмену, как PDF stage."""
+    provider = ConcurrentPageVisionModel()
+    probe = RecordingProgressProbe(cancel_on_call=1)
+    app = _build_app(
+        model=LimitedVisionModel(provider, 1), progress_probe=probe, concurrency=1
+    )
+    document_id = uuid4()
+    item = _request_payload(document_id=document_id, pages=1)["items"][0]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/v1/pages/understand",
+            json=item,
+            headers={"X-PDRD-Analysis-Document-ID": str(document_id)},
+        )
+    assert response.status_code == 200 and response.json()["cancelled"] is True
+    assert provider.page_calls == []
+    assert probe.calls[0][:2] == (document_id, "understanding_sheet")
+
+
+async def test_t_first_cancellation_reports_its_own_stage() -> None:
+    """Отмена проверки ТЗ не помечается Understanding и не начинает GPU-вызов."""
+    model = ConcurrentPageVisionModel()
+    probe = RecordingProgressProbe(cancel_on_call=1)
+    app = _build_app(model=model, progress_probe=probe, concurrency=1)
+    document_id = uuid4()
+    payload = {
+        "document_id": str(document_id),
+        "technical_assignment_id": str(uuid4()),
+        "analysis_document_id": str(uuid4()),
+        "section_id": str(uuid4()),
+        "source_file": "assignment.pdf",
+        "source_sha256": "a" * 64,
+        "requirements": [
+            {
+                "point_id": "point-1",
+                "requirement_id": "R1",
+                "requirement_index": 1,
+                "page": 1,
+                "requirement_strength": "explicit",
+                "source_text": "Требование",
+                "text": "Требование",
+            }
+        ],
+        "items": [
+            {
+                "page_number": 1,
+                "extracted_text": "Лист",
+                "image_base64": _image(),
+                "page_facts": {
+                    "discipline": "ВК",
+                    "page_type": "drawing",
+                    "summary": "Лист",
+                    "objects": [],
+                    "connections": [],
+                    "labels": [],
+                    "normative_queries": [],
+                },
+            }
+        ],
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/v1/stages/check-technical-assignment", json=payload
+        )
+    assert response.status_code == 200 and response.json() == {
+        "items": [],
+        "cancelled": True,
+    }
+    assert probe.calls[0][:2] == (document_id, "checking_technical_assignment")
+    assert model.page_calls == []
+
+
+async def test_cancellation_does_not_hide_parallel_provider_failure() -> None:
+    """Настоящая ошибка другого уже работающего элемента сохраняется при одновременной отмене."""
+    import pytest
+    from fastapi import HTTPException
+    from pdrd_analysis_service.application.vision_execution import (
+        AnalysisCancelledError,
+    )
+    from pdrd_analysis_service.transport.http.stage_batch_routes import _run_stage_items
+
+    app = _build_app(
+        model=ConcurrentPageVisionModel(), progress_probe=None, concurrency=2
+    )
+    ready = asyncio.Event()
+    started = 0
+
+    async def process(item):
+        """Запускает оба элемента до передачи штатной отмены и настоящего отказа провайдера."""
+        nonlocal started
+        started += 1
+        if started == 2:
+            ready.set()
+        await ready.wait()
+        if item == 1:
+            raise AnalysisCancelledError("Отмена")
+        await asyncio.sleep(0)
+        raise HTTPException(503, detail="Провайдер недоступен")
+
+    with pytest.raises(HTTPException) as caught:
+        await asyncio.wait_for(
+            _run_stage_items(
+                container=app.state.container,
+                document_id=uuid4(),
+                stage="checking_requirements",
+                items=[1, 2],
+                process=process,
+            ),
+            1,
+        )
+    assert caught.value.status_code == 503 and started == 2

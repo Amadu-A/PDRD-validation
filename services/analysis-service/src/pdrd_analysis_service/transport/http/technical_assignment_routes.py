@@ -39,8 +39,9 @@ from pdrd_analysis_service.transport.http.technical_assignment_schemas import (
     CheckTechnicalAssignmentResponse,
     TechnicalAssignmentDecisionPayload,
 )
+from pdrd_analysis_service.transport.http.vision_execution import page_execution_context
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(page_execution_context)])
 
 
 def _validate_requirement_count(

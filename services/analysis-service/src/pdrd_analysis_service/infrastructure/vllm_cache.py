@@ -16,6 +16,7 @@ from typing import Any
 from pdrd_analysis_service.application.ports.vision_model import (
     StructuredVisionModel,
 )
+from pdrd_analysis_service.application.vision_execution import current_vision_execution
 from pdrd_analysis_service.domain.analysis import (
     GenerationMetrics,
     GenerationResult,
@@ -89,6 +90,9 @@ class CachedStructuredVisionModel:
         image_bytes: bytes | None = None,
     ) -> GenerationResult:
         """Возвращает canonical cached response либо вызывает delegate один раз."""
+        execution = current_vision_execution.get()
+        if execution is not None:
+            await execution.checkpoint()
         if not self._enabled:
             return await self._delegate.generate_json(
                 prompt=prompt,

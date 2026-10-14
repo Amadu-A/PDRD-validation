@@ -127,7 +127,7 @@ def property_key(fact: DocumentFact) -> str:
 
 def scope_key(fact: DocumentFact) -> tuple[str, ...]:
     """Возвращает условия для безопасного автоматического сопоставления."""
-    return tuple(
+    scopes = tuple(
         normalize_label(value)
         for value in (
             fact.scope_system,
@@ -137,16 +137,28 @@ def scope_key(fact: DocumentFact) -> tuple[str, ...]:
             fact.scope_condition,
         )
     )
+    # Разные карты ОСР описывают разные расчётные условия даже при пропущенном scope.
+    seismic_map = re.search(
+        r"\bоср[-\s\d]*(?:[-\s])?([abcавс])\b", fact.evidence_text, re.I
+    )
+    return (
+        *scopes,
+        seismic_map[1].casefold().translate(str.maketrans("авс", "abc"))
+        if seismic_map
+        else "",
+    )
 
 
 def normalized_value(fact: DocumentFact) -> tuple[str, str] | None:
     """Сравнивает единицы без подмены исходного значения."""
     raw = normalize_label(fact.value_raw).replace(" ", "")
     unit = normalize_label(fact.unit_raw).replace(" ", "")
-    if not raw:
+    if not raw or re.search(r"\?|неразбор|нечита|неясн", raw):
         return None
-    if raw.startswith("dn"):
+    if re.match(r"^(?:dn|ду)\d", raw):
         return "nominal_diameter", raw
+    if raw.startswith(("ø", "⌀")) or re.match(r"^ф\d", raw):
+        return "outer_diameter", raw
     if _NUMBER.fullmatch(raw):
         try:
             number = Decimal(raw.replace(",", "."))

@@ -170,8 +170,9 @@ async def test_http_budget_failure_splits_schema_without_partial_json_or_blind_r
         )
     if cancelled:
         assert (
-            response.status_code == 409
-            and response.json()["detail"]["code"] == "analysis_cancelled"
+            response.status_code == 200
+            and response.json()["cancelled"] is True
+            and response.json()["items"] == []
         )
         assert len(calls) == 1
     else:

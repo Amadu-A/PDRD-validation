@@ -51,6 +51,7 @@ class AnalysisJobModel(Base):
             "'preparing_context', "
             "'understanding_sheet', "
             "'building_document_context', "
+            "'checking_technical_assignment', "
             "'retrieving_requirements', "
             "'checking_requirements', "
             "'checking_cross_page_consistency', "
@@ -152,6 +153,8 @@ class AnalysisJobModel(Base):
         ),
         nullable=True,
     )
+
+    progress_gpu: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     attempt_count: Mapped[int] = mapped_column(
         Integer,

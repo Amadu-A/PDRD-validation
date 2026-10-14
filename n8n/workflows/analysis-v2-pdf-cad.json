@@ -189,6 +189,15 @@
         "body": "={{ JSON.stringify({ page_number: $json.page.page_number, heuristic_page_type: $json.page.page_type, extracted_text: $json.page.text, image_base64: $json.page.image_base64 }) }}",
         "options": {
           "timeout": 600000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-PDRD-Analysis-Document-ID",
+              "value": "={{ $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}"
+            }
+          ]
         }
       },
       "id": "20000000-0000-4000-8000-000000000007",
@@ -360,6 +369,15 @@
         "body": "={{ JSON.stringify({\n  page_number: $('Prepare Combined Context').item.json.page.page_number,\n  extracted_text: $('Augment Project Context').item.json.analysis_text,\n  page_facts: $('Understand Combined Page').item.json.facts,\n  normative_sources: $('Normalize Requirement Search').item.json.normative_sources ?? [],\n  technical_assignment_sources: $('Normalize Requirement Search').item.json.technical_assignment_sources ?? [],\n  conflict_candidates: $('Normalize Requirement Search').item.json.conflict_candidates ?? [],\n  user_package_sources: $json.sources ?? [],\n  image_base64: $('Prepare Combined Context').item.json.page.image_base64,\n  normative_system_prompt: $('POST /analysis/v2/pdf-cad').first().json.body?.normative_system_prompt ?? null\n}) }}",
         "options": {
           "timeout": 600000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-PDRD-Analysis-Document-ID",
+              "value": "={{ $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}"
+            }
+          ]
         }
       },
       "id": "20000000-0000-4000-8000-000000000013",
@@ -472,6 +490,15 @@
         "body": "={{ JSON.stringify({ findings: $json.findings ?? [], experience_by_finding: $json.experience_by_finding ?? {}, normative_candidates_by_finding: $json.normative_candidates_by_finding ?? {} }) }}",
         "options": {
           "timeout": 600000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-PDRD-Analysis-Document-ID",
+              "value": "={{ $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}"
+            }
+          ]
         }
       },
       "id": "20000000-0000-4000-8000-000000000017",
@@ -649,6 +676,15 @@
         "body": "={{ JSON.stringify({\n  page_number: $('Prepare Combined Context').item.json.page.page_number,\n  extracted_text: $('Prepare Combined Context').item.json.page.text,\n  page_facts: $('Understand Combined Page').item.json.facts,\n  image_base64: $('Prepare Combined Context').item.json.page.image_base64,\n  technical_assignment_id: $('Prepare Combined Context').item.json.technical_assignment.technical_assignment_id,\n  analysis_document_id: $('Prepare Combined Context').item.json.technical_assignment.analysis_document_id,\n  section_id: $('Prepare Combined Context').item.json.technical_assignment.section_id,\n  source_file: $('Prepare Combined Context').item.json.technical_assignment.source_file,\n  source_sha256: $('Prepare Combined Context').item.json.technical_assignment.source_sha256,\n  requirements: $('Prepare Combined Context').item.json.technical_assignment.requirements ?? [],\n}) }}",
         "options": {
           "timeout": 600000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-PDRD-Analysis-Document-ID",
+              "value": "={{ $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}"
+            }
+          ]
         }
       },
       "id": "5c200000-0000-4000-8000-000000000005",
@@ -1298,6 +1334,209 @@
         1800,
         780
       ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-progress/' + $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ stage: 'checking_technical_assignment' }) }}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "f0422a40-9bef-4eb7-af6e-3b5d9c656614",
+      "name": "Progress Technical Assignment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -760,
+        660
+      ],
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8c300000-0000-4000-8000-000000000903",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d45dc139-d736-41be-9aea-2d19ffe85d68",
+      "name": "Continue Technical Assignment",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -550,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 1
+      },
+      "id": "bff07016-8093-42d9-a90a-a2199e5ccee4",
+      "name": "Gate Technical Assignment",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -550,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8c300000-0000-4000-8000-000000000903",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2c539c32-bf2c-4fcc-a93f-a01683aece07",
+      "name": "Continue Understand Combined Page Response",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -800,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8c300000-0000-4000-8000-000000000903",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5cc42298-d606-4f73-95b4-a127143aea08",
+      "name": "Continue Check Norms Response",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1400,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8c300000-0000-4000-8000-000000000903",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "45ab418f-7d2b-434e-9bc8-d51c4d49600e",
+      "name": "Continue Finalize Findings Response",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2940,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8c300000-0000-4000-8000-000000000903",
+              "leftValue": "={{ String($json.cancelled ?? false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4b8887bd-5113-46e2-8b7a-2045f0f30b3c",
+      "name": "Continue Check Technical Assignment Response",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -360,
+        -40
+      ]
     }
   ],
   "pinData": {},
@@ -1382,7 +1621,7 @@
       "main": [
         [
           {
-            "node": "Has T First Pass",
+            "node": "Continue Understand Combined Page Response",
             "type": "main",
             "index": 0
           }
@@ -1475,7 +1714,7 @@
       "main": [
         [
           {
-            "node": "Merge Finding Candidates",
+            "node": "Continue Check Norms Response",
             "type": "main",
             "index": 0
           }
@@ -1546,12 +1785,7 @@
       "main": [
         [
           {
-            "node": "Progress Build Result",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Gate Build Result",
+            "node": "Continue Finalize Findings Response",
             "type": "main",
             "index": 0
           }
@@ -1613,7 +1847,12 @@
       "main": [
         [
           {
-            "node": "Check Technical Assignment",
+            "node": "Progress Technical Assignment",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Technical Assignment",
             "type": "main",
             "index": 0
           }
@@ -1631,7 +1870,7 @@
       "main": [
         [
           {
-            "node": "Technical Assignment First Pass",
+            "node": "Continue Check Technical Assignment Response",
             "type": "main",
             "index": 0
           }
@@ -2022,6 +2261,123 @@
         [
           {
             "node": "Respond Cancelled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Technical Assignment": {
+      "main": [
+        [
+          {
+            "node": "Continue Technical Assignment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Technical Assignment": {
+      "main": [
+        [
+          {
+            "node": "Gate Technical Assignment",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate Technical Assignment": {
+      "main": [
+        [
+          {
+            "node": "Check Technical Assignment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Understand Combined Page Response": {
+      "main": [
+        [
+          {
+            "node": "Has T First Pass",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Check Norms Response": {
+      "main": [
+        [
+          {
+            "node": "Merge Finding Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Finalize Findings Response": {
+      "main": [
+        [
+          {
+            "node": "Progress Build Result",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Build Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Check Technical Assignment Response": {
+      "main": [
+        [
+          {
+            "node": "Technical Assignment First Pass",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
             "type": "main",
             "index": 0
           }

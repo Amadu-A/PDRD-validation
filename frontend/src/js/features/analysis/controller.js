@@ -85,10 +85,15 @@ export function createAnalysisController({
     ) {
       return (
         `${progress.message} `
+        + (progress.gpu && (progress.gpu.waiting > 0 || progress.gpu.running > 0)
+          ? `Ожидают GPU: ${progress.gpu.waiting}. Генерация: ${progress.gpu.running}. ` : "")
         + `Этап ${progress.current} из ${progress.total}.`
       );
     }
 
+    if (progress.gpu && (progress.gpu.waiting > 0 || progress.gpu.running > 0)) {
+      return `${progress.message} Ожидают GPU: ${progress.gpu.waiting}. Генерация: ${progress.gpu.running}.`;
+    }
     return progress.message;
   }
 

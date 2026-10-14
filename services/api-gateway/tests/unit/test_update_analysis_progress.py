@@ -134,6 +134,40 @@ def build_processing_job() -> AnalysisJob:
     return job
 
 
+async def test_gpu_wait_does_not_replace_stage_or_survive_late_callback() -> None:
+    """Очередь видна отдельно; запоздалый Understanding не откатывает T-first и его счётчики."""
+    job = build_processing_job()
+    factory = FakeUnitOfWorkFactory(jobs={job.document_id: job})
+    use_case = UpdateAnalysisProgress(factory)
+    await use_case.execute(
+        document_id=job.document_id,
+        stage=AnalysisProgressStage.CHECKING_TECHNICAL_ASSIGNMENT,
+        gpu={"waiting": 3, "running": 1},
+    )
+    assert job.progress_gpu == {"waiting": 3, "running": 1}
+    assert job.progress_stage is AnalysisProgressStage.CHECKING_TECHNICAL_ASSIGNMENT
+    result = await use_case.execute(
+        document_id=job.document_id,
+        stage=AnalysisProgressStage.UNDERSTANDING_SHEET,
+        gpu={"waiting": 0, "running": 0},
+    )
+    assert not result.changed and job.progress_gpu["waiting"] == 3
+    await use_case.execute(
+        document_id=job.document_id, stage=AnalysisProgressStage.RETRIEVING_REQUIREMENTS
+    )
+    assert job.progress_gpu == {}
+    job.mark_cancelled()
+    result = await use_case.execute(
+        document_id=job.document_id,
+        stage=AnalysisProgressStage.FINALIZING_FINDINGS,
+        gpu={"waiting": 0, "running": 1},
+    )
+    assert (
+        result.cancelled
+        and job.progress_stage is AnalysisProgressStage.RETRIEVING_REQUIREMENTS
+    )
+
+
 @pytest.mark.asyncio
 async def test_progress_checkpoint_updates_processing_job() -> None:
     """Новый monotonic stage сохраняется и разрешает workflow продолжиться."""

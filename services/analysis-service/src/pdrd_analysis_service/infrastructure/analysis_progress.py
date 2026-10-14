@@ -32,6 +32,37 @@ class HttpAnalysisProgressProbe:
         total: int,
     ) -> bool:
         """Проверяет cancellation и одновременно обновляет heartbeat."""
+        return await self._post(
+            document_id=document_id, stage=stage, current=current, total=total
+        )
+
+    async def report_gpu_state(
+        self,
+        *,
+        document_id: UUID,
+        stage: str,
+        waiting: int,
+        running: int,
+    ) -> bool:
+        """Сохраняет счётчики очереди модели независимо от основного этапа."""
+        return await self._post(
+            document_id=document_id,
+            stage=stage,
+            current=0,
+            total=0,
+            gpu={"waiting": waiting, "running": running},
+        )
+
+    async def _post(
+        self,
+        *,
+        document_id: UUID,
+        stage: str,
+        current: int,
+        total: int,
+        gpu: dict[str, int] | None = None,
+    ) -> bool:
+        """Передаёт best-effort heartbeat, возвращая durable сигнал отмены."""
         url = f"{self.base_url.rstrip('/')}/internal/v1/analysis-progress/{document_id}"
 
         try:
@@ -45,6 +76,7 @@ class HttpAnalysisProgressProbe:
                     url,
                     json={
                         "stage": stage,
+                        **({"gpu": gpu} if gpu is not None else {}),
                     },
                 )
 

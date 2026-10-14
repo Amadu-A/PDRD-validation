@@ -59,6 +59,7 @@ class UnderstandPagesStageResponse(
     """Ordered результаты page-understanding stage."""
 
     items: list[UnderstandPagesStageItemResponse]
+    cancelled: bool = False
 
 
 class TechnicalAssignmentStagePageRequest(
@@ -136,6 +137,7 @@ class CheckTechnicalAssignmentStageResponse(
     """Ordered результаты T-first stage."""
 
     items: list[CheckTechnicalAssignmentStageItemResponse]
+    cancelled: bool = False
 
 
 class CheckNormsStageRequest(
@@ -172,6 +174,7 @@ class CheckNormsStageResponse(
     """Ordered результаты normative-check stage."""
 
     items: list[CheckNormsStageItemResponse]
+    cancelled: bool = False
 
 
 class FinalizeStageItemRequest(
@@ -224,3 +227,4 @@ class FinalizeStageResponse(
     """Ordered результаты finalization stage."""
 
     items: list[FinalizeStageItemResponse]
+    cancelled: bool = False

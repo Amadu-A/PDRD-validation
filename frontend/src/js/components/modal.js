@@ -5,6 +5,8 @@
  */
 
 
+import { setAnalysisSubmitBlock } from "../features/analysis/submit-guard.js";
+
 async function copyText(
   value,
 ) {
@@ -113,7 +115,7 @@ export function createModal({
       "false",
     );
 
-    submitButton.disabled = true;
+    setAnalysisSubmitBlock(submitButton, "analysis", "Анализ уже выполняется.");
   }
 
 
@@ -127,7 +129,7 @@ export function createModal({
       "true",
     );
 
-    submitButton.disabled = false;
+    setAnalysisSubmitBlock(submitButton, "analysis");
   }
 
 

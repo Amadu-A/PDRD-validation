@@ -34,6 +34,7 @@ from pdrd_analysis_service.core.settings import (
 from pdrd_analysis_service.infrastructure.analysis_progress import (
     HttpAnalysisProgressProbe,
 )
+from pdrd_analysis_service.infrastructure.image_cropper import PilImageCropper
 from pdrd_analysis_service.infrastructure.vllm import (
     VllmStructuredVisionModel,
 )
@@ -129,6 +130,8 @@ def build_container() -> ApplicationContainer:
             vision_model=vision_model,
             num_predict=(settings.pipeline.page_facts_num_predict),
             max_facts_per_page=settings.pipeline.max_facts_per_page,
+            image_cropper=PilImageCropper(),
+            max_graphical_crops=settings.pipeline.max_graphical_crops,
         ),
         build_normative_queries=BuildNormativeQueries(
             max_queries=(settings.pipeline.max_normative_queries),

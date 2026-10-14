@@ -52,6 +52,7 @@ class GenerationMetrics:
 
     content_length: int
     thinking_length: int
+    slot_wait_ms: float = field(default=0.0, kw_only=True)
 
     def as_dict(
         self,
@@ -70,6 +71,7 @@ class GenerationMetrics:
             "eval_count": self.eval_count,
             "content_length": self.content_length,
             "thinking_length": self.thinking_length,
+            "slot_wait_ms": self.slot_wait_ms,
         }
 
 

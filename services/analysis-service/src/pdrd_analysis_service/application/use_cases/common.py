@@ -18,6 +18,7 @@ from pdrd_analysis_service.domain.analysis import (
     GenerationMetrics,
     NormativeSource,
 )
+from pdrd_analysis_service.domain.engineering_claims import false_numeric_claim
 
 _CANDIDATE_SOURCE_ID_FIELDS = (
     "normative_source_ids",
@@ -385,7 +386,11 @@ def _candidate_identity(
 
     raw_regions = candidate.get("visual_regions")
     if not isinstance(raw_regions, list) or not raw_regions:
-        # Одинаковый текст без координат может описывать разные объекты.
+        # Явная одинаковая объектная идентичность позволяет убрать дословный повтор.
+        object_ref = normalize_text(candidate.get("object_ref"))
+        if object_ref:
+            return f"{comment}\0{object_ref}", evidence, ()
+        # Одинаковый текст без координат и объекта может описывать разные места.
         return None
 
     boxes: list[tuple[int, int, int, int]] = []
@@ -861,6 +866,7 @@ def select_violation_candidates(
         list[int],
     ] = {}
 
+    rejected_reasons: list[str] = []
     for raw_index, violation in enumerate(
         violations,
         start=1,
@@ -877,6 +883,10 @@ def select_violation_candidates(
         candidate = dict(
             violation,
         )
+        false_claim = false_numeric_claim(str(candidate.get("comment", "")))
+        if false_claim is not None:
+            rejected_reasons.append(false_claim)
+            continue
 
         identity = _candidate_identity(
             candidate,
@@ -998,6 +1008,7 @@ def select_violation_candidates(
         generated_count=len(
             violations,
         ),
+        rejected_reasons=tuple(rejected_reasons),
         origin_assertions_by_candidate=tuple(
             tuple(origins) for origins in origins_by_candidate
         ),

@@ -85,6 +85,7 @@ class UnderstandingMeasurements:
             eval_count=total("eval_count"),
             content_length=total("content_length"),
             thinking_length=total("thinking_length"),
+            slot_wait_ms=total("slot_wait_ms"),
             diagnostics=diagnostics,
         )
         diagnostics.update(

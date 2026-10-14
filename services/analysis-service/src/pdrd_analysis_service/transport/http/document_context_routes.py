@@ -17,6 +17,10 @@ from pdrd_analysis_service.application.use_cases.document_context import (
     build_page_document_context,
     merge_cross_page_findings,
 )
+from pdrd_analysis_service.application.vision_execution import (
+    AnalysisCancelledError,
+    vision_execution,
+)
 from pdrd_analysis_service.core.container import ApplicationContainer
 from pdrd_analysis_service.transport.http.dependencies import get_container
 from pdrd_analysis_service.transport.http.routes import _finding_draft_payload
@@ -26,6 +30,7 @@ from pdrd_analysis_service.transport.http.schemas import (
     FindingDraftPayload,
     PageFactsPayload,
 )
+from pdrd_analysis_service.transport.http.vision_execution import stage_execution
 
 router = APIRouter(prefix="/internal/v1/document-context", tags=["document-context"])
 
@@ -99,10 +104,11 @@ class CheckConsistencyRequest(BaseModel):
 
 
 class CheckConsistencyResponse(BaseModel):
-    """Только подтверждённые межстраничные замечания."""
+    """Подтверждённые противоречия, конкретные подозрения и штатная отмена."""
 
     findings: list[FindingDraftPayload]
     items: list[PageCheckPayload] = Field(default_factory=list)
+    cancelled: bool = False
 
 
 def _options(container: ApplicationContainer) -> DocumentContextOptions:
@@ -178,15 +184,21 @@ async def check_cross_page_consistency(
         )
 
     try:
-        findings = await use_case.execute(
-            pages=tuple(page.to_domain() for page in request.pages),
-            cancel_check=cancelled,
-        )
-    except CrossPageCancelled as error:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "analysis_cancelled"},
-        ) from error
+        with vision_execution(
+            stage_execution(
+                probe,
+                document_id=request.document_id,
+                stage="checking_cross_page_consistency",
+                current=1,
+                total=1,
+            )
+        ):
+            findings = await use_case.execute(
+                pages=tuple(page.to_domain() for page in request.pages),
+                cancel_check=cancelled,
+            )
+    except (CrossPageCancelled, AnalysisCancelledError):
+        return CheckConsistencyResponse(findings=[], items=[], cancelled=True)
     except VisionModelError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

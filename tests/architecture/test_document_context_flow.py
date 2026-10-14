@@ -25,7 +25,12 @@ def test_document_context_is_built_once_and_used_before_page_check() -> None:
     workflow = _workflow()
     names = {node["name"] for node in workflow["nodes"]}
     assert len(names) == len(workflow["nodes"])
-    assert _next(workflow, "Understand Pages Stage") == ["Use Equipment Search"]
+    assert _next(workflow, "Understand Pages Stage") == [
+        "Continue Understand Pages Stage Response"
+    ]
+    assert _next(workflow, "Continue Understand Pages Stage Response") == [
+        "Use Equipment Search"
+    ]
     assert (
         workflow["connections"]["Use Equipment Search"]["main"][1][0]["node"]
         == "Use Document Context"
@@ -53,8 +58,14 @@ def test_cross_page_stage_is_once_per_document_and_before_finalization() -> None
         if node["name"] == "Check Cross-Page Consistency"
     )
     assert "$('Understand Page').all()" in check["parameters"]["body"]
-    assert _next(workflow, "Check Norms") == ["Use Cross-Page Consistency"]
+    assert _next(workflow, "Check Norms") == ["Continue Check Norms Response"]
+    assert _next(workflow, "Continue Check Norms Response") == [
+        "Use Cross-Page Consistency"
+    ]
     assert _next(workflow, "Check Cross-Page Consistency") == [
+        "Continue Check Cross-Page Consistency Response"
+    ]
+    assert _next(workflow, "Continue Check Cross-Page Consistency Response") == [
         "Merge Cross-Page Checks"
     ]
     assert _next(workflow, "Merge Cross-Page Checks") == [

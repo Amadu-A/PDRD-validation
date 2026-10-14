@@ -575,10 +575,14 @@ export function createAnalysisForm({
   }
 
 
-  /** Проверяет файлы и запрещает новую работу с удаляемым разделом. */
+  /** Требует выбранный раздел и проверяет файлы до отправки запроса анализа. */
   function validate() {
-    if (getNormativeSelection()?.deleting === true) {
-      return { valid: false, message: "Раздел удаляется. Выберите другой раздел или анализ без раздела." };
+    const selection = getNormativeSelection();
+    if (!selection?.sectionId) {
+      return { valid: false, message: "Выберите раздел, чтобы запустить анализ." };
+    }
+    if (selection.deleting === true) {
+      return { valid: false, message: "Раздел удаляется. Выберите другой раздел." };
     }
     const mode = getMode();
 

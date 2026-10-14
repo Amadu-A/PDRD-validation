@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from pdrd_analysis_service.application.engineering_review import engineering_questions
 from pdrd_analysis_service.application.json_schemas import (
     build_normative_check_schema,
 )
@@ -430,6 +431,7 @@ def _combine_generation_metrics(
         eval_count=_sum_optional_ints(tuple(metric.eval_count for metric in metrics)),
         content_length=sum(metric.content_length for metric in metrics),
         thinking_length=sum(metric.thinking_length for metric in metrics),
+        slot_wait_ms=sum(metric.slot_wait_ms for metric in metrics),
     )
 
 
@@ -482,6 +484,7 @@ class BuildNormativeQueries:
                 f"Связи: {connections}. "
                 f"Обозначения: {labels}. "
                 f"Контекст ПЗ проекта: {pz_hint}"
+                f" Проверочные темы: {'; '.join(engineering_questions(page_facts, extracted_text))}"
             ).strip()
         )
 
@@ -993,6 +996,20 @@ class CheckPageAgainstNorms:
                     "",
                 )
             ).strip()
+            if evidence and (
+                evidence in extracted_text
+                or any(
+                    evidence in source.evidence_text
+                    for source in selected_document_context_sources
+                )
+            ):
+                origin_assertions = (
+                    *origin_assertions,
+                    {
+                        "origin": "engineering_verification",
+                        "evidence_grounded": True,
+                    },
+                )
 
             recommendation_draft = str(
                 violation.get(

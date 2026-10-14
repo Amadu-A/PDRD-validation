@@ -75,7 +75,8 @@ async def test_http_budget_recovers_independent_fields_without_same_schema_retry
             },
         )
     if cancelled:
-        assert response.status_code == 409
+        assert response.status_code == 200
+        assert response.json() == {"items": [], "cancelled": True}
         assert len(calls) == 1
     else:
         assert response.status_code == 200

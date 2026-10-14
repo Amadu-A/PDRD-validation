@@ -1,0 +1,2169 @@
+{
+  "title": "PDRD Engineering Review — preliminary human-vs-model evaluation",
+  "version": "2026-10-14",
+  "scope": "Factual comparison only, NOT verified regulatory gold standard",
+  "human_pdf": "777_155-1с-ИОС2.2 с замечаниями и комментариями фриланс.pdf",
+  "sources": {
+    "A": {
+      "filename": "777_155-1с-ИОС2.2_annotated_without_checkboxes.pdf",
+      "job_id": "482a5aa0-a784-4842-8f7b-327031935fe2",
+      "reported_count": 43,
+      "document_pages": 31
+    },
+    "B": {
+      "filename": "777_155-1с-ИОС2.2_annotated_with_checkboxes.pdf",
+      "job_id": "25799f46-4890-463b-acaf-74a180c98669",
+      "reported_count": 24,
+      "document_pages": 31
+    }
+  },
+  "human_annotation_count": 57,
+  "notes": [
+    "All PDF page numbers physical 1-based. The source has 31 original pages, auto reports append pages.",
+    "Human annotations may describe advice or request explanation, not necessarily confirmed defects.",
+    "FreeText annotation bounding boxes may show comment placement rather than defect location; Highlight generally anchors source text.",
+    "A has 10 verbatim repeated findings among 43.",
+    "Direct match concerns issue meaning, not coordinate quality.",
+    "No intermediate analysis stage traces included, so causality cannot be proven."
+  ],
+  "duplicate_A_finding_ids": [
+    [
+      14,
+      24
+    ],
+    [
+      15,
+      25
+    ],
+    [
+      16,
+      26
+    ],
+    [
+      17,
+      27
+    ],
+    [
+      18,
+      28
+    ],
+    [
+      19,
+      29
+    ],
+    [
+      20,
+      30
+    ],
+    [
+      21,
+      31
+    ],
+    [
+      22,
+      32
+    ],
+    [
+      23,
+      33
+    ]
+  ],
+  "cases": [
+    {
+      "case_id": "H01",
+      "expert_issue": "Количество и обозначения ПГ на плане и в ТЧ",
+      "source_pages": [
+        8,
+        24,
+        25
+      ],
+      "human_annotation_ids": [
+        1
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P0",
+      "reason": "Нужна связь текста с ПГ1–ПГ5 и назначением каждого гидранта",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H02",
+      "expert_issue": "Расчёт и размещение резервуаров 100+100+50 м³",
+      "source_pages": [
+        8,
+        9,
+        18
+      ],
+      "human_annotation_ids": [
+        2,
+        3,
+        7,
+        36
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P0",
+      "reason": "Искать обоснование запаса, габаритов и размещения в доступном комплекте",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H03",
+      "expert_issue": "Год/редакция упомянутых СП",
+      "source_pages": [
+        9,
+        10
+      ],
+      "human_annotation_ids": [
+        6,
+        8,
+        9
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P2",
+      "reason": "Проверка полноты цитирования норм; требования уточнять по текущим НД",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H04",
+      "expert_issue": "Применимость раздела о вечномерзлых грунтах и способ прокладки",
+      "source_pages": [
+        11,
+        12
+      ],
+      "human_annotation_ids": [
+        10,
+        13
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Сопоставить исходные изыскания, тип прокладки и текстовое описание",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H05",
+      "expert_issue": "Соответствует ли описание наружным трубопроводам по схеме",
+      "source_pages": [
+        11,
+        24,
+        25
+      ],
+      "human_annotation_ids": [
+        11
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Текст и графика должны описывать один объект и зону ответственности",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H06",
+      "expert_issue": "Полнота ссылок на СП 14 по сейсмичности",
+      "source_pages": [
+        12
+      ],
+      "human_annotation_ids": [
+        12
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P2",
+      "reason": "Отличать полноту нормативных ссылок от ложного противоречия карт ОСР",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H07",
+      "expert_issue": "Применимость СП 73 к наружным сетям",
+      "source_pages": [
+        12
+      ],
+      "human_annotation_ids": [
+        14
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Нужен нормативный проверочный вопрос о scope требования",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H08",
+      "expert_issue": "Обоснование расчётного расхода 10 л/с",
+      "source_pages": [
+        13
+      ],
+      "human_annotation_ids": [
+        15
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P0",
+      "reason": "Недостаточно просто извлечь значение: требуется расчёт/норма",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H09",
+      "expert_issue": "В2 ошибочно названа сетью водоотведения",
+      "source_pages": [
+        13,
+        14
+      ],
+      "human_annotation_ids": [
+        16
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [
+        5,
+        8
+      ],
+      "match_A": "absent",
+      "match_B": "direct",
+      "priority": "P0",
+      "reason": "B уже обнаруживает реальное внутреннее терминологическое противоречие",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H10",
+      "expert_issue": "Длина/диаметр В2 в спецификации отличается от текста",
+      "source_pages": [
+        13
+      ],
+      "human_annotation_ids": [
+        17
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Рецензент пишет «В спецификации 150», нужна конкретизация параметра",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H11",
+      "expert_issue": "Принятый тип пластмассовых/ПЭ труб и порядок описания",
+      "source_pages": [
+        13
+      ],
+      "human_annotation_ids": [
+        18,
+        19
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Сначала состав и материал труб, затем способы соединения",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H12",
+      "expert_issue": "Склад угля: наружное или внутреннее пожаротушение",
+      "source_pages": [
+        14
+      ],
+      "human_annotation_ids": [
+        20,
+        21
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P0",
+      "reason": "Сопоставить систему, здание и тип пожаротушения",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H13",
+      "expert_issue": "ГОСТ труб в тексте и спецификации",
+      "source_pages": [
+        14
+      ],
+      "human_annotation_ids": [
+        22
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P0",
+      "reason": "Проверить точное обозначение НД и применимость к материалу",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H14",
+      "expert_issue": "Полнота нормативного обоснования расходов",
+      "source_pages": [
+        14
+      ],
+      "human_annotation_ids": [
+        23
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P0",
+      "reason": "Нужен retrieval по СП 89/124 и пожарным требованиям, без выдумывания пунктов",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H15",
+      "expert_issue": "Различия таблиц 1 и 2 и назначение каждой",
+      "source_pages": [
+        15
+      ],
+      "human_annotation_ids": [
+        26
+      ],
+      "A_finding_ids": [
+        7
+      ],
+      "B_finding_ids": [
+        7
+      ],
+      "match_A": "related_other_issue",
+      "match_B": "related_other_issue",
+      "priority": "P1",
+      "reason": "Автомат отмечает другой аспект таблиц, но не разъясняет дублирование",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H16",
+      "expert_issue": "Расхождение расходов с расчётным приложением",
+      "source_pages": [
+        15,
+        30
+      ],
+      "human_annotation_ids": [
+        27,
+        28
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [
+        23
+      ],
+      "match_A": "absent",
+      "match_B": "possible_partial",
+      "priority": "P0",
+      "reason": "B сравнивает расход на страницах 15 и 30, но точный смысл человеческой претензии требует ручной сверки",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H17",
+      "expert_issue": "Требуемые напоры В1/В2 относительно схемы ТМ",
+      "source_pages": [
+        16
+      ],
+      "human_annotation_ids": [
+        29,
+        30
+      ],
+      "A_finding_ids": [
+        8
+      ],
+      "B_finding_ids": [],
+      "match_A": "incorrect_related",
+      "match_B": "absent",
+      "priority": "P0",
+      "reason": "A делает ложное арифметическое утверждение, не проверяет расчёт/схему ТМ",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H18",
+      "expert_issue": "Обоснование диаметра, скорости и потерь напора",
+      "source_pages": [
+        16
+      ],
+      "human_annotation_ids": [
+        31
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P0",
+      "reason": "Проверка достаточности гидравлического расчёта",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H19",
+      "expert_issue": "Конкретные документы санитарной допустимости труб",
+      "source_pages": [
+        17
+      ],
+      "human_annotation_ids": [
+        32
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Нужна проверка нормативных и проектных ссылок",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H20",
+      "expert_issue": "Параметры труб по спецификации на странице 17",
+      "source_pages": [
+        17
+      ],
+      "human_annotation_ids": [
+        33,
+        34
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Текст эксперта краток: «В спецификации 1», пока неоднозначно",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H21",
+      "expert_issue": "Подготовка основания и ссылка на серию 3.008.9-6/86.0-28",
+      "source_pages": [
+        17
+      ],
+      "human_annotation_ids": [
+        35
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P0",
+      "reason": "Нужно сопоставить описанную конструкцию и область применимости серии",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H22",
+      "expert_issue": "Пояснение способа выполнения инженерного решения",
+      "source_pages": [
+        19
+      ],
+      "human_annotation_ids": [
+        39
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P2",
+      "reason": "Замечание эксперта неполное; требуется указать конкретный объект",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H23",
+      "expert_issue": "Точное наименование котельной в балансе",
+      "source_pages": [
+        20
+      ],
+      "human_annotation_ids": [
+        40
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [
+        12
+      ],
+      "match_A": "absent",
+      "match_B": "related_other_issue",
+      "priority": "P2",
+      "reason": "В B вопрос о классификации, в замечании эксперта о наименовании",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H24",
+      "expert_issue": "Ссылка на таблицу 3 вместо таблицы 2",
+      "source_pages": [
+        20
+      ],
+      "human_annotation_ids": [
+        41
+      ],
+      "A_finding_ids": [
+        12
+      ],
+      "B_finding_ids": [
+        13
+      ],
+      "match_A": "direct",
+      "match_B": "direct",
+      "priority": "P0",
+      "reason": "Прямое совпадение по существу",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H25",
+      "expert_issue": "Ссылка на расчётное приложение в балансе",
+      "source_pages": [
+        20
+      ],
+      "human_annotation_ids": [
+        42
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Указать связанный расчёт в составе приложений",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H26",
+      "expert_issue": "Неполное название графы таблицы",
+      "source_pages": [
+        20
+      ],
+      "human_annotation_ids": [
+        43
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P2",
+      "reason": "Проверка табличных заголовков",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H27",
+      "expert_issue": "Связь текстовой и графической частей при балансе",
+      "source_pages": [
+        20
+      ],
+      "human_annotation_ids": [
+        44
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P2",
+      "reason": "Эксперт сформулировал общую задачу без отдельного дефекта",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H28",
+      "expert_issue": "Согласование описания прибора/решения со схемой ТМ",
+      "source_pages": [
+        21
+      ],
+      "human_annotation_ids": [
+        45
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Нужны соответствующие документы ТМ, если они действительно приложены",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H29",
+      "expert_issue": "Ссылка на ИОС2.1.2 (внутреннее водоснабжение)",
+      "source_pages": [
+        23
+      ],
+      "human_annotation_ids": [
+        46
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Кросс-раздел: требуются ссылки на доступный проектный том",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H30",
+      "expert_issue": "Сквозная нумерация листов графической части",
+      "source_pages": [
+        24,
+        25,
+        26,
+        27,
+        28
+      ],
+      "human_annotation_ids": [
+        48,
+        50,
+        53,
+        54,
+        55
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Мультилистовая графическая проверка штампов/рамок",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H31",
+      "expert_issue": "Название принципиальной схемы",
+      "source_pages": [
+        25
+      ],
+      "human_annotation_ids": [
+        49
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Проверка наличия заголовка схемы",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H32",
+      "expert_issue": "Читаемость линий-выносок",
+      "source_pages": [
+        25
+      ],
+      "human_annotation_ids": [
+        51
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Нужен региональный анализ графики и пересечений",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H33",
+      "expert_issue": "Обозначение/шифр графического листа",
+      "source_pages": [
+        26
+      ],
+      "human_annotation_ids": [
+        52
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P2",
+      "reason": "Комментрий краток; предмет уточнять при подтверждении",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H34",
+      "expert_issue": "Форма представления расчётного приложения",
+      "source_pages": [
+        29
+      ],
+      "human_annotation_ids": [
+        56
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P2",
+      "reason": "Эксперт предлагает вынести таблицы в ГЧ, не гарантированно нарушение",
+      "review_status": "needs_engineer_adjudication"
+    },
+    {
+      "case_id": "H35",
+      "expert_issue": "Дублирующиеся таблицы водопотребления в приложении",
+      "source_pages": [
+        30
+      ],
+      "human_annotation_ids": [
+        57
+      ],
+      "A_finding_ids": [],
+      "B_finding_ids": [],
+      "match_A": "absent",
+      "match_B": "absent",
+      "priority": "P1",
+      "reason": "Проверить информационное дублирование и согласованность приложения",
+      "review_status": "needs_engineer_adjudication"
+    }
+  ],
+  "human_annotations": [
+    {
+      "id": 1,
+      "page": 8,
+      "type": "Highlight",
+      "text": "на схеме и в спецификации показаны ПГ1–ПГ5. Следует привести количество, размещение и назначение гидрантов к единому описанию.",
+      "rect": [
+        321.56,
+        394.1,
+        463.03,
+        413.9
+      ]
+    },
+    {
+      "id": 2,
+      "page": 8,
+      "type": "Highlight",
+      "text": "Почему именно такой объем воды принят из какой логики ? Сослаться на нормативные документы и необходим расчёт и обоснование",
+      "rect": [
+        94.14,
+        428.18,
+        547.24,
+        465.02
+      ]
+    },
+    {
+      "id": 3,
+      "page": 9,
+      "type": "Highlight",
+      "text": "Почему приняты такие размеры резервуаров?",
+      "rect": [
+        73.02,
+        137.54,
+        549.34,
+        174.62
+      ]
+    },
+    {
+      "id": 4,
+      "page": 9,
+      "type": "Highlight",
+      "text": "197",
+      "rect": [
+        482.62,
+        291.38,
+        516.0,
+        311.18
+      ]
+    },
+    {
+      "id": 5,
+      "page": 9,
+      "type": "Highlight",
+      "text": "-22",
+      "rect": [
+        492.65,
+        342.74,
+        527.33,
+        362.54
+      ]
+    },
+    {
+      "id": 6,
+      "page": 9,
+      "type": "Highlight",
+      "text": "Указать год СП",
+      "rect": [
+        177.32,
+        530.66,
+        272.44,
+        550.46
+      ]
+    },
+    {
+      "id": 7,
+      "page": 9,
+      "type": "FreeText",
+      "text": "указать помимо расчет и обоснвоания также вид резервуаров и их размещение (подземные или надземные?). Ну и по расчету наверно он должен быть в пункте \"К\"?",
+      "rect": [
+        238.53,
+        13.62,
+        560.52,
+        144.27
+      ]
+    },
+    {
+      "id": 8,
+      "page": 10,
+      "type": "Highlight",
+      "text": "Указать год СП",
+      "rect": [
+        79.98,
+        411.14,
+        549.41,
+        447.98
+      ]
+    },
+    {
+      "id": 9,
+      "page": 10,
+      "type": "Highlight",
+      "text": "Указать год СП",
+      "rect": [
+        279.43,
+        530.66,
+        370.78,
+        550.46
+      ]
+    },
+    {
+      "id": 10,
+      "page": 11,
+      "type": "FreeText",
+      "text": "проверить про вечномерзлые грунты",
+      "rect": [
+        82.75,
+        647.96,
+        336.34,
+        758.28
+      ]
+    },
+    {
+      "id": 11,
+      "page": 11,
+      "type": "FreeText",
+      "text": "насколько вижу по схеме в ГЧ там не наружные трубопроводы",
+      "rect": [
+        317.64,
+        450.87,
+        429.32,
+        540.2
+      ]
+    },
+    {
+      "id": 12,
+      "page": 12,
+      "type": "Highlight",
+      "text": "СП 14.13330.2018 необходимо добавить еще",
+      "rect": [
+        178.32,
+        701.54,
+        401.7,
+        721.34
+      ]
+    },
+    {
+      "id": 13,
+      "page": 12,
+      "type": "FreeText",
+      "text": "уточнить тип прокладки",
+      "rect": [
+        261.54,
+        414.02,
+        441.38,
+        446.85
+      ]
+    },
+    {
+      "id": 14,
+      "page": 12,
+      "type": "FreeText",
+      "text": "СП 73 - внутренние санитарно-технические системы, как относится к НВК?",
+      "rect": [
+        115.91,
+        728.85,
+        224.91,
+        838.33
+      ]
+    },
+    {
+      "id": 15,
+      "page": 13,
+      "type": "Highlight",
+      "text": "Обоснование такого расхода принято свзяи с чем ?",
+      "rect": [
+        224.4,
+        582.02,
+        273.74,
+        601.82
+      ]
+    },
+    {
+      "id": 16,
+      "page": 13,
+      "type": "Highlight",
+      "text": "Водоотведения ?",
+      "rect": [
+        224.18,
+        650.42,
+        329.52,
+        670.22
+      ]
+    },
+    {
+      "id": 17,
+      "page": 13,
+      "type": "Highlight",
+      "text": "В спецификации 150",
+      "rect": [
+        483.86,
+        650.42,
+        518.53,
+        670.22
+      ]
+    },
+    {
+      "id": 18,
+      "page": 13,
+      "type": "FreeText",
+      "text": "что за пластмассовые трубы? это какие? и ранее по тексту не видел описания принятых решений по виду и типу трубопроводов. Сразу же про их соединения, это должно быть после описания самих принятых трубопроводов послеждовательно",
+      "rect": [
+        230.27,
+        7.17,
+        587.01,
+        225.78
+      ]
+    },
+    {
+      "id": 19,
+      "page": 13,
+      "type": "FreeText",
+      "text": "здесь уже полиэтилен",
+      "rect": [
+        267.13,
+        354.08,
+        650.31,
+        393.5
+      ]
+    },
+    {
+      "id": 20,
+      "page": 14,
+      "type": "Highlight",
+      "text": "Склад угля тушиться только от наружного водопровода",
+      "rect": [
+        333.99,
+        308.42,
+        420.97,
+        328.22
+      ]
+    },
+    {
+      "id": 21,
+      "page": 14,
+      "type": "Highlight",
+      "text": "Склад угля тушиться только от наружного водопровода",
+      "rect": [
+        148.79,
+        394.1,
+        303.26,
+        413.9
+      ]
+    },
+    {
+      "id": 22,
+      "page": 14,
+      "type": "Highlight",
+      "text": "В спецификации другой ГОСТ на трубы",
+      "rect": [
+        288.59,
+        342.74,
+        305.59,
+        362.54
+      ]
+    },
+    {
+      "id": 23,
+      "page": 14,
+      "type": "Highlight",
+      "text": "Не только по сп 30, также сп89 сп124, а также сп для пожаротушения проверить сп 8 и сп 10",
+      "rect": [
+        91.02,
+        504.98,
+        549.28,
+        542.06
+      ]
+    },
+    {
+      "id": 24,
+      "page": 14,
+      "type": "FreeText",
+      "text": "хозяйственно бытовые нужды может? странн окак по мне сосбтвенные нужды персонала",
+      "rect": [
+        282.72,
+        137.88,
+        494.91,
+        226.89
+      ]
+    },
+    {
+      "id": 25,
+      "page": 14,
+      "type": "FreeText",
+      "text": "вот это где то вначале должно быть",
+      "rect": [
+        168.57,
+        255.58,
+        649.28,
+        301.39
+      ]
+    },
+    {
+      "id": 26,
+      "page": 15,
+      "type": "Highlight",
+      "text": "Таблица 1 такая же как таблица 2, прокомментировать в чем разница данных сведений",
+      "rect": [
+        479.58,
+        462.02,
+        549.57,
+        481.82
+      ]
+    },
+    {
+      "id": 27,
+      "page": 15,
+      "type": "Highlight",
+      "text": "В приложении другое число представлено",
+      "rect": [
+        368.46,
+        537.38,
+        417.08,
+        557.18
+      ]
+    },
+    {
+      "id": 28,
+      "page": 15,
+      "type": "Highlight",
+      "text": "В приложении другое число представлено",
+      "rect": [
+        368.46,
+        61.94,
+        417.08,
+        81.74
+      ]
+    },
+    {
+      "id": 29,
+      "page": 16,
+      "type": "Highlight",
+      "text": "Почему такой принят ? Если согласно схеме ТМ требуемый 64,82 м",
+      "rect": [
+        154.55,
+        454.34,
+        190.93,
+        474.14
+      ]
+    },
+    {
+      "id": 30,
+      "page": 16,
+      "type": "Highlight",
+      "text": "Почему такой принят ? Опять согласно схеме ТМ, напор требуемый 75,45 м",
+      "rect": [
+        104.58,
+        556.82,
+        144.53,
+        576.62
+      ]
+    },
+    {
+      "id": 31,
+      "page": 16,
+      "type": "FreeText",
+      "text": "где обнснование принятия диаметров труб? Скорости, потери и тд? Здесь должны быть расчеты и обоснование принятых решений",
+      "rect": [
+        203.79,
+        247.6,
+        680.32,
+        324.13
+      ]
+    },
+    {
+      "id": 32,
+      "page": 17,
+      "type": "Highlight",
+      "text": "сослаться на документы",
+      "rect": [
+        79.98,
+        607.94,
+        548.74,
+        653.18
+      ]
+    },
+    {
+      "id": 33,
+      "page": 17,
+      "type": "Highlight",
+      "text": "В спецификации 1",
+      "rect": [
+        527.63,
+        155.06,
+        544.63,
+        174.86
+      ]
+    },
+    {
+      "id": 34,
+      "page": 17,
+      "type": "Highlight",
+      "text": "В спецификации 1",
+      "rect": [
+        351.66,
+        103.7,
+        368.66,
+        123.5
+      ]
+    },
+    {
+      "id": 35,
+      "page": 17,
+      "type": "Highlight",
+      "text": "описание железобетонного основания с песчаной подготовкой не соответствует приведённой ссылке на серию 3.008.9-6/86.0-28, которая относится к укладке пластмассовых труб на гравийно-щебёночную подготовку.",
+      "rect": [
+        87.18,
+        180.5,
+        537.03,
+        225.98
+      ]
+    },
+    {
+      "id": 36,
+      "page": 18,
+      "type": "Highlight",
+      "text": "Почему именно такой объем воды принят из какой логики ? Сослаться на нормативные документы и необходим расчёт и обоснование",
+      "rect": [
+        291.95,
+        103.7,
+        485.6,
+        123.5
+      ]
+    },
+    {
+      "id": 37,
+      "page": 18,
+      "type": "Highlight",
+      "text": "Убрать",
+      "rect": [
+        402.46,
+        551.54,
+        452.87,
+        571.34
+      ]
+    },
+    {
+      "id": 38,
+      "page": 19,
+      "type": "Highlight",
+      "text": "Убрать.",
+      "rect": [
+        87.18,
+        462.5,
+        549.11,
+        585.02
+      ]
+    },
+    {
+      "id": 39,
+      "page": 19,
+      "type": "FreeText",
+      "text": "не очень понятно что это такое и как это обеспечивается?",
+      "rect": [
+        330.68,
+        315.01,
+        535.33,
+        377.51
+      ]
+    },
+    {
+      "id": 40,
+      "page": 20,
+      "type": "Highlight",
+      "text": "Блочно-модульная котельная (поз.850).",
+      "rect": [
+        91.02,
+        257.54,
+        371.54,
+        277.34
+      ]
+    },
+    {
+      "id": 41,
+      "page": 20,
+      "type": "Highlight",
+      "text": "Таблица 3",
+      "rect": [
+        139.39,
+        639.86,
+        159.81,
+        659.66
+      ]
+    },
+    {
+      "id": 42,
+      "page": 20,
+      "type": "Text",
+      "text": "Я бы добавил что есть приложение в котором все расписано",
+      "rect": [
+        140.5,
+        484.15,
+        164.5,
+        508.15
+      ]
+    },
+    {
+      "id": 43,
+      "page": 20,
+      "type": "Highlight",
+      "text": "Наименование столбца не полное",
+      "rect": [
+        404.69,
+        399.22,
+        446.27,
+        478.83
+      ]
+    },
+    {
+      "id": 44,
+      "page": 20,
+      "type": "FreeText",
+      "text": "аналогично, проверить по все ТЧ и ГЧ",
+      "rect": [
+        325.53,
+        606.03,
+        476.38,
+        713.14
+      ]
+    },
+    {
+      "id": 45,
+      "page": 21,
+      "type": "Highlight",
+      "text": "Неправильно, смотреть схему ТМ",
+      "rect": [
+        101.34,
+        488.18,
+        549.36,
+        661.82
+      ]
+    },
+    {
+      "id": 46,
+      "page": 23,
+      "type": "Highlight",
+      "text": "Сослаться на раздел 777/155-1с-1.1-ИОС2.1.2 Это Часть 1. Внутренние системы водоснабжения. Там будет описание по основную оборудованию(расходомеры и прочее)",
+      "rect": [
+        87.18,
+        342.98,
+        549.21,
+        388.46
+      ]
+    },
+    {
+      "id": 47,
+      "page": 24,
+      "type": "Ink",
+      "text": "Количество листов ?",
+      "rect": [
+        1617.97,
+        1112.01,
+        1662.63,
+        1120.01
+      ]
+    },
+    {
+      "id": 48,
+      "page": 24,
+      "type": "Text",
+      "text": "Рамка с указанием номера листа по сквозной нумерации",
+      "rect": [
+        1649.68,
+        -3.64,
+        1673.68,
+        20.36
+      ]
+    },
+    {
+      "id": 49,
+      "page": 25,
+      "type": "FreeText",
+      "text": "Указать название схемы",
+      "rect": [
+        802.12,
+        37.15,
+        960.34,
+        60.54
+      ]
+    },
+    {
+      "id": 50,
+      "page": 25,
+      "type": "Text",
+      "text": "Рамка с указанием номера листа по сквозной нумерации",
+      "rect": [
+        1644.1,
+        4.73,
+        1668.1,
+        28.73
+      ]
+    },
+    {
+      "id": 51,
+      "page": 25,
+      "type": "FreeText",
+      "text": "выноски сделать так, чтобы не нарушали читаемости чертежа",
+      "rect": [
+        762.38,
+        659.53,
+        1057.76,
+        917.14
+      ]
+    },
+    {
+      "id": 52,
+      "page": 26,
+      "type": "Text",
+      "text": "Шифр",
+      "rect": [
+        120.0,
+        886.0,
+        144.0,
+        910.0
+      ]
+    },
+    {
+      "id": 53,
+      "page": 26,
+      "type": "Text",
+      "text": "Рамка с указанием номера листа по сквозной нумерации",
+      "rect": [
+        820.14,
+        1171.14,
+        844.14,
+        1195.14
+      ]
+    },
+    {
+      "id": 54,
+      "page": 27,
+      "type": "Text",
+      "text": "Рамка с указанием номера листа по сквозной нумерации",
+      "rect": [
+        822.11,
+        1161.28,
+        846.11,
+        1185.28
+      ]
+    },
+    {
+      "id": 55,
+      "page": 28,
+      "type": "Text",
+      "text": "Рамка с указанием номера листа по сквозной нумерации",
+      "rect": [
+        826.06,
+        1167.19,
+        850.06,
+        1191.19
+      ]
+    },
+    {
+      "id": 56,
+      "page": 29,
+      "type": "FreeText",
+      "text": "а зачем это так приклдывать и для чего? почему нельяз просто данные отсюда использовать в ТЧ? зачем делать отдельно как приложение? Сделать как лист в ГЧ назвать его табилца водопотребления и водоотведения на А3 например или дургом формате",
+      "rect": [
+        307.3,
+        309.93,
+        448.25,
+        557.34
+      ]
+    },
+    {
+      "id": 57,
+      "page": 30,
+      "type": "FreeText",
+      "text": "таблица 1 и 2 уже были вначале ТЧ, как то путаница возникаеи",
+      "rect": [
+        -0.5,
+        18.85,
+        121.14,
+        79.07
+      ]
+    }
+  ],
+  "runs": {
+    "A": {
+      "job_id": "482a5aa0-a784-4842-8f7b-327031935fe2",
+      "filename": "777_155-1с-ИОС2.2_annotated_without_checkboxes.pdf",
+      "findings": [
+        {
+          "id": 1,
+          "pages": [
+            3
+          ],
+          "issue": "В составе проектной документации отсутствует подраздел по теплоснабжению (ИОС3), что является обязательным для объекта котельной.",
+          "evidence": "В таблице перечислены только ИОС1 (электроснабжение) и ИОС2 (водоснабжение), при этом объект является котельной.",
+          "category": "Комплектность",
+          "sources": "Инженерное",
+          "recommendation": "Добавить в состав проектной документации подраздел по теплоснабжению (ИОС3)."
+        },
+        {
+          "id": 2,
+          "pages": [
+            4
+          ],
+          "issue": "В таблице содержания пропущен раздел 11: после позиции 10 следует сразу позиция 12.",
+          "evidence": "В таблице содержания последовательность номеров: 5.3, 5.4, 5.5, 5.6, 7, 8, 9, 10, 12. Строка с номером 11 отсутствует.",
+          "category": "Комплектность",
+          "sources": "Инженерное",
+          "recommendation": "Проверить наличие раздела 11 в документе и при необходимости добавить его в содержание или исправить нумерацию последующих разделов."
+        },
+        {
+          "id": 3,
+          "pages": [
+            6
+          ],
+          "issue": "В оглавлении для пункта «т.1)» отсутствует номер страницы, что нарушает единообразие оформления.",
+          "evidence": "Пункт «т.1) Обоснование выбора...» не имеет номера страницы в конце строки, в отличие от всех предыдущих пунктов.",
+          "category": "Комплектность",
+          "sources": "Инженерное",
+          "recommendation": "Добавить номер страницы для пункта «т.1)» в оглавлении."
+        },
+        {
+          "id": 4,
+          "pages": [
+            8
+          ],
+          "issue": "В пояснительной записке зафиксировано несоответствие диаметров противопожарного водопровода: в разделе (а) указан Ду 200 мм, а в разделе (в) — Ду 100 мм для вводов.",
+          "evidence": "В разделе (а) указано: «диаметр сети противопожарного водоснабжения – Ду 200 мм». В разделе (в) указано: «два ввода противопожарного водоснабжения (В2) диаметром Ду 100 мм».",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать диаметры противопожарного водопровода в тексте пояснительной записки, приведя значения в разделе (а) и (в) к единому проекту."
+        },
+        {
+          "id": 5,
+          "pages": [
+            10
+          ],
+          "issue": "В тексте пояснительной записки указано, что район относится к 8-балльной зоне по картам ОСР-2015-А,В и одновременно к 9-балльной зоне по карте ОСР-2015-С, что требует уточнения принятого проектного решения.",
+          "evidence": "Текст: «Район застройки... относится к 8 балльной сейсмической зоне по картам ОСР-2015-А,В и 9 балльной сейсмической зоне по карте ОСР-2015-С».",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Уточнить в тексте, какая именно карта (ОСР-2015-А,В или ОСР-2015-С) является определяющей для проектирования, и привести описание в соответствие с принятым решением."
+        },
+        {
+          "id": 6,
+          "pages": [
+            14
+          ],
+          "issue": "Сумма расходов по позициям таблицы 1 (3,729 м3/сут) не совпадает с итоговым значением (155,122 м3/сут).",
+          "evidence": "В таблице 1: Хоз-бытовые нужды 2,25 + Мокрая уборка 1,479 = 3,729 м3/сут, при этом итоговая строка указывает 155,122 м3/сут.",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Проверить корректность итоговой строки таблицы 1 и пересчитать баланс водопотребления."
+        },
+        {
+          "id": 7,
+          "pages": [
+            15
+          ],
+          "issue": "В Таблице 2 отсутствуют строки по внутреннему и наружному пожаротушению, которые присутствуют в сводной таблице выше на том же листе.",
+          "evidence": "Верхняя таблица содержит строки 'Пожаротушение внутреннее' (2*2,5 л/с) и 'Пожаротушение наружное' (10 л/с), которых нет в Таблице 2.",
+          "category": "Комплектность",
+          "sources": "Инженерное",
+          "recommendation": "Добавить в Таблицу 2 данные по пожаротушению (внутреннему и наружному) для обеспечения согласованности с общей сводкой расходов воды."
+        },
+        {
+          "id": 8,
+          "pages": [
+            16
+          ],
+          "issue": "Внутреннее противоречие: гарантированный напор сети В2 (75,45 м) указан как меньший, чем требуемый (60 м), что физически невозможно для обеспечения работы системы.",
+          "evidence": "В тексте листа: «Гарантированный напор... (В2)-75,45 м» и «Требуемый напор... составляет 60 м».",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Проверить корректность значений напора в пояснительной записке и сводной таблице, устранить арифметическое или логическое несоответствие."
+        },
+        {
+          "id": 9,
+          "pages": [
+            17
+          ],
+          "issue": "На листе выявлено несоответствие, требующее проверки инженером.",
+          "evidence": "Текст листа: «Противопожарный водопровод В2 прокладывается из технических полиэтиленовых напорных труб... ПЭ 100 SDR 11 по ГОСТ Р 70628.2-2023».",
+          "category": "Оборудование",
+          "sources": "Инженерное",
+          "recommendation": "Уточнить назначение труб: либо изменить материал на технический полиэтилен, либо скорректировать описание в тексте, указав, что применяются трубы для питьевой воды."
+        },
+        {
+          "id": 10,
+          "pages": [
+            18
+          ],
+          "issue": "В тексте допущена техническая ошибка: характеристика «обрезиненный клин» ошибочно приписана задвижкам, так как клин является конструктивным элементом вентилей, а не задвижек.",
+          "evidence": "Текст листа: «применение запорной арматуры (задвижек) с обрезиненным клином».",
+          "category": "Оборудование",
+          "sources": "Инженерное",
+          "recommendation": "Исправить формулировку, заменив «задвижек с обрезиненным клином» на корректное описание арматуры (например, «задвижек с обрезиненным затвором» или «вентилей с обрезиненным клином» в зависимости от фактического типа оборудования)."
+        },
+        {
+          "id": 11,
+          "pages": [
+            19
+          ],
+          "issue": "Внутреннее противоречие: в описании системы ГВС указана централизованная подача и циркуляция, однако расчетный расход горячей воды в спецификации/таблице отмечен как «Не предусматривается».",
+          "evidence": "Текст описывает централизованную подачу ГВС и циркуляцию, однако в пункте п) расчетный расход горячей воды отмечен как «Не предусматривается».",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Устранить противоречие: либо скорректировать описание системы, исключив упоминание ГВС, либо указать корректный расчетный расход горячей воды в соответствующем пункте."
+        },
+        {
+          "id": 12,
+          "pages": [
+            20
+          ],
+          "issue": "В тексте пункта Т указано, что баланс представлен в таблице 2, однако на листе приведена таблица 3, что является внутренним противоречием ссылок.",
+          "evidence": "Текст пункта Т: «Баланс водопотребления и водоотведения представлен в таблице 2», при этом выше расположена «Таблица 3».",
+          "category": "Прочее",
+          "sources": "Инженерное",
+          "recommendation": "Исправить номер таблицы в тексте пункта Т на 3 или перенумеровать таблицы в документе для обеспечения согласованности."
+        },
+        {
+          "id": 13,
+          "pages": [
+            22
+          ],
+          "issue": "Внутреннее противоречие: источник ГВС указан как контур котельной, но приготовление воды отнесено к разделу ИОС4.3.2.",
+          "evidence": "Текст: «Подача... непосредственно из контура системы Т3 котельной» и «Приготовление... предусматривается в разделе ИОС4.3.2».",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Уточнить источник теплоснабжения и согласовать ссылки на разделы проектной документации."
+        },
+        {
+          "id": 14,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованная маркировка диаметра трубопровода В2: в одном месте указан Ø110, в другом Ø89.",
+          "evidence": "Ввод В2 у котельной 850/3 подписан как 'В2, Ø89х3,5 сухотруб', тогда как остальные вводы В2 (например, у 850/1) имеют маркировку 'В2, Ø110х10'.",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Унифицировать маркировку диаметра трубопровода В2 на плане."
+        },
+        {
+          "id": 15,
+          "pages": [
+            24
+          ],
+          "issue": "Противоречивая маркировка диаметра трубопровода В1-2: Ø110х10 и Ø110х6,6.",
+          "evidence": "Узел В1-2 у здания 850/1 подписан как 'В1-2, Ø110х10 L=15,00м', а в другом месте (у 850/9) как 'В1-2, Ø110х6,6'.",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Проверить и согласовать толщину стенки трубопровода В1-2 в разных местах плана."
+        },
+        {
+          "id": 16,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/10, в экспликации 850/1.",
+          "evidence": "На плане здание обозначено как '850/10', однако в таблице 'Экспликация зданий' строка 850/1 отсутствует (есть 850/12, 850/13).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с таблицей экспликации."
+        },
+        {
+          "id": 17,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/11, в экспликации 850/12.",
+          "evidence": "На плане здание обозначено как '850/11', однако в таблице 'Экспликация зданий' строка 850/11 отсутствует (есть 850/12).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с таблицей экспликации."
+        },
+        {
+          "id": 18,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/12, в экспликации 850/13.",
+          "evidence": "На плане здание обозначено как '850/12', однако в таблице 'Экспликация зданий' строка 850/12 отсутствует (есть 850/13).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с таблицей экспликации."
+        },
+        {
+          "id": 19,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/13, в экспликации 850/14.",
+          "evidence": "На плане здание обозначено как '850/13', однако в таблице 'Экспликация зданий' строка 850/13 отсутствует (есть 850/14).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с таблицей экспликации."
+        },
+        {
+          "id": 20,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/14, в экспликации 850/15.",
+          "evidence": "На плане здание обозначено как '850/14', однако в таблице 'Экспликация зданий' строка 850/14 отсутствует (есть 850/15).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с таблицей экспликации."
+        },
+        {
+          "id": 21,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/15, в экспликации 850/16.",
+          "evidence": "На плане здание обозначено как '850/15', однако в таблице 'Экспликация зданий' строка 850/15 отсутствует (есть 850/16).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с таблицей экспликации."
+        },
+        {
+          "id": 22,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/16, в экспликации 850/17.",
+          "evidence": "На плане здание обозначено как '850/16', однако в таблице 'Экспликация зданий' строка 850/16 отсутствует (есть 850/17).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с таблицей экспликации."
+        },
+        {
+          "id": 23,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/17, в экспликации 850/18.",
+          "evidence": "На плане здание обозначено как '850/17', однако в таблице 'Экспликация зданий' строка 850/17 отсутствует (есть 850/18).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с таблицей экспликации."
+        },
+        {
+          "id": 24,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованная маркировка диаметра трубопровода В2: в одном месте указан Ø110, в другом Ø89.",
+          "evidence": "Ввод В2 у котельной 850/3 подписан как 'В2, Ø89х3,5 сухотруб', тогда как остальные вводы В2 (например, у 850/1) имеют маркировку 'В2, Ø110х10'.",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Унифицировать маркировку диаметра трубопровода В2 на плане."
+        },
+        {
+          "id": 25,
+          "pages": [
+            24
+          ],
+          "issue": "Противоречивая маркировка диаметра трубопровода В1-2: Ø110х10 и Ø110х6,6.",
+          "evidence": "Узел В1-2 у здания 850/1 подписан как 'В1-2, Ø110х10 L=15,00м', а в другом месте (у 850/9) как 'В1-2, Ø110х6,6'.",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Проверить и согласовать толщину стенки трубопровода В1-2 в местах его прокладки."
+        },
+        {
+          "id": 26,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/10, в экспликации 850/1.",
+          "evidence": "На плане здание обозначено как '850/10', однако в таблице 'Экспликация зданий' строка 850/1 отсутствует (есть 850/12, 850/13).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с данными таблицы экспликации."
+        },
+        {
+          "id": 27,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/11, в экспликации 850/12.",
+          "evidence": "На плане здание обозначено как '850/11', однако в таблице 'Экспликация зданий' строка 850/11 отсутствует (есть 850/12).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с данными таблицы экспликации."
+        },
+        {
+          "id": 28,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/12, в экспликации 850/13.",
+          "evidence": "На плане здание обозначено как '850/12', однако в таблице 'Экспликация зданий' строка 850/12 отсутствует (есть 850/13).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с данными таблицы экспликации."
+        },
+        {
+          "id": 29,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/13, в экспликации 850/14.",
+          "evidence": "На плане здание обозначено как '850/13', однако в таблице 'Экспликация зданий' строка 850/13 отсутствует (есть 850/14).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с данными таблицы экспликации."
+        },
+        {
+          "id": 30,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/14, в экспликации 850/15.",
+          "evidence": "На плане здание обозначено как '850/14', однако в таблице 'Экспликация зданий' строка 850/14 отсутствует (есть 850/15).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с данными таблицы экспликации."
+        },
+        {
+          "id": 31,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/15, в экспликации 850/16.",
+          "evidence": "На плане здание обозначено как '850/15', однако в таблице 'Экспликация зданий' строка 850/15 отсутствует (есть 850/16).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с данными таблицы экспликации."
+        },
+        {
+          "id": 32,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/16, в экспликации 850/17.",
+          "evidence": "На плане здание обозначено как '850/16', однако в таблице 'Экспликация зданий' строка 850/16 отсутствует (есть 850/17).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с данными таблицы экспликации."
+        },
+        {
+          "id": 33,
+          "pages": [
+            24
+          ],
+          "issue": "Несогласованное обозначение здания: на плане 850/17, в экспликации 850/18.",
+          "evidence": "На плане здание обозначено как '850/17', однако в таблице 'Экспликация зданий' строка 850/17 отсутствует (есть 850/18).",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать нумерацию зданий на плане с данными таблицы экспликации."
+        },
+        {
+          "id": 34,
+          "pages": [
+            25
+          ],
+          "issue": "Несогласованная маркировка диаметра трубопровода сети B1-1: в разных частях схемы указаны значения Ø110x10 и Ø110x6,6.",
+          "evidence": "В левой части схемы указано 'Ввод B1-1, Ø110x10', а в центральной части 'B1-1, Ø110x6,6'.",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Унифицировать маркировку диаметра трубопровода сети B1-1 в соответствии с проектной документацией."
+        },
+        {
+          "id": 35,
+          "pages": [
+            25
+          ],
+          "issue": "Несогласованная маркировка диаметра трубопровода сети B1-2: в разных частях схемы указаны значения Ø110x10 и Ø110x6,6.",
+          "evidence": "В левой части схемы указано 'Ввод B1-2, Ø110x10', а в центральной части 'B1-2, Ø110x6,6'.",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Унифицировать маркировку диаметра трубопровода сети B1-2 в соответствии с проектной документацией."
+        },
+        {
+          "id": 36,
+          "pages": [
+            25
+          ],
+          "issue": "Несогласованная нумерация здания котельной: на схеме обозначено как '850/10', в экспликации как '850'.",
+          "evidence": "На схеме котельная обозначена как '850/10', в таблице экспликации указан номер '850'.",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Привести нумерацию здания котельной в схеме и экспликации к единому виду."
+        },
+        {
+          "id": 37,
+          "pages": [
+            26
+          ],
+          "issue": "В примечаниях к спецификации указаны Колодцы 1 (системы В1 и В2), однако в таблице спецификации отсутствуют позиции оборудования, относящиеся к Колодцу 1.",
+          "evidence": "Примечание: * - Колодец 1 на системе В1...; В таблице нет строк с пометкой Колодец 1.",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Проверить наличие оборудования Колодца 1 в спецификации или скорректировать примечания, исключив ссылки на несуществующие позиции."
+        },
+        {
+          "id": 38,
+          "pages": [
+            30
+          ],
+          "issue": "Арифметическая ошибка в итоговой строке эксплуатационных расходов: сумма компонентов не соответствует указанному итогу.",
+          "evidence": "Сумма м3/сут (17,7+3,464+122,071+2,25+8,158+1,479) = 155,122, но в итоговой строке указано 155,122 (округление), однако сумма м3/ч (0,738+0,144+5,086+1,641+2,410+1,479+5,9+1,155) =",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Пересчитать сумму расходов в м3/сут и м3/ч, сверить с итоговой строкой таблицы."
+        },
+        {
+          "id": 39,
+          "pages": [
+            30
+          ],
+          "issue": "Арифметическая ошибка в итоговой строке заполнения системы: сумма компонентов не равна итогу.",
+          "evidence": "Сумма м3/сут (116,033+57,736+20,7) = 194,469, но в итоговой строке указано 116,033. Сумма м3/ч (4,835+4,835+4,052) = 13,722, но в итоговой строке указано 4,835.",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Исправить значения в итоговой строке, чтобы они соответствовали сумме компонентов."
+        },
+        {
+          "id": 40,
+          "pages": [
+            30
+          ],
+          "issue": "Несогласованное заполнение граф для пожаротушения: значения указаны в л/с, но отсутствуют в м3/сут и м3/ч.",
+          "evidence": "Для строк 'Пожаротушение внутреннее' и 'Пожаротушение наружное' значения (2х2,5 и 10) указаны в графе л/с, при этом графы м3/сут и м3/ч пусты, что нарушает логику таблицы.",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Заполнить графы м3/сут и м3/ч для строк пожаротушения или обосновать отсутствие данных."
+        },
+        {
+          "id": 41,
+          "pages": [
+            31
+          ],
+          "issue": "Сумма объемов аварийных сбросов с котлов (5,075 м³) не соответствует итоговому расходу в таблице (57,736 м³).",
+          "evidence": "В таблице: Котёл 3,0 МВт (4,200) + Котёл 1,44 МВт (0,875) = 5,075 м³, однако итоговая строка указывает 57,736 м³.",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Проверить арифметическую корректность итоговой строки таблицы и устранить расхождение."
+        },
+        {
+          "id": 42,
+          "pages": [
+            31
+          ],
+          "issue": "Производительность ВПУ, указанная в тексте (4,835 м³/ч), не совпадает с расходом регенерации в таблице (2,410 м³/ч).",
+          "evidence": "Текст листа: 'производительность... составляет 4,835 м³/ч'. Таблица 2, строка 'Регенерация ВПУ': 2,410 м³/ч.",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Уточнить корректное значение производительности ВПУ и привести текст и таблицу в соответствие."
+        },
+        {
+          "id": 43,
+          "pages": [
+            31
+          ],
+          "issue": "В примечаниях к таблице отсутствуют пояснения к пунктам (4), (7) и (11), на которые есть ссылки в таблице.",
+          "evidence": "В таблице используются ссылки (4), (7), (11), однако в списке примечаний внизу листа их нет (есть 1, 2, 3, 5, 6, 8, 9, 10, 12, 13).",
+          "category": "Комплектность",
+          "sources": "Инженерное",
+          "recommendation": "Добавить недостающие примечания (4), (7) и (11) в список пояснений к таблице."
+        }
+      ],
+      "total_findings": 43
+    },
+    "B": {
+      "job_id": "25799f46-4890-463b-acaf-74a180c98669",
+      "filename": "777_155-1с-ИОС2.2_annotated_with_checkboxes.pdf",
+      "findings": [
+        {
+          "id": 1,
+          "pages": [
+            3
+          ],
+          "issue": "В таблице состава проектной документации в строке раздела 5 отсутствует обозначение, в то время как у его подразделов (5.1, 5.2) обозначения присутствуют.",
+          "evidence": "Строка 5 (Раздел 5) имеет пустую ячейку «Обозначение», тогда как строки 5.1 и 5.2 содержат 777/155-1с-1.1-ИОС1 и ИОС2.",
+          "category": "Комплектность",
+          "sources": "Инженерное",
+          "recommendation": "Заполнить ячейку «Обозначение» для раздела 5 в соответствии с принятой системой кодирования документов."
+        },
+        {
+          "id": 2,
+          "pages": [
+            8,
+            24,
+            25
+          ],
+          "issue": "Несогласованность диаметра вводов противопожарного водоснабжения В2: в тексте указано Ду 100 мм, на графических листах — Ø110 мм.",
+          "evidence": "В тексте листа указано «два ввода противопожарного водоснабжения (В2) диаметром Ду 100 мм», однако на графических листах (стр. 24-25) обозначено «Водопроводный ввод В2, Ø110х10».",
+          "category": "Маркировка",
+          "sources": "[D] Контекст проверяемого PDF: D-p0024-f0002, стр. 24: Водопроводный ввод В2, Ø110х10 D-p0025-f0005, стр. 25: Водопроводный ввод В2, Ø110х10 L=10,50м",
+          "recommendation": "Привести значения диаметра вводов В2 в соответствие между текстовой и графической частями проектной документации."
+        },
+        {
+          "id": 3,
+          "pages": [
+            9
+          ],
+          "issue": "В тексте указано, что продолжительность неблагоприятного периода составляет семь месяцев, однако приведённые даты (с 10 октября по 10 мая) соответствуют периоду в 7,5 месяцев.",
+          "evidence": "Текст листа: «Продолжительность неблагоприятного периода составляет семь месяцев, с 10 октября по 10 мая».",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Необходимо уточнить фактическую продолжительность периода или скорректировать даты начала и окончания, чтобы они соответствовали заявленному сроку в 7 месяцев."
+        },
+        {
+          "id": 4,
+          "pages": [
+            10
+          ],
+          "issue": "В тексте указано противоречие: объект расположен в зоне 8 баллов по картам ОСР-2015-А,В и в зоне 9 баллов по карте ОСР-2015-С.",
+          "evidence": "Текст листа: «8 балльной сейсмической зоне по картам ОСР-2015-А,В и 9 балльной сейсмической зоне по карте ОСР-2015-С».",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Необходимо уточнить, какая карта ОСР-2015 является основной для данного объекта, и привести описание сейсмичности к единому значению."
+        },
+        {
+          "id": 5,
+          "pages": [
+            13,
+            14
+          ],
+          "issue": "Внутреннее противоречие в обозначениях: система В2 на листе 13 названа «водоотведением», а на листе 14 — «противопожарным водопроводом».",
+          "evidence": "На листе указано: «протяженность сети водоотведения В2 диаметром Ду 100 мм». В D-p0014-c2 (стр. 14) система В2 описана как «Противопожарный водопровод» из труб ПЭ 100.",
+          "category": "Маркировка",
+          "sources": "[D] Контекст проверяемого PDF: D-p0014-c2, стр. 14: terial; pipe; Противопожарный водопровод; Система В2; material_specification; Материал и тип трубы; технические полиэтиленовые напорные трубы ø110 мм ПЭ 100 SDR 11; мм; Система водоснабжения В2; Здание котельной, склад угля; Внутреннее пожаротушение; Аварийный; Подача воды из наружного противопожарн",
+          "recommendation": "Унифицировать наименование системы В2 во всех разделах проектной документации, уточнив её фактическое назначение (водоотведение или противопожарный водопровод)."
+        },
+        {
+          "id": 6,
+          "pages": [
+            14
+          ],
+          "issue": "В таблице водопотребления сумма по строкам (3,729 м3/сут) не соответствует итоговой строке (155,122 м3/сут).",
+          "evidence": "В Таблице 1: 'Всего' = 155,122 м3/сут, но сумма видимых строк 'Хоз-бытовые' (2,25) и 'Мокрая уборка' (1,479) составляет 3,729 м3/сут.",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Проверить полноту списка потребителей в таблице и корректность арифметического итога."
+        },
+        {
+          "id": 7,
+          "pages": [
+            15
+          ],
+          "issue": "В верхнем фрагменте и Таблице 2 на листе 15 значения расхода воды на пожаротушение (10) размещены в столбцах с разными единицами измерения (л/с и м3/час), что создает противоречие в данных.",
+          "evidence": "В верхнем фрагменте значения 2*2,5 и 10 стоят в столбце л/с, в Таблице 2 значение 10 стоит в столбце м3/час.",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Проверить корректность единиц измерения и значений расхода воды на пожаротушение, приведя их к единому стандарту в рамках листа."
+        },
+        {
+          "id": 8,
+          "pages": [
+            12,
+            16,
+            25
+          ],
+          "issue": "Несогласованная маркировка сети В2: в текстовых описаниях (листы 16, 25) она указана как противопожарная, а в графической части (лист 13) — как водоотведение.",
+          "evidence": "Лист 16: В2 - противопожарное. Лист 13: сеть водоотведения В2. Лист 25: В2 - противопожарное.",
+          "category": "Маркировка",
+          "sources": "[D] Контекст проверяемого PDF: D-p0012-f0008, стр. 12: 777/155-1с-1.1-ИОС2.2.2 D-p0025-c1, стр. 25: работанный АО \" 31 ГПИСС\" 2000 ФАКТЫ СТРАНИЦЫ: identifier; drawing; Принципиальная схема сетей водоснабжения; 777/155-1с-ИОС2.2.2-ГЧ; document_number; Шифр документа; 777/155-1с-ИОС2.2.2-ГЧ; ; Система водоснабжения; Блочная-модульная котельная со складом угля, золы и шлака; ; ; ; ; ; ; ; ; ; 777/",
+          "recommendation": "Унифицировать назначение сети В2 во всех разделах проектной документации, исключив противоречие между текстовым описанием и графической схемой."
+        },
+        {
+          "id": 9,
+          "pages": [
+            8,
+            17,
+            24,
+            25
+          ],
+          "issue": "Несовпадение диаметра противопожарного водопровода В2: в пояснительной записке и на схемах указан ø110 мм, а в описании источников — Ду 100 мм.",
+          "evidence": "В тексте листа указан диаметр В2 ø110 мм, однако на схемах (стр. 24-25) и в описании источников (стр. 8) указан диаметр Ду 100 мм.",
+          "category": "Оборудование",
+          "sources": "[D] Контекст проверяемого PDF: D-p0008-f0005, стр. 8: два ввода противопожарного водоснабжения (В2) диаметром Ду 100 мм D-p0024-f0002, стр. 24: Водопроводный ввод В2, Ø110х10 D-p0025-f0005, стр. 25: Водопроводный ввод В2, Ø110х10 L=10,50м",
+          "recommendation": "Согласовать диаметр трубы В2 во всех разделах проектной документации, уточнив фактический размер по гидравлическим расчетам."
+        },
+        {
+          "id": 10,
+          "pages": [
+            18,
+            19
+          ],
+          "issue": "Внутреннее противоречие: в разделе л) (лист 18) указано, что учет водопотребления не предусматривается, однако в разделе н_1) (лист 19) прямо заявлено об установке приборов учета расходов воды.",
+          "evidence": "Лист 18, п. л): «Не предусматривается». Лист 19, п. н_1): «Проектом предусмотрено: ... установка приборов учета расходов воды».",
+          "category": "Логика схемы",
+          "sources": "[D] Контекст проверяемого PDF: D-p0019-adj, стр. 19: 19 позволяющих исключить нерациональный расход воды и нерациональный расход энергетических ресурсов для ее подготовки, если такие требования предусмотрены в задании на проектирование Для обнаружение утечек или нерационального использования горячего и",
+          "recommendation": "Согласовать текстовые описания: либо убрать упоминание об установке приборов учета, либо изменить формулировку в разделе л) на «предусматривается»."
+        },
+        {
+          "id": 11,
+          "pages": [
+            19
+          ],
+          "issue": "Внутреннее противоречие: в разделе о) описана действующая система централизованной подачи ГВС с циркуляцией, однако в разделе п) расчетный расход горячей воды указан как «Не предусматривается».",
+          "evidence": "Раздел п) «Расчетный расход горячей воды» содержит запись «Не предусматривается», при этом раздел о) описывает централизованную подачу ГВС с циркуляцией.",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Устранить противоречие: либо скорректировать описание системы ГВС, указав, что она не проектируется, либо добавить расчетный расход горячей воды в раздел п)."
+        },
+        {
+          "id": 12,
+          "pages": [
+            20
+          ],
+          "issue": "В тексте раздела Т) объект МКУ-24-8-К ошибочно классифицирован как производственный, что противоречит заголовку раздела, указывающему на непроизводственные объекты.",
+          "evidence": "Текст раздела Т) гласит: 'Модульная котельная установка МКУ-24-8-К является производственным объектом', что противоречит заголовку раздела.",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Исправить классификацию объекта в тексте раздела Т) на непроизводственный."
+        },
+        {
+          "id": 13,
+          "pages": [
+            20
+          ],
+          "issue": "В тексте раздела Т) дана ссылка на таблицу 2, тогда как данные по объекту МКУ-24-8-К представлены в таблице 3.",
+          "evidence": "В тексте раздела Т) указано 'представлен в таблице 2', в то время как таблица с данными МКУ-24-8-К на листе имеет заголовок 'Таблица 3'.",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Исправить ссылку в тексте на таблицу 3."
+        },
+        {
+          "id": 14,
+          "pages": [
+            14,
+            24
+          ],
+          "issue": "Несогласованность обозначения материала и диаметра трубопровода В1-1: на схеме указано Ø110х10, в тексте проекта — Ø110 ПЭ 100 SDR 11.",
+          "evidence": "Схема: 'Ввод В1-1, Ø110х10'. Текст (стр. 14): 'труб ø110 мм ПЭ 100 SDR 11'.",
+          "category": "Маркировка",
+          "sources": "[D] Контекст проверяемого PDF: D-p0014-f0001, стр. 14: В здание котельной выполнено два ввода водопровода В1-1 и В1-2 из питьевых полиэтиленовых напорных труб ø110 мм ПЭ 100 SDR 11",
+          "recommendation": "Привести обозначение на схеме в соответствие с текстовым описанием проекта (Ø110 ПЭ 100 SDR 11)."
+        },
+        {
+          "id": 15,
+          "pages": [
+            17,
+            24
+          ],
+          "issue": "Несогласованность обозначения материала и диаметра трубопровода В2: на схеме указано Ø110х10, в тексте проекта — Ø110 ПЭ 100 SDR 11.",
+          "evidence": "Схема: 'В2,Ø110х10'. Текст (стр. 17): 'труб ø110 мм ПЭ 100 SDR 11'.",
+          "category": "Маркировка",
+          "sources": "[D] Контекст проверяемого PDF: D-p0017-f0003, стр. 17: Противопожарный водопровод В2 прокладывается из технических полиэтиленовых напорных труб ø110 мм ПЭ 100 SDR 11",
+          "recommendation": "Привести обозначение на схеме в соответствие с текстовым описанием проекта (Ø110 ПЭ 100 SDR 11)."
+        },
+        {
+          "id": 16,
+          "pages": [
+            8,
+            24
+          ],
+          "issue": "Несогласованность диаметра вводов противопожарного водоснабжения В2: на схеме указано Ø110, в тексте проекта — Ду 100 мм.",
+          "evidence": "Схема: 'Водопроводный ввод В2, Ø110х10'. Текст (стр. 8): 'диаметром Ду 100 мм'.",
+          "category": "Маркировка",
+          "sources": "[D] Контекст проверяемого PDF: D-p0008-f0005, стр. 8: два ввода противопожарного водоснабжения (В2) диаметром Ду 100 мм",
+          "recommendation": "Уточнить и привести в соответствие диаметр вводов В2 на схеме и в тексте проекта."
+        },
+        {
+          "id": 17,
+          "pages": [
+            24
+          ],
+          "issue": "Внутреннее противоречие в обозначениях вводов В1 на схеме: указаны как Ø110х10, так и 2Ø110х6,6.",
+          "evidence": "Схема: 'Ввод В1-1, Ø110х10' и 'Водопроводный ввод В1-1, В1-2, 2Ø110х6,6'.",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Устранить дублирование и противоречие в обозначениях диаметров вводов В1 на схеме."
+        },
+        {
+          "id": 18,
+          "pages": [
+            8,
+            17,
+            25
+          ],
+          "issue": "На схеме сети В2 указаны диаметры Ø110, Ø89 и Ø6,6, что противоречит пояснительной записке (стр. 17) и ТЗ (стр. 8), где для противопожарного водопровода В2 задан единый диаметр Ø110 (Ду 100).",
+          "evidence": "Схема: В2, Ø110х10; В2, Ø89х3,5; В2, Ø110х6,6. Д-контекст (стр. 17): В2 из труб ø110 мм. Д-контекст (стр. 8): ввод В2 Ду 100 мм.",
+          "category": "Оборудование",
+          "sources": "[D] Контекст проверяемого PDF: D-p0017-f0003, стр. 17: Противопожарный водопровод В2 прокладывается из технических полиэтиленовых напорных труб ø110 мм ПЭ 100 SDR 11 D-p0008-f0005, стр. 8: два ввода противопожарного водоснабжения (В2) диаметром Ду 100 мм",
+          "recommendation": "Унифицировать обозначения диаметров труб на схеме В2 в соответствии с пояснительной запиской и техническим заданием (Ø110)."
+        },
+        {
+          "id": 19,
+          "pages": [
+            25
+          ],
+          "issue": "На схеме для труб В2 одного диаметра Ø110 указаны разные толщины стенки (10 мм и 6,6 мм), что требует проверки на предмет опечатки или использования разных серий труб.",
+          "evidence": "Схема: В2, Ø110х10 (ввод) и В2, Ø110х6,6 (участки сети). Разные значения толщины стенки для одного диаметра.",
+          "category": "Маркировка",
+          "sources": "Инженерное",
+          "recommendation": "Проверить и согласовать значения толщины стенки труб В2 Ø110 на схеме с данными пояснительной записки."
+        },
+        {
+          "id": 20,
+          "pages": [
+            25,
+            26
+          ],
+          "issue": "В спецификации (позиции 1 и 6) указан диаметр трубы 110 мм, что соответствует обозначению Ø110х10 на схеме (лист 25). Заявленное в исходном candidate несоответствие с 100 мм не подтверждается переданными данными: evidence схемы явно содержит 'Ø110х10'.",
+          "evidence": "Позиции 1 и 6: '110*10'. Схема (D-p0025-adj): 'В2,Ø110х10' и 'Ø110х10'.",
+          "category": "Оборудование",
+          "sources": "[D] Контекст проверяемого PDF: D-p0025-adj, стр. 25: Футляр, Ø325*6 В2,Ø110х10 L=5,50м L=24,50м Ø110х10L=7,55м Футляр, Ø325*6",
+          "recommendation": "Убедиться, что в спецификации и на схеме указан единый диаметр 110 мм. Если в проекте действительно фигурируют трубы 100 мм, уточнить, к какой именно позиции или участку они относятся, и привести документы в соответствие."
+        },
+        {
+          "id": 21,
+          "pages": [
+            28
+          ],
+          "issue": "В спецификации указаны втулка DN110 (позиция 46) и фланец DN100 (позиция 47) для одного соединительного узла, что создает физическое несоответствие диаметров.",
+          "evidence": "Позиция 46: Втулка под фланец, DN110. Позиция 47: Фланец расточенный для втулок, DN100.",
+          "category": "Оборудование",
+          "sources": "Инженерное",
+          "recommendation": "Проверить корректность диаметров втулки и фланца в спецификации и на чертежах, при необходимости заменить на единый диаметр или добавить переходной элемент."
+        },
+        {
+          "id": 22,
+          "pages": [
+            30
+          ],
+          "issue": "В таблице на листе 30 указаны два разных значения аварийной подпитки (5,900 и 1,155 м3/ч), что противоречит пояснению о расчетном расходе 5,9 м3/ч.",
+          "evidence": "Строки 'Аварийная подпитка' содержат 5,900 и 1,155 м3/ч, а текст ниже указывает: 'расчетный расход аварийной подпитки составляет 5,9 м3/ч'.",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Согласовать значения аварийной подпитки в таблице с пояснительной записью, указав единый расчетный расход."
+        },
+        {
+          "id": 23,
+          "pages": [
+            15,
+            30
+          ],
+          "issue": "Расход подпитки сетевого контура в таблице (0,205 л/с) не совпадает со значением в пояснительной записке (0,5205 л/с).",
+          "evidence": "В таблице 1 (текущий лист) расход 0,205 л/с, в D-p0015-c0 (стр. 15) для той же позиции указано 0,5205 л/с.",
+          "category": "Логика схемы",
+          "sources": "[D] Контекст проверяемого PDF: D-p0015-c0, стр. 15: 15 Подпитка сетевого 17,70 0,738 0,5205 контура Подпитка котлового 3,464 0,144 0,040 контура Приготовление ГВС 122,071 5,086 1,413 (среднечасовая) Приготовление ГВС 35,911 9,975 (максимум) Регенерация ВПУ 8,158 2,410 0,669 Аварийная подпитка 1 раз в сутки в тепловой сети течение 3 часов",
+          "recommendation": "Проверить и согласовать расход подпитки сетевого контура между таблицей расчетов и текстом пояснительной записки."
+        },
+        {
+          "id": 24,
+          "pages": [
+            31
+          ],
+          "issue": "Производительность ВПУ (4,835 м³/ч) указана как достаточная, однако аварийный сброс (6,741 м³/ч) превышает это значение, что создает логическое противоречие в расчете.",
+          "evidence": "Текст: «производительность... 4,835 м³/ч, что не превышает значение аварийной подпитки». Таблица 2: «Аварийный сброс с ПК... 6,741 м³/ч».",
+          "category": "Логика схемы",
+          "sources": "Инженерное",
+          "recommendation": "Проверить корректность выбора производительности ВПУ или пересмотреть параметры аварийного сброса для обеспечения соответствия."
+        }
+      ],
+      "total_findings": 24
+    }
+  }
+}

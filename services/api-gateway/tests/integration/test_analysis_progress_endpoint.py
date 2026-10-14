@@ -57,16 +57,19 @@ class UpdateAnalysisProgressStub:
 
         self.called_document_id: UUID | None = None
         self.called_stage: AnalysisProgressStage | None = None
+        self.called_gpu: dict | None = None
 
     async def execute(
         self,
         *,
         document_id: UUID,
         stage: AnalysisProgressStage,
+        gpu: dict | None = None,
     ) -> AnalysisProgressUpdateResult:
         """Возвращает настроенный checkpoint result."""
         self.called_document_id = document_id
         self.called_stage = stage
+        self.called_gpu = gpu
 
         if self._error is not None:
             raise self._error
@@ -77,6 +80,33 @@ class UpdateAnalysisProgressStub:
             )
 
         return self._result
+
+
+def test_t_first_and_gpu_counters_have_separate_http_fields() -> None:
+    """Этап ТЗ и состояние модели передаются независимо, отрицательные счётчики запрещены."""
+    stub = UpdateAnalysisProgressStub(result=AnalysisProgressUpdateResult(True, False))
+    with build_client(progress_stub=stub) as client:
+        url = f"/internal/v1/analysis-progress/{uuid4()}"
+        response = client.post(
+            url,
+            json={
+                "stage": "checking_technical_assignment",
+                "gpu": {"waiting": 2, "running": 1},
+            },
+        )
+        assert response.status_code == 200 and not response.json()["cancelled"]
+        assert stub.called_stage is AnalysisProgressStage.CHECKING_TECHNICAL_ASSIGNMENT
+        assert stub.called_gpu == {"waiting": 2, "running": 1}
+        assert (
+            client.post(
+                url,
+                json={
+                    "stage": "checking_technical_assignment",
+                    "gpu": {"waiting": -1, "running": 0},
+                },
+            ).status_code
+            == 422
+        )
 
 
 async def noop_shutdown() -> None:

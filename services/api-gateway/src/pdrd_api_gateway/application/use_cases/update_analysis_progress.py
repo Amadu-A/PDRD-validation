@@ -40,6 +40,7 @@ class UpdateAnalysisProgress:
         *,
         document_id: UUID,
         stage: AnalysisProgressStage,
+        gpu: dict[str, int] | None = None,
     ) -> AnalysisProgressUpdateResult:
         """Сохраняет stage и сообщает orchestration о durable cancellation."""
         async with self.unit_of_work_factory() as unit_of_work:
@@ -60,6 +61,7 @@ class UpdateAnalysisProgress:
 
             changed = job.update_progress(
                 stage=stage,
+                gpu=gpu,
             )
 
             if changed:

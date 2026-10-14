@@ -43,6 +43,7 @@ class AnalysisProgressStage(StrEnum):
     PREPARING_CONTEXT = "preparing_context"
     UNDERSTANDING_SHEET = "understanding_sheet"
     BUILDING_DOCUMENT_CONTEXT = "building_document_context"
+    CHECKING_TECHNICAL_ASSIGNMENT = "checking_technical_assignment"
     RETRIEVING_REQUIREMENTS = "retrieving_requirements"
     CHECKING_REQUIREMENTS = "checking_requirements"
     CHECKING_CROSS_PAGE_CONSISTENCY = "checking_cross_page_consistency"
@@ -65,22 +66,26 @@ class AnalysisProgressStage(StrEnum):
         return _PROGRESS_STAGE_MESSAGES[self]
 
 
-ANALYSIS_PROGRESS_TOTAL = 10
+ANALYSIS_PROGRESS_TOTAL = 11
 
 _PROGRESS_STAGE_ORDER = {
     AnalysisProgressStage.EXTRACTING_SOURCES: 1,
     AnalysisProgressStage.PREPARING_CONTEXT: 2,
     AnalysisProgressStage.UNDERSTANDING_SHEET: 3,
     AnalysisProgressStage.BUILDING_DOCUMENT_CONTEXT: 4,
-    AnalysisProgressStage.RETRIEVING_REQUIREMENTS: 5,
-    AnalysisProgressStage.CHECKING_REQUIREMENTS: 6,
-    AnalysisProgressStage.CHECKING_CROSS_PAGE_CONSISTENCY: 7,
-    AnalysisProgressStage.ENRICHING_FINDINGS: 8,
-    AnalysisProgressStage.FINALIZING_FINDINGS: 9,
-    AnalysisProgressStage.BUILDING_RESULT: 10,
+    AnalysisProgressStage.CHECKING_TECHNICAL_ASSIGNMENT: 5,
+    AnalysisProgressStage.RETRIEVING_REQUIREMENTS: 6,
+    AnalysisProgressStage.CHECKING_REQUIREMENTS: 7,
+    AnalysisProgressStage.CHECKING_CROSS_PAGE_CONSISTENCY: 8,
+    AnalysisProgressStage.ENRICHING_FINDINGS: 9,
+    AnalysisProgressStage.FINALIZING_FINDINGS: 10,
+    AnalysisProgressStage.BUILDING_RESULT: 11,
 }
 
 _PROGRESS_STAGE_MESSAGES = {
+    AnalysisProgressStage.CHECKING_TECHNICAL_ASSIGNMENT: (
+        "T-first: сверяю листы с требованиями технического задания…"
+    ),
     AnalysisProgressStage.EXTRACTING_SOURCES: (
         "Извлекаю данные из загруженных документов…"
     ),
@@ -178,6 +183,7 @@ class AnalysisJob:
     status: AnalysisJobStatus = AnalysisJobStatus.PENDING
 
     progress_stage: AnalysisProgressStage | None = None
+    progress_gpu: dict[str, int] = field(default_factory=dict)
 
     attempt_count: int = 0
 
@@ -259,6 +265,7 @@ class AnalysisJob:
         self,
         *,
         stage: AnalysisProgressStage,
+        gpu: dict[str, int] | None = None,
     ) -> bool:
         """Обновляет progress только вперёд.
 
@@ -274,6 +281,10 @@ class AnalysisJob:
         ):
             return False
 
+        if stage is not self.progress_stage:
+            self.progress_gpu = {}
+        if gpu is not None:
+            self.progress_gpu = dict(gpu)
         self.progress_stage = stage
         self.updated_at = utc_now()
 

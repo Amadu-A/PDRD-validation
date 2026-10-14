@@ -38,7 +38,12 @@ def test_equipment_candidates_merge_before_normative_enrichment() -> None:
         return {edge["node"] for edge in connections[name]["main"][output]}
 
     assert len(nodes) == len(workflow["nodes"])
-    assert "Use Equipment Search" in targets("Understand Pages Stage")
+    assert targets("Understand Pages Stage") == {
+        "Continue Understand Pages Stage Response"
+    }
+    assert targets("Continue Understand Pages Stage Response") == {
+        "Use Equipment Search"
+    }
     assert targets("Use Equipment Search", 1) == {"Use Document Context"}
     assert targets("Use Equipment Results", 1) == {"Restore Equipment Pages"}
     assert "Collect Equipment Candidates" in targets("Merge Finding Candidates")

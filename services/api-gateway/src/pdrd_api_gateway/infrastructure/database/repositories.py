@@ -63,6 +63,7 @@ class SqlAlchemyAnalysisJobRepository:
                     job.progress_stage.value if job.progress_stage is not None else None
                 ),
                 attempt_count=job.attempt_count,
+                progress_gpu=job.progress_gpu,
                 error_code=job.error_code,
                 error_message=job.error_message,
                 created_at=job.created_at,
@@ -333,6 +334,7 @@ class SqlAlchemyAnalysisJobRepository:
             job.progress_stage.value if job.progress_stage is not None else None
         )
         model.attempt_count = job.attempt_count
+        model.progress_gpu = job.progress_gpu
 
         model.error_code = job.error_code
         model.error_message = job.error_message
@@ -371,6 +373,7 @@ class SqlAlchemyAnalysisJobRepository:
                 else None
             ),
             attempt_count=model.attempt_count,
+            progress_gpu=model.progress_gpu or {},
             error_code=model.error_code,
             error_message=model.error_message,
             created_at=model.created_at,

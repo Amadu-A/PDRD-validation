@@ -19,6 +19,10 @@ from fastapi import (
     status,
 )
 
+from pdrd_analysis_service.application.vision_execution import (
+    AnalysisCancelledError,
+    vision_execution,
+)
 from pdrd_analysis_service.core.container import (
     ApplicationContainer,
 )
@@ -60,6 +64,7 @@ from pdrd_analysis_service.transport.http.technical_assignment_schemas import (
     CheckTechnicalAssignmentRequest,
     CheckTechnicalAssignmentResponse,
 )
+from pdrd_analysis_service.transport.http.vision_execution import stage_execution
 
 router = APIRouter()
 
@@ -68,6 +73,7 @@ logger = logging.getLogger(
 )
 
 _UNDERSTANDING_STAGE = "understanding_sheet"
+_TECHNICAL_ASSIGNMENT_STAGE = "checking_technical_assignment"
 _CHECKING_STAGE = "checking_requirements"
 _FINALIZATION_STAGE = "finalizing_findings"
 
@@ -142,11 +148,12 @@ async def _run_stage_items[ItemT, ResultT](
         [ItemT],
         Awaitable[ResultT],
     ],
-) -> list[ResultT]:
+) -> list[ResultT] | None:
     """Выполняет stage bounded-concurrently, сохраняя исходный порядок.
 
     Cancellation не прерывает уже запущенные inference.
     Новые items после обнаружения cancellation больше не стартуют.
+    None означает штатную отмену всего этапа; частичный список не возвращается.
     """
     total = len(
         items,
@@ -218,16 +225,26 @@ async def _run_stage_items[ItemT, ResultT](
                 return
 
             try:
-                result = await process(
-                    item,
-                )
+                with vision_execution(
+                    stage_execution(
+                        container.analysis_progress_probe,
+                        document_id=document_id,
+                        stage=stage,
+                        current=current,
+                        total=total,
+                    )
+                ):
+                    result = await process(item)
 
             except asyncio.CancelledError:
                 raise
 
             except Exception as error:
                 async with state_lock:
-                    if first_error is None:
+                    if first_error is None or (
+                        _is_cancellation_error(first_error)
+                        and not _is_cancellation_error(error)
+                    ):
                         first_error = error
 
                     stop_event.set()
@@ -254,21 +271,12 @@ async def _run_stage_items[ItemT, ResultT](
     )
 
     if first_error is not None:
+        if _is_cancellation_error(first_error):
+            return None
         raise first_error
 
     if cancelled_before is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "analysis_cancelled",
-                "message": (
-                    "Analysis job отменён "
-                    "до запуска элемента "
-                    f"{cancelled_before} "
-                    f"из {total}."
-                ),
-            },
-        )
+        return None
 
     if any(item is None for item in results):
         raise RuntimeError(
@@ -276,6 +284,16 @@ async def _run_stage_items[ItemT, ResultT](
         )
 
     return [item for item in results if item is not None]
+
+
+def _is_cancellation_error(error: Exception) -> bool:
+    """Отличает штатную отмену от настоящей ошибки, которую отмена не должна скрыть."""
+    return isinstance(error, AnalysisCancelledError) or (
+        isinstance(error, HTTPException)
+        and error.status_code == 409
+        and isinstance(error.detail, dict)
+        and error.detail.get("code") == "analysis_cancelled"
+    )
 
 
 @router.post(
@@ -327,6 +345,9 @@ async def understand_pages_stage(
         items=request.items,
         process=process,
     )
+
+    if responses is None:
+        return UnderstandPagesStageResponse(items=[], cancelled=True)
 
     result = [
         UnderstandPagesStageItemResponse(
@@ -398,10 +419,13 @@ async def check_technical_assignment_stage(
     responses = await _run_stage_items(
         container=container,
         document_id=request.document_id,
-        stage=_UNDERSTANDING_STAGE,
+        stage=_TECHNICAL_ASSIGNMENT_STAGE,
         items=request.items,
         process=process,
     )
+
+    if responses is None:
+        return CheckTechnicalAssignmentStageResponse(items=[], cancelled=True)
 
     result = [
         CheckTechnicalAssignmentStageItemResponse(
@@ -416,13 +440,9 @@ async def check_technical_assignment_stage(
     ]
 
     logger.info(
-        (
-            "vlm_stage_complete "
-            "document_id=%s "
-            "stage=technical_assignment "
-            "pages=%s concurrency=%s"
-        ),
+        ("vlm_stage_complete document_id=%s stage=%s pages=%s concurrency=%s"),
         request.document_id,
+        _TECHNICAL_ASSIGNMENT_STAGE,
         len(
             request.items,
         ),
@@ -491,6 +511,9 @@ async def check_norms_stage(
         process=process,
     )
 
+    if responses is None:
+        return CheckNormsStageResponse(items=[], cancelled=True)
+
     result = [
         CheckNormsStageItemResponse(
             page_number=item.page_number,
@@ -554,6 +577,9 @@ async def finalize_stage(
         items=request.items,
         process=process,
     )
+
+    if responses is None:
+        return FinalizeStageResponse(items=[], cancelled=True)
 
     result = [
         FinalizeStageItemResponse(

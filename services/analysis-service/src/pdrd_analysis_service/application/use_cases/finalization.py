@@ -29,6 +29,7 @@ from pdrd_analysis_service.domain.analysis import (
     FindingDraft,
     NormativeSource,
 )
+from pdrd_analysis_service.domain.engineering_claims import false_numeric_claim
 
 _NORMATIVE_REFERENCE_PATTERN = re.compile(
     r"\b(?:ГОСТ|GOST|ПУЭ|PUE|СНиП|SNIP|СП)\b",
@@ -418,6 +419,25 @@ def _is_protected_duplicate_review(finding: FindingDraft) -> bool:
     )
 
 
+def _is_protected_factual_review(finding: FindingDraft) -> bool:
+    """Сохраняет конкретное подозрение с проверенным исходным evidence, не объявляя его нарушением."""
+    if _is_protected_duplicate_review(finding):
+        return True
+    return (
+        finding.status == "needs_review"
+        and bool(finding.comment.strip() and finding.evidence.strip())
+        and not finding.basis_sources
+        and not finding.technical_assignment_basis_sources
+        and not finding.user_package_basis_sources
+        and false_numeric_claim(finding.comment) is None
+        and any(
+            item.get("origin") == "engineering_verification"
+            and item.get("evidence_grounded") is True
+            for item in finding.origin_assertions
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class FinalizeFindings:
     """Финализирует candidates, применяет conservative gate и N enrichment."""
@@ -500,7 +520,7 @@ class FinalizeFindings:
         protected = tuple(
             finding
             for finding in findings
-            if _is_protected_duplicate_review(finding)
+            if _is_protected_factual_review(finding)
             or finding.category == "document_consistency"
             or (
                 finding.category == "equipment"
@@ -542,7 +562,7 @@ class FinalizeFindings:
             if finding.status != "hypothesis"
             and (
                 (
-                    not _is_protected_duplicate_review(finding)
+                    not _is_protected_factual_review(finding)
                     and finding.category != "document_consistency"
                     and not (
                         finding.category == "equipment"
@@ -643,7 +663,7 @@ class FinalizeFindings:
         final_items = [
             ordinary_by_id.get(finding.finding_id, self._fallback(finding))
             for finding in findings
-            if _is_protected_duplicate_review(finding)
+            if _is_protected_factual_review(finding)
             or finding.category == "document_consistency"
             or (
                 finding.category == "equipment"
@@ -1068,7 +1088,7 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                 )
             ).strip()
 
-            if _is_protected_duplicate_review(finding) and decision != "keep":
+            if _is_protected_factual_review(finding) and decision != "keep":
                 final_items.append(self._fallback(finding))
                 batch_fallback_count += 1
                 continue
@@ -1091,7 +1111,7 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                 normative_candidates=(candidate_groups.get(finding.finding_id, ())),
                 guard_normative_free_text=isolated_enrichment,
             )
-            if _is_protected_duplicate_review(finding):
+            if _is_protected_factual_review(finding):
                 finalized = replace(
                     finalized,
                     category=finding.category,
@@ -1278,6 +1298,10 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
         finding_category = finding.category
 
         normalized_status = finding.status
+        if false_numeric_claim(comment) is not None:
+            # Редактор не имеет права заменить корректного кандидата ложным вычислением.
+            comment = finding.comment
+            recommendation = _fallback_recommendation(finding)
 
         has_customer_basis = bool(
             finding.technical_assignment_basis_sources

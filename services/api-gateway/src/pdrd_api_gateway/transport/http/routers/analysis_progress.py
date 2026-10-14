@@ -17,6 +17,7 @@ from fastapi import (
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
 )
 
 from pdrd_api_gateway.application.use_cases.get_analysis_job import (
@@ -46,6 +47,13 @@ router = APIRouter(
 )
 
 
+class GpuProgressPayload(BaseModel):
+    """Отделяет ожидание слота приложения от запросов, переданных провайдеру."""
+
+    waiting: int = Field(ge=0)
+    running: int = Field(ge=0)
+
+
 class AnalysisProgressUpdateRequest(
     BaseModel,
 ):
@@ -56,6 +64,7 @@ class AnalysisProgressUpdateRequest(
     )
 
     stage: AnalysisProgressStage
+    gpu: GpuProgressPayload | None = None
 
 
 class AnalysisProgressUpdateResponse(
@@ -94,6 +103,7 @@ class AnalysisProgressResponse(
     total: int
 
     queue_position: int | None
+    gpu: GpuProgressPayload | None = None
 
 
 def require_get_analysis_job(
@@ -154,6 +164,9 @@ def _progress_response(
             current=job.progress_stage.current,
             total=ANALYSIS_PROGRESS_TOTAL,
             queue_position=None,
+            gpu=GpuProgressPayload.model_validate(job.progress_gpu)
+            if job.progress_gpu
+            else None,
         )
 
     if job.status is AnalysisJobStatus.COMPLETED:
@@ -246,6 +259,7 @@ async def update_analysis_progress(
         result = await use_case.execute(
             document_id=document_id,
             stage=request.stage,
+            **({"gpu": request.gpu.model_dump()} if request.gpu is not None else {}),
         )
 
     except AnalysisProgressJobNotFoundError as error:

@@ -19,3 +19,14 @@ class AnalysisProgressProbe(Protocol):
     ) -> bool:
         """Возвращает True, если analysis job уже отменён."""
         ...
+
+    async def report_gpu_state(
+        self,
+        *,
+        document_id: UUID,
+        stage: str,
+        waiting: int,
+        running: int,
+    ) -> bool:
+        """Обновляет отдельные счётчики ожидающих и выполняющихся VLM-запросов."""
+        ...
