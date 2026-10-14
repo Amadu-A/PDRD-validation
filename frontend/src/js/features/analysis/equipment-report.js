@@ -135,6 +135,13 @@ export function equipmentDocumentStatus(row) {
   return "Недостаточно данных";
 }
 
+export function equipmentSourceTrustLabel(document) {
+  /** Описывает историческое разрешение сайта, не обещая применимость документа. */
+  if (document.trust_status === "trusted") return "сайт был разрешён для поиска при загрузке";
+  if (document.trust_status === "unverified_user_override") return "неподтверждённый источник — разрешён только для этого задания";
+  return "разрешение источника на момент загрузки не установлено";
+}
+
 /** Добавляет безопасный DOM и возвращает остановку фоновых запросов. */
 export function appendEquipmentReport(parent, initial, {
   jobId = null, fetchImpl = globalThis.fetch, followImpl = followEquipmentEvents,
@@ -364,7 +371,7 @@ export function appendEquipmentReport(parent, initial, {
         download.type = "button"; download.addEventListener("click", () => snapshot(row.document.source_id));
         documentCell.append(download);
       } else if (!sourceUrl) documentCell.append(element("span", "Документ не подтверждён"));
-      if (row.document?.source_id) documentCell.append(element("small", `Редакция: ${row.document.revision || "не указана"}; ${row.document.trust_status === "trusted" ? "источник подтверждён" : "неподтверждённый источник"}`));
+      if (row.document?.source_id) documentCell.append(element("small", `Редакция: ${row.document.revision || "не указана"}; ${equipmentSourceTrustLabel(row.document)}. Применимость к модели и исполнению проверяется отдельно.`));
       documentCell.append(element("small", equipmentDocumentStatus(row), `equipment-report__status equipment-report__status--${row.status || "incomplete"}`));
       tr.append(documentCell); body.append(tr); renderedRows.push(tr);
     }

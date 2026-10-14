@@ -1,184 +1,209 @@
 // frontend/src/js/features/account/equipment-sources.js
 
-/** Управляет точными EQ-доменами только при подтверждённом серверном разрешении. */
+/** Управляет разрешением точных EQ-доменов в подтверждённой серверной сессии. */
 import { authenticatedRequest } from "../auth/api.js";
+import { node, button, isUsed, sourceGroup, pendingCard, auditTable, openDialog } from "./equipment-source-view.js";
 
-const versions = new WeakMap();
+const versions = new WeakMap(), dialogs = new WeakMap();
 
 export function canManageEquipmentSources(session) {
-  /** Проверяет право, полученное из действующей серверной сессии. */
-  return Boolean(session.authenticated
-    && session.user?.permissions?.includes("equipment_sources.manage"));
+  /** Проверяет назначенное сервером право независимо от роли и unsafe режима. */
+  return Boolean(session.authenticated && session.user?.permissions?.includes("equipment_sources.manage"));
 }
 
 export function listEquipmentSources(status = "", query = "") {
-  /** Читает каталог через API Gateway с серверной повторной проверкой права. */
+  /** Читает существующий каталог с повторной серверной проверкой доступа. */
   const params = new URLSearchParams();
   if (status) params.set("source_status", status);
   if (query) params.set("query", query);
-  const suffix = params.size ? "?" + params.toString() : "";
-  return authenticatedRequest("/api/v1/equipment-sources" + suffix);
+  return authenticatedRequest("/api/v1/equipment-sources" + (params.size ? "?" + params : ""));
 }
 
 export function listEquipmentManufacturers() {
-  /** Читает имена производителей для формы добавления. */
+  /** Читает подтверждённые имена и алиасы для добавления сайта. */
   return authenticatedRequest("/api/v1/equipment-sources/manufacturers");
 }
 
 export function saveEquipmentSource(payload) {
-  /** Сохраняет решение с CSRF и автоматической записью действия для аудита. */
+  /** Сохраняет решение с CSRF; отсутствие allow_http сохраняет прежний транспорт. */
   return authenticatedRequest("/api/v1/equipment-sources", "PUT", {
-    ...payload,
-    reason: payload.reason || "Сохранение источника через личный кабинет",
+    ...payload, reason: payload.reason || "Сохранение источника через личный кабинет",
   });
 }
 
-export function readEquipmentSourceAudit(sourceId) {
-  /** Читает историю доверия конкретного домена. */
-  return authenticatedRequest(
-    "/api/v1/equipment-sources/" + encodeURIComponent(sourceId) + "/audit",
-  );
+export function readEquipmentSourceAudit(id) {
+  /** Читает неизменённую историю решения по домену. */
+  return authenticatedRequest("/api/v1/equipment-sources/" + encodeURIComponent(id) + "/audit");
 }
 
-function element(tag, content = "") {
-  const node = document.createElement(tag);
-  node.textContent = content;
-  return node;
-}
-
-function sourceRow(source, reload, status) {
-  const row = element("li");
-  const heading = element("strong", source.manufacturer + " · " + source.hostname);
-  const meta = element("p",
-    "Статус: " + source.status
-    + " · Использований: " + Number(source.uses_count || 0)
-    + " · Найден: " + (source.registration_source || "неизвестно")
-    + " · Модель: " + (source.example_model || "не указана")
-    + " · Пример URL: " + (source.example_url || "нет"));
-  const controls = element("div");
-  controls.className = "account-actions";
-  const selection = element("select");
-  for (const value of ["pending", "trusted", "blocked"]) {
-    const option = element("option", value);
-    option.value = value;
-    selection.append(option);
+export function siteHostname(value) {
+  /** Принимает HTTPS-адрес, сохраняет точный hostname, включая www. */
+  const text = value.trim();
+  let url;
+  try { url = new URL(text.includes("://") ? text : "https://" + text); }
+  catch { throw new Error("Укажите адрес публичного сайта, например www.example.com."); }
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  if (url.protocol !== "https:" || url.username || url.password || url.port
+      || !host.includes(".") || host.length > 253 || /^[\d.]+$/.test(host)
+      || !host.split(".").every((part) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(part))
+      || /\.(local|localhost|internal|test|invalid)$/i.test(host)) {
+    throw new Error("Нужен публичный HTTPS-сайт без порта, IP-адреса и данных входа.");
   }
-  selection.value = source.status;
-  const enabled = element("input");
-  enabled.type = "checkbox";
-  enabled.checked = Boolean(source.enabled);
-  const enabledLabel = element("label", " Включён");
-  enabledLabel.prepend(enabled);
-  const http = element("input");
-  http.type = "checkbox";
-  http.checked = Boolean(source.allow_http);
-  const httpLabel = element("label", " Разрешить HTTP");
-  httpLabel.prepend(http);
-  const save = element("button", "Сохранить");
-  save.type = "button";
-  save.onclick = async () => {
-    save.disabled = true;
-    try {
-      await saveEquipmentSource({
-        manufacturer: source.manufacturer,
-        hostname: source.hostname,
-        status: selection.value,
-        enabled: enabled.checked,
-        allow_http: http.checked,
-      });
-      await reload();
-    } catch (error) {
-      status.textContent = error.detail ?? "Не удалось сохранить источник.";
-      save.disabled = false;
-    }
-  };
-  const history = element("button", "История");
-  history.type = "button";
-  const audit = element("ul");
-  history.onclick = async () => {
-    history.disabled = true;
-    try {
-      const events = await readEquipmentSourceAudit(source.id);
-      audit.replaceChildren();
-      for (const event of events) {
-        audit.append(element("li",
-          String(event.occurred_at || "") + " · "
-          + (event.previous_status || "новый") + " → " + event.new_status
-          + " · " + event.reason + " · " + event.actor));
-      }
-      if (!events.length) audit.append(element("li", "Истории пока нет."));
-    } catch (error) {
-      status.textContent = error.detail ?? "Не удалось прочитать историю.";
-    } finally {
-      history.disabled = false;
-    }
-  };
-  controls.append(selection, enabledLabel, httpLabel, save, history);
-  row.append(heading, meta, controls, audit);
-  return row;
+  return host;
 }
 
 export async function renderEquipmentSources(root, session) {
-  /** Обновляет каталог без показа старого ответа после смены пользователя. */
+  /** Старые ответы и обработчики теряют действие при смене или отзыве сессии. */
   const allowed = canManageEquipmentSources(session);
-  const navigationLink = root.querySelector("[data-account-equipment-sources-link]");
-  if (navigationLink) navigationLink.hidden = !allowed;
+  const link = root.querySelector("[data-account-equipment-sources-link]");
+  if (link) link.hidden = !allowed;
   const section = root.querySelector("[data-equipment-sources]");
   if (!section) return;
-  const version = (versions.get(section) ?? 0) + 1;
-  versions.set(section, version);
+  const version = (versions.get(section) || 0) + 1;
+  versions.set(section, version); dialogs.get(section)?.close();
   const current = () => versions.get(section) === version;
   section.hidden = !allowed;
-  if (!allowed) return;
+  const app = root.querySelector("[data-equipment-source-app]");
   const status = root.querySelector("[data-equipment-source-status]");
-  const list = root.querySelector("[data-equipment-source-list]");
-  const filterStatus = root.querySelector("[data-equipment-filter-status]");
-  const filterQuery = root.querySelector("[data-equipment-filter-query]");
-  const filterApply = root.querySelector("[data-equipment-filter-apply]");
-  const manufacturers = root.querySelector("[data-equipment-manufacturers]");
-  const form = root.querySelector("[data-equipment-source-form]");
+  app.replaceChildren();
+  if (!allowed) return;
+  let sources = [], makers = [], filter = "all", query = "";
+  const busy = new Set(), collapsed = new Set();
+  const toolbar = node("div", "", "equipment-sources__toolbar");
+  const search = node("input");
+  search.type = "search"; search.placeholder = "Найти производителя или сайт…";
+  search.setAttribute("aria-label", "Поиск по производителю или сайту");
+  const tabs = node("div", "", "equipment-sources__tabs");
+  const add = button("＋ Добавить сайт", () => addSite(), "equipment-sources__primary");
+  toolbar.append(search, tabs, add);
+  const layout = node("div", "", "equipment-sources__layout");
+  const list = node("div", "", "equipment-sources__list"), pending = node("aside", "", "equipment-sources__new");
+  layout.append(list, pending); app.append(toolbar, layout);
+  search.oninput = () => { query = search.value.trim().toLocaleLowerCase(); paint(); };
 
-  const load = async () => {
+  function paint() {
+    /** Фильтрует подтверждённые сервером данные, не меняя доверие. */
+    if (!current()) return;
+    list.replaceChildren(); pending.replaceChildren(); tabs.replaceChildren();
+    const known = sources.filter((item) => item.status !== "pending");
+    for (const [value, label, count] of [["all", "Все", known.length],
+      ["used", "Используем", known.filter(isUsed).length],
+      ["unused", "Не используем", known.filter((item) => !isUsed(item)).length]]) {
+      const tab = button(`${label} (${count})`, () => { filter = value; paint(); });
+      tab.setAttribute("aria-pressed", String(filter === value)); tabs.append(tab);
+    }
+    const matches = (item) => (item.manufacturer + " " + item.hostname).toLocaleLowerCase().includes(query);
+    const visible = known.filter(matches).filter((item) => filter === "all" || isUsed(item) === (filter === "used"));
+    const groups = new Map();
+    for (const item of visible) {
+      if (!groups.has(item.manufacturer)) groups.set(item.manufacturer, []);
+      groups.get(item.manufacturer).push(item);
+    }
+    for (const [name, items] of groups) list.append(sourceGroup(name, items, { session, busy, change, history, collapsed }));
+    if (!visible.length) list.append(node("p", "Сайтов по этому фильтру нет."));
+    const candidates = sources.filter((item) => item.status === "pending" && matches(item));
+    pending.append(node("h3", "Новые сайты · " + candidates.length),
+      node("p", "Ожидают решения. До общего разрешения могут использоваться только в заданиях, где разрешены неподтверждённые источники."));
+    for (const item of candidates) pending.append(pendingCard(item, { busy, change }));
+    if (!candidates.length) pending.append(node("p", "Новых сайтов нет."));
+    pending.append(button("＋ Добавить сайт вручную", () => addSite()));
+  }
+
+  async function load() {
+    /** Повторная загрузка возвращает фактическое состояние API. */
     status.textContent = "Загружаем источники оборудования…";
     try {
-      const [sources, makers] = await Promise.all([
-        listEquipmentSources(filterStatus.value, filterQuery.value.trim()),
-        listEquipmentManufacturers(),
-      ]);
+      const result = await Promise.all([listEquipmentSources(), listEquipmentManufacturers()]);
       if (!current()) return;
-      list.replaceChildren();
-      for (const source of sources) {
-        list.append(sourceRow(source, load, status));
-      }
-      manufacturers.replaceChildren();
-      for (const maker of makers) {
-        const option = element("option");
-        option.value = maker.name;
-        manufacturers.append(option);
-      }
-      status.textContent = sources.length ? "" : "Источников по фильтру нет.";
+      [sources, makers] = result; status.textContent = ""; paint();
     } catch (error) {
-      if (current()) status.textContent = error.detail ?? "Не удалось загрузить каталог.";
+      if (current()) status.textContent = error.detail || "Не удалось загрузить каталог. Обновите страницу.";
     }
-  };
-  filterApply.onclick = () => { void load(); };
-  form.onsubmit = async (event) => {
-    event.preventDefault();
-    const values = new FormData(form);
+  }
+
+  async function change(source, enabled, control) {
+    /** Блокирует повторную отправку и возвращает подтверждённое состояние при отказе. */
+    if (!current() || busy.has(source.id)) return;
+    const restoreFocus = document.activeElement === control;
+    busy.add(source.id); control.disabled = true; paint(); status.textContent = "Сохраняем решение…";
     try {
-      await saveEquipmentSource({
-        manufacturer: String(values.get("manufacturer") || "").trim(),
-        hostname: String(values.get("hostname") || "").trim(),
-        status: String(values.get("status") || "pending"),
-        enabled: true,
-        allow_http: values.get("allow_http") === "on",
-      });
+      const saved = await saveEquipmentSource({ manufacturer: source.manufacturer,
+        hostname: source.hostname, status: enabled ? "trusted" : "blocked", enabled,
+        reason: enabled ? "Разрешил использование сайта" : "Запретил использование сайта" });
       if (!current()) return;
-      form.reset();
-      await load();
+      sources = sources.map((item) => item.id === source.id ? { ...item, ...saved } : item);
+      status.textContent = "Настройка сохранена.";
     } catch (error) {
-      if (current()) status.textContent = error.detail ?? "Не удалось добавить источник.";
+      if (current()) status.textContent = (error.detail || "Не удалось сохранить решение.")
+        + " Показано последнее подтверждённое состояние. Обновите страницу для сверки.";
+    } finally {
+      busy.delete(source.id);
+      if (current()) {
+        paint();
+        if (restoreFocus) [...list.querySelectorAll("[data-source-toggle]")]
+          .find((item) => item.dataset.sourceToggle === source.id)?.focus();
+      }
     }
-  };
+  }
+
+  function dialog(title) {
+    /** Одновременно открыто одно окно; отзыв доступа закрывает его. */
+    dialogs.get(section)?.close();
+    const result = openDialog(section, title); dialogs.set(section, result); return result;
+  }
+
+  async function history(source) {
+    /** Не показывает ответ истории после выхода пользователя. */
+    if (!current()) return;
+    const window = dialog("История изменений — " + source.hostname);
+    const content = node("div", "Загружаем историю…", "equipment-sources__history");
+    window.append(content); window.showModal();
+    try {
+      const events = await readEquipmentSourceAudit(source.id);
+      if (!current() || !window.open) return;
+      content.textContent = "";
+      content.replaceChildren(events.length ? auditTable(events, session) : node("p", "Истории пока нет."));
+    } catch (error) { if (current() && window.open) content.textContent = error.detail || "Не удалось прочитать историю."; }
+  }
+
+  function addSite() {
+    /** Два поля; добавление разрешает только проверенный сервером домен. */
+    if (!current()) return;
+    const window = dialog("Добавить сайт"), form = node("form"), maker = node("input"), address = node("input");
+    const choices = node("datalist"); choices.id = "equipment-manufacturer-choices";
+    maker.required = address.required = true; maker.maxLength = 200; address.maxLength = 2048;
+    maker.name = "manufacturer"; address.name = "hostname"; maker.setAttribute("list", choices.id);
+    maker.placeholder = "Например: Schneider Electric"; address.placeholder = "Например: www.se.com";
+    for (const item of makers) { const option = node("option"); option.value = item.name; choices.append(option); }
+    const makerLabel = node("label", "Производитель *"), addressLabel = node("label", "Адрес сайта *");
+    makerLabel.append(maker); addressLabel.append(address);
+    const errorText = node("p", "", "equipment-sources__error"); errorText.setAttribute("role", "alert");
+    const submit = node("button", "Добавить", "equipment-sources__primary"); submit.type = "submit";
+    const cancel = button("Отмена", () => window.close());
+    const actions = node("div", "", "equipment-sources__buttons"); actions.append(cancel, submit);
+    form.append(makerLabel, addressLabel, choices,
+      node("small", "HTTPS используется по умолчанию. Сохраняется точный домен; www — отдельный сайт."), errorText, actions);
+    let saving = false;
+    form.onsubmit = async (event) => {
+      event.preventDefault(); if (!current() || saving) return;
+      try {
+        const hostname = siteHostname(address.value), manufacturer = maker.value.trim();
+        if (!manufacturer) throw new Error("Укажите производителя.");
+        const normalize = (value) => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+        const canonical = makers.find((item) => [item.name, ...(item.aliases || [])]
+          .some((name) => normalize(name) === normalize(manufacturer)))?.name || manufacturer;
+        if (sources.some((item) => normalize(item.manufacturer) === normalize(canonical) && item.hostname === hostname)) {
+          throw new Error("Этот сайт уже добавлен для производителя.");
+        }
+        saving = true; submit.disabled = cancel.disabled = maker.disabled = address.disabled = true;
+        const saved = await saveEquipmentSource({ manufacturer: canonical, hostname,
+          status: "trusted", enabled: true, create_only: true, reason: "Добавил сайт и разрешил использование" });
+        if (!current()) return;
+        sources.push(saved); window.close(); paint(); status.textContent = "Сайт добавлен и разрешён для поиска.";
+      } catch (error) { if (current()) errorText.textContent = error.detail || error.message || "Не удалось добавить сайт."; }
+      finally { saving = false; submit.disabled = cancel.disabled = maker.disabled = address.disabled = false; }
+    };
+    window.append(form); window.showModal();
+  }
   await load();
 }

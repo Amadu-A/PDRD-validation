@@ -122,7 +122,7 @@ def test_t_first_batch_policy_balances_recall_and_round_trips() -> None:
 
     assert (
         "ANALYSIS_SERVICE_PIPELINE__"
-        "TECHNICAL_ASSIGNMENT_MAX_REQUIREMENTS_PER_PAGE=1000" in environment_source
+        "TECHNICAL_ASSIGNMENT_MAX_REQUIREMENTS_PER_PAGE=2000" in environment_source
     )
 
     assert (

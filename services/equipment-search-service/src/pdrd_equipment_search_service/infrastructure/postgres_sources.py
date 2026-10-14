@@ -13,6 +13,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from pdrd_equipment_search_service.domain.equipment import normalized_token
+from pdrd_equipment_search_service.domain.source_management import (
+    SourceAlreadyExistsError,
+)
 
 
 def validate_hostname(hostname: str) -> str:
@@ -123,7 +126,8 @@ class PostgresSourceManager:
         hostname: str,
         status: str,
         enabled: bool,
-        allow_http: bool,
+        allow_http: bool | None = None,
+        create_only: bool = False,
         reason: str,
         actor: str,
     ) -> dict:
@@ -156,6 +160,7 @@ class PostgresSourceManager:
                          registration_source, created_at)
                         VALUES (:id, :name, :key, CAST(:aliases AS JSONB), true,
                                 'manual', :now)
+                        ON CONFLICT (normalized_name) DO NOTHING
                     """),
                     {
                         "id": uuid4(),
@@ -176,6 +181,12 @@ class PostgresSourceManager:
                     {"key": key, "hostname": hostname},
                 )
             ).first()
+            if previous and create_only:
+                raise SourceAlreadyExistsError(
+                    "Сайт уже добавлен для этого производителя."
+                )
+            if allow_http is None:
+                allow_http = bool(previous.allow_http) if previous else False
             source_id = previous.id if previous else uuid4()
             if previous:
                 await connection.execute(
@@ -196,7 +207,7 @@ class PostgresSourceManager:
                     },
                 )
             else:
-                await connection.execute(
+                inserted = await connection.execute(
                     text("""
                         INSERT INTO equipment_search.source_domains
                         (id, manufacturer_key, hostname, status, enabled,
@@ -204,6 +215,8 @@ class PostgresSourceManager:
                          example_model, updated_at, updated_by)
                         VALUES (:id, :key, :hostname, :status, :enabled,
                                 :allow_http, 'manual', '', '', :now, :actor)
+                        ON CONFLICT (manufacturer_key, hostname) DO NOTHING
+                        RETURNING id
                     """),
                     {
                         "id": source_id,
@@ -216,6 +229,10 @@ class PostgresSourceManager:
                         "actor": actor,
                     },
                 )
+                if inserted.scalar_one_or_none() is None:
+                    raise SourceAlreadyExistsError(
+                        "Сайт уже добавлен; обновите список."
+                    )
             await connection.execute(
                 text("""
                     INSERT INTO equipment_search.source_audit

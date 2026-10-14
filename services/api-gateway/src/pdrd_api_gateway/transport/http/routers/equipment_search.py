@@ -40,7 +40,8 @@ class SourceUpdateRequest(BaseModel):
     hostname: str = Field(min_length=3, max_length=253)
     status: str
     enabled: bool = True
-    allow_http: bool = False
+    allow_http: bool | None = None
+    create_only: bool = False
     reason: str = Field(min_length=1, max_length=1000)
 
 
@@ -336,6 +337,8 @@ async def update_source(
     try:
         return await _client(container).update_source(payload.model_dump(), actor)
     except httpx.HTTPStatusError as error:
+        if error.response.status_code == 409:
+            raise HTTPException(409, "Сайт уже добавлен; обновите список.") from error
         if error.response.status_code == 422:
             raise HTTPException(422, "Некорректный источник.") from error
         raise HTTPException(503, "Каталог EQ-источников недоступен.") from error

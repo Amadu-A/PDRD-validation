@@ -10,12 +10,16 @@ from pdrd_analysis_service.application.json_schemas import (
 )
 from pdrd_analysis_service.application.ports.vision_model import (
     StructuredVisionModel,
+    VisionModelOutputBudgetError,
 )
 from pdrd_analysis_service.application.prompts import (
     build_page_understanding_prompt,
 )
 from pdrd_analysis_service.application.specification_refinement import (
     RefineSpecification,
+)
+from pdrd_analysis_service.application.understanding_recovery import (
+    recover_page_understanding,
 )
 from pdrd_analysis_service.application.use_cases.common import (
     string_tuple,
@@ -84,24 +88,42 @@ class UnderstandPage:
         if needs_refinement and should_stop is not None and await should_stop():
             raise SpecificationCancelled
         max_equipment = 40 if use_equipment_web_search and not tabular else 0
-        result = await self.vision_model.generate_json(
-            prompt=(
-                build_page_understanding_prompt(
-                    page_number=page_number,
-                    heuristic_page_type=(heuristic_page_type),
-                    extracted_text=(extracted_text),
-                    max_facts=max_facts,
-                    max_equipment=max_equipment,
-                )
-            ),
-            schema=(build_page_facts_schema(max_facts, max_equipment)),
-            num_predict=self.num_predict,
-            seed=100,
-            stage=(f"page_understanding:{page_number}"),
-            image_bytes=image_bytes,
-        )
+        try:
+            result = await self.vision_model.generate_json(
+                prompt=(
+                    build_page_understanding_prompt(
+                        page_number=page_number,
+                        heuristic_page_type=(heuristic_page_type),
+                        extracted_text=(extracted_text),
+                        max_facts=max_facts,
+                        max_equipment=max_equipment,
+                    )
+                ),
+                schema=(build_page_facts_schema(max_facts, max_equipment)),
+                num_predict=self.num_predict,
+                seed=100,
+                stage=(f"page_understanding:{page_number}"),
+                image_bytes=image_bytes,
+            )
 
-        payload = result.payload
+            if result.metrics is not None and result.metrics.done_reason == "length":
+                raise VisionModelOutputBudgetError(
+                    "Ответ Understanding достиг предела вывода.", metrics=result.metrics
+                )
+            payload, metrics = result.payload, result.metrics
+        except VisionModelOutputBudgetError as error:
+            payload, metrics = await recover_page_understanding(
+                self.vision_model,
+                page_number=page_number,
+                heuristic_page_type=heuristic_page_type,
+                extracted_text=extracted_text,
+                image_bytes=image_bytes,
+                num_predict=self.num_predict,
+                max_facts=max_facts,
+                max_equipment=max_equipment,
+                initial_error=error,
+                should_stop=should_stop,
+            )
 
         facts = PageFacts(
             discipline=str(
@@ -171,5 +193,5 @@ class UnderstandPage:
 
         return (
             facts,
-            result.metrics,
+            metrics,
         )

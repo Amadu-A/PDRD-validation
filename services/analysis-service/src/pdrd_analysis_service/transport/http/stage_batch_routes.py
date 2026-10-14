@@ -317,7 +317,6 @@ async def understand_pages_stage(
             container=container,
             should_stop=should_stop
             if container.analysis_progress_probe is not None
-            and item.equipment_specification is not None
             else None,
         )
 

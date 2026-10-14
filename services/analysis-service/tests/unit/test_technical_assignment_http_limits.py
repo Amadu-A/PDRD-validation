@@ -77,7 +77,7 @@ def test_default_requirement_limit_is_bounded() -> None:
     """Baseline допускает большой, но конечный T-first input."""
     settings = PipelineSettings()
 
-    assert settings.technical_assignment_max_requirements_per_page == 1000
+    assert settings.technical_assignment_max_requirements_per_page == 2000
 
 
 def test_transport_schema_accepts_more_than_old_page_size() -> None:

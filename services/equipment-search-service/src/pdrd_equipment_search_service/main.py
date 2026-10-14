@@ -26,6 +26,9 @@ from pdrd_equipment_search_service.application.resolve import (
 )
 from pdrd_equipment_search_service.core.settings import Settings
 from pdrd_equipment_search_service.domain.equipment import EquipmentIdentity
+from pdrd_equipment_search_service.domain.source_management import (
+    SourceAlreadyExistsError,
+)
 from pdrd_equipment_search_service.infrastructure.inspect_document import (
     DocumentServiceInspector,
 )
@@ -78,7 +81,8 @@ class SourceUpdate(BaseModel):
     hostname: str = Field(min_length=3, max_length=253)
     status: str
     enabled: bool = True
-    allow_http: bool = False
+    allow_http: bool | None = None
+    create_only: bool = False
     reason: str = Field(min_length=1, max_length=1000)
 
 
@@ -412,6 +416,8 @@ def create_app(
                 **body.model_dump(),
                 actor=x_actor,
             )
+        except SourceAlreadyExistsError as error:
+            raise HTTPException(409, str(error)) from error
         except ValueError as error:
             raise HTTPException(422, str(error)) from error
         return jsonable_encoder(row)
