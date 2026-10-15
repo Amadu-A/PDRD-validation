@@ -125,6 +125,42 @@ test("неверное задание в ответе не считается в
   assert.equal(f.statuses.at(-1).mode, "error");
 });
 
+test("повтор после сбоя первого открытия восстанавливает сессию и разрешает сохранение", async () => {
+  let opens = 0;
+  const f = fixture({ api: { open: async () => {
+    if (++opens === 1) throw new Error("Источник временно недоступен");
+    return { job_id: JOB, revision: 10, findings: [entry] };
+  } } });
+  await f.sync.start();
+  assert.equal(f.statuses.at(-1).initialized, false);
+  assert.equal(f.sync.pending, 0);
+  await Promise.all([f.sync.retry(), f.sync.retry()]);
+  assert.equal(opens, 2);
+  assert.equal(f.statuses.at(-1).mode, "saved");
+  f.change({ decision: "accepted" });
+  await f.sync.settled();
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0].body.expected_revision, 10);
+});
+
+test("ошибка hydrate повторяет первоначальное открытие, поздний ответ отсоединённой сессии не применяется", async () => {
+  let hydrations = 0;
+  const statuses = [];
+  let finish;
+  const sync = createReviewSync({ jobId: JOB, snapshot: () => [], onStatus: (row) => statuses.push(row),
+    hydrate() { if (++hydrations === 1) throw new Error("Некорректная геометрия"); },
+    api: { config: async () => ({ enabled: true }),
+      open: async () => ({ job_id: JOB, revision: 0, findings: [] }) },
+  });
+  await sync.start(); await sync.retry();
+  assert.equal(hydrations, 2);
+  assert.equal(statuses.at(-1).mode, "saved");
+  const old = createReviewSync({ jobId: JOB, snapshot: () => [], hydrate() { assert.fail("старый отчёт"); },
+    api: { config: async () => ({ enabled: true }), open: () => new Promise((resolve) => { finish = resolve; }) } });
+  const opening = old.start(); await new Promise((resolve) => setImmediate(resolve));
+  old.detach(); finish({ job_id: JOB, revision: 0 }); await opening; await old.retry();
+});
+
 test("Gold + геометрия передаются отдельно от оригиналов и тегов VLM", () => {
   const box = { x_min: 0, y_min: 0, x_max: 100, y_max: 100 };
   const gold = { ...entry, finding_id: "manual:id", origin: "manual", page_number: 1,

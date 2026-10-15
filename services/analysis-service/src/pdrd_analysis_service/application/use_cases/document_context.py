@@ -28,6 +28,13 @@ from pdrd_analysis_service.domain.document_context import (
     normalized_value,
     subject_key,
 )
+from pdrd_analysis_service.domain.engineering_assertion import (
+    assertion_from_facts,
+    deterministic_unit_mismatch,
+    merge_assertions,
+    read_assertion,
+    same_assertion,
+)
 from pdrd_analysis_service.domain.engineering_claims import REVIEW_REASON_CODES
 
 logger = logging.getLogger(__name__)
@@ -105,7 +112,13 @@ def build_page_document_context(
                     "subject": "",
                     "property": "",
                     "scope": "",
-                    "text": f"{adjacent.summary}\n{adjacent.text[:600]}",
+                    "text": f"{adjacent.summary}\n"
+                    + (
+                        adjacent.text
+                        if any(fact.table_id for fact in page.facts)
+                        or re.search(r"таблиц|м[³3]/(?:сут|час)", page.text, re.I)
+                        else adjacent.text[:600]
+                    ),
                     "evidence_text": adjacent.text[:300],
                     "visual_regions": [],
                 }
@@ -418,6 +431,24 @@ class CheckCrossPageConsistency:
         decisions: dict[str, str] = {}
         reasons: dict[str, str] = {}
         reason_codes: dict[str, str] = {}
+        assertions = {
+            f"C{index}": assertion_from_facts(group.facts, include_related=True)
+            for index, group in enumerate(groups, 1)
+        }
+        for key, assertion in assertions.items():
+            if (
+                assertion is not None
+                and deterministic_unit_mismatch(assertion)
+                and all(
+                    item.fact.extraction_method in {"pdf_text", "pdf_table"}
+                    for item in assertion.observations
+                )
+            ):
+                decisions[key] = "confirmed"
+                reasons[key] = (
+                    "Программно проверен пересчёт одной строки с учётом округления."
+                )
+                reason_codes[key] = "false_arithmetic"
         batch_size = self.options.validation_batch_size
         for start in range(0, len(groups), batch_size):
             if cancel_check is not None and await cancel_check():
@@ -430,7 +461,10 @@ class CheckCrossPageConsistency:
                     self.options.max_evidence_sources_per_finding,
                 )
                 for index, group in enumerate(subset)
+                if f"C{start + index + 1}" not in decisions
             ]
+            if not candidates:
+                continue
             prompt = (
                 "Проверь только перечисленные кандидаты внутренних противоречий "
                 "ОДНОГО PDF. Сравни объект, свойство, режим, участок, условия и "
@@ -545,6 +579,16 @@ class CheckCrossPageConsistency:
                 )
             )
             first = selected[0]
+            assertion = assertions[f"C{index}"]
+            if assertion is not None:
+                deterministic = reason_codes.get(f"C{index}") == "false_arithmetic"
+                assertion = replace(
+                    assertion,
+                    verification="deterministic" if deterministic else "semantic",
+                    verification_rule="unit_equivalence"
+                    if deterministic
+                    else "cross_page_comparability",
+                )
             subject = first.fact.subject_name or first.fact.identifier
             prop = first.fact.property_name
             description = (
@@ -647,7 +691,9 @@ class CheckCrossPageConsistency:
                             "reason_code": reason_codes.get(
                                 f"C{index}", "model_decision"
                             ),
+                            "comparability_checked": True,
                         },
+                        *((assertion.as_origin(),) if assertion else ()),
                     ),
                 )
             )
@@ -667,15 +713,35 @@ def merge_cross_page_findings(
     cross_findings: tuple[FindingDraft, ...],
 ) -> dict[int, tuple[FindingDraft, ...]]:
     """Объединяет повтор одного доказанного противоречия, сохраняя все типы оснований."""
-    result = {page: list(findings) for page, findings in page_findings.items()}
-    for cross in cross_findings:
+    structured = tuple(
+        finding
+        for findings in page_findings.values()
+        for finding in findings
+        if read_assertion(finding.origin_assertions) is not None
+    )
+    result = {
+        page: [
+            finding
+            for finding in findings
+            if read_assertion(finding.origin_assertions) is None
+        ]
+        for page, findings in page_findings.items()
+    }
+    for cross in (*structured, *cross_findings):
         source_ids = set(cross.document_context_source_ids)
         pages = {source.page for source in cross.document_context_basis_sources}
         duplicates = []
         for findings in result.values():
             for finding in tuple(findings):
                 selected = set(finding.document_context_source_ids)
-                if (
+                left = read_assertion(finding.origin_assertions)
+                right = read_assertion(cross.origin_assertions)
+                structured_duplicate = (
+                    left is not None
+                    and right is not None
+                    and same_assertion(left, right)
+                )
+                if structured_duplicate or (
                     finding.category == "document_consistency"
                     and finding.page in pages
                     and selected
@@ -695,14 +761,51 @@ def merge_cross_page_findings(
             ("technical_assignment_basis_sources", "technical_assignment_source_ids"),
             ("user_package_basis_sources", "user_package_source_ids"),
             ("document_context_basis_sources", "document_context_source_ids"),
+            (
+                "equipment_documentation_basis_sources",
+                "equipment_documentation_source_ids",
+            ),
         ):
             sources = list(getattr(cross, field))
             for finding in duplicates:
                 for source in getattr(finding, field):
-                    if source in sources or (
+                    if source in sources:
+                        continue
+                    existing = next(
+                        (
+                            item
+                            for item in sources
+                            if item.source_id == source.source_id
+                        ),
+                        None,
+                    )
+                    if (
                         field == "document_context_basis_sources"
-                        and any(item.source_id == source.source_id for item in sources)
+                        and existing is not None
+                        and all(
+                            getattr(existing, name) == getattr(source, name)
+                            for name in (
+                                "page",
+                                "fact_id",
+                                "evidence_text",
+                                "text",
+                                "subject",
+                                "property",
+                                "scope",
+                            )
+                        )
                     ):
+                        regions = list(existing.visual_regions)
+                        regions.extend(
+                            region
+                            for region in source.visual_regions
+                            if region not in regions
+                        )
+                        sources[sources.index(existing)] = replace(
+                            existing,
+                            visual_regions=tuple(regions),
+                            score=max(existing.score, source.score),
+                        )
                         continue
                     # N/T/U ID могут быть локальны для страницы; устраняем только коллизию ID.
                     if any(item.source_id == source.source_id for item in sources):
@@ -716,14 +819,71 @@ def merge_cross_page_findings(
         origins = (
             *cross.origin_assertions,
             *(origin for finding in duplicates for origin in finding.origin_assertions),
+            *(
+                {
+                    "origin": "merged_finding",
+                    "finding_id": item.finding_id,
+                    "page": item.page,
+                    "comment": item.comment,
+                    "evidence": item.evidence,
+                    "recommendation_draft": item.recommendation_draft,
+                    "equipment_details": item.equipment_details,
+                }
+                for item in duplicates
+            ),
         )
+        evidence = []
+        for item in (cross, *duplicates):
+            locations = list(item.evidence_locations)
+            if item.visual_regions:
+                locations.append(
+                    {
+                        "page": item.page,
+                        "source_id": item.finding_id,
+                        "text": item.evidence,
+                        "visual_regions": [
+                            region.as_dict() for region in item.visual_regions
+                        ],
+                    }
+                )
+            for location in locations:
+                if location not in evidence:
+                    evidence.append(location)
         merged = replace(
             cross,
             **updates,
             origin_assertions=origins,
+            evidence_locations=tuple(evidence),
             basis="\n".join(
                 dict.fromkeys(item.basis for item in (cross, *duplicates) if item.basis)
             ),
         )
+        assertion = read_assertion(cross.origin_assertions)
+        for duplicate in duplicates:
+            other = read_assertion(duplicate.origin_assertions)
+            if (
+                assertion is not None
+                and other is not None
+                and same_assertion(assertion, other)
+            ):
+                assertion = merge_assertions(assertion, other)
+        if assertion is not None:
+            merged = replace(
+                merged,
+                origin_assertions=(
+                    assertion.as_origin(),
+                    *(
+                        origin
+                        for origin in origins
+                        if origin.get("origin") != "engineering_assertion"
+                    ),
+                    *(
+                        {**origin, "origin": "engineering_assertion_history"}
+                        for origin in origins
+                        if origin.get("origin") == "engineering_assertion"
+                        and origin != assertion.as_origin()
+                    ),
+                ),
+            )
         result.setdefault(cross.page, []).append(merged)
     return {page: tuple(findings) for page, findings in result.items()}

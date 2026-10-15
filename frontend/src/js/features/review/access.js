@@ -2,7 +2,7 @@
 
 /** Связывает серверные права Review с редактором и PDF без доступа для гостя. */
 import { hasPermission } from "../auth/access.js";
-import { currentSession } from "../auth/session.js";
+import { currentSession, subscribeSession } from "../auth/session.js";
 
 export function reviewCapabilities() {
   const session = currentSession();
@@ -14,5 +14,41 @@ export function reviewCapabilities() {
 }
 
 export function mountAuthorizedReview(controller, root, options) {
-  if (reviewCapabilities().canCreateGold) controller.mount(root, options);
+  if (Object.values(reviewCapabilities()).some(Boolean)) {
+    controller.mount(root, options);
+    return true;
+  }
+  return false;
+}
+
+/** Подключает уже показанный отчёт после загрузки сессии, не сбрасывая его решения. */
+export function bindAuthorizedReview(controller, { subscribe = subscribeSession } = {}) {
+  let report = null;
+  let mounted = false;
+  let identity = null;
+  function clear() {
+    controller.clear();
+    report = null;
+    mounted = false;
+  }
+  const unsubscribe = subscribe((session) => {
+    const nextIdentity = session.user?.user_id ?? null;
+    if (report && mounted && (nextIdentity !== identity
+      || !Object.values(reviewCapabilities()).some(Boolean))) {
+      controller.clear();
+      mounted = false;
+    }
+    identity = nextIdentity;
+    if (report && !mounted) mounted = mountAuthorizedReview(controller, report.root, report.options);
+    else if (report && mounted) controller.setCapabilities?.(reviewCapabilities());
+  });
+  return {
+    mount(root, options) {
+      clear();
+      report = { root, options };
+      mounted = mountAuthorizedReview(controller, root, options);
+    },
+    clear,
+    dispose() { clear(); unsubscribe(); },
+  };
 }

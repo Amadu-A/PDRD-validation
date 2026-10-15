@@ -63,5 +63,5 @@ export function mountReviewedPdf({ root, jobId, api, sync, onBusy = () => {}, do
   }
   button.addEventListener("click", click);
   update();
-  return { update, dispose() { disposed = true; button.removeEventListener("click", click); } };
+  return { update, dispose() { disposed = true; button.disabled = true; message.remove(); button.removeEventListener("click", click); } };
 }

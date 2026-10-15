@@ -12,12 +12,48 @@ from pdrd_analysis_service.application.prompts import build_normative_check_prom
 from pdrd_analysis_service.application.use_cases.understanding import UnderstandPage
 from pdrd_analysis_service.application.vision_execution import current_vision_execution
 from pdrd_analysis_service.domain.analysis import GenerationMetrics, GenerationResult
+from pdrd_analysis_service.domain.document_context import LocatedDocumentFact
+from pdrd_analysis_service.domain.engineering_assertion import (
+    assertion_from_facts,
+    read_assertion,
+)
+from pdrd_analysis_service.domain.engineering_facts import explicit_system_purposes
 from pdrd_analysis_service.domain.equipment_specification import SpecificationCancelled
 from pdrd_analysis_service.infrastructure.image_cropper import PilImageCropper
-from pdrd_analysis_service.transport.http.schemas import PageFactsPayload
+from pdrd_analysis_service.transport.http.schemas import (
+    FindingDraftPayload,
+    PageFactsPayload,
+)
 from pdrd_analysis_service.transport.http.vision_execution import page_execution_context
 from PIL import Image
 from starlette.requests import Request
+
+
+def test_assertion_survives_existing_http_contract_without_new_storage():
+    """HTTP между этапами сохраняет тип, объект, условия и исходные наблюдения утверждения."""
+    fact = explicit_system_purposes("Назначение системы: водоснабжение (В2)")[0]
+    assertion = assertion_from_facts((LocatedDocumentFact(8, 1, fact),))
+    payload = FindingDraftPayload(
+        finding_id="f1",
+        page=8,
+        page_type="text",
+        category="document_consistency",
+        severity="warning",
+        status="needs_review",
+        comment="Разное назначение В2",
+        evidence=fact.evidence_text,
+        recommendation_draft="",
+        confidence=0.8,
+        normative_source_ids=[],
+        basis="",
+        basis_sources=[],
+        experience_query="",
+        origin_assertions=[assertion.as_origin()],
+    )
+    decoded = FindingDraftPayload.model_validate_json(
+        payload.model_dump_json()
+    ).to_domain()
+    assert read_assertion(decoded.origin_assertions) == assertion
 
 
 class GraphicsModel:

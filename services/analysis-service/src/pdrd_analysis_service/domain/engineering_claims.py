@@ -26,6 +26,7 @@ REVIEW_REASON_CODES = (
     "non_specific_claim",
     "false_arithmetic",
     "unsupported_conclusion",
+    "extraction_is_not_evidence",
 )
 
 _NUMBER = r"\d+(?:[.,]\d+)?"
@@ -55,7 +56,7 @@ _EQUIVALENCE = re.compile(
 )
 _DIFFERENCE = re.compile(
     r"не соответству|не эквивалент|не совпада|несогласован|расхожд|различаются|противореч|несоответств|"
-    r"неверн\w*\s+пересч|ошиб\w*\s+пересч",
+    r"неверн\w*\s+пересч|ошиб\w*\s+пересч|несовпад|разн\w*\s+диаметр|тогда как",
     re.I,
 )
 _MONTHS = {
@@ -218,6 +219,12 @@ def unsupported_engineering_claim(text: str) -> str | None:
     """Отсекает доказуемую арифметическую ошибку и несовместимые основания сравнения."""
     if reason := false_numeric_claim(text):
         return reason
+    if len(re.findall(r"ОСР[-\s]*\d*[-\s]*[ABCАВС]", text, re.I)) > 1 and re.search(
+        r"разн\w*\s+значени|противореч|един\w*\s+значени", text, re.I
+    ):
+        return "incomparable_seismic_map"
+    if re.search(r"в PAGE FACTS|scope_location|факты p\d+-f", text, re.I):
+        return "extraction_is_not_evidence"
     nominal = re.search(r"\b(?:dn|ду)\s*\d+", text, re.I)
     outer = re.search(r"[ø⌀Ø∅]\s*\d+|наружн\w*\s+диаметр", text, re.I)
     # Не подавляем отдельную претензию о материале, типе изделия или отсутствующем переходе.
@@ -234,6 +241,12 @@ def unsupported_engineering_claim(text: str) -> str | None:
         return "unverified_diameter_compatibility"
     if re.fullmatch(
         r"\s*(?:Требуется\s+)?(?:проверить|уточнить)\s+(?:расч[её]ты|документацию|проект|всё)\s*[.!]?\s*",
+        text,
+        re.I,
+    ):
+        return "non_specific_claim"
+    if re.fullmatch(
+        r"\s*На листе выявлено несоответствие, требующее проверки инженером[.!]?\s*",
         text,
         re.I,
     ):

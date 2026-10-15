@@ -2,11 +2,32 @@
 
 """Границы benchmark, координат, отмены и общего распределения VLM между заданиями."""
 
+import ast
 import json
 import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_assertion_domain_has_no_runtime_or_transport_dependencies():
+    """Общий предмет проверки остаётся в domain и не зависит от HTTP, БД или модели."""
+    path = (
+        ROOT
+        / "services/analysis-service/src/pdrd_analysis_service/domain/engineering_assertion.py"
+    )
+    tree = ast.parse(path.read_text("utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+            "pdrd_analysis_service"
+        ):
+            assert node.module.startswith("pdrd_analysis_service.domain.")
+        if isinstance(node, ast.Import):
+            assert not {alias.name.split(".")[0] for alias in node.names} & {
+                "httpx",
+                "fastapi",
+                "sqlalchemy",
+            }
 
 
 def test_expert_matrix_cannot_enter_runtime_prompts() -> None:

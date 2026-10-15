@@ -69,6 +69,13 @@ export class FakeElement {
     }
   }
 
+  after(node) {
+    if (!this.parent) return;
+    const next = this.parent.children[this.parent.children.indexOf(this) + 1];
+    if (next) this.parent.insertBefore(node, next);
+    else this.parent.append(node);
+  }
+
   addEventListener(name, handler) { this.listeners.set(name, [...(this.listeners.get(name) ?? []), handler]); }
   removeEventListener(name, handler) { this.listeners.set(name, (this.listeners.get(name) ?? []).filter((item) => item !== handler)); }
   dispatch(name, event = {}) { for (const handler of this.listeners.get(name) ?? []) handler(event); }

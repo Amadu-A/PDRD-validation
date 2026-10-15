@@ -9,6 +9,7 @@ from typing import Any
 
 from pdrd_analysis_service.application.candidate_trace import trace_candidate
 from pdrd_analysis_service.application.engineering_plan import (
+    bind_candidate_assertion,
     candidate_engineering_context,
     engineering_plan,
 )
@@ -477,9 +478,10 @@ class BuildNormativeQueries:
         )
 
         pz_hint = " ".join(text[:300] for text in project_context_texts[:3])
+        plan = engineering_plan(page_facts, extracted_text)
         parameters = "; ".join(
             f"{item['object']}: {item['property']} {item['value']} {item['unit']}; {item['scope']}"
-            for item in engineering_plan(page_facts, extracted_text)
+            for item in plan
         )
 
         queries.append(
@@ -497,6 +499,17 @@ class BuildNormativeQueries:
                 f" Проверочные темы: {'; '.join(engineering_questions(page_facts, extracted_text))}"
             ).strip()
         )
+
+        # Предметные вопросы используют те же факты и роли, что discovery и finalization.
+        # Число retrieval-запросов остаётся ограниченным существующим max_queries.
+        focused = [
+            f"{item['object']}; {item['property']}: {item['value']} {item['unit']}; "
+            f"условия {item['scope']}; {item['question']}"
+            for item in plan[:3]
+        ]
+        queries = [*focused, *queries[:-1], queries[-1]] if focused else queries
+        if len(queries) > self.max_queries:
+            queries = [*queries[: max(0, self.max_queries - 1)], queries[-1]]
 
         if not queries and extracted_text.strip():
             queries.append(
@@ -775,7 +788,12 @@ class CheckPageAgainstNorms:
             normative_text_limit=(self.normative_text_limit),
             normative_system_prompt=(normative_system_prompt),
         )
-        plan = engineering_plan(page_facts, extracted_text, document_context_sources)
+        plan = engineering_plan(
+            page_facts,
+            extracted_text,
+            document_context_sources,
+            page_number=page_number,
+        )
         allowed_hypotheses = {item["hypothesis_id"] for item in plan}
         for hypothesis in plan:
             trace_candidate(
@@ -788,6 +806,7 @@ class CheckPageAgainstNorms:
                 normative_sources=len(normative_sources),
                 technical_assignment_sources=len(technical_assignment_sources),
                 user_sources=len(user_package_sources),
+                assertion_id=(hypothesis.get("assertion") or {}).get("assertion_id"),
             )
 
         (
@@ -1047,6 +1066,19 @@ class CheckPageAgainstNorms:
                 )
             ).strip()
             context = candidate_engineering_context(page_facts, violation, page_number)
+            assertion = bind_candidate_assertion(
+                plan, violation, page_number, selected_document_context_sources
+            )
+            if assertion is not None:
+                origin_assertions = (*origin_assertions, assertion)
+                trace_candidate(
+                    "assertion_binding",
+                    assertion["assertion_id"],
+                    page=page_number,
+                    decision="bound",
+                    finding_id=finding_id,
+                    observations=len(assertion["observations"]),
+                )
             if context["facts"]:
                 origin_assertions = (
                     *origin_assertions,
@@ -1084,6 +1116,8 @@ class CheckPageAgainstNorms:
             )
 
             if not selected_any_source:
+                normalized_status = "needs_review"
+            if violation.get("claim_type") == "missing_justification":
                 normalized_status = "needs_review"
 
             if is_hypothesis:

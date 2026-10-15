@@ -13,14 +13,24 @@ export function createReviewSync({ jobId, api, snapshot, hydrate, onStatus = () 
   let revision = null;
   let initialized = false;
   let saving = null;
+  let opening = null;
   let failed = false;
   let conflict = false;
   let detached = false;
   let serverSession = null;
   const queue = [];
-  const emit = (value) => { if (!detached) onStatus(value); };
+  const emit = (value) => { if (!detached) onStatus({ initialized, ...value }); };
 
   async function start() {
+    if (detached || initialized) return;
+    if (opening) return opening;
+    opening = open();
+    try { await opening; } finally { opening = null; }
+  }
+
+  async function open() {
+    failed = false;
+    conflict = false;
     emit({ mode: "loading", pending: 0 });
     try {
       const config = await api.config();
@@ -95,7 +105,9 @@ export function createReviewSync({ jobId, api, snapshot, hydrate, onStatus = () 
     get session() { return serverSession; },
     /** Повторяет ту же CAS-команду; потерянный ответ не приводит к дублированию записи. */
     async retry() {
-      if (conflict || !initialized) return;
+      if (conflict || detached) return;
+      await opening;
+      if (!initialized) return start();
       await saving;
       failed = false;
       emit({ mode: "saving", revision, pending: queue.length });
@@ -104,6 +116,6 @@ export function createReviewSync({ jobId, api, snapshot, hydrate, onStatus = () 
     get pending() { return queue.length; },
     /** Старая очередь завершает записи, но больше не обновляет UI нового задания. */
     detach() { detached = true; },
-    async settled() { await saving; },
+    async settled() { await opening; await saving; },
   };
 }

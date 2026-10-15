@@ -34,12 +34,14 @@ function parseFrame(frame) {
 
 export async function followEquipmentEvents(
   jobId,
-  { onEvent, signal, fetchImpl = globalThis.fetch, retryMilliseconds = 1000, afterEventId = 0 },
+  { onEvent, signal, fetchImpl = globalThis.fetch, retryMilliseconds = 1000, afterEventId = 0,
+    maxFailures = 5, onUnavailable = () => {} },
 ) {
   /** Повторяет соединение после разрыва и прекращает его при завершении анализа. */
   let lastId = /^[1-9]\d*$/.test(String(afterEventId)) ? String(afterEventId) : "";
   const url = "/api/v1/analyses/" + encodeURIComponent(jobId)
     + "/equipment-search/events";
+  let failures = 0;
   while (!signal.aborted) {
     try {
       const headers = {
@@ -53,7 +55,10 @@ export async function followEquipmentEvents(
         cache: "no-store",
         signal,
       });
-      if (!response.ok || !response.body) throw new Error("EQ SSE недоступен");
+      if (!response.ok || !response.body) {
+        if ([401, 403, 410].includes(response.status)) { onUnavailable(response.status); return; }
+        throw Object.assign(new Error("EQ SSE недоступен"), { status: response.status });
+      }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -68,6 +73,7 @@ export async function followEquipmentEvents(
           if (!frame) continue;
           if (frame.id && Number(frame.id) > Number(lastId || 0)) {
             lastId = frame.id;
+            failures = 0;
             onEvent(frame.payload);
             if (["completed", "incomplete", "cancelled"].includes(frame.payload.type)) {
               return;
@@ -76,9 +82,10 @@ export async function followEquipmentEvents(
         }
         if (buffer.length > 10000) buffer = "";
       }
-    } catch {
+    } catch (error) {
       if (signal.aborted) return;
+      if (++failures >= maxFailures) { onUnavailable(error.status ?? null); return; }
     }
-    await pause(signal, retryMilliseconds);
+    await pause(signal, Math.min(30_000, retryMilliseconds * 2 ** failures));
   }
 }

@@ -63,3 +63,14 @@ test("EQ SSE не запускает запросы после отмены", as
   });
   assert.equal(calls, 0);
 });
+
+test("404 EQ ограничен повторными попытками, запрет доступа останавливает поток сразу", async () => {
+  for (const status of [404, 401, 403, 410]) {
+    let calls = 0; const unavailable = [];
+    await followEquipmentEvents(jobId, { signal: new AbortController().signal, retryMilliseconds: 0,
+      maxFailures: 3, onEvent() {}, onUnavailable: (code) => unavailable.push(code),
+      fetchImpl: async () => { calls++; return { ok: false, status }; } });
+    assert.equal(calls, status === 404 ? 3 : 1);
+    assert.deepEqual(unavailable, [status]);
+  }
+});

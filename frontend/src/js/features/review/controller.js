@@ -94,8 +94,8 @@ export function createReviewController({
   onChange = () => {},
   capabilities = { canCreateGold: true, canDecide: true },
 } = {}) {
-  const canCreateGold = capabilities.canCreateGold !== false;
-  const canDecide = capabilities.canDecide !== false;
+  let canCreateGold = capabilities.canCreateGold !== false;
+  let canDecide = capabilities.canDecide !== false;
   let locked = false;
   let persistent = false;
   let syncMessage = "";
@@ -570,6 +570,21 @@ export function createReviewController({
 
   return {
     mount, getManualSnapshot, getReviewSnapshot, hydrate, setConnection, setHistory,
-    dispose() { manual.dispose(); automatic.dispose(); editor?.dialog.remove(); rejectionEditor?.dialog.remove(); },
+    setCapabilities(next) {
+      canCreateGold = next.canCreateGold === true;
+      canDecide = next.canDecide === true;
+      for (const rows of views.values()) for (const view of rows) {
+        view.controls.accept.hidden = !canDecide;
+        view.controls.reject.hidden = !canDecide;
+        view.controls.edit.hidden = !(view.item.dataset.reviewOrigin === REVIEW_ORIGINS.MANUAL ? canCreateGold : canDecide);
+      }
+      setConnection({});
+    },
+    dispose() {
+      setConnection({ isLocked: true });
+      for (const rows of views.values()) for (const view of rows) view.controls.element.remove();
+      preview?.remove();
+      manual.dispose(); automatic.dispose(); editor?.dialog.remove(); rejectionEditor?.dialog.remove();
+    },
   };
 }

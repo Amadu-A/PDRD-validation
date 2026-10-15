@@ -84,7 +84,18 @@ export async function fetchJson(
 
 /** Скачивает только настоящий PDF; JSON/HTML ошибки не превращаются в файл. */
 export async function fetchPdf(url, options = {}) {
-  const response = await fetch(url, options);
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    const operation = String(url).includes("/annotated-pdf") ? "автоматического PDF" : "PDF после Review";
+    const failure = new Error(`Не удалось подключиться для скачивания ${operation}. `
+      + "Проверьте доступность адреса приложения, DNS и сетевое соединение. HTTP-ответ не получен.");
+    failure.name = "NetworkError";
+    failure.cause = error;
+    throw failure;
+  }
   if (!response.ok) {
     const raw = await response.text();
     let detail = raw;

@@ -8,8 +8,26 @@ import { fetchPdf, ApiError } from "../src/js/api.js";
 import { requiresAreaAcceptance, reviewedPdfAvailability } from "../src/js/features/review/pdf-model.js";
 import { createReviewSync } from "../src/js/features/review/sync.js";
 import { mountReviewedPdf } from "../src/js/features/review/pdf-controls.js";
+import { createReviewApi } from "../src/js/features/review/api.js";
+import { downloadAutomaticPdf } from "../src/js/features/analysis/automatic-pdf-download.js";
 
 const JOB = "00000000-0000-4000-8000-000000000001";
+
+test("DNS/сеть различаются с HTTP: автоматический GET и итоговый POST используют текущий origin", async (t) => {
+  const previous = globalThis.fetch;
+  t.after(() => { globalThis.fetch = previous; });
+  const calls = [];
+  globalThis.fetch = async (url, options) => { calls.push([url, options]); throw new TypeError("Failed to fetch"); };
+  await assert.rejects(downloadAutomaticPdf(JOB), (error) => error.name === "NetworkError"
+    && /автоматического PDF.*DNS/.test(error.message) && error.status === undefined);
+  await assert.rejects(createReviewApi().pdf(JOB, 7), /PDF после Review.*HTTP-ответ не получен/);
+  assert.equal(calls[0][0], `/api/v1/analyses/${JOB}/annotated-pdf`);
+  assert.equal(calls[0][1].method ?? "GET", "GET");
+  assert.equal(calls[1][0], `/api/v1/analyses/${JOB}/reviewed-pdf`);
+  assert.equal(calls[1][1].method, "POST");
+  assert.deepEqual(JSON.parse(calls[1][1].body), { expected_revision: 7 });
+  assert.equal(calls.length, 2);
+});
 
 test("старое принятое Review подтверждает текущую область при PDF, Bad не получает новую", () => {
   const located = { finding_id: "vlm:1", origin: "vlm", decision: "accepted", proposed_regions: [{}] };
@@ -81,6 +99,7 @@ class Element {
   constructor() { this.listeners = new Map(); this.disabled = true; this.textContent = ""; }
   setAttribute() {}
   after(node) { this.next = node; }
+  remove() { this.removed = true; }
   addEventListener(name, listener) { this.listeners.set(name, listener); }
   removeEventListener(name) { this.listeners.delete(name); }
 }

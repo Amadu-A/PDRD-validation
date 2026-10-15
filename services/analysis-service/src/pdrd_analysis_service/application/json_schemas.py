@@ -400,6 +400,15 @@ def build_normative_check_schema(
                                 "maxLength": 80,
                             },
                         },
+                        "claim_type": {
+                            "type": "string",
+                            "enum": [
+                                "contradiction",
+                                "missing_justification",
+                                "documentation",
+                                "visual_connection",
+                            ],
+                        },
                         "recommendation_draft": {
                             "type": "string",
                             "maxLength": 0,
@@ -440,6 +449,7 @@ def build_normative_check_schema(
                         "evidence",
                         "object_ref",
                         "hypothesis_ids",
+                        "claim_type",
                         "recommendation_draft",
                         "confidence",
                         "visual_regions",

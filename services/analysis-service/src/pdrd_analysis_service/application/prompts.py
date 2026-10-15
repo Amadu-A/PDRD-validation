@@ -7,6 +7,7 @@ from dataclasses import asdict
 
 from pdrd_analysis_service.application.engineering_plan import (
     engineering_plan,
+    engineering_plan_for_prompt,
     quantity_checks,
 )
 from pdrd_analysis_service.application.engineering_review import (
@@ -768,12 +769,15 @@ def build_normative_check_prompt(
     }
     if page_facts.document_facts:
         facts_payload["engineering_facts"] = [
-            asdict(fact) for fact in page_facts.document_facts
+            {"fact_id": f"p{page_number:04d}-f{index:04d}", **asdict(fact)}
+            for index, fact in enumerate(page_facts.document_facts, 1)
         ]
         facts_payload["quantity_checks"] = quantity_checks(page_facts)
     if page_facts.graphical_targets:
         facts_payload["graphical_targets"] = list(page_facts.graphical_targets)
-    hypotheses = engineering_plan(page_facts, extracted_text, document_context_sources)
+    hypotheses = engineering_plan(
+        page_facts, extracted_text, document_context_sources, page_number=page_number
+    )
 
     normative_payload = [
         {
@@ -924,7 +928,22 @@ D-source — факт из этого же проверяемого PDF, а не
 {chr(10).join(engineering_questions(page_facts, extracted_text))}
 
 ПРЕДМЕТНЫЕ ПРОВЕРОЧНЫЕ ГИПОТЕЗЫ (это вопросы, не готовые замечания):
-{json.dumps(hypotheses, ensure_ascii=False, default=list)}
+{json.dumps(engineering_plan_for_prompt(hypotheses, page_facts, page_number), ensure_ascii=False, default=list)}
+assertion содержит единый предмет проверки и исходные наблюдения. Используй его объект,
+свойство, условия и доказательства на всём пути; не переопределяй систему заново.
+Ссылки fact_id раскрываются в PAGE FACTS.engineering_facts, related_source_ids — в D SOURCES.
+Одна претензия относится к одному объекту, свойству и типу; не смешивай разные вопросы в одном candidate.
+В object_ref перепиши точный тег объекта из плана; без тега используй его исходное имя.
+claim_type=contradiction: две несовместимые записи одного свойства в одинаковых условиях.
+claim_type=missing_justification: конкретное принятое значение и недостающий расчётный шаг;
+сначала проверь ссылки, приложения и все переданные продолжения. Это needs_review, не доказанное нарушение.
+claim_type=documentation: конкретный реквизит или ссылка; различай номер тома, документа,
+локальный номер листа, общее число листов документа и сквозную нумерацию комплекта.
+claim_type=visual_connection: конкретная связь или читаемость, подтверждаемая областью изображения.
+В evidence допускается только исходный документ. Несовпадение PAGE FACTS с PAGE TEXT
+означает возможную ошибку извлечения; перепроверь изображение и не обвиняй проектировщика.
+Различай требуемый и гарантированный напор; объём резервуара и запас всей группы;
+для ВПУ проверь совместное покрытие заполнения и подпитки, а не одно деление объёма на время.
 Для каждой гипотезы сначала проверь контрдоказательства: назначение объекта, режим,
 условия, расчётную ссылку, приложение и продолжение. Источники бери только из переданных N/T/U/D.
 Укажи конкретную незамкнутую связь принятого параметра с обоснованием, если она действительно
@@ -1123,6 +1142,14 @@ def build_finalization_prompt(
                     "comment": finding.comment,
                     "evidence": finding.evidence,
                     "object_ref": finding.object_ref,
+                    "engineering_assertion": next(
+                        (
+                            origin
+                            for origin in finding.origin_assertions
+                            if origin.get("origin") == "engineering_assertion"
+                        ),
+                        None,
+                    ),
                     "engineering_context": [
                         origin["context"]
                         for origin in finding.origin_assertions

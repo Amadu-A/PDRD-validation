@@ -6,6 +6,18 @@ import re
 from dataclasses import asdict
 
 from pdrd_analysis_service.domain.analysis import DocumentContextSource, PageFacts
+from pdrd_analysis_service.domain.document_context import (
+    LocatedDocumentFact,
+    normalize_label,
+    property_key,
+)
+from pdrd_analysis_service.domain.engineering_assertion import (
+    CLAIM_TYPES,
+    assertion_from_facts,
+    candidate_property,
+    engineering_object_key,
+    read_assertion,
+)
 from pdrd_analysis_service.domain.engineering_facts import (
     explicit_design_parameters,
     explicit_system_purposes,
@@ -13,15 +25,22 @@ from pdrd_analysis_service.domain.engineering_facts import (
 
 
 def engineering_plan(
-    facts: PageFacts, text: str, sources: tuple[DocumentContextSource, ...] = ()
+    facts: PageFacts,
+    text: str,
+    sources: tuple[DocumentContextSource, ...] = (),
+    *,
+    page_number: int = 0,
 ) -> tuple[dict, ...]:
     """Привязывает проверочные вопросы к объекту, параметру, режиму и доступным контрдоказательствам."""
     result = []
     seen = set()
-    for fact in (
-        *facts.document_facts,
-        *explicit_system_purposes(text),
-        *explicit_design_parameters(text),
+    for fact_index, fact in enumerate(
+        (
+            *facts.document_facts,
+            *explicit_system_purposes(text),
+            *explicit_design_parameters(text),
+        ),
+        1,
     ):
         object_name = fact.identifier or fact.subject_name
         key = (
@@ -76,9 +95,19 @@ def engineering_plan(
                 "Соответствуют ли количество, перечень обозначений и размещение "
                 "того же состава объектов в переданных представлениях?"
             )
+        assertion = assertion_from_facts(
+            (
+                LocatedDocumentFact(
+                    fact.source_pages[0] if fact.source_pages else max(1, page_number),
+                    fact_index,
+                    fact,
+                ),
+            )
+        )
         result.append(
             {
                 "hypothesis_id": f"engineering-{len(result) + 1}",
+                "assertion": assertion.as_origin() if assertion else None,
                 "object": object_name,
                 "property": fact.property_name,
                 "value": fact.value_raw,
@@ -95,6 +124,107 @@ def engineering_plan(
             }
         )
     return tuple(result)
+
+
+def engineering_plan_for_prompt(
+    plan: tuple[dict, ...], facts: PageFacts, page: int
+) -> tuple[dict, ...]:
+    """Ссылается на уже переданные факты вместо повторной отправки каждого полного наблюдения."""
+    known = {(page, index): fact for index, fact in enumerate(facts.document_facts, 1)}
+    result = []
+    for item in plan:
+        row = {
+            key: value
+            for key, value in item.items()
+            if key not in {"assertion", "related_sources"}
+        }
+        row["related_source_ids"] = [
+            source["source_id"] for source in item["related_sources"]
+        ]
+        assertion = read_assertion((item.get("assertion") or {},))
+        if assertion is not None:
+            payload = {
+                key: value
+                for key, value in assertion.as_origin().items()
+                if key != "observations"
+            }
+            payload["observations"] = [
+                {"page": observation.page, "fact_id": observation.fact_id}
+                if known.get((observation.page, observation.index)) == observation.fact
+                else asdict(observation)
+                for observation in assertion.observations
+            ]
+            row["assertion"] = payload
+        result.append(row)
+    return tuple(result)
+
+
+def bind_candidate_assertion(
+    plan: tuple[dict, ...], candidate: dict, page: int, sources: tuple
+) -> dict | None:
+    """Связывает ответ с исходным предметом, не позволяя модели переписать факты плана."""
+    text = f"{candidate.get('comment', '')} {candidate.get('evidence', '')}"
+    prop = candidate_property(text)
+    linked = set(candidate.get("hypothesis_ids") or ())
+    object_ref = normalize_label(str(candidate.get("object_ref") or ""))
+    observations = []
+    for item in plan:
+        assertion = read_assertion((item.get("assertion") or {},))
+        if assertion is None:
+            continue
+        if linked and item["hypothesis_id"] not in linked:
+            continue
+        if not linked and (
+            not object_ref
+            or not re.search(
+                r"(?<!\w)" + re.escape(normalize_label(item["object"])) + r"(?!\w)",
+                object_ref,
+            )
+            or normalize_label(item["property"]) != normalize_label(prop)
+        ):
+            continue
+        roots = {
+            "Назначение системы": "назначени",
+            "Диаметр": "диаметр",
+            "Толщина стенки": "толщин",
+            "Расход воды": "расход",
+            "Напор": "напор",
+        }
+        if prop and roots[prop] not in normalize_label(item["property"]):
+            continue
+        observations.extend(assertion.observations)
+    if not observations:
+        return None
+    if (
+        len(
+            {
+                (engineering_object_key(item.fact), property_key(item.fact))
+                for item in observations
+            }
+        )
+        != 1
+    ):
+        return None
+    # Для назначения системы добавляем только явно подписанные контрдоказательства D.
+    if prop == "Назначение системы":
+        identifier = observations[0].fact.identifier
+        for source in sources:
+            for fact in explicit_system_purposes(source.evidence_text):
+                if fact.identifier == identifier:
+                    observations.append(
+                        LocatedDocumentFact(source.page, len(observations) + 1, fact)
+                    )
+    claim_type = candidate.get("claim_type")
+    if claim_type not in CLAIM_TYPES:
+        claim_type = (
+            "missing_justification"
+            if re.search(r"обоснован|без.*расч[её]т", text, re.I)
+            else "contradiction"
+        )
+    assertion = assertion_from_facts(
+        tuple(observations), claim_type=claim_type, include_related=True
+    )
+    return assertion.as_origin() if assertion else None
 
 
 def candidate_engineering_context(facts: PageFacts, candidate: dict, page: int) -> dict:

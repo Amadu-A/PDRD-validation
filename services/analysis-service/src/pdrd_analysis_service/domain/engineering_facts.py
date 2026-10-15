@@ -20,7 +20,7 @@ _LEGEND = re.compile(
     re.I,
 )
 _DESIGN_PARAMETER = re.compile(
-    r"(?P<name>расч[её]тн\w*\s+расход|требуем\w*\s+напор|потер\w*\s+напора|"
+    r"(?P<name>расч[её]тн\w*\s+расход|(?:требуемый|гарантированный)\s+напор|потер\w*\s+напора|"
     r"скорост\w*|об[ъь][её]м\w*|запас\w*\s+воды)"
     r"(?P<context>[^.;:]{0,90}?)"
     r"(?P<value>\d+(?:[.,]\d+)?)\s*(?P<unit>м[³3]/(?:ч|сут)|л/с|м/с|м[³3]|мм|м)(?!\w)",
@@ -100,9 +100,16 @@ def merge_text_engineering_facts(
     facts: tuple[DocumentFact, ...], text: str, page: int
 ) -> tuple[DocumentFact, ...]:
     """Дополняет факты проверенными подписями, сохраняя весь первоначальный результат VLM."""
+    facts = tuple(
+        replace(fact, source_pages=fact.source_pages or (page,)) for fact in facts
+    )
     additions = tuple(
         replace(fact, source_pages=(page,))
-        for fact in (*explicit_system_purposes(text), *explicit_design_parameters(text))
+        for fact in (
+            *explicit_system_purposes(text),
+            *explicit_design_parameters(text),
+            *explicit_flow_rows(text, page),
+        )
     )
     return (
         *facts,
@@ -118,3 +125,59 @@ def merge_text_engineering_facts(
             )
         ),
     )
+
+
+def explicit_flow_rows(text: str, page: int) -> tuple[DocumentFact, ...]:
+    """Читает однозначные тройки расходов из текста таблицы без угадывания пустых столбцов.
+
+    Часовой и секундный расчётные расходы сохраняются разными свойствами: они могут
+    описываться разными расчётными режимами и не обязаны быть простым пересчётом.
+    """
+    if not re.search(r"м[³3]/(?:ч|час)", text, re.I) or "л/с" not in text:
+        return ()
+    number = r"\d+[.,]\d+"
+    triple = re.compile(
+        rf"(?P<day>{number})\s+(?P<hour>{number})\s+(?P<second>{number})(?!\d)"
+    )
+    result = []
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        match = triple.search(line)
+        if match is None:
+            continue
+        label = line[: match.start()].strip()
+        if re.search(r"После ВПУ|При наличии|СанПиН|^\d", label, re.I):
+            label = lines[index - 1].strip() if index else ""
+        if not re.fullmatch(r"[А-Яа-я][А-Яа-я()\-\s]{4,80}", label):
+            continue
+        if re.search(r"итого|всего|наименование", label, re.I):
+            continue
+        # Продолжение названия строки не меняет идентичность её числовых столбцов.
+        subject = re.sub(r"\s+", " ", label).casefold()
+        subject = re.sub(r"\s+контур[а-я]*$", "", subject)
+        table = f"p{page}-flow-row-{index}"
+        for column, unit, prop in (
+            ("hour", "м³/ч", "Часовой расход воды"),
+            ("second", "л/с", "Секундный расход воды"),
+        ):
+            fact = document_fact_from_mapping(
+                {
+                    "kind": "parameter",
+                    "subject_type": "flow_consumer",
+                    "identifier": subject,
+                    "subject_name": label,
+                    "property_type": "parameter",
+                    "property_name": prop,
+                    "value_raw": match[column],
+                    "unit_raw": unit,
+                    "table_id": table,
+                    "row_label": subject,
+                    "column_label": unit,
+                    "evidence_text": line.strip(),
+                    "extraction_method": "pdf_text",
+                    "source_pages": [page],
+                }
+            )
+            if fact is not None:
+                result.append(fact)
+    return tuple(result)

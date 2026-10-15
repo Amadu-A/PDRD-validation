@@ -46,7 +46,7 @@ import { mountAnalysisHistoryNavigation } from "./features/analysis/history.js";
 import { bindMainIdentity } from "./features/auth/main-page.js";
 import { currentSession } from "./features/auth/session.js";
 import { hasPermission } from "./features/auth/access.js";
-import { mountAuthorizedReview, reviewCapabilities } from "./features/review/access.js";
+import { bindAuthorizedReview, reviewCapabilities } from "./features/review/access.js";
 import { mountAnalysisHints } from "./features/help/context-hints.js";
 
 import {
@@ -145,6 +145,7 @@ const modal = createModal({
 
 
 const reviewController = createReviewPersistence({ getCapabilities: reviewCapabilities });
+const authorizedReview = bindAuthorizedReview(reviewController);
 
 const resultView = createResultView(
   requireElement(
@@ -152,10 +153,10 @@ const resultView = createResultView(
   ),
   {
     onReportRendered: (root, options) => {
-      mountAuthorizedReview(reviewController, root, options);
+      authorizedReview.mount(root, options);
       void analysisHistory.refresh();
     },
-    onReportCleared: reviewController.clear,
+    onReportCleared: authorizedReview.clear,
   },
 );
 

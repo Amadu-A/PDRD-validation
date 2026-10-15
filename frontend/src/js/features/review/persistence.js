@@ -47,6 +47,7 @@ export function createReviewPersistence({
     active.controller.dispose();
     active.tooltips();
     active.pdf?.dispose();
+    active.actions?.remove();
     active = null;
   }
 
@@ -56,7 +57,7 @@ export function createReviewPersistence({
     let pdf = null;
     let busy = false;
     let latestStatus = { mode: "loading" };
-    const capabilities = getCapabilities();
+    let capabilities = getCapabilities();
     const controller = createReviewController({ onChange: () => sync?.changed(), capabilities });
     controller.mount(root);
     const tooltips = mountReviewTooltips(root);
@@ -79,6 +80,7 @@ export function createReviewPersistence({
     reload.hidden = true;
     reload.addEventListener("click", () => window.location.reload());
     actions.append(retry, reload);
+    active.actions = actions;
     root.querySelector("[data-review-preview]").after(actions);
     function applyStatus(status = latestStatus) {
       latestStatus = status;
@@ -86,9 +88,10 @@ export function createReviewPersistence({
       controller.setConnection({
         isPersistent: status.mode !== "local",
         isLocked: busy || ["loading", "error", "conflict"].includes(status.mode),
-        message: MESSAGES[status.mode] + (status.error?.detail ? ` ${String(status.error.detail).slice(0, 300)}` : ""),
+        message: MESSAGES[status.mode] + (status.error ? ` ${String(status.error.detail ?? status.error.message).slice(0, 300)}` : ""),
       });
-      retry.hidden = status.mode !== "error" || status.pending === 0;
+      retry.hidden = !["error", "local"].includes(status.mode);
+      retry.textContent = status.initialized ? "Повторить сохранение" : "Повторить подключение Review";
       reload.hidden = !["error", "conflict", "saved"].includes(status.mode);
       pdf?.update({ ...status, busy });
     }
@@ -105,10 +108,18 @@ export function createReviewPersistence({
     }
     active.pdf = pdf;
     active.sync = sync;
+    active.setCapabilities = (next) => {
+      capabilities = next;
+      controller.setCapabilities(next);
+      if (capabilities.canDownloadReview === false) { pdf?.dispose(); pdf = null; }
+      else if (!pdf) pdf = mountReviewedPdf({ root, jobId, api, sync, onBusy });
+      active.pdf = pdf;
+      applyStatus();
+    };
     sessions.add(sync);
     retry.addEventListener("click", () => { void sync.retry(); });
     void sync.start();
   }
 
-  return { mount, clear, hasPending };
+  return { mount, clear, hasPending, setCapabilities(next) { active?.setCapabilities?.(next); } };
 }

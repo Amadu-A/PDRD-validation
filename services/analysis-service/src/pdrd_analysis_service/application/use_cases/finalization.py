@@ -30,6 +30,10 @@ from pdrd_analysis_service.domain.analysis import (
     FindingDraft,
     NormativeSource,
 )
+from pdrd_analysis_service.domain.engineering_assertion import (
+    deterministic_unit_mismatch,
+    read_assertion,
+)
 from pdrd_analysis_service.domain.engineering_claims import (
     REVIEW_REASON_CODES,
     false_numeric_claim,
@@ -197,23 +201,24 @@ def _safe_generated_text(
     """Не допускает неподтверждённые нормативные ссылки в свободный текст."""
     normalized_generated = generated.strip()
 
-    if (
-        normalized_generated
-        and _NORMATIVE_REFERENCE_PATTERN.search(
-            normalized_generated,
-        )
-        is None
-    ):
+    reference = re.compile(
+        r"\b(?:ГОСТ(?:\s+Р)?|GOST(?:\s+R)?|СП|SP|СНиП|SNIP|ПУЭ|PUE)\s+\d[\d.\-/]*", re.I
+    )
+    # Упоминание СП без номера и дословная ссылка самого проекта не являются
+    # придуманным нормативным основанием. Проверяем новые обозначения отдельно.
+    allowed = {match.casefold() for match in reference.findall(fallback)}
+    invented = {
+        match.casefold() for match in reference.findall(normalized_generated)
+    } - allowed
+    if normalized_generated and not invented:
         return normalized_generated
 
     normalized_fallback = fallback.strip()
 
-    if (
-        normalized_fallback
-        and _NORMATIVE_REFERENCE_PATTERN.search(
-            normalized_fallback,
-        )
-        is None
+    if normalized_fallback and (
+        not reference.search(normalized_fallback)
+        or "«" in normalized_fallback
+        or re.search(r"указан|ссылк|назван|упомянут", normalized_fallback, re.I)
     ):
         return normalized_fallback
 
@@ -428,6 +433,28 @@ def _is_protected_factual_review(finding: FindingDraft) -> bool:
     """Сохраняет конкретное подозрение с проверенным исходным evidence, не объявляя его нарушением."""
     if _is_protected_duplicate_review(finding):
         return True
+    assertion = read_assertion(finding.origin_assertions)
+    if assertion is not None and assertion.claim_type == "contradiction":
+        if (
+            assertion.verification == "deterministic"
+            and assertion.verification_rule == "unit_equivalence"
+            and all(
+                item.fact.extraction_method in {"pdf_text", "pdf_table"}
+                for item in assertion.observations
+            )
+            and deterministic_unit_mismatch(assertion)
+        ):
+            return True
+        if (
+            assertion.verification == "semantic"
+            and assertion.verification_rule == "cross_page_comparability"
+            and any(
+                origin.get("origin") == "cross_page_validation"
+                and origin.get("comparability_checked") is True
+                for origin in finding.origin_assertions
+            )
+        ):
+            return True
     return (
         finding.status == "needs_review"
         and bool(finding.comment.strip() and finding.evidence.strip())
@@ -553,7 +580,6 @@ class FinalizeFindings:
             finding
             for finding in findings
             if _is_protected_factual_review(finding)
-            or finding.category == "document_consistency"
             or (
                 finding.category == "equipment"
                 and finding.status == "confirmed"
@@ -595,7 +621,6 @@ class FinalizeFindings:
             and (
                 (
                     not _is_protected_factual_review(finding)
-                    and finding.category != "document_consistency"
                     and not (
                         finding.category == "equipment"
                         and finding.status == "confirmed"
@@ -696,7 +721,6 @@ class FinalizeFindings:
             ordinary_by_id.get(finding.finding_id, self._fallback(finding))
             for finding in findings
             if _is_protected_factual_review(finding)
-            or finding.category == "document_consistency"
             or (
                 finding.category == "equipment"
                 and finding.status == "confirmed"
@@ -1222,13 +1246,16 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
         finding: FindingDraft,
     ) -> FinalFinding:
         """Возвращает исходный finding без потери evidence."""
+        assertion = read_assertion(finding.origin_assertions)
         return FinalFinding(
             finding_id=finding.finding_id,
             page=finding.page,
             page_type=finding.page_type,
             category=finding.category,
             severity=finding.severity,
-            status=finding.status,
+            status="needs_review"
+            if assertion is not None and assertion.verification == "unverified"
+            else finding.status,
             comment=finding.comment,
             evidence=finding.evidence,
             recommendation=(
@@ -1377,9 +1404,29 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
             if not has_customer_basis and finding.category != "document_consistency":
                 normalized_status = "needs_review"
 
-        if finding.category == "document_consistency":
+        if _is_protected_factual_review(finding):
             comment = finding.comment
             recommendation = _fallback_recommendation(finding)
+
+        origins = finding.origin_assertions
+        assertion = read_assertion(origins)
+        if assertion is not None:
+            if assertion.claim_type == "missing_justification":
+                normalized_status = "needs_review"
+            if assertion.verification == "unverified":
+                assertion = replace(
+                    assertion,
+                    verification="semantic",
+                    verification_rule="final_comparability",
+                )
+                origins = (
+                    assertion.as_origin(),
+                    *(
+                        origin
+                        for origin in origins
+                        if origin.get("origin") != "engineering_assertion"
+                    ),
+                )
 
         return FinalFinding(
             finding_id=finding.finding_id,
@@ -1401,7 +1448,7 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                 finding.technical_assignment_basis_sources
             ),
             user_package_basis_sources=(finding.user_package_basis_sources),
-            origin_assertions=finding.origin_assertions,
+            origin_assertions=origins,
             object_ref=finding.object_ref,
             evidence_locations=finding.evidence_locations,
             document_context_source_ids=finding.document_context_source_ids,

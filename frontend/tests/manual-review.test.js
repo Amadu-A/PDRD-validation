@@ -451,13 +451,15 @@ test("смена отчёта очищает историю и отключае�
   controller.mount(previous.root);
   const previousCard = addGold(previous.root, previous.pages[0]);
   const oldUndo = pageAction(previous.pages[0], "reviewPageUndo");
+  const oldControls = mounted(previous.pages[0]);
   const next = fixture([23]);
   controller.mount(next.root);
   assert.equal(pageAction(next.pages[0], "reviewPageUndo").disabled, true);
   oldUndo.click();
-  mounted(previous.pages[0]).add.click();
-  draw(mounted(previous.pages[0]).layer, 100, 100, 400, 400);
-  assert.equal(mounted(previous.pages[0]).layer.dataset.manualMode, "idle");
+  assert.equal(oldControls.toolbar.removed, true);
+  oldControls.add.click();
+  draw(oldControls.layer, 100, 100, 400, 400);
+  assert.equal(oldControls.layer.dataset.manualMode, "idle");
   assert.equal(previousCard.removed, false);
   assert.deepEqual(controller.getManualSnapshot(), []);
   addGold(next.root, next.pages[0]);

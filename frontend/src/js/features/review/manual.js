@@ -133,6 +133,7 @@ export function createManualAnnotationController({
     undo.disabled = true;
     toolbar.append(undo);
     page.insertBefore(toolbar, stage);
+    disposeHandlers.push(() => toolbar.remove());
 
     const layer = element(
       "div",
