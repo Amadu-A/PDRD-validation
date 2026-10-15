@@ -2,7 +2,7 @@
 
 /**
  * Связывает DOM Review с отдельной очередью API и состояниями сохранения.
- * Загрузка серверной версии явно сбрасывает несохранённые изменения страницы.
+ * При ошибке несохранённая очередь остаётся на странице и защищена от закрытия.
  */
 
 import { createReviewController } from "./controller.js";
@@ -18,7 +18,7 @@ const MESSAGES = {
   saving: "Сохраняем изменения… Не закрывайте страницу.",
   saved: "Изменения сохранены на сервере и восстановятся после перезагрузки.",
   error: "Не удалось сохранить или загрузить Review. Несохранённые изменения остаются на странице.",
-  conflict: "Review изменён в другой вкладке. Несохранённые изменения остаются на странице; загрузите серверную версию.",
+  conflict: "Review изменён в другой вкладке. Несохранённые изменения остаются на странице; сверяйте их перед обновлением страницы.",
 };
 
 /** Монтирует новую независимую очередь при смене задания или отчёта. */
@@ -47,7 +47,6 @@ export function createReviewPersistence({
     active.controller.dispose();
     active.tooltips();
     active.pdf?.dispose();
-    active.actions?.remove();
     active = null;
   }
 
@@ -66,22 +65,6 @@ export function createReviewPersistence({
     const url = new URL(window.location.href);
     url.searchParams.set("job_id", jobId);
     window.history.replaceState(null, "", url);
-    const actions = document.createElement("div");
-    actions.className = "review-sync";
-    const retry = document.createElement("button");
-    retry.type = "button";
-    retry.className = "manual-annotation__button";
-    retry.textContent = "Повторить сохранение";
-    retry.hidden = true;
-    const reload = document.createElement("button");
-    reload.type = "button";
-    reload.className = "manual-annotation__button";
-    reload.textContent = "Загрузить серверную версию (сбросить несохранённое)";
-    reload.hidden = true;
-    reload.addEventListener("click", () => window.location.reload());
-    actions.append(retry, reload);
-    active.actions = actions;
-    root.querySelector("[data-review-preview]").after(actions);
     function applyStatus(status = latestStatus) {
       latestStatus = status;
       if (status.session?.decision_history) controller.setHistory(status.session.decision_history);
@@ -90,9 +73,6 @@ export function createReviewPersistence({
         isLocked: busy || ["loading", "error", "conflict"].includes(status.mode),
         message: MESSAGES[status.mode] + (status.error ? ` ${String(status.error.detail ?? status.error.message).slice(0, 300)}` : ""),
       });
-      retry.hidden = !["error", "local"].includes(status.mode);
-      retry.textContent = status.initialized ? "Повторить сохранение" : "Повторить подключение Review";
-      reload.hidden = !["error", "conflict", "saved"].includes(status.mode);
       pdf?.update({ ...status, busy });
     }
     const onBusy = (value) => { busy = value; applyStatus(); };
@@ -117,7 +97,6 @@ export function createReviewPersistence({
       applyStatus();
     };
     sessions.add(sync);
-    retry.addEventListener("click", () => { void sync.retry(); });
     void sync.start();
   }
 

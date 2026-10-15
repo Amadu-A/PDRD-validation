@@ -10,7 +10,9 @@ import {
   getVisualizationReview,
   pinReviewCallout,
   reviewCalloutBox,
+  replaceReviewRegions,
 } from "../analysis/visualization-review.js";
+import { restoredReviewGeometry } from "./restore-geometry.js";
 import { positionBox } from "./geometry.js";
 import { attachBoxResize } from "./resize.js";
 
@@ -37,17 +39,20 @@ function measuredBox(node, pane) {
 export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled = () => true }) {
   let entries = [];
   let resizers = [];
+  let visualizationRoot = null;
   const calloutBoxes = new Map();
 
   function dispose() {
     for (const resize of resizers) resize.dispose();
     resizers = [];
     entries = [];
+    visualizationRoot = null;
     calloutBoxes.clear();
   }
 
   function mount(visualization) {
     dispose();
+    visualizationRoot = visualization;
     for (const page of visualization.querySelectorAll(".analysis-result__page-visualization")) {
       const adapter = getVisualizationReview(page);
       if (!adapter) continue;
@@ -57,6 +62,7 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
         const entry = {
           ...record, adapter, rejected: false,
           boxes: record.bboxEntries.map(issueBox), resizers: [],
+          editableCount: record.secondaryEvidence ? 0 : Math.min(record.bboxEntries.length, 4),
         };
         entries.push(entry);
 
@@ -78,7 +84,7 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
             node: bbox.node, page, label: "Область ошибки VLM",
             bounds: () => adapter.imagePane.getBoundingClientRect(),
             getBox: () => ({ ...entry.boxes[index] }),
-            enabled: () => !record.secondaryEvidence && (!record.documentEvidence || index < 4) && isEnabled() && !entry.rejected && page.dataset.reviewSelecting !== "true",
+            enabled: () => index < entry.editableCount && isEnabled() && !entry.rejected && page.dataset.reviewSelecting !== "true",
             onStart() {
               cancelActive();
               onStart();
@@ -161,7 +167,7 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
   function snapshot(findingId) {
     return entries.filter((entry) => entry.findingId === findingId && !entry.secondaryEvidence).map((entry) => ({
       page_number: entry.pageNumber,
-      proposed_issue_boxes: (entry.documentEvidence ? entry.boxes.slice(0, 4) : entry.boxes).map((box) => ({ ...box })),
+      proposed_issue_boxes: entry.boxes.slice(0, entry.editableCount).map((box) => ({ ...box })),
       callout_box: calloutBoxes.has(entry.callout) ? { ...calloutBoxes.get(entry.callout) } : null,
     }));
   }
@@ -172,20 +178,24 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
 
   /** Восстанавливает только операционные правки; они не подтверждают области VLM. */
   function restore(findings) {
+    const byId = new Map(findings.map((row) => [row.finding_id, row]));
+    const changes = entries.flatMap((entry) => {
+      const row = byId.get(entry.findingId);
+      if (!row) return [];
+      const geometry = restoredReviewGeometry(entry, row);
+      return geometry.boxes.length === entry.bboxEntries.length ? [] : [{ entry, geometry }];
+    });
+    if (changes.length) {
+      const root = visualizationRoot;
+      dispose();
+      for (const { entry, geometry } of changes) replaceReviewRegions(entry.adapter, entry, geometry.boxes);
+      mount(root);
+    }
     for (const row of findings) {
       for (const entry of entries.filter((item) => item.findingId === row.finding_id)) {
-        const evidence = (row.evidence_locations ?? []).filter((location) => location.page === entry.pageNumber);
-        const boxes = entry.secondaryEvidence
-          ? evidence.flatMap((location) => (location.proposed_regions ?? []).map((region) => region.bbox))
-          : row.display_regions ?? row.proposed_regions.map((region) => region.bbox);
-        const fixedPrimaryEvidence = entry.documentEvidence && !entry.secondaryEvidence
-          && boxes.length <= 4 && boxes.length < entry.bboxEntries.length;
-        if (boxes.length !== entry.bboxEntries.length && !fixedPrimaryEvidence) {
-          throw new Error("Геометрия Review не соответствует серверной визуализации.");
-        }
-        entry.boxes = fixedPrimaryEvidence
-          ? [...boxes.map((box) => ({ ...box })), ...entry.boxes.slice(boxes.length)]
-          : boxes.map((box) => ({ ...box }));
+        const { boxes, editableCount } = restoredReviewGeometry(entry, row);
+        entry.boxes = boxes;
+        entry.editableCount = editableCount;
         entry.bboxEntries.forEach((bbox, index) => {
           const box = entry.boxes[index];
           Object.assign(bbox.box, { xMin: box.x_min, yMin: box.y_min, xMax: box.x_max, yMax: box.y_max });

@@ -163,6 +163,7 @@ export function createManualAnnotationController({
 
     layer.append(draftIssue, draftCallout);
     pane.append(layer);
+    disposeHandlers.push(() => layer.remove());
 
     let mode = "idle";
     let dragging = null;
@@ -384,6 +385,7 @@ export function createManualAnnotationController({
     );
 
     root.append(editor.dialog);
+    disposeHandlers.push(() => editor.dialog.remove());
 
     /** Начинает отдельный черновик на загруженном изображении этого листа. */
     function beginSelection() {

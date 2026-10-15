@@ -31,7 +31,7 @@ test("право decide без Gold монтирует Review; поздняя а
   assert.equal(mountAuthorizedReview(controller, root, {}), true);
 });
 
-test("ошибка первого открытия показывает повтор при пустой очереди и затем разблокирует настоящие контролы", async (t) => {
+test("ошибка открытия видна без лишних кнопок; повторное открытие отчёта разблокирует контролы", async (t) => {
   const previous = globalThis.window;
   globalThis.window = { addEventListener() {}, location: { href: "https://pdrd.test/" }, history: { replaceState() {} } };
   t.after(() => { globalThis.window = previous; });
@@ -52,11 +52,12 @@ test("ошибка первого открытия показывает повт
   t.after(() => persistence.clear());
   const settle = () => new Promise((resolve) => setImmediate(resolve));
   await settle();
-  const retry = root.querySelectorAll("button").find((button) => button.textContent === "Повторить подключение Review");
-  const accept = article.querySelectorAll("[data-review-action]").find((button) => button.dataset.reviewAction === "accept");
-  assert.equal(retry.hidden, false); assert.equal(accept.disabled, true);
+  let accept = article.querySelectorAll("[data-review-action]").find((button) => button.dataset.reviewAction === "accept");
+  assert.equal(accept.disabled, true);
+  assert.equal(root.querySelectorAll("button").some((button) => /Повторить подключение|Повторить сохранение|Загрузить серверную/.test(button.textContent)), false);
   assert.match(root.querySelector("[data-review-preview]").textContent, /Ошибка восстановления геометрии/);
-  retry.click(); await settle();
+  persistence.mount(root, { jobId: "job" }); await settle();
+  accept = article.querySelectorAll("[data-review-action]").find((button) => button.dataset.reviewAction === "accept");
   assert.equal(opens, 2); assert.equal(accept.disabled, false);
   accept.click(); await settle();
   assert.equal(commands[0].action, "decide"); assert.equal(commands[0].expected_revision, 0);

@@ -1859,6 +1859,7 @@ function setFindingActive(
 
 function bindFindingInteractions(
   item,
+  { bindCallout = true } = {},
 ) {
   const activate = (event) => {
     if (event?.target?.closest?.(".analysis-result__hypotheses")) {
@@ -1878,45 +1879,47 @@ function bindFindingInteractions(
     );
   };
 
-  item.callout.addEventListener(
-    "pointerenter",
-    activate,
-  );
+  if (bindCallout) {
+    item.callout.addEventListener(
+      "pointerenter",
+      activate,
+    );
 
-  item.callout.addEventListener(
-    "pointerleave",
-    deactivate,
-  );
+    item.callout.addEventListener(
+      "pointerleave",
+      deactivate,
+    );
 
-  item.callout.addEventListener(
-    "focusin",
-    activate,
-  );
+    item.callout.addEventListener(
+      "focusin",
+      activate,
+    );
 
-  item.callout.addEventListener(
-    "focusout",
-    (event) => {
-      if (
-        event.relatedTarget
-        && item.callout.contains(
-          event.relatedTarget,
-        )
-      ) {
-        return;
-      }
+    item.callout.addEventListener(
+      "focusout",
+      (event) => {
+        if (
+          event.relatedTarget
+          && item.callout.contains(
+            event.relatedTarget,
+          )
+        ) {
+          return;
+        }
 
-      deactivate();
-    },
-  );
+        deactivate();
+      },
+    );
 
-  if (item.callout.classList.contains("analysis-result__annotation")) {
-    item.callout.querySelectorAll(".analysis-result__hypotheses")
-      .forEach((details) => {
-        details.addEventListener("pointerenter", deactivate);
-        details.addEventListener("focusin", deactivate);
-      });
-    item.callout.querySelector(".analysis-result__annotation-header")
-      ?.addEventListener("pointerenter", activate);
+    if (item.callout.classList.contains("analysis-result__annotation")) {
+      item.callout.querySelectorAll(".analysis-result__hypotheses")
+        .forEach((details) => {
+          details.addEventListener("pointerenter", deactivate);
+          details.addEventListener("focusin", deactivate);
+        });
+      item.callout.querySelector(".analysis-result__annotation-header")
+        ?.addEventListener("pointerenter", activate);
+    }
   }
 
   item.bboxEntries.forEach(
@@ -2190,6 +2193,7 @@ function appendPageVisualization(
         reviewItem.dataset.reviewPage = String(pageNumber);
         reviewRecords.push({
           findingId: String(member.finding.finding_id ?? "").trim(),
+          finding: member.finding, findingIndex: member.findingIndex,
           pageNumber, item: reviewItem, callout,
           secondaryEvidence: Number(member.finding.page ?? member.finding.page_number) !== pageNumber,
           documentEvidence: Array.isArray(member.finding.document_context_basis_sources) && member.finding.document_context_basis_sources.length > 0,
@@ -2306,7 +2310,14 @@ function appendPageVisualization(
   };
 
   registerVisualizationReview(section, {
-    imagePane, image, records: reviewRecords, redraw: scheduleRedraw,
+    imagePane, image, svg, groups: items, records: reviewRecords, redraw: scheduleRedraw,
+    createReviewBoxes: (record, boxes) => createBoundingBoxes({
+      ...record.finding,
+      location: { status: "located", regions: boxes.map((bbox) => ({ bbox })) },
+    }, record.findingIndex),
+    bindReviewBoxes: (record) => bindFindingInteractions({
+      callout: record.item, bboxEntries: record.bboxEntries, connectorEntries: record.connectorEntries,
+    }, { bindCallout: false }),
   });
 
   annotationOverlay.addEventListener("toggle", scheduleRedraw, true);
