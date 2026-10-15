@@ -4,19 +4,38 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from pdrd_analysis_service.application.use_cases.finalization import FinalizeFindings
-from pdrd_analysis_service.domain.analysis import FindingDraft
+from pdrd_analysis_service.domain.analysis import FindingDraft, GenerationMetrics
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-class NoModel:
-    """Запрещает передачу эталонных комментариев в VLM и лишние GPU-вызовы."""
+class PreservationModel:
+    """Эмулирует сохранение заданных кандидатов; обнаружение ошибок здесь не оценивается."""
 
     async def generate_json(self, **request):
-        """Подтверждённые исходным evidence фактические подозрения проходят без генерации."""
-        raise AssertionError("Сохранение доказанных фактов не должно запрашивать VLM.")
+        """Пропускает только синтетические ID, не обращаясь к настоящей модели."""
+        return SimpleNamespace(
+            payload={
+                "findings": [
+                    {
+                        "finding_id": identifier,
+                        "decision": "keep",
+                        "rejection_reason": "",
+                        "comment": "Конкретное решение требует проверки инженером.",
+                        "recommendation": "Проверить основание принятого решения.",
+                        "normative_source_ids": [],
+                        "experience_source_ids": [],
+                    }
+                    for identifier in request["schema"]["properties"]["findings"][
+                        "items"
+                    ]["properties"]["finding_id"]["enum"]
+                ]
+            },
+            metrics=GenerationMetrics(1, "stop", 1000, 1, 0, 1, 1, 1, 0),
+        )
 
 
 async def test_all_benchmark_page_anchors_survive_factual_finalization() -> None:
@@ -67,11 +86,13 @@ async def test_all_benchmark_page_anchors_survive_factual_finalization() -> None
                 ),
             )
         )
-    _, final, metrics = await FinalizeFindings(NoModel(), 1000, 10, 600, 0.55).execute(
+    _, final, metrics = await FinalizeFindings(
+        PreservationModel(), 1000, 10, 600, 0.55
+    ).execute(
         findings=tuple(candidates),
         experience_by_finding={},
     )
-    assert len(final) == 35 and metrics["vlm_call_count"] == 0
+    assert len(final) == 35 and metrics["vlm_call_count"] == 4
     by_id = {item.finding_id: item for item in final}
     for candidate in candidates:
         saved = by_id[candidate.finding_id]

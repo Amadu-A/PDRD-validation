@@ -196,6 +196,7 @@ class FakeLocator:
         self,
         *,
         page_number: int,
+        analysis_document_id: str | None = None,
         extracted_text: str,
         image_base64: str,
         findings: tuple[
@@ -207,6 +208,7 @@ class FakeLocator:
         ...,
     ]:
         """Возвращает deterministic fake VLM bbox."""
+        assert analysis_document_id is not None
         assert page_number >= 1
         assert extracted_text
         assert image_base64

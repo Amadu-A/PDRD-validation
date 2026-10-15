@@ -10,6 +10,7 @@ from pdrd_analysis_service.core.container import (
     ApplicationContainer,
     build_container,
 )
+from pdrd_analysis_service.core.observability import configure_service_logging
 from pdrd_analysis_service.transport.http.document_context_routes import (
     router as document_context_router,
 )
@@ -31,6 +32,7 @@ def create_app(
     container: ApplicationContainer | None = None,
 ) -> FastAPI:
     """Создаёт FastAPI application."""
+    configure_service_logging()
     application_container = container if container is not None else build_container()
 
     settings = application_container.settings

@@ -6,6 +6,10 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from pdrd_analysis_service.application.candidate_trace import (
+    candidate_key,
+    trace_candidate,
+)
 from pdrd_analysis_service.application.json_schemas import (
     FINDING_CATEGORIES,
     FINDING_SEVERITIES,
@@ -18,7 +22,9 @@ from pdrd_analysis_service.domain.analysis import (
     GenerationMetrics,
     NormativeSource,
 )
-from pdrd_analysis_service.domain.engineering_claims import false_numeric_claim
+from pdrd_analysis_service.domain.engineering_claims import (
+    unsupported_engineering_claim,
+)
 
 _CANDIDATE_SOURCE_ID_FIELDS = (
     "normative_source_ids",
@@ -414,11 +420,15 @@ def _candidate_identity(
     )
 
 
-def _origin_assertion(candidate: dict[str, Any], raw_index: int) -> dict[str, Any]:
+def _origin_assertion(
+    candidate: dict[str, Any], raw_index: int, page: int | None = None
+) -> dict[str, Any]:
     """Сохраняет исходное утверждение вместе с его собственными источниками и областью."""
     regions = candidate.get("visual_regions")
     return {
         "origin": "vlm",
+        "candidate_id": candidate_key(candidate, page=page),
+        "hypothesis_ids": list(string_tuple(candidate.get("hypothesis_ids"), limit=3)),
         "raw_index": raw_index,
         "comment": str(candidate.get("comment", "")),
         "evidence": str(candidate.get("evidence", "")),
@@ -803,6 +813,8 @@ def _merge_candidate_regions(
 
 def select_violation_candidates(
     violations: Any,
+    *,
+    page_number: int | None = None,
 ) -> ViolationCandidateSelection:
     """Выполняет lossless deterministic candidate consolidation.
 
@@ -883,9 +895,18 @@ def select_violation_candidates(
         candidate = dict(
             violation,
         )
-        false_claim = false_numeric_claim(str(candidate.get("comment", "")))
+        trace_id = candidate_key(candidate, page=page_number)
+        trace_candidate("discovery", trace_id, page=page_number, decision="generated")
+        false_claim = unsupported_engineering_claim(str(candidate.get("comment", "")))
         if false_claim is not None:
             rejected_reasons.append(false_claim)
+            trace_candidate(
+                "verification",
+                trace_id,
+                page=page_number,
+                decision="reject",
+                reason=false_claim,
+            )
             continue
 
         identity = _candidate_identity(
@@ -932,6 +953,13 @@ def select_violation_candidates(
             )
 
         if existing_position is not None:
+            trace_candidate(
+                "deduplication",
+                trace_id,
+                page=page_number,
+                decision="merge",
+                reason="same_object_and_evidence",
+            )
             _merge_candidate_source_ids(
                 target=candidates[existing_position],
                 duplicate=candidate,
@@ -946,7 +974,7 @@ def select_violation_candidates(
             )
 
             origins_by_candidate[existing_position].append(
-                _origin_assertion(violation, raw_index)
+                _origin_assertion(violation, raw_index, page_number)
             )
 
             if identity is not None:
@@ -973,6 +1001,13 @@ def select_violation_candidates(
         candidates.append(
             candidate,
         )
+        trace_candidate(
+            "verification",
+            trace_id,
+            page=page_number,
+            decision="candidate",
+            reason="requires_semantic_review",
+        )
 
         source_indexes_by_candidate.append(
             [
@@ -980,7 +1015,9 @@ def select_violation_candidates(
             ]
         )
 
-        origins_by_candidate.append([_origin_assertion(violation, raw_index)])
+        origins_by_candidate.append(
+            [_origin_assertion(violation, raw_index, page_number)]
+        )
 
         if identity is not None:
             candidate_position_by_identity[identity] = candidate_position

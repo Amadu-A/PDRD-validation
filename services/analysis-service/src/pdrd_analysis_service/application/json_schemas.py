@@ -4,6 +4,8 @@
 
 from typing import Any
 
+from pdrd_analysis_service.domain.engineering_claims import REVIEW_REASON_CODES
+
 FINDING_CATEGORIES = (
     "normative_control",
     "equipment",
@@ -29,7 +31,7 @@ FINDING_STATUSES = (
 
 
 def build_page_facts_schema(
-    max_facts: int = 12, max_equipment: int = 0
+    max_facts: int = 12, max_equipment: int = 0, max_graphical_targets: int = 0
 ) -> dict[str, Any]:
     """Возвращает лёгкую схему листа; D-факты добавляет только при положительном лимите."""
     schema = {
@@ -91,6 +93,42 @@ def build_page_facts_schema(
             "normative_queries",
         ],
     }
+
+    if max_graphical_targets > 0:
+        schema["properties"]["graphical_targets"] = {
+            "type": "array",
+            "maxItems": max_graphical_targets,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "object_ref": {"type": "string", "maxLength": 80},
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "connection",
+                            "callout",
+                            "marking",
+                            "sheet_title",
+                            "sheet_number",
+                            "node",
+                            "related_view",
+                        ],
+                    },
+                    "question": {"type": "string", "maxLength": 220},
+                    "observation": {"type": "string", "maxLength": 220},
+                    "regions": build_finding_visual_regions_schema(),
+                },
+                "required": [
+                    "object_ref",
+                    "kind",
+                    "question",
+                    "observation",
+                    "regions",
+                ],
+            },
+        }
+        schema["required"].append("graphical_targets")
 
     if max_facts <= 0:
         return _add_equipment_schema(schema, max_equipment)
@@ -353,6 +391,15 @@ def build_normative_check_schema(
                             "type": "string",
                             "maxLength": 80,
                         },
+                        "hypothesis_ids": {
+                            "type": "array",
+                            "maxItems": 3,
+                            "items": {
+                                "type": "string",
+                                "pattern": "^engineering-[1-9][0-9]*$",
+                                "maxLength": 80,
+                            },
+                        },
                         "recommendation_draft": {
                             "type": "string",
                             "maxLength": 0,
@@ -392,6 +439,7 @@ def build_normative_check_schema(
                         "comment",
                         "evidence",
                         "object_ref",
+                        "hypothesis_ids",
                         "recommendation_draft",
                         "confidence",
                         "visual_regions",
@@ -461,6 +509,10 @@ def build_finalization_schema(
                             "type": "string",
                             "maxLength": 300,
                         },
+                        "reason_code": {
+                            "type": "string",
+                            "enum": list(REVIEW_REASON_CODES),
+                        },
                         "comment": {
                             "type": "string",
                             "minLength": 1,
@@ -488,6 +540,7 @@ def build_finalization_schema(
                         "finding_id",
                         "decision",
                         "rejection_reason",
+                        "reason_code",
                         "comment",
                         "recommendation",
                         "experience_source_ids",

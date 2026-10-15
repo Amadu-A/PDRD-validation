@@ -12,6 +12,18 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
+def configure_service_logging() -> None:
+    """Делает INFO-диагностику сервиса доступной в контейнере без включения debug сторонних библиотек."""
+    logger = logging.getLogger("pdrd_analysis_service")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers and not logging.getLogger().handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+        )
+        logger.addHandler(handler)
+
+
 def log_execution_time(
     *, operation: str
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:

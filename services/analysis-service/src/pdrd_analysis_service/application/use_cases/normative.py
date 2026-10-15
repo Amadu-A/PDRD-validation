@@ -7,6 +7,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from pdrd_analysis_service.application.candidate_trace import trace_candidate
+from pdrd_analysis_service.application.engineering_plan import (
+    candidate_engineering_context,
+    engineering_plan,
+)
 from pdrd_analysis_service.application.engineering_review import engineering_questions
 from pdrd_analysis_service.application.json_schemas import (
     build_normative_check_schema,
@@ -472,6 +477,10 @@ class BuildNormativeQueries:
         )
 
         pz_hint = " ".join(text[:300] for text in project_context_texts[:3])
+        parameters = "; ".join(
+            f"{item['object']}: {item['property']} {item['value']} {item['unit']}; {item['scope']}"
+            for item in engineering_plan(page_facts, extracted_text)
+        )
 
         queries.append(
             (
@@ -484,6 +493,7 @@ class BuildNormativeQueries:
                 f"Связи: {connections}. "
                 f"Обозначения: {labels}. "
                 f"Контекст ПЗ проекта: {pz_hint}"
+                f" Принятые инженерные параметры для поиска обоснования: {parameters}"
                 f" Проверочные темы: {'; '.join(engineering_questions(page_facts, extracted_text))}"
             ).strip()
         )
@@ -544,7 +554,7 @@ class CheckPageAgainstNorms:
         raw_candidates: list[dict[str, Any]] = []
         all_metrics: list[GenerationMetrics] = []
         summary = ""
-        selection = select_violation_candidates([])
+        selection = select_violation_candidates([], page_number=page_number)
         mode, probe_round, bulk_round, call_index = "probe", 0, 0, 0
         capacity_limit = _NORMATIVE_PROBE_BATCH_SIZE
         sparse_bulk_rounds = 0
@@ -611,10 +621,14 @@ class CheckPageAgainstNorms:
             violations = generation.payload.get("violations", [])
             if not isinstance(violations, list):
                 raise ValueError("Поле violations должно быть JSON array.")
-            round_selection = select_violation_candidates(violations)
+            round_selection = select_violation_candidates(
+                violations, page_number=page_number
+            )
             before_unique = selection.consolidated_count
             raw_candidates.extend(dict(candidate) for candidate in violations)
-            selection = select_violation_candidates(raw_candidates)
+            selection = select_violation_candidates(
+                raw_candidates, page_number=page_number
+            )
             new_unique = selection.consolidated_count - before_unique
             generated = round_selection.generated_count
             unique_ratio = new_unique / generated if generated else 0.0
@@ -761,6 +775,20 @@ class CheckPageAgainstNorms:
             normative_text_limit=(self.normative_text_limit),
             normative_system_prompt=(normative_system_prompt),
         )
+        plan = engineering_plan(page_facts, extracted_text, document_context_sources)
+        allowed_hypotheses = {item["hypothesis_id"] for item in plan}
+        for hypothesis in plan:
+            trace_candidate(
+                "hypothesis_retrieval",
+                hypothesis["hypothesis_id"],
+                page=page_number,
+                decision="planned",
+                facts=len(page_facts.document_facts),
+                related_sources=len(hypothesis["related_sources"]),
+                normative_sources=len(normative_sources),
+                technical_assignment_sources=len(technical_assignment_sources),
+                user_sources=len(user_package_sources),
+            )
 
         (
             summary,
@@ -1008,6 +1036,7 @@ class CheckPageAgainstNorms:
                     {
                         "origin": "engineering_verification",
                         "evidence_grounded": True,
+                        "conclusion_verified": False,
                     },
                 )
 
@@ -1017,6 +1046,12 @@ class CheckPageAgainstNorms:
                     "",
                 )
             ).strip()
+            context = candidate_engineering_context(page_facts, violation, page_number)
+            if context["facts"]:
+                origin_assertions = (
+                    *origin_assertions,
+                    {"origin": "engineering_context", "context": context},
+                )
 
             finding_category = category(
                 violation.get(
@@ -1127,6 +1162,25 @@ class CheckPageAgainstNorms:
                     object_ref=str(violation.get("object_ref", "")).strip()[:80],
                 )
             )
+            for origin in origin_assertions:
+                if origin.get("candidate_id"):
+                    trace_candidate(
+                        "source_binding",
+                        origin["candidate_id"],
+                        page=page_number,
+                        decision="candidate",
+                        reason="evidence_is_not_conclusion",
+                        finding_id=finding_id,
+                        hypothesis_ids=tuple(
+                            identifier
+                            for identifier in origin.get("hypothesis_ids", [])
+                            if identifier in allowed_hypotheses
+                        ),
+                        normative=len(selected_normative_sources),
+                        technical_assignment=len(selected_technical_assignment_sources),
+                        user=len(selected_user_package_sources),
+                        document=len(selected_document_context_sources),
+                    )
 
         logger.info(
             (

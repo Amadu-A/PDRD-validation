@@ -136,6 +136,7 @@ def _page_facts_payload(
             list(facts.equipment_identities) if include_equipment else None
         ),
         equipment_specification=facts.equipment_specification,
+        graphical_targets=list(facts.graphical_targets),
     )
 
 

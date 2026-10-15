@@ -255,6 +255,7 @@ class AnalysisFindingLocator(Protocol):
         self,
         *,
         page_number: int,
+        analysis_document_id: str | None = None,
         extracted_text: str,
         image_base64: str,
         findings: tuple[

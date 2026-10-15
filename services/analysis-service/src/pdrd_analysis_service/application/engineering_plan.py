@@ -1,0 +1,151 @@
+# services/analysis-service/src/pdrd_analysis_service/application/engineering_plan.py
+
+"""Предметные проверочные гипотезы по фактам текущего анализа, без экспертного benchmark."""
+
+import re
+from dataclasses import asdict
+
+from pdrd_analysis_service.domain.analysis import DocumentContextSource, PageFacts
+from pdrd_analysis_service.domain.engineering_facts import (
+    explicit_design_parameters,
+    explicit_system_purposes,
+)
+
+
+def engineering_plan(
+    facts: PageFacts, text: str, sources: tuple[DocumentContextSource, ...] = ()
+) -> tuple[dict, ...]:
+    """Привязывает проверочные вопросы к объекту, параметру, режиму и доступным контрдоказательствам."""
+    result = []
+    seen = set()
+    for fact in (
+        *facts.document_facts,
+        *explicit_system_purposes(text),
+        *explicit_design_parameters(text),
+    ):
+        object_name = fact.identifier or fact.subject_name
+        key = (
+            object_name,
+            fact.property_name,
+            fact.value_raw,
+            fact.scope_operating_mode,
+            fact.scope_segment,
+            fact.scope_condition,
+            fact.unit_raw,
+            fact.table_id,
+            fact.row_label,
+        )
+        if key in seen or not object_name or not fact.evidence_text:
+            continue
+        seen.add(key)
+        related = tuple(
+            source
+            for source in sources
+            if re.search(
+                r"(?<![\w-])" + re.escape(object_name) + r"(?![\w-])",
+                source.subject + " " + source.evidence_text + " " + source.text,
+                re.I,
+            )
+        )
+        question = (
+            "Согласовано ли назначение этого же тега во всех переданных представлениях?"
+            if fact.property_name == "Назначение системы"
+            else "Где обосновано это принятое значение и согласованы ли объект, свойство, участок и режим? "
+            "Проверь ссылку, расчётное приложение и продолжение таблицы. Не утверждай отсутствие во всём проекте "
+            "по отсутствию на одном листе. Для конкретного незамкнутого расчётного шага допустим needs_review."
+        )
+        if fact.property_type == "sheet_number":
+            question = "Согласованы ли печатный номер, шифр и порядок листов с перечнем и связанными частями документа?"
+        elif fact.relation == "member_of":
+            question = (
+                "Подтверждена ли принадлежность этого элемента той же группе "
+                "и согласован ли её состав в переданных материалах?"
+            )
+        elif fact.kind == "relationship":
+            question = (
+                "Подтверждены ли видимая связь, её назначение и принадлежность "
+                "тем же объектам, участкам и условиям?"
+            )
+        elif fact.kind == "reference":
+            question = (
+                "Существует ли указанный лист, таблица или расчётное приложение "
+                "и совпадают ли его шифр, название и назначение?"
+            )
+        elif fact.kind == "quantity":
+            question = (
+                "Соответствуют ли количество, перечень обозначений и размещение "
+                "того же состава объектов в переданных представлениях?"
+            )
+        result.append(
+            {
+                "hypothesis_id": f"engineering-{len(result) + 1}",
+                "object": object_name,
+                "property": fact.property_name,
+                "value": fact.value_raw,
+                "unit": fact.unit_raw,
+                "scope": {
+                    "system": fact.scope_system,
+                    "segment": fact.scope_segment,
+                    "mode": fact.scope_operating_mode,
+                    "condition": fact.scope_condition,
+                },
+                "evidence": fact.evidence_text,
+                "question": question,
+                "related_sources": [asdict(source) for source in related],
+            }
+        )
+    return tuple(result)
+
+
+def candidate_engineering_context(facts: PageFacts, candidate: dict, page: int) -> dict:
+    """Сохраняет относящиеся к кандидату факты и режимы для проверки вывода при финализации."""
+    content = " ".join(
+        str(candidate.get(key, "")) for key in ("object_ref", "comment", "evidence")
+    )
+    related = []
+    for index, fact in enumerate(facts.document_facts, 1):
+        identifier = fact.identifier or fact.subject_name
+        matches_object = identifier and re.search(
+            r"(?<![\w-])" + re.escape(identifier) + r"(?![\w-])", content, re.I
+        )
+        matches_quote = len(fact.evidence_text) >= 8 and fact.evidence_text in str(
+            candidate.get("evidence", "")
+        )
+        if matches_object or matches_quote:
+            related.append({"fact_id": f"p{page:04d}-f{index:04d}", **asdict(fact)})
+    return {"page": page, "facts": related}
+
+
+def quantity_checks(facts: PageFacts) -> tuple[dict, ...]:
+    """Передаёт проверяемые величины со всеми условиями вместо свободного пересчёта моделью."""
+    from pdrd_analysis_service.domain.engineering_claims import extract_quantities
+
+    result = []
+    for fact in facts.document_facts:
+        values = extract_quantities(f"{fact.value_raw} {fact.unit_raw}")
+        if len(values) != 1:
+            continue
+        value = values[0]
+        result.append(
+            {
+                "object": fact.identifier,
+                "property": fact.property_name,
+                "row": fact.row_label,
+                "column": fact.column_label,
+                "table": fact.table_id,
+                "raw": fact.value_raw,
+                "unit": fact.unit_raw,
+                "dimension": value.dimension,
+                "base_unit": {"flow": "м³/ч", "length": "м", "pressure": "Па"}[
+                    value.dimension
+                ],
+                "normalized_value": str(value.value),
+                "rounding_tolerance": str(value.tolerance),
+                "mode": fact.scope_operating_mode,
+                "segment": fact.scope_segment,
+                "condition": fact.scope_condition,
+                "continuation": fact.continuation_marker,
+                "evidence": fact.evidence_text,
+            }
+        )
+    return tuple(result)

@@ -27,6 +27,7 @@ async def recover_page_understanding(
     num_predict: int,
     max_facts: int,
     max_equipment: int,
+    max_graphical_targets: int = 0,
     initial_error: VisionModelOutputBudgetError,
     should_stop: Callable[[], Awaitable[bool]] | None = None,
     prompt_suffix: str = "",
@@ -57,7 +58,7 @@ async def recover_page_understanding(
         metrics.append(result.metrics)
         return result
 
-    def prompt(facts: int = 0, equipment: int = 0):
+    def prompt(facts: int = 0, equipment: int = 0, graphics: int = 0):
         """Оставляет исходные инструкции grounding и исходный контекст изображения."""
         return (
             build_page_understanding_prompt(
@@ -66,12 +67,13 @@ async def recover_page_understanding(
                 extracted_text=extracted_text,
                 max_facts=facts,
                 max_equipment=equipment,
+                max_graphical_targets=graphics,
             )
             + prompt_suffix
         )
 
     core_schema = build_page_facts_schema(0, 0)
-    split_core = not (max_facts or max_equipment)
+    split_core = not (max_facts or max_equipment or max_graphical_targets)
     payload = {}
     if not split_core:
         try:
@@ -104,6 +106,21 @@ async def recover_page_understanding(
                     "Поле листа достигло output budget.", metrics=result.metrics
                 )
             payload.update(result.payload)
+
+    if max_graphical_targets > 0:
+        graphics_schema = build_page_facts_schema(0, 0, max_graphical_targets)
+        graphics_schema["properties"] = {
+            "graphical_targets": graphics_schema["properties"]["graphical_targets"]
+        }
+        graphics_schema["required"] = ["graphical_targets"]
+        graphics = await generate(
+            prompt(graphics=max_graphical_targets), graphics_schema, "graphics"
+        )
+        if graphics.metrics.done_reason == "length":
+            raise VisionModelOutputBudgetError(
+                "Цели чтения графики достигли output budget.", metrics=graphics.metrics
+            )
+        payload["graphical_targets"] = graphics.payload.get("graphical_targets", [])
 
     for field, limit, size in (
         ("document_facts", max_facts, 4),

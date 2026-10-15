@@ -132,6 +132,7 @@ class LimitedVisionModel:
             await self._report(execution)
             wait_ms = (waiter.admitted_at - started) * 1000
             generated_at = perf_counter()
+            provider_attempts = None
             try:
                 result = await self.delegate.generate_json(
                     prompt=prompt,
@@ -141,17 +142,24 @@ class LimitedVisionModel:
                     stage=stage,
                     image_bytes=image_bytes,
                 )
+                provider_attempts = getattr(
+                    getattr(result, "metrics", None), "attempt", None
+                )
             except VisionModelError as error:
+                provider_attempts = (
+                    error.metrics.attempt if error.metrics is not None else None
+                )
                 if error.metrics is not None:
                     error.metrics = replace(error.metrics, slot_wait_ms=wait_ms)
                 raise
             finally:
                 logger.info(
-                    "vlm_slot_timing job=%s stage=%s slot_wait_ms=%.2f provider_ms=%.2f",
+                    "vlm_slot_timing job=%s stage=%s slot_wait_ms=%.2f provider_ms=%.2f provider_attempts=%s",
                     waiter.key,
                     stage,
                     wait_ms,
                     (perf_counter() - generated_at) * 1000,
+                    provider_attempts,
                 )
             if isinstance(result, GenerationResult):
                 result = replace(

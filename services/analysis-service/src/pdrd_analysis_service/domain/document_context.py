@@ -7,7 +7,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from itertools import pairwise
 from typing import Any
+
+from pdrd_analysis_service.domain.engineering_claims import extract_quantities
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +102,10 @@ _UNIT_FACTORS: dict[str, tuple[str, Decimal]] = {
 _PROPERTY_ALIASES = {
     "расчетная температура наружного воздуха": "design_outdoor_temperature",
     "температура наружного воздуха расчетная": "design_outdoor_temperature",
+    "назначение системы": "system_purpose",
+    "наименование системы": "system_purpose",
+    "расход воды": "water_flow",
+    "расчетный расход воды": "water_flow",
 }
 
 
@@ -146,6 +153,7 @@ def scope_key(fact: DocumentFact) -> tuple[str, ...]:
         seismic_map[1].casefold().translate(str.maketrans("авс", "abc"))
         if seismic_map
         else "",
+        normalize_label(fact.row_label) if fact.table_id else "",
     )
 
 
@@ -159,6 +167,19 @@ def normalized_value(fact: DocumentFact) -> tuple[str, str] | None:
         return "nominal_diameter", raw
     if raw.startswith(("ø", "⌀")) or re.match(r"^ф\d", raw):
         return "outer_diameter", raw
+    prop = normalize_label(fact.property_name)
+    if "диаметр" in prop:
+        if re.search(r"условн|номиналь|\b(?:dn|ду)\b", prop):
+            return "nominal_diameter", raw
+        if "наружн" in prop:
+            return "outer_diameter", raw
+    if _PROPERTY_ALIASES.get(prop) == "system_purpose":
+        for pattern, purpose in (
+            (r"водоотвед|канализац", "water_disposal"),
+            (r"водоснабж|водопровод", "water_supply"),
+        ):
+            if re.search(pattern, raw):
+                return "text", purpose
     if _NUMBER.fullmatch(raw):
         try:
             number = Decimal(raw.replace(",", "."))
@@ -185,6 +206,8 @@ def discover_conflicts(
     groups: dict[tuple[str, str, tuple[str, ...]], list[LocatedDocumentFact]] = {}
     for located in facts:
         fact = located.fact
+        if _printed_sheet_number(fact) is not None:
+            continue
         subject = subject_key(fact)
         prop = property_key(fact)
         value = normalized_value(fact)
@@ -194,21 +217,45 @@ def discover_conflicts(
 
     conflicts: list[ConflictGroup] = []
     for (subject, prop, _scope), members in groups.items():
-        if len({member.page for member in members}) < 2:
+        same_row = len(
+            {(member.fact.table_id, member.fact.row_label) for member in members}
+        ) == 1 and all(
+            member.fact.table_id and member.fact.row_label for member in members
+        )
+        units = {normalize_label(member.fact.unit_raw) for member in members}
+        row_conversion = same_row and len(units) > 1
+        if len({member.page for member in members}) < 2 and not row_conversion:
             continue
         values = {normalized_value(member.fact) for member in members}
         dimensions = {value[0] for value in values if value is not None}
         if len(dimensions) != 1 or len(values) < 2:
             continue
+        quantities = [
+            extract_quantities(f"{member.fact.value_raw} {member.fact.unit_raw}")
+            for member in members
+        ]
+        if all(len(value) == 1 for value in quantities):
+            first = quantities[0][0]
+            if all(
+                value[0].dimension == first.dimension
+                and abs(value[0].value - first.value)
+                <= value[0].tolerance + first.tolerance
+                for value in quantities
+            ):
+                continue
         kind = normalize_label(members[0].fact.kind)
         prop_type = normalize_label(members[0].fact.property_type)
-        mismatch_type = {
-            "quantity": "quantity_mismatch",
-            "equipment_model": "equipment_model_mismatch",
-            "material": "material_mismatch",
-            "room_property": "room_property_mismatch",
-            "relationship": "relationship_mismatch",
-        }.get(kind, f"{prop_type}_mismatch" if prop_type else "value_mismatch")
+        mismatch_type = (
+            "unit_equivalence"
+            if row_conversion
+            else {
+                "quantity": "quantity_mismatch",
+                "equipment_model": "equipment_model_mismatch",
+                "material": "material_mismatch",
+                "room_property": "room_property_mismatch",
+                "relationship": "relationship_mismatch",
+            }.get(kind, f"{prop_type}_mismatch" if prop_type else "value_mismatch")
+        )
         conflicts.append(
             ConflictGroup(
                 facts=tuple(members),
@@ -219,7 +266,106 @@ def discover_conflicts(
         )
         if len(conflicts) >= max_candidates:
             break
+    remaining = max_candidates - len(conflicts)
+    if remaining > 0:
+        conflicts.extend(_relationship_conflicts(facts)[:remaining])
     return tuple(conflicts)
+
+
+def _printed_sheet_number(fact: DocumentFact) -> int | None:
+    """Читает явно извлечённое проектное поле, не используя физический индекс PDF как номер листа."""
+    if (
+        fact.subject_type != "drawing_document"
+        or fact.property_type != "sheet_number"
+        or not fact.identifier
+    ):
+        return None
+    match = re.fullmatch(r"(?:Лист\s*)?(\d+)", fact.value_raw.strip(), re.I)
+    return int(match[1]) if match is not None else None
+
+
+def _relationship_conflicts(
+    facts: tuple[LocatedDocumentFact, ...],
+) -> list[ConflictGroup]:
+    """Сопоставляет явный состав и печатную последовательность; неполный перечень не доказывает недостачу."""
+    result = []
+    memberships: dict[tuple, dict[str, list[LocatedDocumentFact]]] = {}
+    sheets: dict[tuple, dict[int, list[LocatedDocumentFact]]] = {}
+    inventories: dict[tuple, list[LocatedDocumentFact]] = {}
+    for located in facts:
+        fact = located.fact
+        if (
+            fact.relation == "member_of"
+            and fact.identifier
+            and fact.scope_system
+            and fact.subject_type
+        ):
+            key = (
+                normalize_label(fact.scope_system),
+                normalize_label(fact.subject_type),
+                scope_key(fact)[1:6],
+            )
+            memberships.setdefault(key, {}).setdefault(
+                normalize_label(fact.identifier), []
+            ).append(located)
+        if _printed_sheet_number(fact) is not None:
+            sheets.setdefault((subject_key(fact), scope_key(fact)), {}).setdefault(
+                located.page, []
+            ).append(located)
+    for located in facts:
+        fact = located.fact
+        if (
+            fact.kind != "quantity"
+            or fact.property_type != "inventory_count"
+            or not fact.identifier
+        ):
+            continue
+        if not re.fullmatch(r"\d+", fact.value_raw.strip()):
+            continue
+        if fact.scope_system and normalize_label(fact.scope_system) != normalize_label(
+            fact.identifier
+        ):
+            continue
+        key = (
+            normalize_label(fact.identifier),
+            normalize_label(fact.subject_type),
+            scope_key(fact)[1:6],
+        )
+        members = memberships.get(key, {})
+        # Только избыточный явно связанный состав доказывается неполным наблюдением.
+        if len(members) > int(fact.value_raw):
+            inventories.setdefault((key, int(fact.value_raw)), []).append(located)
+    for (key, _count), declarations in inventories.items():
+        members = memberships[key]
+        result.append(
+            ConflictGroup(
+                (
+                    *declarations,
+                    *(item for group in members.values() for item in group),
+                ),
+                subject_key(declarations[0].fact),
+                "inventory_count",
+                "inventory_composition",
+            )
+        )
+    for (subject, _scope), by_page in sheets.items():
+        unambiguous = [
+            (page, members)
+            for page, members in sorted(by_page.items())
+            if len({_printed_sheet_number(item.fact) for item in members}) == 1
+        ]
+        for (first_page, first), (second_page, second) in pairwise(unambiguous):
+            if (
+                second_page == first_page + 1
+                and _printed_sheet_number(second[0].fact)
+                != _printed_sheet_number(first[0].fact) + 1
+            ):
+                result.append(
+                    ConflictGroup(
+                        (*first, *second), subject, "sheet_number", "sheet_sequence"
+                    )
+                )
+    return result
 
 
 def fact_search_text(located: LocatedDocumentFact) -> str:

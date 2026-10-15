@@ -118,6 +118,7 @@ class PageFacts:
     document_facts: tuple[DocumentFact, ...] = ()
     equipment_identities: tuple[dict[str, Any], ...] = ()
     equipment_specification: dict[str, Any] | None = None
+    graphical_targets: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

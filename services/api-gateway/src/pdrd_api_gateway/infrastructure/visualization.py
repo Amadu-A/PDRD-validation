@@ -288,6 +288,7 @@ class HttpAnalysisFindingLocator:
         self,
         *,
         page_number: int,
+        analysis_document_id: str | None = None,
         extracted_text: str,
         image_base64: str,
         findings: tuple[
@@ -328,6 +329,9 @@ class HttpAnalysisFindingLocator:
                 response = await client.post(
                     (f"{self._base_url}/internal/v1/findings/localize"),
                     json=payload,
+                    headers={"X-PDRD-Analysis-Document-ID": analysis_document_id}
+                    if analysis_document_id is not None
+                    else None,
                 )
 
                 response.raise_for_status()

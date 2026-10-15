@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any
 
+from pdrd_analysis_service.application.candidate_trace import trace_candidate
 from pdrd_analysis_service.application.json_schemas import (
     build_finalization_schema,
 )
@@ -29,7 +30,11 @@ from pdrd_analysis_service.domain.analysis import (
     FindingDraft,
     NormativeSource,
 )
-from pdrd_analysis_service.domain.engineering_claims import false_numeric_claim
+from pdrd_analysis_service.domain.engineering_claims import (
+    REVIEW_REASON_CODES,
+    false_numeric_claim,
+    unsupported_engineering_claim,
+)
 
 _NORMATIVE_REFERENCE_PATTERN = re.compile(
     r"\b(?:ГОСТ|GOST|ПУЭ|PUE|СНиП|SNIP|СП)\b",
@@ -173,7 +178,7 @@ def _fallback_recommendation(
     """Возвращает безопасную исходную рекомендацию."""
     recommendation = finding.recommendation_draft.strip()
 
-    if recommendation:
+    if recommendation and false_numeric_claim(recommendation) is None:
         return recommendation
 
     return (
@@ -433,6 +438,9 @@ def _is_protected_factual_review(finding: FindingDraft) -> bool:
         and any(
             item.get("origin") == "engineering_verification"
             and item.get("evidence_grounded") is True
+            and item.get("conclusion_verified") is True
+            and item.get("verification_rule")
+            in {"unit_equivalence", "explicit_system_purpose"}
             for item in finding.origin_assertions
         )
     )
@@ -490,6 +498,30 @@ class FinalizeFindings:
                 "finalization batch_size должен быть положительным.",
             )
 
+        candidate_count = len(findings)
+        pre_rejected = []
+        accepted = []
+        for finding in findings:
+            reason = unsupported_engineering_claim(finding.comment)
+            if reason is not None:
+                pre_rejected.append(
+                    {
+                        "finding_id": finding.finding_id,
+                        "page": finding.page,
+                        "reason": reason,
+                    }
+                )
+                trace_candidate(
+                    "finalization",
+                    finding.finding_id,
+                    page=finding.page,
+                    decision="reject",
+                    reason=reason,
+                )
+            else:
+                accepted.append(finding)
+        findings = tuple(accepted)
+
         if not findings:
             return (
                 "",
@@ -503,10 +535,10 @@ class FinalizeFindings:
                     "batch_execution_count": 0,
                     "fallback_count": 0,
                     "deterministic_review_count": 0,
-                    "candidate_count": 0,
+                    "candidate_count": candidate_count,
                     "kept_count": 0,
-                    "rejected_count": 0,
-                    "rejected_findings": [],
+                    "rejected_count": len(pre_rejected),
+                    "rejected_findings": pre_rejected,
                     "vlm_call_count": 0,
                     "successful_vlm_call_count": 0,
                     "failed_vlm_call_count": 0,
@@ -608,7 +640,7 @@ class FinalizeFindings:
                 str,
                 object,
             ]
-        ] = []
+        ] = list(pre_rejected)
 
         vlm_call_count = 0
         successful_vlm_call_count = 0
@@ -679,6 +711,29 @@ class FinalizeFindings:
                 len(protected),
                 tuple(item.finding_id for item in protected),
             )
+        kept_ids = {item.finding_id for item in final_items}
+        reasons_by_id = {
+            item["finding_id"]: item.get("reason_code", "model_reject")
+            for item in rejected_findings
+        }
+        for finding in findings:
+            decision = "keep" if finding.finding_id in kept_ids else "reject"
+            for origin in finding.origin_assertions or ({},):
+                trace_candidate(
+                    "finalization",
+                    str(origin.get("candidate_id") or finding.finding_id),
+                    page=finding.page,
+                    decision=decision,
+                    reason="semantic_review"
+                    if decision == "keep"
+                    else str(reasons_by_id.get(finding.finding_id, "model_reject")),
+                    finding_id=finding.finding_id,
+                    locations=len(finding.evidence_locations),
+                    sources=len(finding.basis_sources)
+                    + len(finding.technical_assignment_basis_sources)
+                    + len(finding.user_package_basis_sources)
+                    + len(finding.document_context_basis_sources),
+                )
 
         if isolated_enrichment:
             normative_candidates_count = sum(
@@ -758,9 +813,7 @@ class FinalizeFindings:
                 ),
                 "fallback_count": fallback_count,
                 "deterministic_review_count": len(protected),
-                "candidate_count": len(
-                    findings,
-                ),
+                "candidate_count": candidate_count,
                 "kept_count": len(
                     final_items,
                 ),
@@ -1099,6 +1152,11 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                         "finding_id": finding.finding_id,
                         "page": finding.page,
                         "reason": rejection_reason,
+                        **(
+                            {"reason_code": item["reason_code"]}
+                            if item.get("reason_code") in REVIEW_REASON_CODES
+                            else {}
+                        ),
                     }
                 )
 
@@ -1298,9 +1356,11 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
         finding_category = finding.category
 
         normalized_status = finding.status
-        if false_numeric_claim(comment) is not None:
+        if unsupported_engineering_claim(comment) is not None:
             # Редактор не имеет права заменить корректного кандидата ложным вычислением.
             comment = finding.comment
+            recommendation = _fallback_recommendation(finding)
+        if false_numeric_claim(recommendation) is not None:
             recommendation = _fallback_recommendation(finding)
 
         has_customer_basis = bool(

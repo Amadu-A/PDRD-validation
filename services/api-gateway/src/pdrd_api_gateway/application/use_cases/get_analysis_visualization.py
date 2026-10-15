@@ -285,6 +285,7 @@ class GetAnalysisVisualization:
                     try:
                         fallback_locations = await self.finding_locator.localize(
                             page_number=(page.page_number),
+                            analysis_document_id=str(job.document_id),
                             extracted_text=(page.extracted_text),
                             image_base64=(page.image_base64),
                             findings=vlm_targets,

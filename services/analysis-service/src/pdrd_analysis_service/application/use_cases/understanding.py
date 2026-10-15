@@ -37,6 +37,9 @@ from pdrd_analysis_service.domain.analysis import (
     PageFacts,
 )
 from pdrd_analysis_service.domain.document_context import document_fact_from_mapping
+from pdrd_analysis_service.domain.engineering_facts import (
+    merge_text_engineering_facts,
+)
 from pdrd_analysis_service.domain.equipment_identification import (
     ground_equipment_records,
 )
@@ -262,6 +265,9 @@ class UnderstandPage:
                 + json.dumps(content.get("table_regions", []), ensure_ascii=False)
             )
         max_equipment = 40 if use_equipment_web_search and not tabular else 0
+        max_graphical_targets = (
+            self.max_graphical_crops if self.image_cropper is not None else 0
+        )
         try:
             result = await self.vision_model.generate_json(
                 prompt=(
@@ -271,10 +277,15 @@ class UnderstandPage:
                         extracted_text=(extracted_text),
                         max_facts=max_facts,
                         max_equipment=max_equipment,
+                        max_graphical_targets=max_graphical_targets,
                     )
                     + prompt_suffix
                 ),
-                schema=(build_page_facts_schema(max_facts, max_equipment)),
+                schema=(
+                    build_page_facts_schema(
+                        max_facts, max_equipment, max_graphical_targets
+                    )
+                ),
                 num_predict=self.num_predict,
                 seed=100,
                 stage=(f"page_understanding:{page_number}"),
@@ -296,6 +307,7 @@ class UnderstandPage:
                 num_predict=self.num_predict,
                 max_facts=max_facts,
                 max_equipment=max_equipment,
+                max_graphical_targets=max_graphical_targets,
                 initial_error=error,
                 should_stop=should_stop,
                 prompt_suffix=prompt_suffix,
@@ -357,6 +369,13 @@ class UnderstandPage:
                 else ()
             ),
             equipment_specification=specification,
+            graphical_targets=tuple(
+                target
+                for target in payload.get("graphical_targets", [])[
+                    :max_graphical_targets
+                ]
+                if isinstance(target, dict)
+            ),
             document_facts=tuple(
                 fact
                 for raw in payload.get("document_facts", [])[:max_facts]
@@ -370,12 +389,25 @@ class UnderstandPage:
         if table_facts is not None:
             facts = merge_specification_facts(table_facts, facts)
 
+        if use_document_context:
+            facts = replace(
+                facts,
+                document_facts=merge_text_engineering_facts(
+                    facts.document_facts, extracted_text, page_number
+                ),
+            )
+
         if self.image_cropper is not None and self.max_graphical_crops > 0:
             facts = await RefineGraphicalFacts(
                 self.vision_model,
                 self.image_cropper,
                 self.max_graphical_crops,
-            ).execute(facts, page_number=page_number, image_bytes=image_bytes)
+            ).execute(
+                facts,
+                page_number=page_number,
+                image_bytes=image_bytes,
+                should_stop=should_stop,
+            )
 
         return (
             facts,

@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from typing import Any
 
+from pdrd_analysis_service.application.candidate_trace import trace_candidate
 from pdrd_analysis_service.application.ports.vision_model import StructuredVisionModel
 from pdrd_analysis_service.domain.analysis import (
     DocumentContextSource,
@@ -26,6 +28,7 @@ from pdrd_analysis_service.domain.document_context import (
     normalized_value,
     subject_key,
 )
+from pdrd_analysis_service.domain.engineering_claims import REVIEW_REASON_CODES
 
 logger = logging.getLogger(__name__)
 
@@ -226,10 +229,58 @@ def _evidence_region(
     if fact.fact.visual_regions:
         return list(fact.fact.visual_regions)
     page = pages_by_number[fact.page]
+    quote_tokens = re.findall(
+        r"\w+", fact.fact.evidence_text.casefold().replace(",", ".")
+    )
+    word_tokens = [
+        re.findall(r"\w+", str(word.get("text", "")).casefold().replace(",", "."))
+        for word in page.text_words
+    ]
+    for start in range(len(page.text_words)):
+        tokens = []
+        selected = []
+        for offset in range(
+            start, min(len(page.text_words), start + len(quote_tokens) + 2)
+        ):
+            tokens.extend(word_tokens[offset])
+            selected.append(page.text_words[offset])
+            if tokens == quote_tokens and tokens:
+                boxes = [word.get("bbox") for word in selected]
+                if all(
+                    isinstance(box, dict)
+                    and all(
+                        isinstance(box.get(key), (int, float))
+                        for key in ("x_min", "y_min", "x_max", "y_max")
+                    )
+                    for box in boxes
+                ):
+                    region = {
+                        key: int(
+                            (min if key.endswith("min") else max)(
+                                box[key] for box in boxes
+                            )
+                        )
+                        for key in ("x_min", "y_min", "x_max", "y_max")
+                    }
+                    if (
+                        0 <= region["x_min"] < region["x_max"] <= 1000
+                        and 0 <= region["y_min"] < region["y_max"] <= 1000
+                    ):
+                        return [{**region, "confidence": 0.9}]
+                break
+            if tokens != quote_tokens[: len(tokens)]:
+                break
     needle = fact.fact.value_raw.strip().casefold().replace(",", ".")
     if not needle:
         return []
-    for word in page.text_words:
+    matching_words = [
+        word
+        for word in page.text_words
+        if str(word.get("text", "")).strip().casefold().replace(",", ".") == needle
+    ]
+    if len(matching_words) != 1:
+        return []
+    for word in matching_words:
         token = str(word.get("text", "")).strip().casefold().replace(",", ".")
         if token != needle:
             continue
@@ -255,6 +306,15 @@ def _representative_facts(
     limit: int,
 ) -> tuple[LocatedDocumentFact, ...]:
     """Сохраняет сначала доказательство каждого различного значения, затем других страниц."""
+    if group.mismatch_type == "inventory_composition":
+        seen = set()
+        selected = []
+        for fact in group.facts:
+            identity = (fact.fact.kind, normalize_label(fact.fact.identifier))
+            if identity not in seen:
+                seen.add(identity)
+                selected.append(fact)
+        return tuple(selected[:limit])
     chosen: list[LocatedDocumentFact] = []
     seen_values: set[tuple[str, str] | None] = set()
     for fact in group.facts:
@@ -285,10 +345,28 @@ def _candidate_payload(index: int, group: ConflictGroup, limit: int) -> dict[str
         "mismatch_type": group.mismatch_type,
         "subject": group.subject_key,
         "property": group.property_key,
+        **(
+            {
+                "declared_count": group.facts[0].fact.value_raw,
+                "observed_unique_count": len(
+                    {
+                        normalize_label(fact.fact.identifier)
+                        for fact in group.facts
+                        if fact.fact.relation == "member_of"
+                    }
+                ),
+            }
+            if group.mismatch_type == "inventory_composition"
+            else {}
+        ),
         "facts": [
             {
                 "page": fact.page,
                 "fact_id": fact.fact_id,
+                "identifier": fact.fact.identifier,
+                "subject_type": fact.fact.subject_type,
+                "property": fact.fact.property_name,
+                "relation": fact.fact.relation,
                 "value": fact.fact.value_raw,
                 "unit": fact.fact.unit_raw,
                 "scope": {
@@ -323,6 +401,15 @@ class CheckCrossPageConsistency:
             _located(pages),
             max_candidates=self.options.max_cross_page_candidates,
         )
+        for index, group in enumerate(groups, 1):
+            trace_candidate(
+                "cross_page_hypothesis",
+                f"C{index}",
+                decision="candidate",
+                reason=group.mismatch_type,
+                facts=len(group.facts),
+                pages=len({fact.page for fact in group.facts}),
+            )
         if not groups:
             logger.info(
                 "cross_page_candidates generated=0 confirmed=0 rejected=0 needs_review=0"
@@ -330,6 +417,7 @@ class CheckCrossPageConsistency:
             return ()
         decisions: dict[str, str] = {}
         reasons: dict[str, str] = {}
+        reason_codes: dict[str, str] = {}
         batch_size = self.options.validation_batch_size
         for start in range(0, len(groups), batch_size):
             if cancel_check is not None and await cancel_check():
@@ -349,6 +437,15 @@ class CheckCrossPageConsistency:
                 "смысл значения. Разные режимы и объяснённые различия отклони. "
                 "Не устанавливай, какое значение правильно. D не является нормативом. "
                 "Верни решение для каждого candidate_id.\n"
+                "Для unit_equivalence проверь пересчёт единиц и округление только в одной строке и режиме. "
+                "Не дели суточное значение на 24 для периодического процесса. "
+                "Название карты ОСР, DN/наружный диаметр, разные условия прокладки и разные "
+                "области учёта не являются противоречием.\n"
+                "Для inventory_composition сопоставь заявленное количество с уникальными тегами "
+                "явных member_of той же группы и условий; существующие/проектируемые элементы не смешивай. "
+                "Для sheet_sequence проверь печатные номера смежных страниц одного шифра, "
+                "учитывая раздельные части и продолжение одного большого чертежа. "
+                "Физический индекс PDF не является проектным номером листа.\n"
                 + json.dumps(candidates, ensure_ascii=False)
             )
             schema = {
@@ -373,8 +470,17 @@ class CheckCrossPageConsistency:
                                     "enum": ["confirmed", "rejected", "needs_review"],
                                 },
                                 "reason": {"type": "string", "maxLength": 300},
+                                "reason_code": {
+                                    "type": "string",
+                                    "enum": list(REVIEW_REASON_CODES),
+                                },
                             },
-                            "required": ["candidate_id", "status", "reason"],
+                            "required": [
+                                "candidate_id",
+                                "status",
+                                "reason",
+                                "reason_code",
+                            ],
                         },
                     },
                 },
@@ -395,11 +501,24 @@ class CheckCrossPageConsistency:
                     reasons[str(decision.get("candidate_id", ""))] = str(
                         decision.get("reason", "")
                     ).strip()
+                    code = str(decision.get("reason_code", ""))
+                    if code in REVIEW_REASON_CODES:
+                        reason_codes[str(decision.get("candidate_id", ""))] = code
 
         by_number = {page.page: page for page in pages}
         findings: list[FindingDraft] = []
         for index, group in enumerate(groups, start=1):
             decision = decisions.get(f"C{index}")
+            trace_candidate(
+                "cross_page_verification",
+                f"C{index}",
+                decision=decision
+                if decision in {"confirmed", "needs_review", "rejected"}
+                else "reject",
+                reason=reason_codes.get(f"C{index}", "model_decision")
+                if decision
+                else "missing_decision",
+            )
             if decision not in {"confirmed", "needs_review"}:
                 continue
             if decision == "needs_review" and not reasons.get(f"C{index}"):
@@ -438,6 +557,40 @@ class CheckCrossPageConsistency:
                 if decision == "needs_review"
                 else ""
             )
+            comment = (
+                f"{description} для {subject} по параметру «{prop}»: {locations}. "
+                "Требуется определить корректное значение и привести документацию к единому значению."
+                + review_reason
+            )
+            recommendation = "Сопоставить исходные данные и привести значения на указанных страницах к единому решению."
+            if group.mismatch_type == "inventory_composition":
+                tags = tuple(
+                    dict.fromkeys(
+                        fact.fact.identifier
+                        for fact in group.facts
+                        if fact.fact.relation == "member_of"
+                    )
+                )
+                comment = (
+                    f"{description} состава группы {first.fact.identifier}: заявлено {first.fact.value_raw}, "
+                    f"в связанных материалах указаны {len(tags)} уникальных элементов: {', '.join(tags)}. "
+                    "Требуется сверить состав и условия учёта элементов."
+                    + review_reason
+                )
+                recommendation = (
+                    "Сверить заявленное количество с перечнем той же группы, "
+                    "исключив смешение существующих и проектируемых элементов."
+                )
+            elif group.mismatch_type == "sheet_sequence":
+                comment = (
+                    f"{description} в последовательности печатных номеров документа {first.fact.identifier}: "
+                    f"{locations}. Сверить порядок листов, раздельные части и продолжения чертежа."
+                    + review_reason
+                )
+                recommendation = (
+                    "Проверить печатную нумерацию по перечню листов "
+                    "и при подтверждении скорректировать последовательность."
+                )
             findings.append(
                 FindingDraft(
                     finding_id=f"cross-page-{index:04d}",
@@ -446,17 +599,9 @@ class CheckCrossPageConsistency:
                     category="document_consistency",
                     severity="warning",
                     status="confirmed" if decision == "confirmed" else "needs_review",
-                    comment=(
-                        f"{description} для {subject} "
-                        f"по параметру «{prop}»: {locations}. "
-                        "Требуется определить корректное значение и привести "
-                        "документацию к единому значению." + review_reason
-                    ),
+                    comment=comment,
                     evidence=locations,
-                    recommendation_draft=(
-                        "Сопоставить исходные данные и привести значения "
-                        "на указанных страницах к единому решению."
-                    ),
+                    recommendation_draft=recommendation,
                     confidence=0.85 if decision == "confirmed" else 0.65,
                     normative_source_ids=(),
                     basis="",
@@ -495,6 +640,15 @@ class CheckCrossPageConsistency:
                         for fact in selected
                     ),
                     object_ref=first.fact.identifier,
+                    origin_assertions=(
+                        {
+                            "origin": "cross_page_validation",
+                            "candidate_id": f"C{index}",
+                            "reason_code": reason_codes.get(
+                                f"C{index}", "model_decision"
+                            ),
+                        },
+                    ),
                 )
             )
         logger.info(
@@ -526,6 +680,12 @@ def merge_cross_page_findings(
                     and finding.page in pages
                     and selected
                     and selected <= source_ids
+                    and normalize_label(finding.object_ref)
+                    == normalize_label(cross.object_ref)
+                    and normalize_label(finding.comment)
+                    == normalize_label(cross.comment)
+                    and normalize_label(finding.evidence)
+                    == normalize_label(cross.evidence)
                 ):
                     duplicates.append(finding)
                     findings.remove(finding)

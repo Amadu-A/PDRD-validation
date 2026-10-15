@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from pdrd_analysis_service.application.candidate_trace import trace_candidate
 from pdrd_analysis_service.application.ports.vision_model import (
     StructuredVisionModel,
 )
@@ -286,6 +287,16 @@ class LocalizeFindings:
             )
             for finding_id in finding_ids
         )
+        for location in locations:
+            trace_candidate(
+                "localization",
+                location.finding_id,
+                page=page_number,
+                decision=location.status,
+                reason="validated_bbox"
+                if location.bbox is not None
+                else "no_reliable_bbox",
+            )
 
         return (
             locations,

@@ -5,6 +5,10 @@
 import json
 from dataclasses import asdict
 
+from pdrd_analysis_service.application.engineering_plan import (
+    engineering_plan,
+    quantity_checks,
+)
 from pdrd_analysis_service.application.engineering_review import (
     ENGINEERING_EVIDENCE_RULES,
     engineering_questions,
@@ -602,6 +606,7 @@ def build_page_understanding_prompt(
     extracted_text: str,
     max_facts: int = 12,
     max_equipment: int = 0,
+    max_graphical_targets: int = 0,
 ) -> str:
     """Добавляет инструкции D и EQ только при включённых режимах."""
     combined_mode = _combined_mode_instruction(
@@ -625,6 +630,15 @@ reference, requirement, table_record, other.
 Приоритет фактов: назначение системы, расчётные параметры и их обоснование,
 состав/количество/расположение объектов, материал, ссылки на расчёты и смежные листы.
 Сохраняй отношения текста, плана, схемы и спецификации по явным объектам.
+Для явно заявленного количества группы: kind=quantity, property_type=inventory_count,
+identifier=явный идентификатор системы/группы, subject_type=тип её элементов.
+Для явно связанного элемента: relation=member_of, identifier=его собственный тег,
+scope_system=идентификатор той же группы, subject_type=тот же тип элемента.
+В scope_condition/operating_mode различай проектируемое и существующее, не угадывай
+принадлежность. Неполный перечень видимых элементов не доказывает недостачу.
+Для печатного поля Лист основной надписи: subject_type=drawing_document,
+identifier=дословный шифр документа, property_type=sheet_number, value_raw=печатный номер.
+Не подставляй physical_pdf_page. Раздельные части/продолжения сохраняй в scope.
 У DN, наружного диаметра и толщины стенки должны быть разные property_name.
 Карту сейсмичности, режим, участок и назначение параметра сохраняй в scope.
 
@@ -660,6 +674,18 @@ condition и дословный evidence_text. Числа, диапазоны, �
         else ""
     )
 
+    graphical_instruction = (
+        f"\nНа графическом листе выбери до {max_graphical_targets} конкретных graphical_targets для целевого чтения: "
+        "соединение, линия-выноска, обозначение, узел, связанный вид или основная надпись. "
+        "Проверь подписанное название/поле Лист и читаемость связи надписи с её элементом. "
+        "Для каждой цели запиши наблюдение, объект, вопрос и ограниченную область regions в координатах 0..1000. "
+        "Это план чтения, а не вывод о нарушении. Цель может быть читаемой: уточнение требуется для проверки связи. "
+        "Не выбирай целый лист и не придумывай отсутствующую область. На текстовом листе или при отсутствии "
+        "конкретной цели graphical_targets=[]. Базовая проверка графики не зависит от D.\n"
+        if max_graphical_targets > 0
+        else ""
+    )
+
     return f"""
 Ты анализируешь один лист российской проектной
 или рабочей документации.
@@ -690,7 +716,7 @@ condition и дословный evidence_text. Числа, диапазоны, �
 - видимые связи;
 - важные марки, теги и обозначения.
 
-{document_instruction}{equipment_instruction}Затем сформулируй до 6 НЕЙТРАЛЬНЫХ тем,
+{document_instruction}{equipment_instruction}{graphical_instruction}Затем сформулируй до 6 НЕЙТРАЛЬНЫХ тем,
 по которым следует подобрать нормативные требования.
 
 Не утверждай наличие нарушения.
@@ -740,6 +766,14 @@ def build_normative_check_prompt(
             page_facts.labels,
         ),
     }
+    if page_facts.document_facts:
+        facts_payload["engineering_facts"] = [
+            asdict(fact) for fact in page_facts.document_facts
+        ]
+        facts_payload["quantity_checks"] = quantity_checks(page_facts)
+    if page_facts.graphical_targets:
+        facts_payload["graphical_targets"] = list(page_facts.graphical_targets)
+    hypotheses = engineering_plan(page_facts, extracted_text, document_context_sources)
 
     normative_payload = [
         {
@@ -888,6 +922,19 @@ D-source — факт из этого же проверяемого PDF, а не
 
 КОНТЕКСТНЫЕ ПРОВЕРОЧНЫЕ ВОПРОСЫ:
 {chr(10).join(engineering_questions(page_facts, extracted_text))}
+
+ПРЕДМЕТНЫЕ ПРОВЕРОЧНЫЕ ГИПОТЕЗЫ (это вопросы, не готовые замечания):
+{json.dumps(hypotheses, ensure_ascii=False, default=list)}
+Для каждой гипотезы сначала проверь контрдоказательства: назначение объекта, режим,
+условия, расчётную ссылку, приложение и продолжение. Источники бери только из переданных N/T/U/D.
+Укажи конкретную незамкнутую связь принятого параметра с обоснованием, если она действительно
+требует решения инженера. Не превращай отсутствие данных в доказанное нарушение.
+В hypothesis_ids перечисли только связанные engineering-ID из плана. Если кандидат найден
+самостоятельно, верни []. Не создавай кандидат только для заполнения плана.
+Для quantities сравнивай одинаковые объект, свойство, строку, участок и режим.
+normalized_value задан программно в общей размерности; учитывай rounding_tolerance.
+Не дели суточный расход на 24 при периодическом режиме. Для суммы нужны все строки,
+общая область учёта, режим суммирования и продолжения таблицы.
 
 {combined_mode}
 
@@ -1075,6 +1122,13 @@ def build_finalization_prompt(
                     "status": finding.status,
                     "comment": finding.comment,
                     "evidence": finding.evidence,
+                    "object_ref": finding.object_ref,
+                    "engineering_context": [
+                        origin["context"]
+                        for origin in finding.origin_assertions
+                        if origin.get("origin") == "engineering_context"
+                        and isinstance(origin.get("context"), dict)
+                    ],
                     "recommendation_draft": (finding.recommendation_draft),
                     "confidence": finding.confidence,
                     "normative_basis": normative_basis,
@@ -1148,6 +1202,12 @@ DATA:
 
 - для reject rejection_reason содержит
   одну короткую конкретную причину;
+
+- reason_code выбери из схемы по фактической причине keep/reject;
+- буквальное наличие цитаты подтверждает только исходные слова, не инженерный вывод;
+- engineering_context содержит относящиеся к объекту исходные факты, единицы и режимы.
+  Проверь, что вывод следует из них; разные режимы, условия, типы диаметров и роли параметров
+  не являются противоречием. Не отклоняй конкретный needs_review только из-за отсутствия N.
 
 - сомнение само по себе НЕ является
   причиной reject;

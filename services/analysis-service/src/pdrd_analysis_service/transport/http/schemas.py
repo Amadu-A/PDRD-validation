@@ -50,6 +50,7 @@ class PageFactsPayload(BaseModel):
     document_facts: list[dict[str, Any]] = Field(default_factory=list)
     equipment_identities: list[dict[str, Any]] | None = None
     equipment_specification: dict[str, Any] | None = None
+    graphical_targets: list[dict[str, Any]] = Field(default_factory=list)
 
     def to_domain(
         self,
@@ -73,6 +74,7 @@ class PageFactsPayload(BaseModel):
             ),
             equipment_identities=tuple(self.equipment_identities or ()),
             equipment_specification=self.equipment_specification,
+            graphical_targets=tuple(self.graphical_targets),
             document_facts=tuple(
                 fact
                 for raw in self.document_facts

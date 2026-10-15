@@ -69,10 +69,20 @@ async def page_execution_context(
         "/internal/v1/pages/check-norms": "checking_requirements",
         "/internal/v1/pages/check-technical-assignment": "checking_technical_assignment",
         "/internal/v1/findings/finalize": "finalizing_findings",
+        "/internal/v1/findings/localize": "localization",
     }
     stage = stages.get(request.url.path)
     if document_id is None or stage is None:
         yield
+        return
+    if stage == "localization":
+
+        async def finished_analysis() -> bool:
+            """Локализация готового отчёта не меняет прогресс и сигнал отмены завершённого анализа."""
+            return False
+
+        with vision_execution(VisionExecution(str(document_id), finished_analysis)):
+            yield
         return
     with vision_execution(
         stage_execution(
