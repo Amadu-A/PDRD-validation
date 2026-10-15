@@ -2,6 +2,7 @@
 
 """Сценарий извлечения структурированных сведений инженерного листа."""
 
+import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -9,29 +10,27 @@ from contextlib import suppress
 from dataclasses import dataclass, replace
 
 from pdrd_analysis_service.application.graphical_refinement import RefineGraphicalFacts
-from pdrd_analysis_service.application.json_schemas import (
-    build_page_facts_schema,
-)
 from pdrd_analysis_service.application.ports.image_cropper import ImageCropper
 from pdrd_analysis_service.application.ports.vision_model import (
     StructuredVisionModel,
     VisionModelOutputBudgetError,
 )
-from pdrd_analysis_service.application.prompts import (
-    build_page_understanding_prompt,
-)
 from pdrd_analysis_service.application.specification_refinement import (
     RefineSpecification,
+)
+from pdrd_analysis_service.application.understanding_contract import (
+    build_understanding_contract,
 )
 from pdrd_analysis_service.application.understanding_metrics import (
     UnderstandingMeasurements,
 )
 from pdrd_analysis_service.application.understanding_recovery import (
-    recover_page_understanding,
+    limited_understanding_payload,
 )
 from pdrd_analysis_service.application.use_cases.common import (
     string_tuple,
 )
+from pdrd_analysis_service.application.vision_execution import AnalysisCancelledError
 from pdrd_analysis_service.domain.analysis import (
     GenerationMetrics,
     PageFacts,
@@ -83,7 +82,9 @@ class UnderstandPage:
         started = time.perf_counter()
         measurements = UnderstandingMeasurements(self.vision_model)
         try:
-            facts, _ = await replace(self, vision_model=measurements)._execute(
+            facts, _, limited_reason = await replace(
+                self, vision_model=measurements
+            )._execute(
                 page_number=page_number,
                 heuristic_page_type=heuristic_page_type,
                 extracted_text=extracted_text,
@@ -93,7 +94,7 @@ class UnderstandPage:
                 equipment_specification=equipment_specification,
                 should_stop=should_stop,
             )
-        except Exception as error:
+        except (Exception, asyncio.CancelledError) as error:
             failed_specification = {}
             with suppress(SpecificationContractError):
                 failed_specification = (
@@ -108,10 +109,21 @@ class UnderstandPage:
                 started,
             )
             diagnostics["result"] = (
-                "cancelled" if isinstance(error, SpecificationCancelled) else "failed"
+                "cancelled"
+                if isinstance(
+                    error,
+                    (
+                        SpecificationCancelled,
+                        AnalysisCancelledError,
+                        asyncio.CancelledError,
+                    ),
+                )
+                else "failed"
             )
             diagnostics["error_code"] = (
-                "output_budget"
+                "cancelled"
+                if diagnostics["result"] == "cancelled"
+                else "output_budget"
                 if isinstance(error, VisionModelOutputBudgetError)
                 else "stage_error"
             )
@@ -125,7 +137,8 @@ class UnderstandPage:
             facts.document_facts,
             started,
         )
-        diagnostics["result"] = "completed"
+        diagnostics["result"] = "incomplete" if limited_reason else "completed"
+        diagnostics["limited_reason"] = limited_reason
         return facts, measurements.result(diagnostics)
 
     @staticmethod
@@ -177,10 +190,15 @@ class UnderstandPage:
             "items": len(spec.get("items", [])),
             "document_facts": len(document_facts),
             "programmatic_facts": sum(
-                fact.extraction_method == "pdf_table" for fact in document_facts
+                fact.extraction_method in {"pdf_table", "pdf_text"}
+                for fact in document_facts
+            ),
+            "text_facts": sum(
+                fact.extraction_method == "pdf_text" for fact in document_facts
             ),
             "vlm_facts": sum(
-                fact.extraction_method != "pdf_table" for fact in document_facts
+                fact.extraction_method not in {"pdf_table", "pdf_text"}
+                for fact in document_facts
             ),
             "duration_ms": round((time.perf_counter() - started) * 1000, 2),
             "fallback_reason": safe_reason
@@ -203,9 +221,10 @@ class UnderstandPage:
         should_stop: Callable[[], Awaitable[bool]] | None = None,
     ) -> tuple[
         PageFacts,
-        GenerationMetrics,
+        GenerationMetrics | None,
+        str | None,
     ]:
-        """Извлекает сведения страницы; при выключенном D использует лёгкие промпт и схему."""
+        """Делает один основной запрос; переполнение оставляет только программные факты."""
         max_facts = self.max_facts_per_page if use_document_context else 0
         specification = (
             validated_specification(equipment_specification, page_number)
@@ -248,14 +267,18 @@ class UnderstandPage:
                 and content.get("requires_vision") is False
             ):
                 specification["refinement_metrics"] = refinement_metrics
-                return replace(
-                    table_facts,
-                    equipment_identities=(
-                        table_equipment_records(specification, page_number)
-                        if use_equipment_web_search
-                        else ()
+                return (
+                    replace(
+                        table_facts,
+                        equipment_identities=(
+                            table_equipment_records(specification, page_number)
+                            if use_equipment_web_search
+                            else ()
+                        ),
                     ),
-                ), GenerationMetrics(0, "pdf_table", 0, 0, 0, 0, 0, 0, 0)
+                    GenerationMetrics(0, "pdf_table", 0, 0, 0, 0, 0, 0, 0),
+                    None,
+                )
             if isinstance(content.get("outside_text"), str):
                 extracted_text = content["outside_text"]
             prompt_suffix = (
@@ -268,24 +291,19 @@ class UnderstandPage:
         max_graphical_targets = (
             self.max_graphical_crops if self.image_cropper is not None else 0
         )
+        limited_reason = None
+        prompt, schema = build_understanding_contract(
+            page_number=page_number,
+            heuristic_page_type=heuristic_page_type,
+            extracted_text=extracted_text,
+            max_facts=max_facts,
+            max_equipment=max_equipment,
+            max_graphical_targets=max_graphical_targets,
+        )
         try:
             result = await self.vision_model.generate_json(
-                prompt=(
-                    build_page_understanding_prompt(
-                        page_number=page_number,
-                        heuristic_page_type=(heuristic_page_type),
-                        extracted_text=(extracted_text),
-                        max_facts=max_facts,
-                        max_equipment=max_equipment,
-                        max_graphical_targets=max_graphical_targets,
-                    )
-                    + prompt_suffix
-                ),
-                schema=(
-                    build_page_facts_schema(
-                        max_facts, max_equipment, max_graphical_targets
-                    )
-                ),
+                prompt=prompt + prompt_suffix,
+                schema=schema,
                 num_predict=self.num_predict,
                 seed=100,
                 stage=(f"page_understanding:{page_number}"),
@@ -297,44 +315,25 @@ class UnderstandPage:
                     "Ответ Understanding достиг предела вывода.", metrics=result.metrics
                 )
             payload, metrics = result.payload, result.metrics
+            core = limited_understanding_payload(heuristic_page_type)
+            if not payload or not any(payload.values()):
+                limited_reason = "empty_page_facts"
+            elif any(name not in payload or payload[name] is None for name in core):
+                limited_reason = "partial_page_facts"
         except VisionModelOutputBudgetError as error:
-            payload, metrics = await recover_page_understanding(
-                self.vision_model,
-                page_number=page_number,
-                heuristic_page_type=heuristic_page_type,
-                extracted_text=extracted_text,
-                image_bytes=image_bytes,
-                num_predict=self.num_predict,
-                max_facts=max_facts,
-                max_equipment=max_equipment,
-                max_graphical_targets=max_graphical_targets,
-                initial_error=error,
-                should_stop=should_stop,
-                prompt_suffix=prompt_suffix,
-            )
+            payload = limited_understanding_payload(heuristic_page_type)
+            metrics = error.metrics
+            limited_reason = "output_budget"
+
+        if limited_reason and should_stop is not None and await should_stop():
+            raise SpecificationCancelled
 
         facts = PageFacts(
-            discipline=str(
-                payload.get(
-                    "discipline",
-                    "",
-                )
-            ).strip(),
+            discipline=str(payload.get("discipline") or "").strip(),
             page_type=(
-                str(
-                    payload.get(
-                        "page_type",
-                        "",
-                    )
-                ).strip()
-                or heuristic_page_type
+                str(payload.get("page_type") or "").strip() or heuristic_page_type
             ),
-            summary=str(
-                payload.get(
-                    "summary",
-                    "",
-                )
-            ).strip(),
+            summary=str(payload.get("summary") or "").strip(),
             objects=string_tuple(
                 payload.get(
                     "objects",
@@ -371,14 +370,14 @@ class UnderstandPage:
             equipment_specification=specification,
             graphical_targets=tuple(
                 target
-                for target in payload.get("graphical_targets", [])[
+                for target in (payload.get("graphical_targets") or [])[
                     :max_graphical_targets
                 ]
                 if isinstance(target, dict)
             ),
             document_facts=tuple(
                 fact
-                for raw in payload.get("document_facts", [])[:max_facts]
+                for raw in (payload.get("document_facts") or [])[:max_facts]
                 if (fact := document_fact_from_mapping(raw)) is not None
             ),
         )
@@ -389,7 +388,7 @@ class UnderstandPage:
         if table_facts is not None:
             facts = merge_specification_facts(table_facts, facts)
 
-        if use_document_context:
+        if use_document_context or limited_reason:
             facts = replace(
                 facts,
                 document_facts=merge_text_engineering_facts(
@@ -412,4 +411,5 @@ class UnderstandPage:
         return (
             facts,
             metrics,
+            limited_reason,
         )

@@ -11,17 +11,12 @@ from pdrd_analysis_service.application.engineering_plan import (
     engineering_plan,
     quantity_checks,
 )
-from pdrd_analysis_service.application.ports.vision_model import (
-    VisionModelOutputBudgetError,
-)
 from pdrd_analysis_service.application.prompts import build_finalization_prompt
-from pdrd_analysis_service.application.understanding_recovery import (
-    recover_page_understanding,
-)
 from pdrd_analysis_service.application.use_cases.document_context import (
     merge_cross_page_findings,
 )
 from pdrd_analysis_service.application.use_cases.finalization import FinalizeFindings
+from pdrd_analysis_service.application.use_cases.understanding import UnderstandPage
 from pdrd_analysis_service.domain.analysis import DocumentContextSource
 from pdrd_analysis_service.domain.document_context import (
     LocatedDocumentFact,
@@ -34,7 +29,6 @@ from pdrd_analysis_service.domain.engineering_claims import (
 from pdrd_analysis_service.domain.engineering_facts import explicit_design_parameters
 
 from .test_analysis_use_cases import FakeVisionModel, finding, page_facts
-from .test_analysis_use_cases import metrics as generation_metrics
 from .test_engineering_review import _fact
 
 
@@ -274,8 +268,11 @@ def test_finalization_receives_object_modes_without_neighbouring_tag():
     assert '"identifier":"S70"' not in prompt
 
 
-async def test_output_budget_recovery_retains_graphical_targets_without_d():
-    """Разделение переполненного ответа сохраняет целевое чтение и не включает межстраничный D."""
+async def test_compact_understanding_retains_graphical_targets_without_d():
+    """Основной запрос сохраняет целевое чтение без D; незаданная область не вызывает crop."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
     target = {
         "object_ref": "S7",
         "kind": "connection",
@@ -293,26 +290,25 @@ async def test_output_budget_recovery_retains_graphical_targets_without_d():
                 "connections": [],
                 "labels": [],
                 "normative_queries": [],
+                "graphical_targets": [target],
             },
-            {"graphical_targets": [target]},
         ]
     )
-    payload, _ = await recover_page_understanding(
+    facts, metrics = await UnderstandPage(
         model,
+        1500,
+        image_cropper=SimpleNamespace(crop=AsyncMock()),
+        max_graphical_crops=1,
+    ).execute(
         page_number=7,
         heuristic_page_type="drawing",
         extracted_text="S7",
         image_bytes=b"render",
-        num_predict=1500,
-        max_facts=0,
-        max_equipment=0,
-        max_graphical_targets=1,
-        initial_error=VisionModelOutputBudgetError(
-            "budget", metrics=generation_metrics()
-        ),
+        use_document_context=False,
     )
-    assert payload["graphical_targets"] == [target] and "document_facts" not in payload
-    assert model.call_count == 2
+    assert facts.graphical_targets == (target,) and not facts.document_facts
+    assert model.call_count == 1
+    assert metrics.as_dict()["understanding"]["recovery_count"] == 0
 
 
 def test_trace_identity_distinguishes_same_comment_on_other_page():

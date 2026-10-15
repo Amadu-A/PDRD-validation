@@ -6,6 +6,9 @@ from dataclasses import asdict
 from pathlib import Path
 
 import pytest
+from pdrd_analysis_service.application.ports.vision_model import (
+    VisionModelOutputBudgetError,
+)
 from pdrd_analysis_service.application.use_cases.understanding import UnderstandPage
 from pdrd_analysis_service.domain.analysis import GenerationMetrics, GenerationResult
 from pdrd_analysis_service.domain.document_context import (
@@ -121,3 +124,68 @@ async def test_real_255_rows_and_131_positions_are_programmatic_and_complete(
     assert all(not stage.startswith("page_understanding:") for stage in model.calls)
     assert discover_conflicts(tuple(located), max_candidates=24) == ()
     assert sum(len(facts.equipment_specification["items"]) for facts in outputs) == 131
+
+
+@pytest.mark.parametrize("d,eq", [(True, True), (True, False), (False, True)])
+async def test_real_31_page_pdf_survives_overflow_without_recovery_or_table_loss(
+    pages, d, eq
+):
+    """Настоящий PDF-reader сохраняет 255 строк и 131 позицию при отказе всех основных VLM-ответов."""
+
+    class OverflowVision(NoTableVision):
+        """Обрезает основной ответ; существующее уточнение спорных строк оставляет прежним."""
+
+        async def generate_json(self, **request):
+            """Ни один recovery-запрос не получает имитированного успешного ответа."""
+            if request["stage"].startswith("page_understanding:"):
+                self.calls.append(request["stage"])
+                assert ":recovery:" not in request["stage"]
+                raise VisionModelOutputBudgetError(
+                    "overflow",
+                    metrics=GenerationMetrics(
+                        1, "length", 4000, 1, 0, 100, 4000, 20, 0
+                    ),
+                )
+            return await super().generate_json(**request)
+
+    provider = OverflowVision()
+    results, diagnostics = [], []
+    for page in pages:
+        facts, usage = await UnderstandPage(provider, 4000).execute(
+            page_number=page.number,
+            heuristic_page_type=page.page_type,
+            extracted_text=page.text,
+            image_bytes=page.rendered_png,
+            equipment_specification=page.equipment_specification,
+            use_document_context=d,
+            use_equipment_web_search=eq,
+        )
+        results.append(facts)
+        diagnostic = usage.as_dict()["understanding"]
+        diagnostics.append(diagnostic)
+        assert (
+            diagnostic["main_request_count"] <= 1 and diagnostic["recovery_count"] == 0
+        )
+        if diagnostic["route"] != "pdf_table":
+            assert (
+                diagnostic["result"] == "incomplete"
+                and diagnostic["limited_reason"] == "output_budget"
+            )
+        if page.equipment_specification:
+            assert (
+                facts.equipment_specification["raw_rows"]
+                == page.equipment_specification["raw_rows"]
+            )
+            assert [
+                item["quantity"] for item in facts.equipment_specification["items"]
+            ] == [item["quantity"] for item in page.equipment_specification["items"]]
+        assert PageFactsPayload.model_validate(asdict(facts)).to_domain() == facts
+    assert len(results) == 31
+    tables = [facts for facts in results if facts.equipment_specification]
+    assert (
+        sum(facts.equipment_specification["raw_row_count"] for facts in tables) == 255
+    )
+    assert sum(len(facts.equipment_specification["items"]) for facts in tables) == 131
+    assert sum(diagnostic["main_request_count"] for diagnostic in diagnostics) == sum(
+        stage.startswith("page_understanding:") for stage in provider.calls
+    )

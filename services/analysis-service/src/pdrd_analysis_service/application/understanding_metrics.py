@@ -1,15 +1,16 @@
 # services/analysis-service/src/pdrd_analysis_service/application/understanding_metrics.py
 
-"""Считает обращения Understanding, включая уточнения, восстановление и неудачные попытки."""
+"""Разделяет основной Understanding, уточнения, переполнения, кеш и физические попытки."""
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, replace
 
 from pdrd_analysis_service.application.ports.vision_model import (
-    VisionModelError,
     VisionModelOutputBudgetError,
 )
+from pdrd_analysis_service.application.vision_execution import current_vision_execution
 from pdrd_analysis_service.domain.analysis import GenerationMetrics
 
 logger = logging.getLogger(__name__)
@@ -24,20 +25,29 @@ class UnderstandingMeasurements:
         self.metrics = []
         self.calls = 0
         self.recoveries = 0
+        self.logical_requests = 0
+        self.main_requests = 0
+        self.output_budgets = 0
         self.unknown_usage = False
         self.cache_hits = 0
 
     async def generate_json(self, **request):
         """Учитывает метрики исчерпанного ответа, не сохраняя его текст."""
+        self.logical_requests += 1
+        stage = request.get("stage", "")
+        self.recoveries += ":recovery:" in stage
+        self.main_requests += (
+            stage.startswith("page_understanding:") and ":recovery:" not in stage
+        )
         try:
             result = await self.delegate.generate_json(**request)
-        except VisionModelError as error:
-            self.recoveries += isinstance(error, VisionModelOutputBudgetError)
-            self._record(error.metrics)
+        except (Exception, asyncio.CancelledError) as error:
+            self.output_budgets += isinstance(error, VisionModelOutputBudgetError)
+            self._record(getattr(error, "metrics", None))
             raise
         self._record(result.metrics)
         if result.metrics is not None and result.metrics.done_reason == "length":
-            self.recoveries += 1
+            self.output_budgets += 1
         return result
 
     def _record(self, metrics):
@@ -59,6 +69,8 @@ class UnderstandingMeasurements:
 
     def result(self, diagnostics: dict) -> GenerationMetrics:
         """Возвращает суммарные известные затраты и безопасную диагностику листа."""
+        execution = current_vision_execution.get()
+        diagnostics["job"] = execution.job_key if execution is not None else "unscoped"
 
         def total(field):
             """Не интерпретирует неизвестную метрику как подтверждённый ноль."""
@@ -70,8 +82,8 @@ class UnderstandingMeasurements:
         result = UnderstandingMetrics(
             attempt=self.calls,
             done_reason=(
-                "failed"
-                if diagnostics.get("result") == "failed"
+                diagnostics["result"]
+                if diagnostics.get("result") in {"failed", "cancelled"}
                 else self.metrics[-1].done_reason
                 if self.metrics
                 else "unknown"
@@ -89,8 +101,11 @@ class UnderstandingMeasurements:
             diagnostics=diagnostics,
         )
         diagnostics.update(
-            vlm_call_count=self.calls,
+            vlm_call_count=None if self.unknown_usage else self.calls,
             recovery_count=self.recoveries,
+            main_request_count=self.main_requests,
+            logical_request_count=self.logical_requests,
+            output_budget_count=self.output_budgets,
             cache_hits=self.cache_hits,
             input_tokens=result.prompt_eval_count,
             output_tokens=result.eval_count,

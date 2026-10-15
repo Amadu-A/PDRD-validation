@@ -1,219 +1,233 @@
 # services/analysis-service/tests/unit/test_understanding_recovery.py
 
-"""Восстановление Understanding сохраняет D/EQ, лимиты, отмену и исходный контекст."""
+"""Продолжение Understanding после overflow без recovery, выдуманных фактов и потери программных данных."""
 
+import asyncio
+import json
 from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from pdrd_analysis_service.application.ports.vision_model import (
     VisionModelError,
     VisionModelOutputBudgetError,
 )
-from pdrd_analysis_service.application.understanding_recovery import (
-    recover_page_understanding,
-)
 from pdrd_analysis_service.application.use_cases.understanding import UnderstandPage
+from pdrd_analysis_service.application.vision_execution import AnalysisCancelledError
 from pdrd_analysis_service.domain.analysis import GenerationMetrics, GenerationResult
 from pdrd_analysis_service.domain.equipment_specification import SpecificationCancelled
+from pdrd_analysis_service.domain.specification_facts import (
+    specification_document_facts,
+)
+
+from .test_specification_page_facts import routed_specification
 
 
-def metrics(reason="stop"):
-    """Возвращает измеримые затраты каждого вызова, включая неудачные."""
-    return GenerationMetrics(1, reason, 3200, 10, 1, 100, 200, 300, 0)
+def metrics(reason="length"):
+    """Учитывает две физические попытки одного логического запроса адаптера."""
+    return GenerationMetrics(
+        2, reason, 9600, 100, 0, 300, 9600, 500, 0, slot_wait_ms=80
+    )
 
 
-class Model:
-    """Проверяет контракт схемы и отдаёт последовательные атомарные записи."""
+def model(response=None, error=None):
+    """Не разрешает скрытую последовательность восстановительных ответов."""
+    return SimpleNamespace(
+        generate_json=AsyncMock(return_value=response, side_effect=error)
+    )
 
-    def __init__(self, overflow_capacity=None, light_overflow=False):
-        """Настраивает границу переполнения для уменьшения порций."""
-        self.calls = []
-        self.offsets = {"document_facts": 0, "equipment_identities": 0}
-        self.overflow_capacity = overflow_capacity
-        self.light_overflow = light_overflow
 
-    async def generate_json(self, **kwargs):
-        """Неполный ответ никогда не выдаётся за подтверждённые факты."""
-        self.calls.append(kwargs)
-        fields = kwargs["schema"]["properties"]
-        if ":recovery:" not in kwargs["stage"] or (
-            self.light_overflow and len(fields) == 7
-        ):
-            raise VisionModelOutputBudgetError(
-                "Переполнение", metrics=metrics("length")
-            )
-        payload = {}
-        for name, schema in fields.items():
-            if name in self.offsets:
-                capacity = schema["maxItems"]
-                if (
-                    self.overflow_capacity is not None
-                    and capacity > self.overflow_capacity
-                ):
-                    raise VisionModelOutputBudgetError(
-                        "Переполнение порции", metrics=metrics("length")
-                    )
-                start = self.offsets[name]
-                self.offsets[name] += capacity
-                if name == "document_facts":
-                    payload[name] = [
-                        {
-                            "kind": "equipment",
-                            "subject_name": f"Узел {i}",
-                            "evidence_text": f"Модель М-{i}",
-                        }
-                        for i in range(start, start + capacity)
-                    ]
-                else:
-                    payload[name] = [
-                        {
-                            "manufacturer": "",
-                            "model": f"М-{i}",
-                            "status": "needs_review",
-                            "evidence_text": f"Модель М-{i}",
-                        }
-                        for i in range(start, start + capacity)
-                    ]
-            else:
-                payload[name] = [] if schema.get("type") == "array" else "Схема"
-        return GenerationResult(payload=payload, metrics=metrics())
+async def understand(provider, *, d=True, eq=False, text="", source=None, stop=None):
+    """Запускает настоящий сценарий с независимыми флагами и сохранённой спецификацией."""
+    return await UnderstandPage(
+        provider, 3200, image_cropper=SimpleNamespace(crop=AsyncMock())
+    ).execute(
+        page_number=25,
+        heuristic_page_type="drawing",
+        extracted_text=text,
+        image_bytes=b"original-image",
+        use_document_context=d,
+        use_equipment_web_search=eq,
+        equipment_specification=source,
+        should_stop=stop,
+    )
 
 
 @pytest.mark.parametrize(
     "d,eq", [(True, True), (True, False), (False, True), (False, False)]
 )
-async def test_budget_recovery_preserves_independent_features_and_metrics(d, eq):
-    """Прежние лимиты 12/40 достигаются порциями без потери отдельных моделей."""
-    model = Model()
-    facts, total = await UnderstandPage(model, 3200).execute(
-        page_number=20,
-        heuristic_page_type="scheme",
-        image_bytes=b"same-image",
-        extracted_text="\n".join(f"Модель М-{i}" for i in range(40)),
-        use_document_context=d,
-        use_equipment_web_search=eq,
-    )
-    assert len(facts.document_facts) == (12 if d else 0)
-    assert len(facts.equipment_identities) == (40 if eq else 0)
-    assert all(call["image_bytes"] == b"same-image" for call in model.calls)
-    assert total.eval_count == 200 * len(model.calls)
-    assert total.requested_num_predict == 3200 * len(model.calls)
-    assert all(call["num_predict"] == 3200 for call in model.calls)
-    if not d and not eq:
-        assert "core-fields" in model.calls[1]["stage"]
-
-
-async def test_adaptive_sizes_and_explicit_failure_for_single_record():
-    """Не повторяет одинаковый переполненный запрос; минимум — одна запись."""
-    model = Model(overflow_capacity=1)
-    payload, _ = await recover_page_understanding(
-        model,
-        page_number=20,
-        heuristic_page_type="scheme",
-        extracted_text="М-1",
-        image_bytes=b"image",
-        num_predict=3200,
-        max_facts=4,
-        max_equipment=0,
-        initial_error=VisionModelOutputBudgetError("bulk"),
-    )
-    sizes = [
-        call["schema"]["properties"]["document_facts"]["maxItems"]
-        for call in model.calls
-        if "document_facts" in call["schema"]["properties"]
-    ]
-    assert sizes[:3] == [4, 2, 1]
-    assert len(payload["document_facts"]) == 4
-    with pytest.raises(VisionModelOutputBudgetError):
-        await recover_page_understanding(
-            Model(overflow_capacity=0),
-            page_number=20,
-            heuristic_page_type="scheme",
-            extracted_text="",
-            image_bytes=b"image",
-            num_predict=3200,
-            max_facts=4,
-            max_equipment=0,
-            initial_error=VisionModelOutputBudgetError("bulk"),
+@pytest.mark.parametrize("length_payload", [False, True])
+async def test_overflow_has_one_main_request_and_no_recovery(d, eq, length_payload):
+    """Ни исключение, ни валидный JSON с length не запускают восстановление или выдуманные цели crop."""
+    usage = metrics()
+    provider = model(
+        GenerationResult(
+            {
+                "summary": "НЕДОСТОВЕРНЫЙ ОТВЕТ",
+                "graphical_targets": [{"object_ref": "FAKE"}],
+            },
+            usage,
         )
-
-
-async def test_core_overflow_splits_fields_and_cancel_stops_before_gpu():
-    """Облегчённое ядро делится по полям; отмена не запускает очередное обращение."""
-    model = Model(light_overflow=True)
-    payload, _ = await recover_page_understanding(
-        model,
-        page_number=20,
-        heuristic_page_type="scheme",
-        extracted_text="",
-        image_bytes=b"image",
-        num_predict=3200,
-        max_facts=1,
-        max_equipment=0,
-        initial_error=VisionModelOutputBudgetError("bulk"),
+        if length_payload
+        else None,
+        None
+        if length_payload
+        else VisionModelOutputBudgetError("overflow", metrics=usage),
     )
-    assert payload["summary"] == "Схема" and len(payload["document_facts"]) == 1
+    facts, total = await understand(provider, d=d, eq=eq)
+    provider.generate_json.assert_awaited_once()
+    request = provider.generate_json.await_args.kwargs
+    assert request["stage"] == "page_understanding:25"
+    assert request["image_bytes"] == b"original-image"
+    assert ("document_facts" in request["schema"]["properties"]) is d
+    assert ("equipment_identities" in request["schema"]["properties"]) is eq
+    assert "graphical_targets" in request["schema"]["properties"]
+    assert facts.page_type == "drawing" and facts.summary == facts.discipline == ""
+    assert not any(
+        (
+            facts.objects,
+            facts.labels,
+            facts.connections,
+            facts.normative_queries,
+            facts.document_facts,
+            facts.equipment_identities,
+            facts.graphical_targets,
+        )
+    )
+    assert (
+        total.attempt == 2
+        and total.eval_count == 9600
+        and total.prompt_eval_count == 300
+    )
+    assert total.slot_wait_ms == 80 and total.requested_num_predict == 9600
+    diagnostic = total.as_dict()["understanding"]
+    assert diagnostic["main_request_count"] == diagnostic["logical_request_count"] == 1
+    assert diagnostic["recovery_count"] == 0 and diagnostic["output_budget_count"] == 1
+    assert (
+        diagnostic["result"] == "incomplete"
+        and diagnostic["limited_reason"] == "output_budget"
+    )
 
-    async def cancelled():
-        """Имитирует подтверждённую отмену задания."""
-        return True
 
-    fresh = Model()
+@pytest.mark.parametrize(
+    "d,eq", [(True, True), (True, False), (False, True), (False, False)]
+)
+async def test_overflow_keeps_literal_engineering_facts_for_both_d_modes(d, eq):
+    """Собственные факты PAGE TEXT сохраняются без выдуманной визуальной области или внешних источников."""
+    text = "Назначение системы: водоснабжение (В2). Расчётный расход принят 10 л/с."
+    provider = model(error=VisionModelOutputBudgetError("overflow", metrics=metrics()))
+    facts, result = await understand(provider, d=d, eq=eq, text=text)
+    assert len(facts.document_facts) == 2
+    assert all(
+        fact.extraction_method == "pdf_text"
+        and fact.source_pages == (25,)
+        and not fact.visual_regions
+        for fact in facts.document_facts
+    )
+    assert {fact.value_raw for fact in facts.document_facts} == {"водоснабжение", "10"}
+    diagnostic = result.as_dict()["understanding"]
+    assert diagnostic["programmatic_facts"] == diagnostic["text_facts"] == 2
+    assert diagnostic["vlm_facts"] == 0
+    assert facts.normative_queries == facts.equipment_identities == ()
+    assert provider.generate_json.await_count == 1
+
+
+@pytest.mark.parametrize("d,eq", [(True, True), (True, False), (False, True)])
+async def test_mixed_overflow_keeps_every_table_row_quantity_and_eq_model(d, eq):
+    """65 строк не обрезаются лимитом 12 VLM-фактов; D и EQ сохраняют отдельные правила."""
+    source = routed_specification("mixed")
+    original = json.loads(json.dumps(source))
+    provider = model(error=VisionModelOutputBudgetError("overflow", metrics=metrics()))
+    facts, result = await understand(
+        provider, d=d, eq=eq, text="ТАБЛИЦА", source=source
+    )
+    assert facts.equipment_specification["raw_rows"] == original["raw_rows"]
+    assert facts.equipment_specification["items"] == original["items"]
+    assert len(facts.objects) == 65 and len(facts.equipment_identities) == (
+        65 if eq else 0
+    )
+    expected = specification_document_facts(source, 25) if d else ()
+    assert facts.document_facts == expected
+    if d:
+        assert [
+            fact.value_raw
+            for fact in facts.document_facts
+            if fact.column_label == "quantity"
+        ] == [str(i) for i in range(1, 66)]
+    assert result.as_dict()["understanding"]["programmatic_facts"] == len(expected)
+    provider.generate_json.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "payload,reason",
+    [
+        ({}, "empty_page_facts"),
+        ({"summary": "Видимый заголовок"}, "partial_page_facts"),
+        (
+            {"summary": None, "document_facts": None, "graphical_targets": None},
+            "empty_page_facts",
+        ),
+    ],
+)
+async def test_empty_or_incomplete_page_facts_do_not_invent_missing_data(
+    payload, reason
+):
+    """Отсутствующие списки и null не превращаются в строки None или фиктивные источники."""
+    provider = model(GenerationResult(payload, replace(metrics("stop"), attempt=1)))
+    facts, result = await understand(provider)
+    assert facts.discipline == "" and facts.page_type == "drawing"
+    assert facts.summary == (payload.get("summary") or "")
+    assert (
+        not facts.document_facts
+        and not facts.normative_queries
+        and not facts.graphical_targets
+    )
+    assert result.as_dict()["understanding"]["limited_reason"] == reason
+    provider.generate_json.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        VisionModelError("network"),
+        RuntimeError("infrastructure"),
+        asyncio.CancelledError(),
+        AnalysisCancelledError("cancelled"),
+    ],
+)
+async def test_real_errors_and_task_cancellation_are_not_success(error, caplog):
+    """Обрабатывается только output budget; сетевой отказ и отмена сохраняют свой тип."""
+    provider = model(error=error)
+    with caplog.at_level("INFO"), pytest.raises(type(error)):
+        await understand(provider)
+    provider.generate_json.assert_awaited_once()
+    diagnostic = json.loads(
+        next(
+            record.message.removeprefix("understanding_page ")
+            for record in caplog.records
+            if record.message.startswith("understanding_page ")
+        )
+    )
+    assert diagnostic["result"] == (
+        "cancelled"
+        if isinstance(error, (asyncio.CancelledError, AnalysisCancelledError))
+        else "failed"
+    )
+    assert diagnostic["recovery_count"] == 0
+
+
+async def test_cancel_after_overflow_prevents_successful_continuation():
+    """Отмена проверяется после переполнения до формирования неполного результата."""
+    provider = model(error=VisionModelOutputBudgetError("overflow", metrics=metrics()))
     with pytest.raises(SpecificationCancelled):
-        await recover_page_understanding(
-            fresh,
-            page_number=20,
-            heuristic_page_type="scheme",
-            extracted_text="",
-            image_bytes=b"image",
-            num_predict=3200,
-            max_facts=1,
-            max_equipment=0,
-            initial_error=VisionModelOutputBudgetError("bulk"),
-            should_stop=cancelled,
-        )
-    assert not fresh.calls
+        await understand(provider, stop=AsyncMock(return_value=True))
+    provider.generate_json.assert_awaited_once()
 
 
-async def test_network_failure_is_not_retried_as_budget_recovery():
-    """Сетевая ошибка не маскируется дополнительными вызовами."""
-
-    class Broken:
-        """Модель с отказом сети до получения ответа."""
-
-        async def generate_json(self, **kwargs):
-            """Сохраняет тип исходной ошибки."""
-            raise VisionModelError("Сеть недоступна")
-
-    with pytest.raises(VisionModelError, match="Сеть недоступна"):
-        await UnderstandPage(Broken(), 3200).execute(
-            page_number=20,
-            heuristic_page_type="scheme",
-            extracted_text="",
-            image_bytes=b"image",
-        )
-
-
-async def test_completed_json_with_length_is_also_recovered():
-    """Валидный JSON с finish_reason=length не завершает проверку молча."""
-
-    class LengthModel(Model):
-        """Первый синтаксически полный ответ всё же достиг предела провайдера."""
-
-        async def generate_json(self, **kwargs):
-            """После первого ответа использует обычное раздельное восстановление."""
-            if not self.calls:
-                self.calls.append(kwargs)
-                return GenerationResult(
-                    {"summary": "Обрезанный смысл"},
-                    replace(metrics(), done_reason="length"),
-                )
-            return await super().generate_json(**kwargs)
-
-    facts, _ = await UnderstandPage(LengthModel(), 3200).execute(
-        page_number=20,
-        heuristic_page_type="scheme",
-        extracted_text="",
-        image_bytes=b"image",
-    )
-    assert facts.summary == "Схема" and len(facts.document_facts) == 12
+async def test_missing_usage_is_not_reported_as_zero_after_overflow():
+    """Неизвестная стоимость не выдаётся за отсутствие расхода GPU."""
+    _, result = await understand(model(error=VisionModelOutputBudgetError("overflow")))
+    assert result.prompt_eval_count is result.eval_count is result.slot_wait_ms is None
+    assert result.as_dict()["understanding"]["vlm_call_count"] is None
+    assert result.as_dict()["understanding"]["limited_reason"] == "output_budget"
