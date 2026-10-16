@@ -23,7 +23,17 @@ def build_understanding_contract(
     )
     fields = schema["properties"]
     if "document_facts" in fields:
-        fields["document_facts"]["items"]["required"] = ["kind", "evidence_text"]
+        fields["document_facts"]["items"]["required"] = [
+            "kind",
+            "subject_type",
+            "identifier",
+            "property_type",
+            "property_name",
+            "value_raw",
+            "unit_raw",
+            "evidence_text",
+            "visual_regions",
+        ]
     if "equipment_identities" in fields:
         fields["equipment_identities"]["items"]["required"] = [
             "model",

@@ -57,6 +57,8 @@ def test_sparse_fact_uses_fewer_tokens_without_changing_domain_meaning():
     full = dict.fromkeys(old["properties"], "")
     full.update(
         kind="parameter",
+        subject_type="equipment",
+        property_type="parameter",
         subject_name="Насос P3",
         identifier="P3",
         property_name="Напор",
@@ -65,8 +67,12 @@ def test_sparse_fact_uses_fewer_tokens_without_changing_domain_meaning():
         evidence_text="P3, напор 48 м",
         visual_regions=[],
     )
-    sparse = {name: value for name, value in full.items() if value}
     definition = compact["properties"]["document_facts"]["items"]
+    sparse = {
+        name: value
+        for name, value in full.items()
+        if value or name in definition["required"]
+    }
     assert (
         set(definition["required"]) <= sparse.keys() <= definition["properties"].keys()
     )

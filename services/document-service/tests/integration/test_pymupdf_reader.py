@@ -3,6 +3,7 @@
 """Integration-тест PyMuPDF adapter."""
 
 import fitz
+import pytest
 from pdrd_document_service.domain.pdf import (
     PdfPageType,
 )
@@ -40,6 +41,36 @@ def build_pdf() -> bytes:
     document.close()
 
     return content
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_vector_lines_share_word_coordinate_system_and_keep_path_provenance(rotation):
+    """Векторные пути используют тот же поворот и масштаб, что и PDF-слова."""
+    document = fitz.open()
+    page = document.new_page(width=400, height=200)
+    page.insert_text((40, 60), "S1 L=15m")
+    page.draw_line((40, 60), (120, 60), color=(0, 0, 1), width=0.5)
+    page.draw_line((120, 60), (120, 140), color=(0, 0, 1), width=2)
+    page.set_rotation(rotation)
+    content = document.tobytes()
+    document.close()
+    result = (
+        PyMuPdfReader(render_max_side=800, text_limit=2000)
+        .extract(content, selected_pages=(1,))
+        .pages[0]
+    )
+    assert len(result.graphic_lines) == 2 and result.text_words
+    assert all(line["id"] for line in result.graphic_lines)
+    assert result.graphic_lines[0]["color"] == [0, 0, 1]
+    with fitz.open(stream=content, filetype="pdf") as reopened:
+        expected = fitz.Point(40, 60) * reopened[0].rotation_matrix
+        line = result.graphic_lines[0]
+        assert line["x1"] == pytest.approx(
+            expected.x / reopened[0].rect.width * 1000, abs=0.001
+        )
+        assert line["y1"] == pytest.approx(
+            expected.y / reopened[0].rect.height * 1000, abs=0.001
+        )
 
 
 def test_reader_extracts_selected_page_png_and_text_geometry() -> None:

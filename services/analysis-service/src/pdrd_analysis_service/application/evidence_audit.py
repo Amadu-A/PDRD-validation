@@ -8,9 +8,11 @@ import re
 from dataclasses import asdict, replace
 
 from pdrd_analysis_service.application.candidate_trace import trace_candidate
+from pdrd_analysis_service.domain.analysis import FindingDraft
 from pdrd_analysis_service.domain.document_context import (
     LocatedDocumentFact,
     document_fact_from_mapping,
+    property_key,
 )
 from pdrd_analysis_service.domain.engineering_assertion import (
     assertion_from_facts,
@@ -51,6 +53,7 @@ def _bind_legacy_context(finding):
         "Назначение системы": r"назначени|наименовани",
         "Расход воды": r"расход",
         "Напор": r"напор",
+        "Абсолютная отметка": r"отметк|высот",
     }
     if prop not in patterns:
         return finding
@@ -66,8 +69,19 @@ def _bind_legacy_context(finding):
             continue
         for index, raw in enumerate(context.get("facts", ()), 1):
             fact = document_fact_from_mapping(raw)
-            if fact is None or not re.search(patterns[prop], fact.property_name, re.I):
+            if fact is None or not re.search(
+                patterns[prop], fact.property_name + " " + property_key(fact), re.I
+            ):
                 continue
+            if not fact.subject_type and prop in {
+                "Диаметр",
+                "Толщина стенки",
+                "Длина",
+                "Абсолютная отметка",
+            }:
+                # Старый компактный контракт разрешал пропуск типа. Такая запись
+                # достаточна для контрдоказательства эквивалентности, но не для подтверждения объекта.
+                fact = replace(fact, subject_type="unclassified")
             roles = candidate_parameter_roles(finding.comment)
             if (
                 types == {"missing_justification"}
@@ -94,6 +108,20 @@ def _bind_legacy_context(finding):
     )
     if len(types) == 1:
         claim_type = next(iter(types))
+    if (
+        claim_type == "missing_justification"
+        and re.search(
+            r"^(?:уточнить|сверить|согласовать)\s+(?:назначение|наименование)\b",
+            finding.comment,
+            re.I,
+        )
+        and not re.search(
+            r"расч[её]т|исходн\w*\s+услов|почему|обоснован|требован",
+            finding.comment,
+            re.I,
+        )
+    ):
+        claim_type = "contradiction"
     assertion = assertion_from_facts(
         tuple(observations), claim_type=claim_type, include_related=True
     )
@@ -104,12 +132,61 @@ def _bind_legacy_context(finding):
     )
 
 
-def audit_findings_evidence(findings, *, page_texts: dict[int, str], stage: str):
+def audit_findings_evidence(
+    findings: tuple[FindingDraft, ...],
+    *,
+    page_texts: dict[int, str],
+    stage: str,
+    located_facts: tuple[LocatedDocumentFact, ...] = (),
+) -> tuple[FindingDraft, ...]:
     """Проверяет все переданные кандидаты без изменения источников, страниц и областей."""
-    return tuple(
-        _audit_finding(finding, page_texts=page_texts, stage=stage)
-        for finding in findings
-    )
+    lookup = {
+        (
+            item.page,
+            item.fact.identifier,
+            item.fact.property_name,
+            item.fact.value_raw,
+            item.fact.evidence_text,
+        ): item.fact
+        for item in located_facts
+    }
+    result = []
+    for finding in findings:
+        finding = _bind_legacy_context(finding)
+        assertion = read_assertion(finding.origin_assertions)
+        if assertion is not None and lookup:
+            observations = tuple(
+                replace(
+                    item,
+                    fact=lookup.get(
+                        (
+                            item.page,
+                            item.fact.identifier,
+                            item.fact.property_name,
+                            item.fact.value_raw,
+                            item.fact.evidence_text,
+                        ),
+                        item.fact,
+                    ),
+                )
+                for item in assertion.observations
+            )
+            if observations != assertion.observations:
+                updated = replace(assertion, observations=observations)
+                finding = replace(
+                    finding,
+                    origin_assertions=(
+                        updated.as_origin(),
+                        *(
+                            {**origin, "origin": "engineering_assertion_history"}
+                            if origin.get("origin") == "engineering_assertion"
+                            else origin
+                            for origin in finding.origin_assertions
+                        ),
+                    ),
+                )
+        result.append(_audit_finding(finding, page_texts=page_texts, stage=stage))
+    return tuple(result)
 
 
 def _source_limits(finding):
@@ -210,11 +287,118 @@ def _audit_finding(finding, *, page_texts, stage):
     """Не считает категорию или решение модели доказательством инженерного противоречия."""
     finding = _bind_legacy_context(finding)
     assertion = read_assertion(finding.origin_assertions)
+    if (
+        assertion is not None
+        and assertion.claim_type == "missing_justification"
+        and assertion.property_key.endswith(":system_purpose")
+        and re.search(
+            r"^(?:уточнить|сверить|согласовать)\s+(?:назначение|наименование)\b",
+            finding.comment,
+            re.I,
+        )
+        and not re.search(
+            r"расч[её]т|исходн\w*\s+услов|почему|обоснован|требован",
+            finding.comment,
+            re.I,
+        )
+    ):
+        assertion = replace(assertion, claim_type="contradiction")
+        finding = replace(
+            finding,
+            origin_assertions=(
+                assertion.as_origin(),
+                *(
+                    {**origin, "origin": "engineering_assertion_history"}
+                    if origin.get("origin") == "engineering_assertion"
+                    else origin
+                    for origin in finding.origin_assertions
+                ),
+            ),
+        )
     implementation_text = diagnostic_language(
         finding.comment + " " + finding.recommendation_draft
     )
     if assertion is None and not implementation_text:
-        return finding
+        from pdrd_analysis_service.domain.project_dependencies import (
+            normative_reference_continuations,
+        )
+
+        continuations = normative_reference_continuations(page_texts)
+        incomplete_ref = re.search(
+            r"неполн\w*\s+(?:нормативн\w*\s+)?ссылк|(?:не\s+указан|отсутствует|без)\s+номер|ссылк\w*[^.!?]{0,30}(?:обрыв|не\s+заверш)",
+            finding.comment,
+            re.I,
+        )
+        resolved = tuple(
+            fact
+            for _, fact in continuations
+            if finding.page in fact.source_pages
+            and literal_contains(
+                finding.comment + " " + finding.evidence, fact.value_raw.split()[0]
+            )
+            and finding.evidence.strip()
+            and any(
+                literal_contains(part["text"], finding.evidence)
+                or literal_contains(finding.evidence, part["text"])
+                for part in fact.source_fragments
+                if part["page"] == finding.page
+            )
+        )
+        if incomplete_ref and resolved:
+            origin = {
+                "origin": AUDIT_ORIGIN,
+                "stage": stage,
+                "status": "counterevidence",
+                "disposition": "diagnostic",
+                "reason_code": "normative_reference_continues_on_next_page",
+                "original": {
+                    "comment": finding.comment,
+                    "evidence": finding.evidence,
+                    "status": finding.status,
+                },
+                "continuations": [asdict(fact) for fact in resolved],
+                "page_texts": {
+                    str(page): text
+                    for page, text in page_texts.items()
+                    if any(page in fact.source_pages for fact in resolved)
+                },
+            }
+            return replace(
+                finding,
+                status="hypothesis",
+                origin_assertions=(*finding.origin_assertions, origin),
+            )
+        pages = {
+            finding.page,
+            *(source.page for source in finding.document_context_basis_sources),
+        }
+        for origin in finding.origin_assertions:
+            context = origin.get("context", {})
+            if isinstance(context, dict) and isinstance(context.get("page"), int):
+                pages.add(context["page"])
+        if re.search(
+            r"\b(?:СП|ГОСТ|СНиП)\b", finding.comment + " " + finding.evidence, re.I
+        ):
+            pages.update((finding.page - 1, finding.page + 1))
+        return replace(
+            finding,
+            origin_assertions=(
+                *(
+                    origin
+                    for origin in finding.origin_assertions
+                    if origin.get("origin") != "engineering_evidence_context"
+                ),
+                {
+                    "origin": "engineering_evidence_context",
+                    "stage": stage,
+                    "page_texts": {
+                        str(page): text
+                        for page, text in page_texts.items()
+                        if page in pages
+                    },
+                },
+            ),
+        )
     # Программные доказательства и арифметика этапа 1 имеют собственную повторную проверку.
     if not implementation_text and (
         (assertion is not None and assertion.claim_type == "arithmetic")
@@ -371,12 +555,12 @@ def _audit_finding(finding, *, page_texts, stage):
     )
 
 
-def finalize_evidence_candidate(finding):
+def finalize_evidence_candidate(finding: FindingDraft) -> FindingDraft:
     """Повторяет проверку сохранённого контекста, включая объединённые страницы двух кандидатов."""
     audits = tuple(
         origin
         for origin in finding.origin_assertions
-        if origin.get("origin") == AUDIT_ORIGIN
+        if origin.get("origin") in {AUDIT_ORIGIN, "engineering_evidence_context"}
     )
     if not audits:
         if diagnostic_language(finding.comment + " " + finding.recommendation_draft):

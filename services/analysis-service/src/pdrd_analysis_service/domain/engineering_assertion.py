@@ -141,6 +141,12 @@ def read_assertion(origins: tuple[dict, ...]) -> EngineeringAssertion | None:
                 assertion = replace(
                     assertion, property_key="relationship:system_purpose"
                 )
+            if observations and len(assertion.conditions) == 7:
+                canonical = scope_key(observations[0].fact)
+                if assertion.conditions[1:] == canonical[1:] and assertion.conditions[
+                    0
+                ] == normalize_label(observations[0].fact.identifier):
+                    assertion = replace(assertion, conditions=canonical)
             if assertion.claim_type not in CLAIM_TYPES or not assertion.observations:
                 return None
             return assertion
@@ -184,10 +190,72 @@ def same_assertion(left: EngineeringAssertion, right: EngineeringAssertion) -> b
     if propositions(left) != propositions(right):
         return False
 
+    from pdrd_analysis_service.domain.physical_identity import comparison_identity
+
+    if any(
+        normalized_value(item.fact) is None
+        for item in (*left.observations, *right.observations)
+    ):
+        return False
+    if comparison_identity((*left.observations, *right.observations)) not in {
+        "not_required",
+        "same_physical_object",
+    }:
+        return False
+
     def anchors(assertion: EngineeringAssertion) -> set[tuple]:
         return {_evidence_key(item) for item in assertion.observations}
 
-    return bool(anchors(left) & anchors(right))
+    return bool(anchors(left) & anchors(right)) or (
+        len(propositions(left)) > 1
+        and any(
+            first.page == second.page
+            and normalized_value(first.fact) == normalized_value(second.fact)
+            and (
+                normalize_label(first.fact.evidence_text)
+                in normalize_label(second.fact.evidence_text)
+                or normalize_label(second.fact.evidence_text)
+                in normalize_label(first.fact.evidence_text)
+            )
+            for first in left.observations
+            for second in right.observations
+        )
+    )
+
+
+def assertion_subsumes(
+    complete: EngineeringAssertion, partial: EngineeringAssertion
+) -> bool:
+    """Поглощает лишь незавершённое сравнение; независимый вопрос обоснования остаётся."""
+    if complete.identity != partial.identity or complete.claim_type != "contradiction":
+        return False
+    from pdrd_analysis_service.domain.physical_identity import comparison_identity
+
+    if comparison_identity((*complete.observations, *partial.observations)) not in {
+        "not_required",
+        "same_physical_object",
+    }:
+        return False
+
+    def propositions(assertion):
+        """Сравнивает исходные стороны, а не формулировки кандидатов."""
+        return {
+            (
+                engineering_object_key(item.fact),
+                property_key(item.fact),
+                scope_key(item.fact),
+                normalized_value(item.fact),
+            )
+            for item in assertion.observations
+        }
+
+    full, part = propositions(complete), propositions(partial)
+    return (
+        len(full) > 1
+        and bool(part)
+        and part < full
+        and all(value[-1] is not None for value in full)
+    )
 
 
 def _evidence_key(item: LocatedDocumentFact) -> tuple:
@@ -228,6 +296,7 @@ def candidate_property(text: str) -> str:
         (r"длин|протяж", "Длина"),
         (r"водоотвед|назначени\w*\s+систем", "Назначение системы"),
         (r"напор", "Напор"),
+        (r"отметк|высот", "Абсолютная отметка"),
         (r"расход", "Расход воды"),
     ):
         if re.search(pattern, text, re.I):

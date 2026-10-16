@@ -198,6 +198,7 @@ async def extract_pdf(
                 page_type=page.page_type,
                 text=page.text,
                 equipment_specification=page.equipment_specification,
+                graphic_lines=list(page.graphic_lines) if include_text_geometry else [],
                 width_points=(page.width_points),
                 height_points=(page.height_points),
                 image_base64=(

@@ -49,6 +49,7 @@ class DocumentPagePayload(BaseModel):
     extracted_text: str
     page_facts: PageFactsPayload
     text_words: list[dict[str, Any]] = Field(default_factory=list)
+    graphic_lines: list[dict[str, Any]] = Field(default_factory=list)
 
     def to_domain(self) -> DocumentPage:
         """Преобразует HTTP payload в application DTO."""
@@ -59,6 +60,7 @@ class DocumentPagePayload(BaseModel):
             summary=facts.summary,
             facts=facts.document_facts,
             text_words=tuple(self.text_words),
+            graphic_lines=tuple(self.graphic_lines),
         )
 
 

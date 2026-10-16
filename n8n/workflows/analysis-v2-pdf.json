@@ -1552,7 +1552,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify(Object.assign({}, $json, { enabled: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context), pages: $json.pages.map((item) => Object.assign({}, item, { text_words: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.page_number))?.text_words ?? [] })) })) }}",
+        "body": "={{ JSON.stringify(Object.assign({}, $json, { enabled: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context), pages: $json.pages.map((item) => Object.assign({}, item, { text_words: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.page_number))?.text_words ?? [], graphic_lines: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.page_number))?.graphic_lines ?? [] })) })) }}",
         "options": {
           "timeout": 1800000
         }
@@ -1644,7 +1644,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({\n  enabled: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context),\n  document_id: $('POST /analysis/v2/pdf').first().json.body.document_id,\n  page_checks: $('Check Norms').first().json.items ?? [],\n  pages: $('Understand Page').all().map((item) => ({\n    page_number: item.json.page_number,\n    extracted_text: item.json.expanded.page.text,\n    page_facts: item.json.facts,\n    text_words: item.json.expanded.page.text_words ?? [],\n  })),\n}) }}",
+        "body": "={{ JSON.stringify({\n  enabled: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context),\n  document_id: $('POST /analysis/v2/pdf').first().json.body.document_id,\n  page_checks: $('Check Norms').first().json.items ?? [],\n  pages: $('Understand Page').all().map((item) => ({\n    page_number: item.json.page_number,\n    extracted_text: item.json.expanded.page.text,\n    page_facts: item.json.facts,\n    text_words: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.json.page_number))?.text_words ?? [],\n    graphic_lines: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.json.page_number))?.graphic_lines ?? [],\n  })),\n}) }}",
         "options": {
           "timeout": 3300000
         }

@@ -23,6 +23,7 @@ from pdrd_analysis_service.application.evidence_audit import (
     finalize_evidence_candidate,
     protected_evidence_question,
 )
+from pdrd_analysis_service.application.final_evidence import audit_final_findings
 from pdrd_analysis_service.application.json_schemas import (
     build_finalization_schema,
 )
@@ -798,13 +799,29 @@ class FinalizeFindings:
                 len(protected),
                 tuple(item.finding_id for item in protected),
             )
+        before_merge_count = len(final_items)
+        final_items, post_rejected = audit_final_findings(final_items, findings)
+        rejected_findings.extend(post_rejected)
+        merged_count = before_merge_count - len(final_items) - len(post_rejected)
         kept_ids = {item.finding_id for item in final_items}
+        merged_into = {
+            origin["finding_id"]: item.finding_id
+            for item in final_items
+            for origin in item.origin_assertions
+            if origin.get("origin") == "merged_finding"
+        }
         reasons_by_id = {
             item["finding_id"]: item.get("reason_code", "model_reject")
             for item in rejected_findings
         }
         for finding in findings:
-            decision = "keep" if finding.finding_id in kept_ids else "reject"
+            decision = (
+                "keep"
+                if finding.finding_id in kept_ids
+                else "merge"
+                if finding.finding_id in merged_into
+                else "reject"
+            )
             for origin in finding.origin_assertions or ({},):
                 trace_candidate(
                     "finalization",
@@ -813,7 +830,10 @@ class FinalizeFindings:
                     decision=decision,
                     reason="semantic_review"
                     if decision == "keep"
+                    else "same_engineering_assertion"
+                    if decision == "merge"
                     else str(reasons_by_id.get(finding.finding_id, "model_reject")),
+                    merged_into=merged_into.get(finding.finding_id),
                     finding_id=finding.finding_id,
                     locations=len(finding.evidence_locations),
                     sources=len(finding.basis_sources)
@@ -901,6 +921,7 @@ class FinalizeFindings:
                 "fallback_count": fallback_count,
                 "deterministic_review_count": len(protected),
                 "candidate_count": candidate_count,
+                "merged_count": merged_count,
                 "kept_count": len(
                     final_items,
                 ),
@@ -1479,7 +1500,14 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
             comment = finding.comment
             recommendation = _fallback_recommendation(finding)
 
-        origins = finding.origin_assertions
+        origins = (
+            *finding.origin_assertions,
+            {
+                "origin": "finalization_model_output",
+                "finding_id": finding.finding_id,
+                "item": dict(item),
+            },
+        )
         assertion = read_assertion(origins)
         if assertion is None and finding.category == "document_consistency":
             normalized_status = "needs_review"

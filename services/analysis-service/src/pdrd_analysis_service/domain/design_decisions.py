@@ -315,6 +315,13 @@ def _grounding(item: LocatedDocumentFact, page_texts: dict[int, str]) -> str:
         return "ambiguous"
     quote = normalize_label(fact.evidence_text)
     text = page_texts.get(item.page, "")
+    if fact.source_fragments and all(
+        isinstance(part.get("page"), int)
+        and normalize_label(part.get("text", ""))
+        and normalize_label(part["text"]) in page_texts.get(part["page"], "")
+        for part in fact.source_fragments
+    ):
+        return "literal_text"
     if quote and quote in text:
         numeric = normalize_label(fact.value_raw).replace(",", ".")
         if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", numeric) and not re.search(
@@ -358,7 +365,21 @@ def _parameter_role(item: DecisionEvidence) -> tuple[str, ...]:
         else ""
     )
     column = normalize_label(fact.column_label)
-    return (*markers, diameter, "column:" + column if column else "")
+    from pdrd_analysis_service.domain.physical_identity import (
+        geometric_property,
+        physical_key,
+    )
+
+    physical = ""
+    if geometric_property(fact):
+        key = physical_key(item.observation)
+        physical = "physical:" + repr(key) if key else "unresolved:" + item.evidence_id
+    return (
+        *markers,
+        diameter,
+        "column:" + column if column else "",
+        *((physical,) if physical else ()),
+    )
 
 
 def _local_page(item: DecisionEvidence, document_context_enabled: bool) -> int | None:

@@ -101,3 +101,57 @@ def _fact(page, *, evidence, **values):
             **values,
         }
     )
+
+
+def normative_reference_continuations(
+    page_texts: dict[int, str],
+) -> tuple[tuple[int, DocumentFact], ...]:
+    """Восстанавливает только буквальное продолжение номера нормы на следующем листе.
+
+    Основная надпись после последней строки не считается продолжением предложения.
+    Номер ищется в начале соседней страницы с допустимым печатным номером листа.
+    """
+    result = []
+    for page, text in sorted(page_texts.items()):
+        next_text = page_texts.get(page + 1, "")
+        end = re.search(
+            r"(?P<quote>[^\n]{0,180}\b(?:согласно|по|требованиям)\s+(?P<code>СП|ГОСТ(?:\s+Р)?|СНиП)\s*)$",
+            text,
+            re.M | re.I,
+        )
+        start = re.match(
+            r"\s*(?:\d{1,3}\s*\n\s*)?(?P<number>\d{1,5}(?:\.\d{2,6})+(?:-\d{2,4})?)\.?\s",
+            next_text,
+        )
+        if end is None or start is None:
+            continue
+        # После ссылки допускается только короткая основная надпись; следующее
+        # содержательное предложение означало бы разрыв не на границе страниц.
+        tail = text[end.end() :]
+        if len(re.sub(r"\s+", " ", tail).strip()) > 450 or re.search(
+            r"[А-Яа-яЁё]{6,}", tail
+        ):
+            continue
+        first = end["quote"].strip()
+        second = start["number"]
+        value = end["code"] + " " + second
+        fact = _fact(
+            page,
+            evidence=first + " " + second,
+            subject_type="normative_reference",
+            identifier=value,
+            property_type="requirement_reference",
+            property_name="Нормативная ссылка",
+            value_raw=value,
+            relation="references",
+            source_fragments=(
+                {"page": page, "text": first},
+                {"page": page + 1, "text": second},
+            ),
+            continuation_marker="adjacent_page_literal",
+        )
+        if fact is not None:
+            from dataclasses import replace
+
+            result.append((page, replace(fact, source_pages=(page, page + 1))))
+    return tuple(result)

@@ -21,7 +21,10 @@ from pdrd_analysis_service.application.engineering_program import (
     program_findings,
     run_engineering_program,
 )
-from pdrd_analysis_service.application.evidence_audit import audit_findings_evidence
+from pdrd_analysis_service.application.evidence_audit import (
+    audit_findings_evidence,
+    evidence_audit,
+)
 from pdrd_analysis_service.application.ports.vision_model import StructuredVisionModel
 from pdrd_analysis_service.domain.analysis import (
     DocumentContextSource,
@@ -41,14 +44,21 @@ from pdrd_analysis_service.domain.document_context import (
 )
 from pdrd_analysis_service.domain.engineering_assertion import (
     assertion_from_facts,
+    assertion_subsumes,
     deterministic_unit_mismatch,
     merge_assertions,
     read_assertion,
     same_assertion,
 )
 from pdrd_analysis_service.domain.engineering_claims import REVIEW_REASON_CODES
+from pdrd_analysis_service.domain.physical_identity import (
+    PdfLineIndex,
+    bind_graphical_fact,
+    pdf_label_facts,
+)
 from pdrd_analysis_service.domain.project_dependencies import (
     explicit_project_dependencies,
+    normative_reference_continuations,
 )
 from pdrd_analysis_service.domain.signal_connections import build_signal_graph
 
@@ -64,6 +74,7 @@ class DocumentPage:
     summary: str
     facts: tuple[DocumentFact, ...]
     text_words: tuple[dict[str, Any], ...] = ()
+    graphic_lines: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,16 +91,59 @@ class DocumentContextOptions:
     max_saved_evidence_sources_per_finding: int = 2400
 
 
-def _located(pages: tuple[DocumentPage, ...]) -> tuple[LocatedDocumentFact, ...]:
+def _located(
+    pages: tuple[DocumentPage, ...], *, link_continuations: bool = True
+) -> tuple[LocatedDocumentFact, ...]:
     """Присваивает фактам физические provenance ID."""
-    return tuple(
-        LocatedDocumentFact(page=page.page, index=index, fact=fact)
+    continuations = (
+        normative_reference_continuations({page.page: page.text for page in pages})
+        if link_continuations
+        else ()
+    )
+    geometries = {page.page: PdfLineIndex(page.graphic_lines) for page in pages}
+    native = {
+        page.page: tuple(
+            fact
+            for fact in pdf_label_facts(
+                page.text_words, page=page.page, page_text=page.text
+            )
+            if not any(
+                old.source_item_id == fact.source_item_id
+                and old.property_name == fact.property_name
+                and old.value_raw == fact.value_raw
+                and old.evidence_text == fact.evidence_text
+                for old in page.facts
+            )
+        )
         for page in pages
-        for index, fact in enumerate(page.facts, start=1)
+    }
+    return tuple(
+        LocatedDocumentFact(
+            page=page.page,
+            index=index,
+            fact=bind_graphical_fact(
+                fact,
+                page=page.page,
+                text_words=page.text_words,
+                graphic_lines=page.graphic_lines,
+                line_index=geometries[page.page],
+            ),
+        )
+        for page in pages
+        for index, fact in enumerate(
+            (
+                *page.facts,
+                *native[page.page],
+                *(fact for number, fact in continuations if number == page.page),
+            ),
+            start=1,
+        )
     )
 
 
-def document_engineering_report(pages, document_id, *, enabled=True):
+def document_engineering_report(
+    pages: tuple[DocumentPage, ...], document_id: str, *, enabled: bool = True
+) -> EngineeringReport:
     """Строит единый программный протокол документа после Understanding, без изменения prompt."""
     from pdrd_analysis_service.domain.calculation_tables import (
         calculation_tables_by_page,
@@ -99,13 +153,14 @@ def document_engineering_report(pages, document_id, *, enabled=True):
         tuple((page.page, page.text_words) for page in pages),
         link_continuations=enabled,
     )
+    located = _located(pages, link_continuations=enabled)
 
     facts = tuple(
         LocatedDocumentFact(page.page, index, fact)
         for page in pages
         for index, fact in enumerate(
             (
-                *page.facts,
+                *(item.fact for item in located if item.page == page.page),
                 *explicit_project_dependencies(page.text, page.page),
                 *tables[page.page],
             ),
@@ -123,7 +178,12 @@ def document_engineering_report(pages, document_id, *, enabled=True):
     )
 
 
-def audit_document_findings(page_findings, report, *, page_texts=None):
+def audit_document_findings(
+    page_findings: dict[int, tuple[FindingDraft, ...]],
+    report: EngineeringReport,
+    *,
+    page_texts: dict[int, str] | None = None,
+) -> dict[int, tuple[FindingDraft, ...]]:
     """Применяет полные табличные контрдоказательства к локальным кандидатам."""
     return {
         page: attach_decision_protocols(
@@ -131,6 +191,9 @@ def audit_document_findings(page_findings, report, *, page_texts=None):
                 audit_engineering_candidates(findings, report),
                 page_texts=page_texts or {},
                 stage="document_evidence_audit",
+                located_facts=tuple(
+                    item.observation for item in report.registry.evidence
+                ),
             )
             if page_texts is not None
             else audit_engineering_candidates(findings, report),
@@ -151,7 +214,8 @@ def build_page_document_context(
     by_number = {page.page: page for page in pages}
     by_subject: dict[str, list[LocatedDocumentFact]] = {}
     by_table: dict[str, list[LocatedDocumentFact]] = {}
-    for fact in _located(pages):
+    located = _located(pages)
+    for fact in located:
         key = subject_key(fact.fact)
         if key:
             by_subject.setdefault(key, []).append(fact)
@@ -163,6 +227,30 @@ def build_page_document_context(
     for page in pages:
         sources: list[dict[str, Any]] = []
         seen: set[str] = set()
+        for item in located:
+            if (
+                item.fact.continuation_marker != "adjacent_page_literal"
+                or page.page not in item.fact.source_pages
+            ):
+                continue
+            for part in item.fact.source_fragments:
+                source_id = f"D-p{part['page']:04d}-continuation-{item.fact_id}"
+                seen.add(source_id)
+                sources.append(
+                    {
+                        "source_id": source_id,
+                        "page": part["page"],
+                        "match_type": "reference_continuation",
+                        "score": 1.0,
+                        "fact_id": item.fact_id,
+                        "subject": item.fact.identifier,
+                        "property": item.fact.property_name,
+                        "scope": "",
+                        "text": item.fact.evidence_text,
+                        "evidence_text": part["text"],
+                        "visual_regions": [],
+                    }
+                )
         for neighbor in (page.page - 1, page.page + 1):
             adjacent = by_number.get(neighbor)
             if adjacent is None:
@@ -553,6 +641,7 @@ class CheckCrossPageConsistency:
         groups = discover_conflicts(
             facts,
             max_candidates=self.options.max_cross_page_candidates,
+            require_physical_identity=True,
         )
         for index, group in enumerate(groups, 1):
             trace_candidate(
@@ -881,7 +970,20 @@ def merge_cross_page_findings(
         ]
         for page, findings in page_findings.items()
     }
-    for cross in (*structured, *cross_findings):
+
+    # Полный вывод обрабатывается последним и сохраняет собственный статус/текст.
+    def strength(finding):
+        """Сохраняет статус и текст более полного инженерного сравнения."""
+        assertion = read_assertion(finding.origin_assertions)
+        audit = evidence_audit(finding) or {}
+        return (
+            len({normalized_value(item.fact) for item in assertion.observations})
+            if assertion
+            else 0,
+            audit.get("disposition") == "supported",
+        )
+
+    for cross in sorted((*structured, *cross_findings), key=strength):
         source_ids = set(cross.document_context_source_ids)
         pages = {source.page for source in cross.document_context_basis_sources}
         duplicates = []
@@ -895,20 +997,30 @@ def merge_cross_page_findings(
                     and right is not None
                     and same_assertion(left, right)
                 )
+                subsumed = (
+                    left is not None
+                    and right is not None
+                    and (evidence_audit(cross) or {}).get("disposition") == "supported"
+                    and assertion_subsumes(right, left)
+                )
                 # Внутренняя диагностика не поглощает полезный вопрос или подтверждённую запись.
                 if (finding.status == "hypothesis") != (cross.status == "hypothesis"):
                     continue
-                if structured_duplicate or (
-                    finding.category == "document_consistency"
-                    and finding.page in pages
-                    and selected
-                    and selected <= source_ids
-                    and normalize_label(finding.object_ref)
-                    == normalize_label(cross.object_ref)
-                    and normalize_label(finding.comment)
-                    == normalize_label(cross.comment)
-                    and normalize_label(finding.evidence)
-                    == normalize_label(cross.evidence)
+                if (
+                    structured_duplicate
+                    or subsumed
+                    or (
+                        finding.category == "document_consistency"
+                        and finding.page in pages
+                        and selected
+                        and selected <= source_ids
+                        and normalize_label(finding.object_ref)
+                        == normalize_label(cross.object_ref)
+                        and normalize_label(finding.comment)
+                        == normalize_label(cross.comment)
+                        and normalize_label(finding.evidence)
+                        == normalize_label(cross.evidence)
+                    )
                 ):
                     duplicates.append(finding)
                     findings.remove(finding)
@@ -1046,9 +1158,25 @@ def merge_cross_page_findings(
             if (
                 assertion is not None
                 and other is not None
-                and same_assertion(assertion, other)
+                and (
+                    same_assertion(assertion, other)
+                    or assertion_subsumes(assertion, other)
+                )
             ):
-                assertion = merge_assertions(assertion, other)
+                if same_assertion(assertion, other):
+                    assertion = merge_assertions(assertion, other)
+                else:
+                    assertion = replace(
+                        assertion,
+                        observations=tuple(
+                            list(assertion.observations)
+                            + [
+                                item
+                                for item in other.observations
+                                if item not in assertion.observations
+                            ]
+                        ),
+                    )
         if assertion is not None:
             merged = replace(
                 merged,

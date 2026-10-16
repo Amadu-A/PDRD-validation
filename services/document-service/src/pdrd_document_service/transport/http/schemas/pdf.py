@@ -67,6 +67,7 @@ class PdfPageResponse(BaseModel):
         default_factory=list,
     )
     equipment_specification: dict[str, Any] | None = None
+    graphic_lines: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ProjectContextTextPageResponse(

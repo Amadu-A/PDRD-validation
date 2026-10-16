@@ -94,6 +94,7 @@ class PdfPage:
     ] = ()
 
     equipment_specification: dict[str, Any] | None = None
+    graphic_lines: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

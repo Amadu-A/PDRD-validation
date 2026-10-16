@@ -246,6 +246,7 @@ async def extract_combined(
         pdf=PdfPageResponse(
             page_number=page.number,
             page_type=page.page_type,
+            graphic_lines=list(page.graphic_lines) if include_text_geometry else [],
             text=page.text,
             width_points=(page.width_points),
             height_points=(page.height_points),

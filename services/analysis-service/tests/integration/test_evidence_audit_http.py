@@ -2,7 +2,7 @@
 
 """Проверка доказательств через существующие HTTP DTO без новых полей и модели."""
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from uuid import uuid4
 
 import httpx
@@ -91,3 +91,117 @@ async def test_http_diagnostics_and_specific_question_survive_roundtrip_without_
         diagnostic = body["metrics"]["rejected_findings"][0]
         assert diagnostic["finding_id"] == "false-size"
         assert len(diagnostic["candidate"]["origin_assertions"][0]["observations"]) == 2
+
+
+async def test_http_vector_provenance_is_replayed_without_assuming_cross_page_segment_identity():
+    """Настоящие HTTP DTO сохраняют путь выноски; одинаковый тег на двух листах не даёт нарушения."""
+    region = {"x_min": 10, "y_min": 10, "x_max": 20, "y_max": 20, "confidence": 0.9}
+    observations = (
+        fact("15", prop="Длина", unit="м", visual_regions=[region]),
+        fact("16", 2, prop="Длина", unit="м", visual_regions=[region]),
+    )
+    app, model = build_app(), ForbiddenVision()
+    app.state.container = replace(
+        app.state.container,
+        check_cross_page_consistency=CheckCrossPageConsistency(
+            model, _options(app.state.container)
+        ),
+        finalize_findings=FinalizeFindings(model, 2000, 8, 1000, 0.5),
+    )
+    pages = []
+    for item in observations:
+        words = [
+            {
+                "text": "S1",
+                "block_no": 1,
+                "line_no": 0,
+                "word_no": 0,
+                "bbox": {"x_min": 1, "y_min": 10, "x_max": 9, "y_max": 20},
+            },
+            {
+                "text": item.fact.value_raw,
+                "block_no": 1,
+                "line_no": 0,
+                "word_no": 1,
+                "bbox": region,
+            },
+        ]
+        lines = [
+            {
+                "id": "leader",
+                "x1": 20,
+                "y1": 15,
+                "x2": 40,
+                "y2": 30,
+                "width": 0.2,
+                "color": [0, 0, 1],
+            },
+            {
+                "id": "pipe",
+                "x1": 30,
+                "y1": 30,
+                "x2": 80,
+                "y2": 30,
+                "width": 1,
+                "color": [0, 0, 1],
+            },
+        ]
+        pages.append(
+            {
+                "page_number": item.page,
+                "extracted_text": item.fact.evidence_text,
+                "page_facts": {
+                    **facts_payload(),
+                    "document_facts": [asdict(item.fact)],
+                },
+                "text_words": words,
+                "graphic_lines": lines,
+            }
+        )
+    original = candidate(*observations)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/v1/document-context/check-consistency",
+            json={
+                "enabled": True,
+                "document_id": str(uuid4()),
+                "pages": pages,
+                "page_checks": [
+                    {
+                        "page_number": 1,
+                        "result": {
+                            "summary": "",
+                            "metrics": {},
+                            "findings": [
+                                _finding_draft_payload(original).model_dump(mode="json")
+                            ],
+                        },
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200, response.text
+        findings = response.json()["items"][0]["result"]["findings"]
+        assert len(findings) == 1 and findings[0]["status"] == "needs_review"
+        assertion = next(
+            origin
+            for origin in findings[0]["origin_assertions"]
+            if origin.get("origin") == "engineering_assertion"
+        )
+        assert all(
+            item["fact"]["geometry_binding"]["status"] == "bound"
+            for item in assertion["observations"]
+        )
+        assert {
+            item["fact"]["geometry_binding"]["page"]
+            for item in assertion["observations"]
+        } == {1, 2}
+        result = await client.post(
+            "/internal/v1/findings/finalize",
+            json={"findings": findings, "experience_by_finding": {}},
+        )
+        assert result.status_code == 200, result.text
+        assert result.json()["metrics"]["vlm_call_count"] == 0
+        assert result.json()["findings"][0]["status"] == "needs_review"

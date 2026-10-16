@@ -273,6 +273,9 @@ async def test_workflow_raw_body_reaches_page_context_api_with_user_switch(switc
                     "document_facts": [fact_payload(value)],
                 },
                 "text_words": [{"text": value, "x0": 10, "y0": 20, "x1": 40, "y1": 30}],
+                "graphic_lines": [
+                    {"id": f"path-{number}", "x1": 10, "y1": 20, "x2": 40, "y2": 30}
+                ],
             }
             for number, value in [(7, "-37"), (10, "-35")]
         ],
@@ -285,12 +288,20 @@ async def test_workflow_raw_body_reaches_page_context_api_with_user_switch(switc
     current = {
         **request,
         "pages": [
-            {key: value for key, value in page.items() if key != "text_words"}
+            {
+                key: value
+                for key, value in page.items()
+                if key not in {"text_words", "graphic_lines"}
+            }
             for page in request["pages"]
         ],
     }
     source_pages = [
-        {"page_number": page["page_number"], "text_words": page["text_words"]}
+        {
+            "page_number": page["page_number"],
+            "text_words": page["text_words"],
+            "graphic_lines": page["graphic_lines"],
+        }
         for page in reversed(request["pages"])
     ]
     body = document_context_workflow_body(current, switch, source_pages)

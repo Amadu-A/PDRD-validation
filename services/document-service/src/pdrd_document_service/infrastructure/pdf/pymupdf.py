@@ -177,7 +177,54 @@ class PyMuPdfReader:
             rendered_png=rendered_png,
             text_words=text_words,
             equipment_specification=specification,
+            graphic_lines=self._extract_graphic_lines(page),
         )
+
+    @staticmethod
+    def _extract_graphic_lines(page: fitz.Page) -> tuple[dict, ...]:
+        """Читает прямые PDF-пути для проверки выносок в системе координат слов.
+
+        Мелкие штрихи шрифта не используются как линии привязки. Текст, исходное
+        изображение, факты и области при этом сохраняются без изменений.
+        """
+        result = []
+        for path_index, path in enumerate(page.get_drawings()):
+            if path.get("color") is None:
+                continue
+            for item_index, item in enumerate(path["items"]):
+                if item[0] != "l":
+                    continue
+                first, second = item[1:3]
+                if abs(second - first) < 4:
+                    continue
+                if page.rotation:
+                    first, second = (
+                        first * page.rotation_matrix,
+                        second * page.rotation_matrix,
+                    )
+                values = (
+                    first.x / page.rect.width * 1000,
+                    first.y / page.rect.height * 1000,
+                    second.x / page.rect.width * 1000,
+                    second.y / page.rect.height * 1000,
+                )
+                if not all(0 <= value <= 1000 for value in values):
+                    continue
+                result.append(
+                    {
+                        "id": f"path-{path_index}-line-{item_index}",
+                        **dict(
+                            zip(
+                                ("x1", "y1", "x2", "y2"),
+                                (round(value, 3) for value in values),
+                                strict=True,
+                            )
+                        ),
+                        "width": round(float(path.get("width") or 0), 3),
+                        "color": list(path["color"]),
+                    }
+                )
+        return tuple(result)
 
     def _extract_text_words(
         self,

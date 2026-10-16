@@ -47,6 +47,12 @@ class DocumentFact:
     calculation_rule: str = ""
     calculation_evidence: str = ""
     column_binding: str = ""
+    object_kind: str = ""
+    value_role: str = ""
+    segment_start: str = ""
+    segment_end: str = ""
+    geometry_binding: dict[str, Any] | None = None
+    source_fragments: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +110,13 @@ _UNIT_FACTORS: dict[str, tuple[str, Decimal]] = {
 }
 
 _PROPERTY_ALIASES = {
+    "pipe_diameter": "Диаметр",
+    "casing_diameter": "Диаметр",
+    "dry_pipe_diameter": "Диаметр",
+    "pipe_length": "Длина",
+    "casing_length": "Длина",
+    "connection_elevation": "Абсолютная отметка",
+    "system_type": "system_purpose",
     "расчетная температура наружного воздуха": "design_outdoor_temperature",
     "температура наружного воздуха расчетная": "design_outdoor_temperature",
     "назначение системы": "system_purpose",
@@ -135,7 +148,7 @@ def property_key(fact: DocumentFact) -> str:
         return ""
     if _PROPERTY_ALIASES.get(name) == "system_purpose":
         return "relationship:system_purpose"
-    return f"{kind}:{_PROPERTY_ALIASES.get(name, name)}"
+    return f"{kind}:{normalize_label(_PROPERTY_ALIASES.get(name, name))}"
 
 
 def scope_key(fact: DocumentFact) -> tuple[str, ...]:
@@ -150,6 +163,8 @@ def scope_key(fact: DocumentFact) -> tuple[str, ...]:
             fact.scope_condition,
         )
     )
+    if scopes[0] == normalize_label(fact.identifier):
+        scopes = ("", *scopes[1:])
     # Разные карты ОСР описывают разные расчётные условия даже при пропущенном scope.
     seismic_map = re.search(
         r"\bоср[-\s\d]*(?:[-\s])?([abcавс])\b", fact.evidence_text, re.I
@@ -169,6 +184,12 @@ def normalized_value(fact: DocumentFact) -> tuple[str, str] | None:
     # Знаки умножения в типоразмере не меняют наружный диаметр и стенку.
     raw = re.sub(r"(?<=\d)[xх×*](?=\d)", "x", raw).replace(",", ".")
     unit = normalize_label(fact.unit_raw).replace(" ", "")
+    inline = re.fullmatch(
+        r"(?P<number>[+-]?\d+(?:\.\d+)?)(?P<unit>м[³3]/(?:ч|сут)|л/с|м/с|мм|м[³3]|м)",
+        raw,
+    )
+    if inline and (not unit or unit == inline["unit"]):
+        raw, unit = inline["number"], inline["unit"]
     if not raw or re.search(r"\?|неразбор|нечита|неясн", raw):
         return None
     nominal = re.fullmatch(r"(?:dn|ду)(\d+(?:\.\d+)?)", raw)
@@ -180,7 +201,7 @@ def normalized_value(fact: DocumentFact) -> tuple[str, str] | None:
             str(Decimal(value).normalize()) for value in outer[1].split("x")
         )
     prop = normalize_label(fact.property_name)
-    if "диаметр" in prop:
+    if "диаметр" in prop or "diameter" in prop:
         value = str(Decimal(raw).normalize()) if _NUMBER.fullmatch(raw) else raw
         if re.search(r"условн|номиналь|\b(?:dn|ду)\b", prop):
             return "nominal_diameter", value
@@ -223,6 +244,7 @@ def discover_conflicts(
     facts: tuple[LocatedDocumentFact, ...],
     *,
     max_candidates: int,
+    require_physical_identity: bool = False,
 ) -> tuple[ConflictGroup, ...]:
     """Ищет ограниченное число групп без попарного VLM-сравнения страниц."""
     groups: dict[tuple[str, str, tuple[str, ...]], list[LocatedDocumentFact]] = {}
@@ -235,7 +257,20 @@ def discover_conflicts(
         value = normalized_value(fact)
         if not subject or not prop or value is None:
             continue
-        groups.setdefault((subject, prop, scope_key(fact)), []).append(located)
+        physical = None
+        if require_physical_identity:
+            from pdrd_analysis_service.domain.physical_identity import (
+                geometric_property,
+                physical_key,
+            )
+
+            if geometric_property(fact):
+                physical = physical_key(located)
+                if physical is None:
+                    continue
+        groups.setdefault(
+            (subject, prop, (*scope_key(fact), repr(physical))), []
+        ).append(located)
 
     conflicts: list[ConflictGroup] = []
     for (subject, prop, _scope), members in groups.items():
@@ -475,6 +510,18 @@ def document_fact_from_mapping(raw: object) -> DocumentFact | None:
             if isinstance(region, dict)
         ),
         extraction_method=str(raw.get("extraction_method") or ""),
+        object_kind=str(raw.get("object_kind") or ""),
+        value_role=str(raw.get("value_role") or ""),
+        segment_start=str(raw.get("segment_start") or ""),
+        segment_end=str(raw.get("segment_end") or ""),
+        geometry_binding=dict(raw["geometry_binding"])
+        if isinstance(raw.get("geometry_binding"), dict)
+        else None,
+        source_fragments=tuple(
+            dict(part)
+            for part in _provenance_values(raw, "source_fragments")
+            if isinstance(part, dict)
+        ),
         **{
             key: str(raw.get(key) or "")
             for key in (

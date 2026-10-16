@@ -90,6 +90,16 @@ def bind_evidence(
     if text is None:
         return result("source_unavailable", "physical_page_unavailable")
     quote = fact.evidence_text
+    if fact.source_fragments:
+        if not all(
+            isinstance(part.get("page"), int)
+            and literal_key(part.get("text", ""))
+            and literal_key(part["text"])
+            in literal_key(page_texts.get(part["page"], ""))
+            for part in fact.source_fragments
+        ):
+            return result("counterevidence", "source_fragment_unavailable")
+        text = " ".join(part["text"] for part in fact.source_fragments)
     if not quote or literal_key(quote) not in literal_key(text):
         return result(
             "incomplete",
@@ -306,21 +316,18 @@ def audit_assertion(
             "diagnostic",
             "equivalent_values_or_compatible_descriptions",
         )
-    first = facts[0].fact
-    # Типоразмер и длина одной системы могут относиться к разным её участкам.
-    # Явно подписанная общая протяжённость сети отличается от локальной длины ввода.
-    segment_property = re.search(
-        r"диаметр|толщин|типоразмер|длин|протяж", first.property_name, re.I
-    )
-    whole_network = all(
-        re.search(
-            r"(?:общая|полная)\s+протяж|протяженность\s+(?:проектируем\w*\s+)?сет",
-            item.fact.evidence_text,
-            re.I,
-        )
-        for item in facts
-    )
-    if segment_property and not first.scope_segment and not whole_network:
+    if any(item.fact.subject_type == "unclassified" for item in facts):
+        return result("unidentified", "question", "object_type_not_established")
+    from pdrd_analysis_service.domain.physical_identity import comparison_identity
+
+    identity = comparison_identity(facts)
+    if identity in {
+        "different_object_kinds",
+        "different_value_roles",
+        "different_physical_objects",
+    }:
+        return result("counterevidence", "diagnostic", identity)
+    if identity == "physical_identity_unresolved":
         return result("incomplete", "question", "same_physical_segment_not_established")
     return result(
         "supported", "supported", "same_object_property_conditions_with_distinct_values"

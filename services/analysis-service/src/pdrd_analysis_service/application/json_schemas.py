@@ -160,6 +160,8 @@ def build_page_facts_schema(
     }
     fact_properties["visual_regions"] = build_finding_visual_regions_schema()
     fact_properties["visual_regions"]["maxItems"] = 2
+    for name in ("object_kind", "value_role", "segment_start", "segment_end"):
+        fact_properties[name] = {"type": "string", "maxLength": 220}
     schema["properties"]["document_facts"] = {
         "type": "array",
         "maxItems": max_facts,

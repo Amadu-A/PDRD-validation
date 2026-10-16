@@ -178,16 +178,20 @@ def test_actual_wall_difference_for_same_explicit_segment_is_supported():
         "Ø110x10",
         prop="Диаметр",
         unit="мм",
-        scope_segment="ввод А",
-        quote="S1 ввод А диаметр Ø110x10 мм",
+        scope_segment="У1—У2",
+        segment_start="У1",
+        segment_end="У2",
+        quote="S1 участок У1—У2 диаметр Ø110x10 мм",
     )
     second = observation(
         "Ø110x6,6",
         page=2,
         prop="Диаметр",
         unit="мм",
-        scope_segment="ввод А",
-        quote="S1 ввод А диаметр Ø110x6,6 мм",
+        scope_segment="У1—У2",
+        segment_start="У1",
+        segment_end="У2",
+        quote="S1 участок У1—У2 диаметр Ø110x6,6 мм",
     )
     assert assess(first, second).status == "supported"
 
