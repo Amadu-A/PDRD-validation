@@ -140,6 +140,12 @@ def same_assertion(left: EngineeringAssertion, right: EngineeringAssertion) -> b
     """Объединяет только один предмет с пересекающимся исходным доказательством."""
     if left.identity != right.identity:
         return False
+    if (
+        left.verification == right.verification == "deterministic"
+        and left.verification_rule == right.verification_rule == "engineering_program"
+        and any(condition.startswith("program-check:") for condition in left.conditions)
+    ):
+        return True
     # Для неполного обоснования один принятый параметр может порождать несколько
     # независимых вопросов. Без отдельного доказательства тождества не объединяем их.
     if left.claim_type != "contradiction":

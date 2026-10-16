@@ -244,6 +244,17 @@ class Comparison:
 
 
 _PROPERTY_ALIASES = {
+    "sensor_type": ("sensor type", "тип датчика", "тип термопреобразователя"),
+    "rtd_wires": ("rtd wires", "схема подключения rtd", "число проводов датчика"),
+    "measurement_error": ("measurement error", "погрешность измерения"),
+    "accessory_model": (
+        "compatible accessory",
+        "совместимая колодка",
+        "совместимые колодки",
+    ),
+    "mounting_width": ("mounting width", "монтажная ширина"),
+    "mounting_height": ("mounting height", "монтажная высота"),
+    "mounting_depth": ("mounting depth", "монтажная глубина"),
     "operating_mode": ("operating mode", "режим работы"),
     "contact_configuration": ("contact configuration", "конфигурация контактов"),
     "trip_curve": (
@@ -264,6 +275,11 @@ _PROPERTY_ALIASES = {
     "ambient_temperature": ("ambient temperature", "температура окружающей среды"),
 }
 _UNIT_SCALE = {
+    "мм": ("length", Decimal(1)),
+    "mm": ("length", Decimal(1)),
+    "м": ("length", Decimal(1000)),
+    "m": ("length", Decimal(1000)),
+    "%": ("relative_percent", Decimal(1)),
     "мв": ("voltage", Decimal("0.001")),
     "в": ("voltage", Decimal(1)),
     "кв": ("voltage", Decimal(1000)),
@@ -351,6 +367,30 @@ def _quantity(value: str, unit: str) -> tuple[str, Decimal, Decimal] | None:
 
 def _value(value: str, unit: str, property_name: str) -> tuple | None:
     """Разбирает только известный тип свойства и совместимые единицы."""
+    if property_name in {"sensor_type", "rtd_wires", "accessory_model"}:
+        if unit:
+            return None
+        members = frozenset(_token(part) for part in re.split(r"[,;]", value))
+        if property_name == "sensor_type" and not members <= {
+            "pt100",
+            "pt500",
+            "pt1000",
+            "ni100",
+            "cu50",
+            "cu100",
+        }:
+            return None
+        if property_name == "rtd_wires" and not members <= {"2", "3", "4"}:
+            return None
+        if property_name == "accessory_model" and any(
+            not re.fullmatch(r"[\w./-]{1,64}", part) for part in members
+        ):
+            return None
+        return (
+            (property_name, members, members)
+            if members and len(members) <= 16
+            else None
+        )
     if property_name in {"operating_mode", "contact_configuration"}:
         raw = _token(value)
         if unit or not raw or len(raw) > 120:
@@ -360,7 +400,9 @@ def _value(value: str, unit: str, property_name: str) -> tuple | None:
     if property_name not in {"trip_curve", "protection_degree", "requires_earthing"}:
         quantity = _quantity(value, unit)
         expected = (
-            "voltage"
+            "length"
+            if property_name.startswith("mounting_")
+            else "voltage"
             if property_name.endswith("voltage")
             else "current"
             if property_name.endswith("current")
@@ -368,6 +410,13 @@ def _value(value: str, unit: str, property_name: str) -> tuple | None:
             if property_name == "ambient_temperature"
             else property_name
         )
+        if property_name == "measurement_error":
+            return (
+                quantity
+                if quantity is not None
+                and quantity[0] in {"temperature", "relative_percent"}
+                else None
+            )
         return quantity if quantity is not None and quantity[0] == expected else None
     if unit:
         return None
@@ -500,7 +549,10 @@ def compare_equipment(
                 elif _fits(project_quantity, maker_quantity):
                     status = "matched"
                     explanation = "Проектное значение соответствует подтверждённым значениям производителя."
-                elif fact.value_type == "text":
+                elif (
+                    fact.value_type == "text"
+                    and property_name not in {"sensor_type", "accessory_model"}
+                ) or property_name == "rtd_wires":
                     status = "needs_review"
                     explanation = (
                         "Различие текстовых характеристик требует смысловой проверки."

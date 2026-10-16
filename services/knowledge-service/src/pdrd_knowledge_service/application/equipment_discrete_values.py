@@ -22,6 +22,26 @@ def parse_discrete_value(
 ) -> tuple[str, dict[str, Any], str] | None:
     """Не делает числовые или логические выводы по свободному тексту."""
     value = text.strip(" |:=.")
+    if property_type in {"sensor_type", "rtd_wires", "accessory_model"}:
+        parts = [part.strip().casefold() for part in re.split(r"[,;]", value)]
+        if property_type == "sensor_type" and not set(parts) <= {
+            "pt100",
+            "pt500",
+            "pt1000",
+            "ni100",
+            "cu50",
+            "cu100",
+        }:
+            return None
+        if property_type == "rtd_wires" and not set(parts) <= {"2", "3", "4"}:
+            return None
+        if property_type == "accessory_model" and any(
+            not re.fullmatch(r"[\w./-]{1,64}", part) for part in parts
+        ):
+            return None
+        if parts and len(parts) <= 16 and all(parts):
+            return "enumeration", {"values": sorted(set(parts))}, value
+        return None
     if property_type == "trip_curve":
         parts = re.split(r"\s*[,;/]\s*", value.upper())
         if parts and all(part in {"B", "C", "D", "K", "Z"} for part in parts):

@@ -236,14 +236,34 @@ class LocalizeFindings:
                 ("Finding localization требует непустые уникальные finding_id."),
             )
 
+        # Новые программные выводы используют исходные области/слова PDF.
+        # Отсутствие точной области не разрешает новый визуальный проход.
+        ordinary = tuple(
+            finding
+            for finding in findings
+            if not finding.finding_id.startswith("program-")
+        )
+        if not ordinary:
+            return (
+                tuple(
+                    FindingLocation.unlocated(finding_id=identity)
+                    for identity in finding_ids
+                ),
+                {
+                    "attempt": 0,
+                    "done_reason": "programmatic_localization_only",
+                    "requested_num_predict": 0,
+                },
+            )
+        ordinary_ids = tuple(finding.finding_id for finding in ordinary)
         generation = await self.vision_model.generate_json(
             prompt=build_finding_localization_prompt(
                 page_number=page_number,
                 extracted_text=extracted_text,
-                findings=findings,
+                findings=ordinary,
             ),
             schema=build_finding_localization_schema(
-                finding_ids=finding_ids,
+                finding_ids=ordinary_ids,
             ),
             num_predict=self.num_predict,
             seed=700 + page_number,
@@ -269,7 +289,7 @@ class LocalizeFindings:
                 location = self._parse_location(
                     raw_location=raw_location,
                     allowed_ids=set(
-                        finding_ids,
+                        ordinary_ids,
                     ),
                 )
 

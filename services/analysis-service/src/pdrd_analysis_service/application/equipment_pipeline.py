@@ -6,6 +6,9 @@ from collections import defaultdict
 from dataclasses import asdict, replace
 from typing import Any
 
+from pdrd_analysis_service.application.engineering_program import (
+    equipment_proof_comment,
+)
 from pdrd_analysis_service.application.equipment_report import (
     model_report,
     report_statistics,
@@ -164,6 +167,38 @@ def compare_equipment_stage(
                 f"Документация для {item.manufacturer} {item.model} не подтверждена."
             )
             continue
+        if any(
+            document.get(field)
+            and equipment_key(
+                str(document.get("manufacturer") or item.manufacturer),
+                str(document.get("model") or item.model),
+                str(document.get("variant") or ""),
+            )[index]
+            != equipment_key(item.manufacturer, item.model, item.variant)[index]
+            for index, field in enumerate(("manufacturer", "model", "variant"))
+        ):
+            diagnostics.append(
+                {
+                    "manufacturer": item.manufacturer,
+                    "model": item.model,
+                    "variant": item.variant,
+                    "status": "not_comparable",
+                    "reason": "Паспорт относится к другой модели или исполнению.",
+                }
+            )
+            warnings.append(
+                f"Для {item.manufacturer} {item.model} не подтверждена точная модификация документа."
+            )
+            continue
+        trusted_document = (
+            document.get("trust_status") == "trusted"
+            and len(str(document.get("sha256") or "")) == 64
+            and str(document.get("final_url") or "").startswith(("https://", "http://"))
+        )
+        if not trusted_document:
+            warnings.append(
+                f"Источник {item.manufacturer} {item.model} требует проверки достоверности."
+            )
         if document.get("revision_ambiguous"):
             warnings.append(
                 f"Для {item.manufacturer} {item.model} сохранено несколько ревизий: "
@@ -184,7 +219,7 @@ def compare_equipment_stage(
                 snippet=str(fact.get("snippet") or ""),
                 confidence=(
                     0.0
-                    if document.get("revision_ambiguous")
+                    if document.get("revision_ambiguous") or not trusted_document
                     else float(fact.get("confidence") or 0)
                 ),
                 applicability=str(fact.get("applicability") or ""),
@@ -241,12 +276,6 @@ def compare_equipment_stage(
                 "source_url": str(document.get("final_url") or ""),
                 "trust_status": str(document.get("trust_status") or ""),
             }
-            project_text = (
-                f"{comparison.project_value} {comparison.project_unit}".strip()
-            )
-            maker_text = (
-                f"{comparison.manufacturer_value} {comparison.manufacturer_unit}"
-            ).strip()
             candidates[comparison.page].append(
                 {
                     "finding_id": comparison.candidate_id,
@@ -255,12 +284,7 @@ def compare_equipment_stage(
                     "category": "equipment",
                     "severity": "warning",
                     "status": "confirmed" if confirmed else "needs_review",
-                    "comment": (
-                        f"{item.manufacturer} {item.model}: "
-                        f"{comparison.property_name} в проекте {project_text}; "
-                        f"документация производителя указывает {maker_text}. "
-                        f"{comparison.explanation}"
-                    ),
+                    "comment": equipment_proof_comment(item, comparison),
                     "evidence": comparison.project_evidence,
                     "recommendation_draft": (
                         "Проверить выбранное исполнение и привести проектное "
@@ -278,7 +302,14 @@ def compare_equipment_stage(
                     "user_package_source_ids": [],
                     "user_package_basis_sources": [],
                     "visual_regions": list(comparison.visual_regions),
-                    "origin_assertions": [],
+                    "origin_assertions": [
+                        {
+                            "origin": "equipment_program_check",
+                            "item": asdict(item),
+                            "facts": [asdict(fact) for fact in facts],
+                            "candidate_id": comparison.candidate_id,
+                        }
+                    ],
                     "object_ref": comparison.object_ref,
                     "evidence_locations": [],
                     "document_context_source_ids": [],

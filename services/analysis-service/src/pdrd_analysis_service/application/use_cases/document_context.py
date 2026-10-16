@@ -12,12 +12,22 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from pdrd_analysis_service.application.candidate_trace import trace_candidate
+from pdrd_analysis_service.application.decision_protocol import (
+    attach_decision_protocols,
+)
+from pdrd_analysis_service.application.engineering_program import (
+    EngineeringReport,
+    audit_engineering_candidates,
+    program_findings,
+    run_engineering_program,
+)
 from pdrd_analysis_service.application.ports.vision_model import StructuredVisionModel
 from pdrd_analysis_service.domain.analysis import (
     DocumentContextSource,
     FindingDraft,
     FindingVisualRegion,
 )
+from pdrd_analysis_service.domain.design_decisions import build_decision_registry
 from pdrd_analysis_service.domain.document_context import (
     ConflictGroup,
     DocumentFact,
@@ -36,6 +46,10 @@ from pdrd_analysis_service.domain.engineering_assertion import (
     same_assertion,
 )
 from pdrd_analysis_service.domain.engineering_claims import REVIEW_REASON_CODES
+from pdrd_analysis_service.domain.project_dependencies import (
+    explicit_project_dependencies,
+)
+from pdrd_analysis_service.domain.signal_connections import build_signal_graph
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +86,37 @@ def _located(pages: tuple[DocumentPage, ...]) -> tuple[LocatedDocumentFact, ...]
         for page in pages
         for index, fact in enumerate(page.facts, start=1)
     )
+
+
+def document_engineering_report(pages, document_id):
+    """Строит единый программный протокол документа после Understanding, без изменения prompt."""
+    facts = tuple(
+        LocatedDocumentFact(page.page, index, fact)
+        for page in pages
+        for index, fact in enumerate(
+            (*page.facts, *explicit_project_dependencies(page.text, page.page)), 1
+        )
+    )
+    registry = build_decision_registry(
+        document_id=document_id,
+        facts=facts,
+        page_texts={page.page: page.text for page in pages},
+    )
+    return run_engineering_program(
+        registry, page_texts={page.page: page.text for page in pages}
+    )
+
+
+def audit_document_findings(page_findings, report):
+    """Применяет полные табличные контрдоказательства к локальным кандидатам."""
+    return {
+        page: attach_decision_protocols(
+            audit_engineering_candidates(findings, report),
+            report.registry,
+            checks=report.checks,
+        )
+        for page, findings in page_findings.items()
+    }
 
 
 def build_page_document_context(
@@ -347,6 +392,56 @@ def _representative_facts(
     return tuple(chosen)
 
 
+def _localize_programmatic_findings(findings, pages):
+    """Локализует только новые программные findings по прежнему поиску PDF-слов."""
+    by_number = {page.page: page for page in pages}
+    result = []
+    for finding in findings:
+        assertion = read_assertion(finding.origin_assertions)
+        if assertion is None:
+            result.append(finding)
+            continue
+        regions = {
+            item.fact_id: tuple(
+                FindingVisualRegion(**region)
+                for region in _evidence_region(item, by_number)
+            )
+            for item in assertion.observations
+        }
+        sources = tuple(
+            replace(
+                source,
+                visual_regions=regions.get(source.fact_id, source.visual_regions),
+            )
+            for source in finding.document_context_basis_sources
+        )
+        locations = tuple(
+            {
+                **location,
+                "visual_regions": [
+                    region.as_dict()
+                    for region in regions.get(location.get("fact_id"), ())
+                ],
+            }
+            for location in finding.evidence_locations
+        )
+        primary = tuple(
+            region
+            for item in assertion.observations
+            if item.page == finding.page
+            for region in regions[item.fact_id]
+        )
+        result.append(
+            replace(
+                finding,
+                visual_regions=primary,
+                document_context_basis_sources=sources,
+                evidence_locations=locations,
+            )
+        )
+    return tuple(result)
+
+
 class CrossPageCancelled(Exception):
     """Проверка отменена между пакетами валидации."""
 
@@ -408,10 +503,33 @@ class CheckCrossPageConsistency:
         *,
         pages: tuple[DocumentPage, ...],
         cancel_check: Callable[[], Awaitable[bool]] | None = None,
+        document_id: str = "current-document",
+        engineering_report: EngineeringReport | None = None,
     ) -> tuple[FindingDraft, ...]:
         """Сохраняет подтверждённые группы и конкретные подозрения с обеими сторонами evidence."""
+        if cancel_check is not None and await cancel_check():
+            raise CrossPageCancelled
+        facts = _located(pages)
+        report = engineering_report or document_engineering_report(pages, document_id)
+        registry = report.registry
+        if registry.document_id != document_id:
+            raise ValueError("Программный протокол относится к другому документу.")
+        graph = build_signal_graph(registry)
+        deterministic_findings = _localize_programmatic_findings(
+            program_findings(report), pages
+        )
+        logger.info(
+            "design_decision_registry document=%s decisions=%s facts=%s "
+            "unassigned=%s connections=%s unresolved_connections=%s new_vlm_calls=0",
+            document_id,
+            len(registry.decisions),
+            len(registry.evidence),
+            len(registry.unassigned_evidence_ids),
+            len(graph.connections),
+            len(graph.unresolved_evidence_ids),
+        )
         groups = discover_conflicts(
-            _located(pages),
+            facts,
             max_candidates=self.options.max_cross_page_candidates,
         )
         for index, group in enumerate(groups, 1):
@@ -427,7 +545,9 @@ class CheckCrossPageConsistency:
             logger.info(
                 "cross_page_candidates generated=0 confirmed=0 rejected=0 needs_review=0"
             )
-            return ()
+            return attach_decision_protocols(
+                deterministic_findings, registry, checks=report.checks
+            )
         decisions: dict[str, str] = {}
         reasons: dict[str, str] = {}
         reason_codes: dict[str, str] = {}
@@ -704,7 +824,13 @@ class CheckCrossPageConsistency:
             sum(value == "rejected" for value in decisions.values()),
             sum(value == "needs_review" for value in decisions.values()),
         )
-        return tuple(findings)
+        by_id = {
+            finding.finding_id: finding
+            for finding in (*findings, *deterministic_findings)
+        }
+        return attach_decision_protocols(
+            tuple(by_id.values()), registry, checks=report.checks
+        )
 
 
 def merge_cross_page_findings(

@@ -9,6 +9,12 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from pdrd_analysis_service.application.candidate_trace import trace_candidate
+from pdrd_analysis_service.application.engineering_program import (
+    equipment_review_question,
+    protected_equipment_question,
+    verified_equipment_check,
+    verified_programmatic_check,
+)
 from pdrd_analysis_service.application.json_schemas import (
     build_finalization_schema,
 )
@@ -431,6 +437,10 @@ def _is_protected_duplicate_review(finding: FindingDraft) -> bool:
 
 def _is_protected_factual_review(finding: FindingDraft) -> bool:
     """Сохраняет конкретное подозрение с проверенным исходным evidence, не объявляя его нарушением."""
+    if verified_programmatic_check(finding):
+        return True
+    if verified_equipment_check(finding) or protected_equipment_question(finding):
+        return True
     if _is_protected_duplicate_review(finding):
         return True
     assertion = read_assertion(finding.origin_assertions)
@@ -529,7 +539,16 @@ class FinalizeFindings:
         pre_rejected = []
         accepted = []
         for finding in findings:
-            reason = unsupported_engineering_claim(finding.comment)
+            finding = equipment_review_question(finding)
+            reason = (
+                "invalid_programmatic_proof"
+                if any(
+                    origin.get("origin") == "programmatic_engineering_check"
+                    for origin in finding.origin_assertions
+                )
+                and not verified_programmatic_check(finding)
+                else unsupported_engineering_claim(finding.comment)
+            )
             if reason is not None:
                 pre_rejected.append(
                     {
@@ -577,14 +596,7 @@ class FinalizeFindings:
         # Проверенная текстом запись остаётся осторожным фактическим
         # замечанием; все прочие кандидаты проходят неизменный quality gate.
         protected = tuple(
-            finding
-            for finding in findings
-            if _is_protected_factual_review(finding)
-            or (
-                finding.category == "equipment"
-                and finding.status == "confirmed"
-                and finding.equipment_documentation_basis_sources
-            )
+            finding for finding in findings if _is_protected_factual_review(finding)
         )
         eligible_experience = {
             finding_id: tuple(
@@ -618,15 +630,11 @@ class FinalizeFindings:
             finding
             for finding in findings
             if finding.status != "hypothesis"
+            and not verified_programmatic_check(finding)
+            and not verified_equipment_check(finding)
+            and not protected_equipment_question(finding)
             and (
-                (
-                    not _is_protected_factual_review(finding)
-                    and not (
-                        finding.category == "equipment"
-                        and finding.status == "confirmed"
-                        and finding.equipment_documentation_basis_sources
-                    )
-                )
+                (not _is_protected_factual_review(finding))
                 or normalized_candidate_groups.get(finding.finding_id)
             )
         )
@@ -721,11 +729,6 @@ class FinalizeFindings:
             ordinary_by_id.get(finding.finding_id, self._fallback(finding))
             for finding in findings
             if _is_protected_factual_review(finding)
-            or (
-                finding.category == "equipment"
-                and finding.status == "confirmed"
-                and finding.equipment_documentation_basis_sources
-            )
             or finding.status == "hypothesis"
             or finding.finding_id in ordinary_by_id
         ]

@@ -13,9 +13,20 @@ from pdrd_knowledge_service.application.equipment_discrete_values import (
 )
 
 SCHEMA_VERSION = 1
-EXTRACTOR_VERSION = 7
+EXTRACTOR_VERSION = 8
 
 _PROPERTY_LABELS = {
+    "sensor_type": ("sensor type", "тип датчика", "тип термопреобразователя"),
+    "rtd_wires": ("rtd wires", "число проводов датчика"),
+    "measurement_error": ("measurement error", "погрешность измерения"),
+    "accessory_model": (
+        "compatible accessory",
+        "совместимая колодка",
+        "совместимые колодки",
+    ),
+    "mounting_width": ("mounting width", "монтажная ширина"),
+    "mounting_height": ("mounting height", "монтажная высота"),
+    "mounting_depth": ("mounting depth", "монтажная глубина"),
     "operating_mode": ("operating mode", "режим работы"),
     "contact_configuration": ("contact configuration", "конфигурация контактов"),
     "trip_curve": (
@@ -35,7 +46,7 @@ _PROPERTY_LABELS = {
     "frequency": ("frequency", "частота"),
     "ambient_temperature": ("ambient temperature", "температура окружающей среды"),
 }
-_UNIT = r"(?:mV|kV|V|mA|A|kW|W|kHz|Hz|°C|мВ|кВ|В|мА|А|кВт|Вт|кГц|Гц|°С)"
+_UNIT = r"(?:mV|kV|V|mA|A|kW|W|kHz|Hz|°C|мм|mm|мВ|кВ|В|мА|А|кВт|Вт|кГц|Гц|°С|%)"
 _NUMBER = r"[+-]?\d+(?:[.,]\d+)?"
 _VALUE = re.compile(
     rf"(?P<value>{_NUMBER}(?:\s*(?:\.{{2,}}|–|—|-|to)\s*{_NUMBER})?)"
@@ -322,4 +333,4 @@ def extract_equipment_facts(
                     applicability=applicability,
                 )
                 extracted.append(asdict(fact))
-    return extracted[:100]
+    return extracted

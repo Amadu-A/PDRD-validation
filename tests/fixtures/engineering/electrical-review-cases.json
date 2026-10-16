@@ -1,0 +1,32 @@
+{
+  "title": "АТМ/ЭОМ — независимые сценарии доказательной проверки",
+  "version": 2,
+  "scope": "offline_only",
+  "positive_benchmark_ready": false,
+  "notes": [
+    "Сценарии из дополнения к ТЗ являются гипотезами и отрицательными ограничениями, а не размеченной истиной.",
+    "Исходный комплект ЛСУ, шкафа котла, ВРУ, закупочной спецификации и паспортов не предоставлен.",
+    "Программные механизмы проверены на исходных текстах и структурированных фактах; положительная приёмка реального проекта не выполнена."
+  ],
+  "mock_coverage": {
+    "identity_and_relays": "services/analysis-service/tests/unit/test_design_decisions.py",
+    "calculations_signals_sources_and_procurement": "services/analysis-service/tests/unit/test_engineering_program.py",
+    "exact_equipment_proof": "services/analysis-service/tests/unit/test_equipment_program_proof.py",
+    "rtd_accessories_dimensions_and_error": "tests/functional/test_engineering_equipment_parameters.py",
+    "http_and_zero_new_calls": "services/analysis-service/tests/integration/test_engineering_program_http.py"
+  },
+  "cases": [
+    {"case_id": "ATM01", "scenario": "ELHART ECV1-L-RR-RS", "constraint": "Не определять напряжение по индексу исполнения без официального документа.", "acceptance": "pending_source_documents"},
+    {"case_id": "ATM02", "scenario": "Релейная развязка", "constraint": "Сохранить все промежуточные связи; путь не доказывает электрическую совместимость.", "acceptance": "structural_mock_only"},
+    {"case_id": "ATM03", "scenario": "Разные межшкафные клеммники", "constraint": "Разные имена клеммников не доказывают ошибку; нужны адреса и соединительная схема.", "acceptance": "structural_mock_only"},
+    {"case_id": "ATM04", "scenario": "Сухой контакт", "constraint": "Не назначать фиксированное напряжение без питающей стороны цепи.", "acceptance": "structural_mock_only"},
+    {"case_id": "ATM05", "scenario": "АВР и местное управление", "constraint": "Учитывать режим, переключатель и фактически реализованные блокировки.", "acceptance": "pending_functional_checks"},
+    {"case_id": "ATM06", "scenario": "Аварийный останов", "constraint": "Различать отключение топлива и электрического питания; не объявлять цепь безопасной по неполным данным.", "acceptance": "pending_source_documents"},
+    {"case_id": "ATM07", "scenario": "RTD", "constraint": "Проверять тип датчика, число проводов, схему и допустимую погрешность по достоверным источникам.", "acceptance": "pending_equipment_checks"},
+    {"case_id": "ATM08", "scenario": "Защита двигателей", "constraint": "Учитывать всю цепь защиты, а не только номинал автомата.", "acceptance": "pending_functional_checks"},
+    {"case_id": "ATM09", "scenario": "Закупка реле и колодок", "constraint": "53 необходимых и 20 закупленных колодок означают дефицит 33 только при сопоставимых единицах, составе и исполнениях.", "acceptance": "pending_quantity_checks"},
+    {"case_id": "ATM10", "scenario": "Монтажная панель", "constraint": "Совместимость устанавливать по точной модели, исполнению и проверенному паспорту.", "acceptance": "pending_equipment_checks"},
+    {"case_id": "ATM11", "scenario": "Нормативное требование", "constraint": "Не придумывать пункт СП; проверить переданный источник и область применимости.", "acceptance": "pending_applicability_checks"},
+    {"case_id": "ATM12", "scenario": "Экономия и наличие в ЭТМ", "constraint": "Не утверждать экономию или наличие без подтверждённых данных; рекомендация не является нарушением.", "acceptance": "pending_verified_commercial_data"}
+  ]
+}

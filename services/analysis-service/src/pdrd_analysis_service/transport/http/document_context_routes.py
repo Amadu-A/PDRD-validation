@@ -14,7 +14,9 @@ from pdrd_analysis_service.application.use_cases.document_context import (
     CrossPageCancelled,
     DocumentContextOptions,
     DocumentPage,
+    audit_document_findings,
     build_page_document_context,
+    document_engineering_report,
     merge_cross_page_findings,
 )
 from pdrd_analysis_service.application.vision_execution import (
@@ -193,9 +195,15 @@ async def check_cross_page_consistency(
                 total=1,
             )
         ):
+            if await cancelled():
+                return CheckConsistencyResponse(findings=[], items=[], cancelled=True)
+            pages = tuple(page.to_domain() for page in request.pages)
+            report = document_engineering_report(pages, str(request.document_id))
             findings = await use_case.execute(
-                pages=tuple(page.to_domain() for page in request.pages),
+                pages=pages,
                 cancel_check=cancelled,
+                document_id=str(request.document_id),
+                engineering_report=report,
             )
     except (CrossPageCancelled, AnalysisCancelledError):
         return CheckConsistencyResponse(findings=[], items=[], cancelled=True)
@@ -205,12 +213,15 @@ async def check_cross_page_consistency(
             detail=str(error),
         ) from error
     merged = merge_cross_page_findings(
-        page_findings={
-            item.page_number: tuple(
-                finding.to_domain() for finding in item.result.findings
-            )
-            for item in request.page_checks
-        },
+        page_findings=audit_document_findings(
+            {
+                item.page_number: tuple(
+                    finding.to_domain() for finding in item.result.findings
+                )
+                for item in request.page_checks
+            },
+            report,
+        ),
         cross_findings=findings,
     )
     return CheckConsistencyResponse(
@@ -228,35 +239,5 @@ async def check_cross_page_consistency(
             )
             for item in request.page_checks
         ],
-        findings=[
-            FindingDraftPayload.model_validate(
-                {
-                    "finding_id": finding.finding_id,
-                    "page": finding.page,
-                    "page_type": finding.page_type,
-                    "category": finding.category,
-                    "severity": finding.severity,
-                    "status": finding.status,
-                    "comment": finding.comment,
-                    "evidence": finding.evidence,
-                    "recommendation_draft": finding.recommendation_draft,
-                    "confidence": finding.confidence,
-                    "normative_source_ids": [],
-                    "basis": finding.basis,
-                    "basis_sources": [],
-                    "experience_query": finding.experience_query,
-                    "visual_regions": [],
-                    "evidence_locations": list(finding.evidence_locations),
-                    "document_context_source_ids": list(
-                        finding.document_context_source_ids
-                    ),
-                    "document_context_basis_sources": [
-                        asdict(source)
-                        for source in finding.document_context_basis_sources
-                    ],
-                    "object_ref": finding.object_ref,
-                }
-            )
-            for finding in findings
-        ],
+        findings=[_finding_draft_payload(finding) for finding in findings],
     )

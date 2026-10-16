@@ -13,6 +13,10 @@ from pdrd_analysis_service.application.engineering_plan import (
     candidate_engineering_context,
     engineering_plan,
 )
+from pdrd_analysis_service.application.engineering_program import (
+    augment_page_findings,
+    prepare_page_program,
+)
 from pdrd_analysis_service.application.engineering_review import engineering_questions
 from pdrd_analysis_service.application.json_schemas import (
     build_normative_check_schema,
@@ -757,6 +761,14 @@ class CheckPageAgainstNorms:
         GenerationMetrics,
     ]:
         """Проверяет сам лист и сопоставляет его с N/T/U evidence."""
+        program = prepare_page_program(
+            page_number=page_number,
+            page_facts=page_facts,
+            extracted_text=extracted_text,
+            normative=normative_sources,
+            technical=technical_assignment_sources,
+            user=user_package_sources,
+        )
         normative_source_ids = tuple(
             source.source_id for source in normative_sources if source.source_id
         )
@@ -1236,8 +1248,15 @@ class CheckPageAgainstNorms:
 
         return (
             summary,
-            tuple(
-                findings,
+            augment_page_findings(
+                report=program,
+                findings=tuple(findings),
+                page_number=page_number,
+                page_facts=page_facts,
+                extracted_text=extracted_text,
+                normative=normative_sources,
+                technical=technical_assignment_sources,
+                user=user_package_sources,
             ),
             metrics,
         )
