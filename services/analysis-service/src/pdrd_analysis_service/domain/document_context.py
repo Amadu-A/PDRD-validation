@@ -133,6 +133,8 @@ def property_key(fact: DocumentFact) -> str:
     kind = normalize_label(fact.property_type or fact.kind)
     if not name or not kind:
         return ""
+    if _PROPERTY_ALIASES.get(name) == "system_purpose":
+        return "relationship:system_purpose"
     return f"{kind}:{_PROPERTY_ALIASES.get(name, name)}"
 
 
@@ -164,26 +166,42 @@ def scope_key(fact: DocumentFact) -> tuple[str, ...]:
 def normalized_value(fact: DocumentFact) -> tuple[str, str] | None:
     """Сравнивает единицы без подмены исходного значения."""
     raw = normalize_label(fact.value_raw).replace(" ", "")
+    # Знаки умножения в типоразмере не меняют наружный диаметр и стенку.
+    raw = re.sub(r"(?<=\d)[xх×*](?=\d)", "x", raw).replace(",", ".")
     unit = normalize_label(fact.unit_raw).replace(" ", "")
     if not raw or re.search(r"\?|неразбор|нечита|неясн", raw):
         return None
-    if re.match(r"^(?:dn|ду)\d", raw):
-        return "nominal_diameter", raw
-    if raw.startswith(("ø", "⌀")) or re.match(r"^ф\d", raw):
-        return "outer_diameter", raw
+    nominal = re.fullmatch(r"(?:dn|ду)(\d+(?:\.\d+)?)", raw)
+    if nominal:
+        return "nominal_diameter", str(Decimal(nominal[1]).normalize())
+    outer = re.fullmatch(r"[ø⌀ф](\d+(?:\.\d+)?(?:x\d+(?:\.\d+)?)?)", raw)
+    if outer:
+        return "outer_diameter", "x".join(
+            str(Decimal(value).normalize()) for value in outer[1].split("x")
+        )
     prop = normalize_label(fact.property_name)
     if "диаметр" in prop:
+        value = str(Decimal(raw).normalize()) if _NUMBER.fullmatch(raw) else raw
         if re.search(r"условн|номиналь|\b(?:dn|ду)\b", prop):
-            return "nominal_diameter", raw
+            return "nominal_diameter", value
         if "наружн" in prop:
-            return "outer_diameter", raw
+            return "outer_diameter", value
+        if _NUMBER.fullmatch(raw):
+            literal_number = re.escape(raw).replace(r"\.", "[.,]") + r"(?![\d.,])"
+            if re.search(r"\b(?:dn|ду)\s*" + literal_number, fact.evidence_text, re.I):
+                return "nominal_diameter", value
+            if re.search(r"[ø⌀ф]\s*" + literal_number, fact.evidence_text, re.I):
+                return "outer_diameter", value
     if _PROPERTY_ALIASES.get(prop) == "system_purpose":
         for pattern, purpose in (
             (r"водоотвед|канализац", "water_disposal"),
             (r"водоснабж|водопровод", "water_supply"),
+            (r"электроснабж", "electric_supply"),
+            (r"теплоснабж", "heat_supply"),
         ):
             if re.search(pattern, raw):
                 return "text", purpose
+        return None
     if _NUMBER.fullmatch(raw):
         try:
             number = Decimal(raw.replace(",", "."))

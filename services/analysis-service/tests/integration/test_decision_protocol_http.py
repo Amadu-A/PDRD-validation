@@ -75,6 +75,7 @@ async def test_existing_http_keeps_protocol_sources_and_geometry_without_extra_c
     assert {item["origin"] for item in origins} == {
         "cross_page_validation",
         "engineering_assertion",
+        "engineering_evidence_audit",
         "design_decision_registry",
     }
     protocol = next(

@@ -16,6 +16,7 @@ from pdrd_analysis_service.domain.document_context import (
     LocatedDocumentFact,
     document_fact_from_mapping,
     normalize_label,
+    normalized_value,
     property_key,
     scope_key,
     subject_key,
@@ -129,6 +130,17 @@ def read_assertion(origins: tuple[dict, ...]) -> EngineeringAssertion | None:
                 origin.get("verification", "unverified"),
                 origin.get("verification_rule", ""),
             )
+            if (
+                assertion.property_key.endswith(":system_purpose")
+                and observations
+                and all(
+                    property_key(item.fact) == "relationship:system_purpose"
+                    for item in observations
+                )
+            ):
+                assertion = replace(
+                    assertion, property_key="relationship:system_purpose"
+                )
             if assertion.claim_type not in CLAIM_TYPES or not assertion.observations:
                 return None
             return assertion
@@ -154,6 +166,22 @@ def same_assertion(left: EngineeringAssertion, right: EngineeringAssertion) -> b
     if {scope_key(item.fact) for item in left.observations} != {
         scope_key(item.fact) for item in right.observations
     }:
+        return False
+
+    # A↔B и B↔C могут касаться разных противоречий одного объекта.
+    # Пересечения одной записи недостаточно для тождества всей претензии.
+    def propositions(assertion: EngineeringAssertion) -> set[tuple]:
+        return {
+            (
+                engineering_object_key(item.fact),
+                property_key(item.fact),
+                scope_key(item.fact),
+                normalized_value(item.fact),
+            )
+            for item in assertion.observations
+        }
+
+    if propositions(left) != propositions(right):
         return False
 
     def anchors(assertion: EngineeringAssertion) -> set[tuple]:
@@ -196,7 +224,8 @@ def candidate_property(text: str) -> str:
     """Распознаёт лишь явный предмет для старого кандидата без ссылки на план."""
     for pattern, prop in (
         (r"толщин\w*\s+стен", "Толщина стенки"),
-        (r"диаметр|\b(?:ду|dn)\s*\d", "Диаметр"),
+        (r"диаметр|типоразмер|\b(?:ду|dn)\s*\d", "Диаметр"),
+        (r"длин|протяж", "Длина"),
         (r"водоотвед|назначени\w*\s+систем", "Назначение системы"),
         (r"напор", "Напор"),
         (r"расход", "Расход воды"),
@@ -204,6 +233,16 @@ def candidate_property(text: str) -> str:
         if re.search(pattern, text, re.I):
             return prop
     return ""
+
+
+def candidate_parameter_roles(text: str) -> tuple[str, ...]:
+    """Разделяет явно названные расчётные роли без смыслового угадывания."""
+    text = normalize_label(text)
+    return tuple(
+        role
+        for role in ("гарантирован", "требуем", "максим", "миним", "средн")
+        if role in text
+    )
 
 
 def deterministic_unit_mismatch(assertion: EngineeringAssertion) -> bool:

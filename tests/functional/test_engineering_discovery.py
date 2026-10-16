@@ -257,7 +257,9 @@ async def test_structural_candidates_keep_source_pages_and_specific_recommendati
         assert fact is not None
         by_page.setdefault(page, []).append(fact)
     pages = tuple(
-        DocumentPage(page, "Исходные данные", "", tuple(facts))
+        DocumentPage(
+            page, "\n".join(fact.evidence_text for fact in facts), "", tuple(facts)
+        )
         for page, facts in by_page.items()
     )
     findings = await CheckCrossPageConsistency(BlindExtractionModel(), OPTIONS).execute(

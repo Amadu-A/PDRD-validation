@@ -14,6 +14,7 @@ from pdrd_analysis_service.domain.document_context import (
 from pdrd_analysis_service.domain.engineering_assertion import (
     CLAIM_TYPES,
     assertion_from_facts,
+    candidate_parameter_roles,
     candidate_property,
     engineering_object_key,
     read_assertion,
@@ -185,12 +186,20 @@ def bind_candidate_assertion(
             continue
         roots = {
             "Назначение системы": "назначени",
-            "Диаметр": "диаметр",
+            "Диаметр": "диаметр|типоразмер",
+            "Длина": "длин|протяж",
             "Толщина стенки": "толщин",
             "Расход воды": "расход",
             "Напор": "напор",
         }
-        if prop and roots[prop] not in normalize_label(item["property"]):
+        if prop and not re.search(roots[prop], normalize_label(item["property"])):
+            continue
+        roles = candidate_parameter_roles(str(candidate.get("comment", "")))
+        if (
+            candidate.get("claim_type") == "missing_justification"
+            and roles
+            and not any(role in normalize_label(item["property"]) for role in roles)
+        ):
             continue
         observations.extend(assertion.observations)
     if not observations:

@@ -21,6 +21,7 @@ from pdrd_analysis_service.application.engineering_program import (
     program_findings,
     run_engineering_program,
 )
+from pdrd_analysis_service.application.evidence_audit import audit_findings_evidence
 from pdrd_analysis_service.application.ports.vision_model import StructuredVisionModel
 from pdrd_analysis_service.domain.analysis import (
     DocumentContextSource,
@@ -122,11 +123,17 @@ def document_engineering_report(pages, document_id, *, enabled=True):
     )
 
 
-def audit_document_findings(page_findings, report):
+def audit_document_findings(page_findings, report, *, page_texts=None):
     """Применяет полные табличные контрдоказательства к локальным кандидатам."""
     return {
         page: attach_decision_protocols(
-            audit_engineering_candidates(findings, report),
+            audit_findings_evidence(
+                audit_engineering_candidates(findings, report),
+                page_texts=page_texts or {},
+                stage="document_evidence_audit",
+            )
+            if page_texts is not None
+            else audit_engineering_candidates(findings, report),
             report.registry,
             checks=report.checks,
         )
@@ -844,7 +851,13 @@ class CheckCrossPageConsistency:
             for finding in (*findings, *deterministic_findings)
         }
         return attach_decision_protocols(
-            tuple(by_id.values()), registry, checks=report.checks
+            audit_findings_evidence(
+                tuple(by_id.values()),
+                page_texts={page.page: page.text for page in pages},
+                stage="cross_page_evidence_audit",
+            ),
+            registry,
+            checks=report.checks,
         )
 
 
@@ -882,6 +895,9 @@ def merge_cross_page_findings(
                     and right is not None
                     and same_assertion(left, right)
                 )
+                # Внутренняя диагностика не поглощает полезный вопрос или подтверждённую запись.
+                if (finding.status == "hypothesis") != (cross.status == "hypothesis"):
+                    continue
                 if structured_duplicate or (
                     finding.category == "document_consistency"
                     and finding.page in pages
@@ -956,7 +972,19 @@ def merge_cross_page_findings(
                         )
                     sources.append(source)
             updates[field] = tuple(sources)
-            updates[id_field] = tuple(source.source_id for source in sources)
+            updates[id_field] = tuple(
+                dict.fromkeys(
+                    (
+                        *(source.source_id for source in sources),
+                        *getattr(cross, id_field),
+                        *(
+                            source_id
+                            for finding in duplicates
+                            for source_id in getattr(finding, id_field)
+                        ),
+                    )
+                )
+            )
         origins = (
             *cross.origin_assertions,
             *(origin for finding in duplicates for origin in finding.origin_assertions),
@@ -969,6 +997,19 @@ def merge_cross_page_findings(
                     "evidence": item.evidence,
                     "recommendation_draft": item.recommendation_draft,
                     "equipment_details": item.equipment_details,
+                    "status": item.status,
+                    "confidence": item.confidence,
+                    "origin_assertions": item.origin_assertions,
+                    "source_ids": {
+                        field: getattr(item, field)
+                        for field in (
+                            "normative_source_ids",
+                            "technical_assignment_source_ids",
+                            "user_package_source_ids",
+                            "document_context_source_ids",
+                            "equipment_documentation_source_ids",
+                        )
+                    },
                 }
                 for item in duplicates
             ),

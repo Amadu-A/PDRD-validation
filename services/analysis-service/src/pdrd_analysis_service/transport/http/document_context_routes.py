@@ -236,6 +236,7 @@ def _checked_response(request, report, findings, *, expose_findings=True):
             for item in request.page_checks
         },
         report,
+        page_texts={page.page_number: page.extracted_text for page in request.pages},
     )
     if expose_findings:
         merged = merge_cross_page_findings(

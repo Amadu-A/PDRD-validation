@@ -283,6 +283,30 @@ def test_same_words_without_regions_are_not_consolidated() -> None:
     assert select_violation_candidates([first, second]).consolidated_count == 2
 
 
+def test_same_words_and_regions_with_different_explicit_objects_stay_distinct():
+    """Даже совпавшие рамки не разрешают объединить разные инженерные объекты."""
+    first = violation(
+        comment="Уточнить параметр.", evidence="Общая подпись", object_ref="S1"
+    )
+    second = {**first, "object_ref": "S2"}
+    assert select_violation_candidates([first, second]).consolidated_count == 2
+
+
+def test_nearby_flow_questions_for_different_modes_are_not_merged_before_fact_binding():
+    """Один объект и близкие области не доказывают тождество вопросов о расходах."""
+    first = violation(
+        comment="Для S1 не указан расчёт расхода штатного режима.",
+        evidence="S1 расход 10 л/с",
+        object_ref="S1",
+    )
+    second = violation(
+        comment="Для S1 не указан расчёт расхода аварийного режима.",
+        evidence="S1 расход 10 л/с",
+        object_ref="S1",
+    )
+    assert select_violation_candidates([first, second]).consolidated_count == 2
+
+
 def test_rephrased_same_defect_of_explicit_object_keeps_both_origins() -> None:
     """Явный объект, свойство, дефект и близкие области допускают мягкий dedupe."""
     first = violation(

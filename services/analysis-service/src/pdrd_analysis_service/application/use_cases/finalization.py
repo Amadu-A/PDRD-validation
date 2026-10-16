@@ -5,7 +5,7 @@
 import json
 import logging
 import re
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from pdrd_analysis_service.application.candidate_trace import trace_candidate
@@ -16,6 +16,12 @@ from pdrd_analysis_service.application.engineering_program import (
     protected_table_question,
     verified_equipment_check,
     verified_programmatic_check,
+)
+from pdrd_analysis_service.application.evidence_audit import (
+    diagnostic_record,
+    evidence_audit,
+    finalize_evidence_candidate,
+    protected_evidence_question,
 )
 from pdrd_analysis_service.application.json_schemas import (
     build_finalization_schema,
@@ -47,6 +53,7 @@ from pdrd_analysis_service.domain.engineering_claims import (
     false_numeric_claim,
     unsupported_engineering_claim,
 )
+from pdrd_analysis_service.domain.evidence_audit import diagnostic_language
 
 _NORMATIVE_REFERENCE_PATTERN = re.compile(
     r"\b(?:ГОСТ|GOST|ПУЭ|PUE|СНиП|SNIP|СП)\b",
@@ -439,6 +446,8 @@ def _is_protected_duplicate_review(finding: FindingDraft) -> bool:
 
 def _is_protected_factual_review(finding: FindingDraft) -> bool:
     """Сохраняет конкретное подозрение с проверенным исходным evidence, не объявляя его нарушением."""
+    if protected_evidence_question(finding):
+        return True
     if protected_table_question(finding) or verified_programmatic_check(finding):
         return True
     if verified_equipment_check(finding) or protected_equipment_question(finding):
@@ -543,6 +552,11 @@ class FinalizeFindings:
         for finding in findings:
             finding = finalize_arithmetic_candidate(finding)
             finding = equipment_review_question(finding)
+            finding = finalize_evidence_candidate(finding)
+            diagnostic = diagnostic_record(finding)
+            if diagnostic is not None:
+                pre_rejected.append(diagnostic)
+                continue
             reason = (
                 "invalid_programmatic_proof"
                 if any(
@@ -631,6 +645,41 @@ class FinalizeFindings:
             normative_candidates_by_finding=raw_candidate_groups,
             legacy_candidates=normative_candidates,
         )
+        # Вопрос не требует редактора, но уже найденные N/E нельзя потерять при обходе модели.
+        # Сохраняем их как непроверенные подсказки, не назначая нормативным основанием.
+        retrieved_candidates = {
+            finding.finding_id: raw_candidate_groups.get(finding.finding_id)
+            or (normative_candidates if len(findings) == 1 else ())
+            for finding in findings
+        }
+        findings = tuple(
+            replace(
+                finding,
+                origin_assertions=(
+                    *finding.origin_assertions,
+                    {
+                        "origin": "unverified_enrichment_context",
+                        "normative_candidates": [
+                            asdict(source)
+                            for source in retrieved_candidates[finding.finding_id]
+                        ],
+                        "experience_candidates": [
+                            asdict(source)
+                            for source in experience_by_finding.get(
+                                finding.finding_id, ()
+                            )
+                        ],
+                    },
+                ),
+            )
+            if protected_evidence_question(finding)
+            and (
+                retrieved_candidates[finding.finding_id]
+                or experience_by_finding.get(finding.finding_id)
+            )
+            else finding
+            for finding in findings
+        )
 
         # Проверенные текстом повторы проходят модель только ради finding-local
         # нормативного обоснования. Без найденных кандидатов их путь остаётся
@@ -639,6 +688,7 @@ class FinalizeFindings:
             finding
             for finding in findings
             if finding.status != "hypothesis"
+            and not protected_evidence_question(finding)
             and not protected_table_question(finding)
             and not verified_programmatic_check(finding)
             and not verified_equipment_check(finding)
@@ -1268,8 +1318,10 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
             severity=finding.severity,
             status="needs_review"
             if finding.status != "hypothesis"
-            and assertion is not None
-            and assertion.verification == "unverified"
+            and (
+                (assertion is not None and assertion.verification == "unverified")
+                or (assertion is None and finding.category == "document_consistency")
+            )
             else finding.status,
             comment=finding.comment,
             evidence=finding.evidence,
@@ -1398,11 +1450,15 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
         finding_category = finding.category
 
         normalized_status = finding.status
-        if unsupported_engineering_claim(comment) is not None:
+        if unsupported_engineering_claim(comment) is not None or diagnostic_language(
+            comment
+        ):
             # Редактор не имеет права заменить корректного кандидата ложным вычислением.
             comment = finding.comment
             recommendation = _fallback_recommendation(finding)
-        if false_numeric_claim(recommendation) is not None:
+        if false_numeric_claim(recommendation) is not None or diagnostic_language(
+            recommendation
+        ):
             recommendation = _fallback_recommendation(finding)
 
         has_customer_basis = bool(
@@ -1425,10 +1481,23 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
 
         origins = finding.origin_assertions
         assertion = read_assertion(origins)
+        if assertion is None and finding.category == "document_consistency":
+            normalized_status = "needs_review"
+        audit = evidence_audit(finding)
+        if audit is not None:
+            # Редактор не может подменить проверенный предмет новой интерпретацией.
+            comment = finding.comment
+            recommendation = _fallback_recommendation(finding)
+            if audit["disposition"] != "supported":
+                normalized_status = "needs_review"
         if assertion is not None:
             if assertion.claim_type == "missing_justification":
                 normalized_status = "needs_review"
-            if assertion.verification == "unverified":
+            if (
+                assertion.verification == "unverified"
+                and audit is not None
+                and audit["status"] == "supported"
+            ):
                 assertion = replace(
                     assertion,
                     verification="semantic",
@@ -1436,6 +1505,11 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
                 )
                 origins = (
                     assertion.as_origin(),
+                    *(
+                        {**origin, "origin": "engineering_assertion_history"}
+                        for origin in origins
+                        if origin.get("origin") == "engineering_assertion"
+                    ),
                     *(
                         origin
                         for origin in origins

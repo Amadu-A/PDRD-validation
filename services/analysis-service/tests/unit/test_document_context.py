@@ -188,6 +188,17 @@ async def test_cross_page_finding_has_two_locations_and_one_vlm_batch() -> None:
             },
         ),
     )
+    # Подтверждённое сравнение требует буквального основания не только чисел, но и условий.
+    first = replace(
+        first,
+        evidence_text=first.evidence_text
+        + " ОВ подвал winter_design расчётный зимний режим",
+    )
+    second = replace(
+        second,
+        evidence_text=second.evidence_text
+        + " ОВ подвал winter_design расчётный зимний режим",
+    )
     pages = (
         DocumentPage(
             10,

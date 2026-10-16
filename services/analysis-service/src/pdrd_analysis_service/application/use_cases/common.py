@@ -386,6 +386,9 @@ def _candidate_identity(
             "evidence",
         )
     )
+    object_ref = normalize_text(candidate.get("object_ref"))
+    claim_type = normalize_text(candidate.get("claim_type"))
+    identified_comment = f"{comment}\0{object_ref}\0{claim_type}"
 
     if not comment or not evidence:
         return None
@@ -395,7 +398,7 @@ def _candidate_identity(
         # Явная одинаковая объектная идентичность позволяет убрать дословный повтор.
         object_ref = normalize_text(candidate.get("object_ref"))
         if object_ref:
-            return f"{comment}\0{object_ref}", evidence, ()
+            return identified_comment, evidence, ()
         # Одинаковый текст без координат и объекта может описывать разные места.
         return None
 
@@ -414,7 +417,7 @@ def _candidate_identity(
         boxes.append(box)
 
     return (
-        comment,
+        identified_comment,
         evidence,
         tuple(sorted(boxes)),
     )
@@ -658,7 +661,7 @@ def _candidate_structural_identity(
         return None
 
     return (
-        category_value,
+        f"{category_value}\0{normalize_text(candidate.get('object_ref'))}\0{normalize_text(candidate.get('claim_type'))}",
         issue_signature,
         anchors,
         property_signature,
@@ -675,10 +678,14 @@ def _candidate_object_semantic_identity(
     properties = _candidate_property_signature(candidate)
     if not object_ref or not anchors or not issue or not properties:
         return None
+    # До привязки исходных фактов режимы и расчётные роли ещё не доказаны.
+    # Другие инженерные повторы объединяются позднее по полному assertion.
+    if "position" not in properties:
+        return None
     text = f"{candidate.get('comment', '')} {candidate.get('evidence', '')}"
     roles = tuple(sorted({role.upper() for role in _INSTRUMENT_ROLE_RE.findall(text)}))
     return (
-        normalize_text(candidate.get("category")),
+        f"{normalize_text(candidate.get('category'))}\0{normalize_text(candidate.get('claim_type'))}",
         object_ref,
         issue,
         properties,

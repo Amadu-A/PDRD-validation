@@ -30,9 +30,10 @@ from .test_normative_adaptive_discovery import (
 
 async def test_cross_page_d_survives_transport_finalization_and_normative_enrichment():
     """Одно замечание страниц 7 и 10 сохраняет D и сочетает его с N."""
+    first, second = _fact("-37"), _fact("-35")
     pages = (
-        DocumentPage(7, "", "", (_fact("-37"),)),
-        DocumentPage(10, "", "", (_fact("-35"),)),
+        DocumentPage(7, first.evidence_text, "", (first,)),
+        DocumentPage(10, second.evidence_text, "", (second,)),
     )
     (draft,) = await CheckCrossPageConsistency(_ConfirmingVision(), _options()).execute(
         pages=pages

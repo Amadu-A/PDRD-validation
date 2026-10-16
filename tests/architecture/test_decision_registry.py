@@ -18,10 +18,12 @@ def test_registry_and_connections_have_no_model_network_storage_or_transport_acc
         PACKAGE / "domain/engineering_calculations.py",
         PACKAGE / "domain/calculation_tables.py",
         PACKAGE / "domain/engineering_checks.py",
+        PACKAGE / "domain/evidence_audit.py",
         PACKAGE / "domain/project_dependencies.py",
         PACKAGE / "domain/requirement_applicability.py",
         PACKAGE / "application/decision_protocol.py",
         PACKAGE / "application/engineering_program.py",
+        PACKAGE / "application/evidence_audit.py",
     ):
         tree = ast.parse(path.read_text("utf-8"))
         for node in ast.walk(tree):

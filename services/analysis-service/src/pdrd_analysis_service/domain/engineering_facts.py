@@ -146,8 +146,10 @@ def explicit_flow_rows(text: str, page: int) -> tuple[DocumentFact, ...]:
         if match is None:
             continue
         label = line[: match.start()].strip()
+        evidence = line.strip()
         if re.search(r"После ВПУ|При наличии|СанПиН|^\d", label, re.I):
             label = lines[index - 1].strip() if index else ""
+            evidence = label + "\n" + evidence
         if not re.fullmatch(r"[А-Яа-я][А-Яа-я()\-\s]{4,80}", label):
             continue
         if re.search(r"итого|всего|наименование", label, re.I):
@@ -173,8 +175,9 @@ def explicit_flow_rows(text: str, page: int) -> tuple[DocumentFact, ...]:
                     "table_id": table,
                     "row_label": subject,
                     "column_label": unit,
-                    "evidence_text": line.strip(),
+                    "evidence_text": evidence,
                     "extraction_method": "pdf_text",
+                    "column_binding": "pdf_text_header",
                     "source_pages": [page],
                 }
             )

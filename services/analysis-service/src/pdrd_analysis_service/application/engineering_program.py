@@ -8,6 +8,7 @@ import re
 from dataclasses import asdict, dataclass, replace
 from decimal import Decimal
 
+from pdrd_analysis_service.application.evidence_audit import audit_findings_evidence
 from pdrd_analysis_service.application.vision_execution import current_vision_execution
 from pdrd_analysis_service.domain.analysis import (
     DocumentContextSource,
@@ -516,6 +517,11 @@ def augment_page_findings(
     )
     registry = report.registry
     findings = audit_engineering_candidates(findings, report)
+    findings = audit_findings_evidence(
+        findings,
+        page_texts={page_number: extracted_text},
+        stage="check_norms_evidence_audit",
+    )
     combined = {
         finding.finding_id: finding
         for finding in (
@@ -672,8 +678,8 @@ def audit_engineering_candidates(findings, report):
                 )
             )
             comment = (
-                f"Для показателя «{label}» правило формирования итога не установлено в доступных фактах. "
-                "Требуется уточнить состав расчётной группы и режим."
+                f"Уточнить правило формирования показателя «{label}»: "
+                "какие строки и режимы входят в расчётную группу."
             )
             recommendation = (
                 "Уточнить, отражает итог сумму, производительность или расход выбранного режима, "
