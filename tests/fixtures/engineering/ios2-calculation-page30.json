@@ -1,0 +1,3608 @@
+{
+  "source_file": "777_155-1с-ИОС2.2.pdf",
+  "source_sha256": "76e3f20c20bd0ab570d04ee93916928c9a56d432045afb3ed5fc46470f49cdfa",
+  "page_number": 30,
+  "text": "Таблица 1 – Расчет водопотребления котельной.\n\n\n                                                        ВОДОПОТРЕБЛЕНИЕ\n                                                                                       часов сут.в                                             Расход на единицу        Наименование                         приб-в,\n                                              шт.          Треб. к кач-         Режим                                     Прим.         потребителя\n                                               ву воды       водопотребления      м3/сут    м3/ч       л/с                                                                                                        Кол-во  работы                                                                                    Кол-во\n\n\n                                            Эксплуатационные расходы\n    Подпитка сетевого\n                                   24     После ВПУ     При наличии утечек      17,700     0,738     0,205     (1), (3)\n    контура\n    Подпитка котлового\n                                   24     После ВПУ     При наличии утечек      3,464     0,144     0,040     (1), (3)\n    контура\n    Приготовление ГВС                     СанПиН\n                                   24                      Постоянно         122,071    5,086     1,413\n    (среднечасовая)                           2.1.3684-21\n    Приготовление ГВС                     СанПиН\n                                                            -                     Периодически                -       35,911     9,975      (10)\n    (максимальная)                            2.1.3684-21\n    Хозяйственно-бытовые                  СанПиН\n                                   24                      Постоянно           2,250     1,641     0,963\n    нужды котельной                          2.1.3684-21\n                                       СанПиН\n    Регенерация ВПУ          1      3                     Периодически         8,158     2,410     0,669       (5)\n                                                2.1.3684-21\n    Мокрая уборка                        СанПиН\n                                    1                     Периодически         1,479     1,479     0,411       (6)\n    помещений                               2.1.3684-21\n    Аварийная подпитка                    СанПиН      Аварийное падение\n                                                            -                                                                        -        5,900     1,639     (2), (9)\n    сетевого контура                          2.1.3684-21         давления\n    Аварийная подпитка                    СанПиН      Аварийное падение\n                                                            -                                                                        -        1,155     0,321     (2), (9)\n    сетевого контура                          2.1.3684-21         давления\n\n                                          Итого эксплуатационные расходы воды:   155,122    42,323    12,264\n\n                                               Заполнение системы\n\n    Заполнение сетевого\n                                   24     После ВПУ   Первичное заполнение   116,033    4,835     1,343      (11)\n    контура\n    Заполнение котлового                  СанПиН\n                                          3,1                Первичное заполнение    57,736     4,835     1,343\n    контура                                   2.1.3684-21\n\n    Заполнение контура ГВС            5,1    После ВПУ   Первичное заполнение     20,7      4,052     1,125       (7)\n\n                                            Итого расход на заполнение системы:   116,033    4,835     1,343\n\n                                          Пожаротушение\n\n    Пожаротушение\n                                                     При пожаре                                2х2,5      (12)\n    внутреннее\n    Пожаротушение\n                                                     При пожаре                             10       (13)\n    наружное\n\n      Согласно п. 6.22 СП 124.13330 аварийная подпитка системы теплоснабжения принимается в размере\n  2% от объема тепловой сети. При объеме тепловой сети 295 м³ расчетный расход аварийной подпитки\n   составляет 5,9 м³/ч.\n      В соответствии с п. 6.16 СП 124.13330 (таблица 3) максимальная производительность подпитки для\n  тепловой сети диаметром Ду 400 составляет 65 м³/ч. С учетом объема сети и необходимости исключения\n\n\n                                                                777/155-1c-850-ТМ\n\n\n                                                  Комплекс зданий и сооружений объекта 777/155-1с\n                                                                    Зона 6\n\nРазработал Рябинин                     09.26                                            Стадия     Лист     Листов\nПроверил   Заикин                      09.26              Сооружение 850\n                                                                            П            1        2\nУтвердил   Ярославцева                09.26\n\n                                      Расчет водопотребления и водоотведения\n                                                 котельной 20,88 МВт",
+  "text_words": [
+    {
+      "text": "Таблица",
+      "bbox": {
+        "x_min": 190,
+        "y_min": 69,
+        "x_max": 257,
+        "y_max": 83
+      },
+      "block_no": 13,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "1",
+      "bbox": {
+        "x_min": 260,
+        "y_min": 69,
+        "x_max": 270,
+        "y_max": 83
+      },
+      "block_no": 13,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "–",
+      "bbox": {
+        "x_min": 274,
+        "y_min": 69,
+        "x_max": 284,
+        "y_max": 83
+      },
+      "block_no": 13,
+      "line_no": 0,
+      "word_no": 2
+    },
+    {
+      "text": "Расчет",
+      "bbox": {
+        "x_min": 287,
+        "y_min": 69,
+        "x_max": 339,
+        "y_max": 83
+      },
+      "block_no": 13,
+      "line_no": 0,
+      "word_no": 3
+    },
+    {
+      "text": "водопотребления",
+      "bbox": {
+        "x_min": 342,
+        "y_min": 69,
+        "x_max": 484,
+        "y_max": 83
+      },
+      "block_no": 13,
+      "line_no": 0,
+      "word_no": 4
+    },
+    {
+      "text": "котельной.",
+      "bbox": {
+        "x_min": 488,
+        "y_min": 69,
+        "x_max": 576,
+        "y_max": 83
+      },
+      "block_no": 13,
+      "line_no": 0,
+      "word_no": 5
+    },
+    {
+      "text": "ВОДОПОТРЕБЛЕНИЕ",
+      "bbox": {
+        "x_min": 583,
+        "y_min": 99,
+        "x_max": 715,
+        "y_max": 111
+      },
+      "block_no": 20,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "сут.",
+      "bbox": {
+        "x_min": 378,
+        "y_min": 110,
+        "x_max": 394,
+        "y_max": 127
+      },
+      "block_no": 19,
+      "line_no": 0,
+      "word_no": 2
+    },
+    {
+      "text": "Расход",
+      "bbox": {
+        "x_min": 724,
+        "y_min": 116,
+        "x_max": 770,
+        "y_max": 128
+      },
+      "block_no": 24,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "на",
+      "bbox": {
+        "x_min": 772,
+        "y_min": 116,
+        "x_max": 789,
+        "y_max": 128
+      },
+      "block_no": 24,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "единицу",
+      "bbox": {
+        "x_min": 791,
+        "y_min": 116,
+        "x_max": 848,
+        "y_max": 128
+      },
+      "block_no": 24,
+      "line_no": 0,
+      "word_no": 2
+    },
+    {
+      "text": "часов",
+      "bbox": {
+        "x_min": 359,
+        "y_min": 111,
+        "x_max": 375,
+        "y_max": 137
+      },
+      "block_no": 18,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "в",
+      "bbox": {
+        "x_min": 378,
+        "y_min": 129,
+        "x_max": 394,
+        "y_max": 135
+      },
+      "block_no": 19,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "Наименование",
+      "bbox": {
+        "x_min": 159,
+        "y_min": 129,
+        "x_max": 257,
+        "y_max": 141
+      },
+      "block_no": 14,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "приб-в,",
+      "bbox": {
+        "x_min": 310,
+        "y_min": 106,
+        "x_max": 326,
+        "y_max": 141
+      },
+      "block_no": 16,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "потребителя",
+      "bbox": {
+        "x_min": 167,
+        "y_min": 142,
+        "x_max": 250,
+        "y_max": 154
+      },
+      "block_no": 15,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "шт.",
+      "bbox": {
+        "x_min": 328,
+        "y_min": 133,
+        "x_max": 345,
+        "y_max": 148
+      },
+      "block_no": 17,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "Треб.",
+      "bbox": {
+        "x_min": 415,
+        "y_min": 139,
+        "x_max": 450,
+        "y_max": 150
+      },
+      "block_no": 21,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "к",
+      "bbox": {
+        "x_min": 453,
+        "y_min": 139,
+        "x_max": 461,
+        "y_max": 150
+      },
+      "block_no": 21,
+      "line_no": 1,
+      "word_no": 1
+    },
+    {
+      "text": "кач-",
+      "bbox": {
+        "x_min": 463,
+        "y_min": 139,
+        "x_max": 490,
+        "y_max": 150
+      },
+      "block_no": 21,
+      "line_no": 1,
+      "word_no": 2
+    },
+    {
+      "text": "Режим",
+      "bbox": {
+        "x_min": 567,
+        "y_min": 139,
+        "x_max": 612,
+        "y_max": 150
+      },
+      "block_no": 23,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "Прим.",
+      "bbox": {
+        "x_min": 903,
+        "y_min": 136,
+        "x_max": 943,
+        "y_max": 147
+      },
+      "block_no": 21,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "ву",
+      "bbox": {
+        "x_min": 426,
+        "y_min": 152,
+        "x_max": 441,
+        "y_max": 163
+      },
+      "block_no": 22,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "воды",
+      "bbox": {
+        "x_min": 444,
+        "y_min": 152,
+        "x_max": 479,
+        "y_max": 163
+      },
+      "block_no": 22,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "водопотребления",
+      "bbox": {
+        "x_min": 531,
+        "y_min": 152,
+        "x_max": 647,
+        "y_max": 163
+      },
+      "block_no": 23,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "м3/сут",
+      "bbox": {
+        "x_min": 693,
+        "y_min": 152,
+        "x_max": 737,
+        "y_max": 164
+      },
+      "block_no": 25,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "м3/ч",
+      "bbox": {
+        "x_min": 770,
+        "y_min": 152,
+        "x_max": 802,
+        "y_max": 164
+      },
+      "block_no": 25,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "л/с",
+      "bbox": {
+        "x_min": 847,
+        "y_min": 152,
+        "x_max": 868,
+        "y_max": 164
+      },
+      "block_no": 25,
+      "line_no": 2,
+      "word_no": 0
+    },
+    {
+      "text": "Кол-во",
+      "bbox": {
+        "x_min": 359,
+        "y_min": 138,
+        "x_max": 375,
+        "y_max": 170
+      },
+      "block_no": 18,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "работы",
+      "bbox": {
+        "x_min": 378,
+        "y_min": 136,
+        "x_max": 394,
+        "y_max": 171
+      },
+      "block_no": 19,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "Кол-во",
+      "bbox": {
+        "x_min": 310,
+        "y_min": 143,
+        "x_max": 326,
+        "y_max": 175
+      },
+      "block_no": 16,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "Эксплуатационные",
+      "bbox": {
+        "x_min": 442,
+        "y_min": 191,
+        "x_max": 569,
+        "y_max": 203
+      },
+      "block_no": 26,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "расходы",
+      "bbox": {
+        "x_min": 572,
+        "y_min": 191,
+        "x_max": 629,
+        "y_max": 203
+      },
+      "block_no": 26,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "Подпитка",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 207,
+        "x_max": 191,
+        "y_max": 219
+      },
+      "block_no": 26,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "сетевого",
+      "bbox": {
+        "x_min": 193,
+        "y_min": 207,
+        "x_max": 250,
+        "y_max": 219
+      },
+      "block_no": 26,
+      "line_no": 1,
+      "word_no": 1
+    },
+    {
+      "text": "24",
+      "bbox": {
+        "x_min": 367,
+        "y_min": 213,
+        "x_max": 383,
+        "y_max": 225
+      },
+      "block_no": 27,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "После",
+      "bbox": {
+        "x_min": 418,
+        "y_min": 213,
+        "x_max": 458,
+        "y_max": 225
+      },
+      "block_no": 27,
+      "line_no": 2,
+      "word_no": 0
+    },
+    {
+      "text": "ВПУ",
+      "bbox": {
+        "x_min": 460,
+        "y_min": 213,
+        "x_max": 487,
+        "y_max": 225
+      },
+      "block_no": 27,
+      "line_no": 2,
+      "word_no": 1
+    },
+    {
+      "text": "При",
+      "bbox": {
+        "x_min": 525,
+        "y_min": 213,
+        "x_max": 551,
+        "y_max": 225
+      },
+      "block_no": 27,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "наличии",
+      "bbox": {
+        "x_min": 554,
+        "y_min": 213,
+        "x_max": 609,
+        "y_max": 225
+      },
+      "block_no": 27,
+      "line_no": 3,
+      "word_no": 1
+    },
+    {
+      "text": "утечек",
+      "bbox": {
+        "x_min": 612,
+        "y_min": 213,
+        "x_max": 654,
+        "y_max": 225
+      },
+      "block_no": 27,
+      "line_no": 3,
+      "word_no": 2
+    },
+    {
+      "text": "17,700",
+      "bbox": {
+        "x_min": 693,
+        "y_min": 213,
+        "x_max": 736,
+        "y_max": 225
+      },
+      "block_no": 27,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "0,738",
+      "bbox": {
+        "x_min": 768,
+        "y_min": 213,
+        "x_max": 803,
+        "y_max": 225
+      },
+      "block_no": 27,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "0,205",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 213,
+        "x_max": 875,
+        "y_max": 225
+      },
+      "block_no": 27,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "(1),",
+      "bbox": {
+        "x_min": 902,
+        "y_min": 213,
+        "x_max": 924,
+        "y_max": 225
+      },
+      "block_no": 27,
+      "line_no": 7,
+      "word_no": 0
+    },
+    {
+      "text": "(3)",
+      "bbox": {
+        "x_min": 926,
+        "y_min": 213,
+        "x_max": 944,
+        "y_max": 225
+      },
+      "block_no": 27,
+      "line_no": 7,
+      "word_no": 1
+    },
+    {
+      "text": "контура",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 220,
+        "x_max": 180,
+        "y_max": 232
+      },
+      "block_no": 26,
+      "line_no": 2,
+      "word_no": 0
+    },
+    {
+      "text": "Подпитка",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 234,
+        "x_max": 191,
+        "y_max": 245
+      },
+      "block_no": 28,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "котлового",
+      "bbox": {
+        "x_min": 193,
+        "y_min": 234,
+        "x_max": 259,
+        "y_max": 245
+      },
+      "block_no": 28,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "24",
+      "bbox": {
+        "x_min": 367,
+        "y_min": 240,
+        "x_max": 383,
+        "y_max": 252
+      },
+      "block_no": 28,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "После",
+      "bbox": {
+        "x_min": 418,
+        "y_min": 240,
+        "x_max": 458,
+        "y_max": 252
+      },
+      "block_no": 28,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "ВПУ",
+      "bbox": {
+        "x_min": 460,
+        "y_min": 240,
+        "x_max": 487,
+        "y_max": 252
+      },
+      "block_no": 28,
+      "line_no": 4,
+      "word_no": 1
+    },
+    {
+      "text": "При",
+      "bbox": {
+        "x_min": 525,
+        "y_min": 240,
+        "x_max": 551,
+        "y_max": 252
+      },
+      "block_no": 28,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "наличии",
+      "bbox": {
+        "x_min": 554,
+        "y_min": 240,
+        "x_max": 609,
+        "y_max": 252
+      },
+      "block_no": 28,
+      "line_no": 5,
+      "word_no": 1
+    },
+    {
+      "text": "утечек",
+      "bbox": {
+        "x_min": 612,
+        "y_min": 240,
+        "x_max": 654,
+        "y_max": 252
+      },
+      "block_no": 28,
+      "line_no": 5,
+      "word_no": 2
+    },
+    {
+      "text": "3,464",
+      "bbox": {
+        "x_min": 697,
+        "y_min": 240,
+        "x_max": 732,
+        "y_max": 252
+      },
+      "block_no": 28,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "0,144",
+      "bbox": {
+        "x_min": 768,
+        "y_min": 240,
+        "x_max": 803,
+        "y_max": 252
+      },
+      "block_no": 28,
+      "line_no": 7,
+      "word_no": 0
+    },
+    {
+      "text": "0,040",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 240,
+        "x_max": 875,
+        "y_max": 252
+      },
+      "block_no": 28,
+      "line_no": 8,
+      "word_no": 0
+    },
+    {
+      "text": "(1),",
+      "bbox": {
+        "x_min": 902,
+        "y_min": 240,
+        "x_max": 924,
+        "y_max": 252
+      },
+      "block_no": 28,
+      "line_no": 9,
+      "word_no": 0
+    },
+    {
+      "text": "(3)",
+      "bbox": {
+        "x_min": 926,
+        "y_min": 240,
+        "x_max": 944,
+        "y_max": 252
+      },
+      "block_no": 28,
+      "line_no": 9,
+      "word_no": 1
+    },
+    {
+      "text": "контура",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 247,
+        "x_max": 180,
+        "y_max": 258
+      },
+      "block_no": 28,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "Приготовление",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 260,
+        "x_max": 228,
+        "y_max": 272
+      },
+      "block_no": 29,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "ГВС",
+      "bbox": {
+        "x_min": 230,
+        "y_min": 260,
+        "x_max": 254,
+        "y_max": 272
+      },
+      "block_no": 29,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "СанПиН",
+      "bbox": {
+        "x_min": 427,
+        "y_min": 260,
+        "x_max": 478,
+        "y_max": 272
+      },
+      "block_no": 29,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "24",
+      "bbox": {
+        "x_min": 367,
+        "y_min": 267,
+        "x_max": 383,
+        "y_max": 278
+      },
+      "block_no": 29,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "Постоянно",
+      "bbox": {
+        "x_min": 555,
+        "y_min": 267,
+        "x_max": 625,
+        "y_max": 278
+      },
+      "block_no": 29,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "122,071",
+      "bbox": {
+        "x_min": 689,
+        "y_min": 267,
+        "x_max": 740,
+        "y_max": 278
+      },
+      "block_no": 29,
+      "line_no": 7,
+      "word_no": 0
+    },
+    {
+      "text": "5,086",
+      "bbox": {
+        "x_min": 768,
+        "y_min": 267,
+        "x_max": 803,
+        "y_max": 278
+      },
+      "block_no": 29,
+      "line_no": 8,
+      "word_no": 0
+    },
+    {
+      "text": "1,413",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 267,
+        "x_max": 875,
+        "y_max": 278
+      },
+      "block_no": 29,
+      "line_no": 9,
+      "word_no": 0
+    },
+    {
+      "text": "(среднечасовая)",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 273,
+        "x_max": 234,
+        "y_max": 285
+      },
+      "block_no": 29,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "2.1.3684-21",
+      "bbox": {
+        "x_min": 415,
+        "y_min": 273,
+        "x_max": 490,
+        "y_max": 285
+      },
+      "block_no": 29,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "Приготовление",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 287,
+        "x_max": 228,
+        "y_max": 299
+      },
+      "block_no": 30,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "ГВС",
+      "bbox": {
+        "x_min": 230,
+        "y_min": 287,
+        "x_max": 254,
+        "y_max": 299
+      },
+      "block_no": 30,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "СанПиН",
+      "bbox": {
+        "x_min": 427,
+        "y_min": 287,
+        "x_max": 478,
+        "y_max": 299
+      },
+      "block_no": 30,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "-",
+      "bbox": {
+        "x_min": 374,
+        "y_min": 294,
+        "x_max": 380,
+        "y_max": 305
+      },
+      "block_no": 30,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "Периодически",
+      "bbox": {
+        "x_min": 542,
+        "y_min": 294,
+        "x_max": 637,
+        "y_max": 305
+      },
+      "block_no": 30,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "-",
+      "bbox": {
+        "x_min": 712,
+        "y_min": 294,
+        "x_max": 717,
+        "y_max": 305
+      },
+      "block_no": 30,
+      "line_no": 7,
+      "word_no": 0
+    },
+    {
+      "text": "35,911",
+      "bbox": {
+        "x_min": 764,
+        "y_min": 294,
+        "x_max": 807,
+        "y_max": 305
+      },
+      "block_no": 30,
+      "line_no": 8,
+      "word_no": 0
+    },
+    {
+      "text": "9,975",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 294,
+        "x_max": 875,
+        "y_max": 305
+      },
+      "block_no": 30,
+      "line_no": 9,
+      "word_no": 0
+    },
+    {
+      "text": "(10)",
+      "bbox": {
+        "x_min": 910,
+        "y_min": 294,
+        "x_max": 936,
+        "y_max": 305
+      },
+      "block_no": 30,
+      "line_no": 10,
+      "word_no": 0
+    },
+    {
+      "text": "(максимальная)",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 300,
+        "x_max": 232,
+        "y_max": 312
+      },
+      "block_no": 30,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "2.1.3684-21",
+      "bbox": {
+        "x_min": 415,
+        "y_min": 300,
+        "x_max": 490,
+        "y_max": 312
+      },
+      "block_no": 30,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "Хозяйственно-бытовые",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 314,
+        "x_max": 279,
+        "y_max": 325
+      },
+      "block_no": 31,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "СанПиН",
+      "bbox": {
+        "x_min": 427,
+        "y_min": 314,
+        "x_max": 478,
+        "y_max": 325
+      },
+      "block_no": 31,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "24",
+      "bbox": {
+        "x_min": 367,
+        "y_min": 320,
+        "x_max": 383,
+        "y_max": 332
+      },
+      "block_no": 31,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "Постоянно",
+      "bbox": {
+        "x_min": 555,
+        "y_min": 320,
+        "x_max": 625,
+        "y_max": 332
+      },
+      "block_no": 31,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "2,250",
+      "bbox": {
+        "x_min": 697,
+        "y_min": 320,
+        "x_max": 732,
+        "y_max": 332
+      },
+      "block_no": 31,
+      "line_no": 7,
+      "word_no": 0
+    },
+    {
+      "text": "1,641",
+      "bbox": {
+        "x_min": 768,
+        "y_min": 320,
+        "x_max": 803,
+        "y_max": 332
+      },
+      "block_no": 31,
+      "line_no": 8,
+      "word_no": 0
+    },
+    {
+      "text": "0,963",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 320,
+        "x_max": 875,
+        "y_max": 332
+      },
+      "block_no": 31,
+      "line_no": 9,
+      "word_no": 0
+    },
+    {
+      "text": "нужды",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 327,
+        "x_max": 173,
+        "y_max": 338
+      },
+      "block_no": 31,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "котельной",
+      "bbox": {
+        "x_min": 175,
+        "y_min": 327,
+        "x_max": 244,
+        "y_max": 338
+      },
+      "block_no": 31,
+      "line_no": 1,
+      "word_no": 1
+    },
+    {
+      "text": "2.1.3684-21",
+      "bbox": {
+        "x_min": 415,
+        "y_min": 327,
+        "x_max": 490,
+        "y_max": 338
+      },
+      "block_no": 31,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "СанПиН",
+      "bbox": {
+        "x_min": 427,
+        "y_min": 340,
+        "x_max": 478,
+        "y_max": 352
+      },
+      "block_no": 32,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "Регенерация",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 347,
+        "x_max": 211,
+        "y_max": 359
+      },
+      "block_no": 32,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "ВПУ",
+      "bbox": {
+        "x_min": 214,
+        "y_min": 347,
+        "x_max": 240,
+        "y_max": 359
+      },
+      "block_no": 32,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "1",
+      "bbox": {
+        "x_min": 317,
+        "y_min": 347,
+        "x_max": 326,
+        "y_max": 359
+      },
+      "block_no": 32,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "3",
+      "bbox": {
+        "x_min": 369,
+        "y_min": 347,
+        "x_max": 378,
+        "y_max": 359
+      },
+      "block_no": 32,
+      "line_no": 2,
+      "word_no": 0
+    },
+    {
+      "text": "Периодически",
+      "bbox": {
+        "x_min": 542,
+        "y_min": 347,
+        "x_max": 637,
+        "y_max": 359
+      },
+      "block_no": 32,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "8,158",
+      "bbox": {
+        "x_min": 697,
+        "y_min": 347,
+        "x_max": 732,
+        "y_max": 359
+      },
+      "block_no": 32,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "2,410",
+      "bbox": {
+        "x_min": 768,
+        "y_min": 347,
+        "x_max": 803,
+        "y_max": 359
+      },
+      "block_no": 32,
+      "line_no": 7,
+      "word_no": 0
+    },
+    {
+      "text": "0,669",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 347,
+        "x_max": 875,
+        "y_max": 359
+      },
+      "block_no": 32,
+      "line_no": 8,
+      "word_no": 0
+    },
+    {
+      "text": "(5)",
+      "bbox": {
+        "x_min": 914,
+        "y_min": 347,
+        "x_max": 932,
+        "y_max": 359
+      },
+      "block_no": 32,
+      "line_no": 9,
+      "word_no": 0
+    },
+    {
+      "text": "2.1.3684-21",
+      "bbox": {
+        "x_min": 415,
+        "y_min": 353,
+        "x_max": 490,
+        "y_max": 365
+      },
+      "block_no": 32,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "Мокрая",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 367,
+        "x_max": 179,
+        "y_max": 379
+      },
+      "block_no": 33,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "уборка",
+      "bbox": {
+        "x_min": 182,
+        "y_min": 367,
+        "x_max": 228,
+        "y_max": 379
+      },
+      "block_no": 33,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "СанПиН",
+      "bbox": {
+        "x_min": 427,
+        "y_min": 367,
+        "x_max": 478,
+        "y_max": 379
+      },
+      "block_no": 33,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "1",
+      "bbox": {
+        "x_min": 371,
+        "y_min": 374,
+        "x_max": 379,
+        "y_max": 385
+      },
+      "block_no": 33,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "Периодически",
+      "bbox": {
+        "x_min": 542,
+        "y_min": 374,
+        "x_max": 637,
+        "y_max": 385
+      },
+      "block_no": 33,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "1,479",
+      "bbox": {
+        "x_min": 697,
+        "y_min": 374,
+        "x_max": 732,
+        "y_max": 385
+      },
+      "block_no": 33,
+      "line_no": 7,
+      "word_no": 0
+    },
+    {
+      "text": "1,479",
+      "bbox": {
+        "x_min": 768,
+        "y_min": 374,
+        "x_max": 803,
+        "y_max": 385
+      },
+      "block_no": 33,
+      "line_no": 8,
+      "word_no": 0
+    },
+    {
+      "text": "0,411",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 374,
+        "x_max": 875,
+        "y_max": 385
+      },
+      "block_no": 33,
+      "line_no": 9,
+      "word_no": 0
+    },
+    {
+      "text": "(6)",
+      "bbox": {
+        "x_min": 914,
+        "y_min": 374,
+        "x_max": 932,
+        "y_max": 385
+      },
+      "block_no": 33,
+      "line_no": 10,
+      "word_no": 0
+    },
+    {
+      "text": "помещений",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 380,
+        "x_max": 206,
+        "y_max": 392
+      },
+      "block_no": 33,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "2.1.3684-21",
+      "bbox": {
+        "x_min": 415,
+        "y_min": 380,
+        "x_max": 490,
+        "y_max": 392
+      },
+      "block_no": 33,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "Аварийная",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 394,
+        "x_max": 199,
+        "y_max": 405
+      },
+      "block_no": 34,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "подпитка",
+      "bbox": {
+        "x_min": 201,
+        "y_min": 394,
+        "x_max": 263,
+        "y_max": 405
+      },
+      "block_no": 34,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "СанПиН",
+      "bbox": {
+        "x_min": 427,
+        "y_min": 394,
+        "x_max": 478,
+        "y_max": 405
+      },
+      "block_no": 34,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "Аварийное",
+      "bbox": {
+        "x_min": 524,
+        "y_min": 394,
+        "x_max": 597,
+        "y_max": 405
+      },
+      "block_no": 34,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "падение",
+      "bbox": {
+        "x_min": 599,
+        "y_min": 394,
+        "x_max": 655,
+        "y_max": 405
+      },
+      "block_no": 34,
+      "line_no": 6,
+      "word_no": 1
+    },
+    {
+      "text": "-",
+      "bbox": {
+        "x_min": 372,
+        "y_min": 400,
+        "x_max": 378,
+        "y_max": 412
+      },
+      "block_no": 34,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "-",
+      "bbox": {
+        "x_min": 712,
+        "y_min": 400,
+        "x_max": 717,
+        "y_max": 412
+      },
+      "block_no": 35,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "5,900",
+      "bbox": {
+        "x_min": 768,
+        "y_min": 400,
+        "x_max": 803,
+        "y_max": 412
+      },
+      "block_no": 35,
+      "line_no": 2,
+      "word_no": 0
+    },
+    {
+      "text": "1,639",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 400,
+        "x_max": 875,
+        "y_max": 412
+      },
+      "block_no": 35,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "(2),",
+      "bbox": {
+        "x_min": 902,
+        "y_min": 400,
+        "x_max": 924,
+        "y_max": 412
+      },
+      "block_no": 35,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "(9)",
+      "bbox": {
+        "x_min": 926,
+        "y_min": 400,
+        "x_max": 944,
+        "y_max": 412
+      },
+      "block_no": 35,
+      "line_no": 4,
+      "word_no": 1
+    },
+    {
+      "text": "сетевого",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 407,
+        "x_max": 184,
+        "y_max": 419
+      },
+      "block_no": 34,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "контура",
+      "bbox": {
+        "x_min": 187,
+        "y_min": 407,
+        "x_max": 239,
+        "y_max": 419
+      },
+      "block_no": 34,
+      "line_no": 1,
+      "word_no": 1
+    },
+    {
+      "text": "2.1.3684-21",
+      "bbox": {
+        "x_min": 415,
+        "y_min": 407,
+        "x_max": 490,
+        "y_max": 419
+      },
+      "block_no": 34,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "давления",
+      "bbox": {
+        "x_min": 558,
+        "y_min": 407,
+        "x_max": 621,
+        "y_max": 419
+      },
+      "block_no": 35,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "Аварийная",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 423,
+        "x_max": 199,
+        "y_max": 434
+      },
+      "block_no": 36,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "подпитка",
+      "bbox": {
+        "x_min": 201,
+        "y_min": 423,
+        "x_max": 263,
+        "y_max": 434
+      },
+      "block_no": 36,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "СанПиН",
+      "bbox": {
+        "x_min": 427,
+        "y_min": 423,
+        "x_max": 478,
+        "y_max": 434
+      },
+      "block_no": 36,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "Аварийное",
+      "bbox": {
+        "x_min": 524,
+        "y_min": 423,
+        "x_max": 597,
+        "y_max": 434
+      },
+      "block_no": 36,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "падение",
+      "bbox": {
+        "x_min": 599,
+        "y_min": 423,
+        "x_max": 655,
+        "y_max": 434
+      },
+      "block_no": 36,
+      "line_no": 6,
+      "word_no": 1
+    },
+    {
+      "text": "-",
+      "bbox": {
+        "x_min": 372,
+        "y_min": 429,
+        "x_max": 378,
+        "y_max": 441
+      },
+      "block_no": 36,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "-",
+      "bbox": {
+        "x_min": 712,
+        "y_min": 429,
+        "x_max": 717,
+        "y_max": 441
+      },
+      "block_no": 37,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "1,155",
+      "bbox": {
+        "x_min": 768,
+        "y_min": 429,
+        "x_max": 803,
+        "y_max": 441
+      },
+      "block_no": 37,
+      "line_no": 2,
+      "word_no": 0
+    },
+    {
+      "text": "0,321",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 429,
+        "x_max": 875,
+        "y_max": 441
+      },
+      "block_no": 37,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "(2),",
+      "bbox": {
+        "x_min": 902,
+        "y_min": 429,
+        "x_max": 924,
+        "y_max": 441
+      },
+      "block_no": 37,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "(9)",
+      "bbox": {
+        "x_min": 926,
+        "y_min": 429,
+        "x_max": 944,
+        "y_max": 441
+      },
+      "block_no": 37,
+      "line_no": 4,
+      "word_no": 1
+    },
+    {
+      "text": "сетевого",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 436,
+        "x_max": 184,
+        "y_max": 447
+      },
+      "block_no": 36,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "контура",
+      "bbox": {
+        "x_min": 187,
+        "y_min": 436,
+        "x_max": 239,
+        "y_max": 447
+      },
+      "block_no": 36,
+      "line_no": 1,
+      "word_no": 1
+    },
+    {
+      "text": "2.1.3684-21",
+      "bbox": {
+        "x_min": 415,
+        "y_min": 436,
+        "x_max": 490,
+        "y_max": 447
+      },
+      "block_no": 36,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "давления",
+      "bbox": {
+        "x_min": 558,
+        "y_min": 436,
+        "x_max": 621,
+        "y_max": 447
+      },
+      "block_no": 37,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "Итого",
+      "bbox": {
+        "x_min": 409,
+        "y_min": 459,
+        "x_max": 447,
+        "y_max": 471
+      },
+      "block_no": 38,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "эксплуатационные",
+      "bbox": {
+        "x_min": 449,
+        "y_min": 459,
+        "x_max": 571,
+        "y_max": 471
+      },
+      "block_no": 38,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "расходы",
+      "bbox": {
+        "x_min": 574,
+        "y_min": 459,
+        "x_max": 629,
+        "y_max": 471
+      },
+      "block_no": 38,
+      "line_no": 0,
+      "word_no": 2
+    },
+    {
+      "text": "воды:",
+      "bbox": {
+        "x_min": 631,
+        "y_min": 459,
+        "x_max": 670,
+        "y_max": 471
+      },
+      "block_no": 38,
+      "line_no": 0,
+      "word_no": 3
+    },
+    {
+      "text": "155,122",
+      "bbox": {
+        "x_min": 689,
+        "y_min": 459,
+        "x_max": 740,
+        "y_max": 471
+      },
+      "block_no": 38,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "42,323",
+      "bbox": {
+        "x_min": 764,
+        "y_min": 459,
+        "x_max": 807,
+        "y_max": 471
+      },
+      "block_no": 38,
+      "line_no": 2,
+      "word_no": 0
+    },
+    {
+      "text": "12,264",
+      "bbox": {
+        "x_min": 836,
+        "y_min": 459,
+        "x_max": 879,
+        "y_max": 471
+      },
+      "block_no": 38,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "Заполнение",
+      "bbox": {
+        "x_min": 466,
+        "y_min": 484,
+        "x_max": 546,
+        "y_max": 496
+      },
+      "block_no": 39,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "системы",
+      "bbox": {
+        "x_min": 548,
+        "y_min": 484,
+        "x_max": 606,
+        "y_max": 496
+      },
+      "block_no": 39,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "Заполнение",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 502,
+        "x_max": 206,
+        "y_max": 514
+      },
+      "block_no": 40,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "сетевого",
+      "bbox": {
+        "x_min": 209,
+        "y_min": 502,
+        "x_max": 265,
+        "y_max": 514
+      },
+      "block_no": 40,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "24",
+      "bbox": {
+        "x_min": 367,
+        "y_min": 509,
+        "x_max": 383,
+        "y_max": 520
+      },
+      "block_no": 40,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "После",
+      "bbox": {
+        "x_min": 418,
+        "y_min": 509,
+        "x_max": 458,
+        "y_max": 520
+      },
+      "block_no": 40,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "ВПУ",
+      "bbox": {
+        "x_min": 460,
+        "y_min": 509,
+        "x_max": 487,
+        "y_max": 520
+      },
+      "block_no": 40,
+      "line_no": 4,
+      "word_no": 1
+    },
+    {
+      "text": "Первичное",
+      "bbox": {
+        "x_min": 513,
+        "y_min": 509,
+        "x_max": 585,
+        "y_max": 520
+      },
+      "block_no": 40,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "заполнение",
+      "bbox": {
+        "x_min": 588,
+        "y_min": 509,
+        "x_max": 665,
+        "y_max": 520
+      },
+      "block_no": 40,
+      "line_no": 5,
+      "word_no": 1
+    },
+    {
+      "text": "116,033",
+      "bbox": {
+        "x_min": 689,
+        "y_min": 509,
+        "x_max": 740,
+        "y_max": 520
+      },
+      "block_no": 40,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "4,835",
+      "bbox": {
+        "x_min": 768,
+        "y_min": 509,
+        "x_max": 803,
+        "y_max": 520
+      },
+      "block_no": 40,
+      "line_no": 7,
+      "word_no": 0
+    },
+    {
+      "text": "1,343",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 509,
+        "x_max": 875,
+        "y_max": 520
+      },
+      "block_no": 40,
+      "line_no": 8,
+      "word_no": 0
+    },
+    {
+      "text": "(11)",
+      "bbox": {
+        "x_min": 910,
+        "y_min": 509,
+        "x_max": 936,
+        "y_max": 520
+      },
+      "block_no": 40,
+      "line_no": 9,
+      "word_no": 0
+    },
+    {
+      "text": "контура",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 515,
+        "x_max": 180,
+        "y_max": 527
+      },
+      "block_no": 40,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "Заполнение",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 529,
+        "x_max": 206,
+        "y_max": 540
+      },
+      "block_no": 41,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "котлового",
+      "bbox": {
+        "x_min": 209,
+        "y_min": 529,
+        "x_max": 274,
+        "y_max": 540
+      },
+      "block_no": 41,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "СанПиН",
+      "bbox": {
+        "x_min": 427,
+        "y_min": 529,
+        "x_max": 478,
+        "y_max": 540
+      },
+      "block_no": 41,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "3,1",
+      "bbox": {
+        "x_min": 365,
+        "y_min": 535,
+        "x_max": 385,
+        "y_max": 547
+      },
+      "block_no": 41,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "Первичное",
+      "bbox": {
+        "x_min": 513,
+        "y_min": 535,
+        "x_max": 585,
+        "y_max": 547
+      },
+      "block_no": 41,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "заполнение",
+      "bbox": {
+        "x_min": 588,
+        "y_min": 535,
+        "x_max": 665,
+        "y_max": 547
+      },
+      "block_no": 41,
+      "line_no": 6,
+      "word_no": 1
+    },
+    {
+      "text": "57,736",
+      "bbox": {
+        "x_min": 693,
+        "y_min": 535,
+        "x_max": 736,
+        "y_max": 547
+      },
+      "block_no": 41,
+      "line_no": 7,
+      "word_no": 0
+    },
+    {
+      "text": "4,835",
+      "bbox": {
+        "x_min": 768,
+        "y_min": 535,
+        "x_max": 803,
+        "y_max": 547
+      },
+      "block_no": 41,
+      "line_no": 8,
+      "word_no": 0
+    },
+    {
+      "text": "1,343",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 535,
+        "x_max": 875,
+        "y_max": 547
+      },
+      "block_no": 41,
+      "line_no": 9,
+      "word_no": 0
+    },
+    {
+      "text": "контура",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 542,
+        "x_max": 180,
+        "y_max": 553
+      },
+      "block_no": 41,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "2.1.3684-21",
+      "bbox": {
+        "x_min": 415,
+        "y_min": 542,
+        "x_max": 490,
+        "y_max": 553
+      },
+      "block_no": 41,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "Заполнение",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 558,
+        "x_max": 206,
+        "y_max": 570
+      },
+      "block_no": 42,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "контура",
+      "bbox": {
+        "x_min": 209,
+        "y_min": 558,
+        "x_max": 260,
+        "y_max": 570
+      },
+      "block_no": 42,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "ГВС",
+      "bbox": {
+        "x_min": 263,
+        "y_min": 558,
+        "x_max": 287,
+        "y_max": 570
+      },
+      "block_no": 42,
+      "line_no": 0,
+      "word_no": 2
+    },
+    {
+      "text": "5,1",
+      "bbox": {
+        "x_min": 365,
+        "y_min": 558,
+        "x_max": 385,
+        "y_max": 570
+      },
+      "block_no": 42,
+      "line_no": 2,
+      "word_no": 0
+    },
+    {
+      "text": "После",
+      "bbox": {
+        "x_min": 418,
+        "y_min": 558,
+        "x_max": 458,
+        "y_max": 570
+      },
+      "block_no": 42,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "ВПУ",
+      "bbox": {
+        "x_min": 460,
+        "y_min": 558,
+        "x_max": 487,
+        "y_max": 570
+      },
+      "block_no": 42,
+      "line_no": 3,
+      "word_no": 1
+    },
+    {
+      "text": "Первичное",
+      "bbox": {
+        "x_min": 513,
+        "y_min": 558,
+        "x_max": 585,
+        "y_max": 570
+      },
+      "block_no": 42,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "заполнение",
+      "bbox": {
+        "x_min": 588,
+        "y_min": 558,
+        "x_max": 665,
+        "y_max": 570
+      },
+      "block_no": 42,
+      "line_no": 4,
+      "word_no": 1
+    },
+    {
+      "text": "20,7",
+      "bbox": {
+        "x_min": 701,
+        "y_min": 558,
+        "x_max": 728,
+        "y_max": 570
+      },
+      "block_no": 42,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "4,052",
+      "bbox": {
+        "x_min": 768,
+        "y_min": 558,
+        "x_max": 803,
+        "y_max": 570
+      },
+      "block_no": 42,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "1,125",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 558,
+        "x_max": 875,
+        "y_max": 570
+      },
+      "block_no": 42,
+      "line_no": 7,
+      "word_no": 0
+    },
+    {
+      "text": "(7)",
+      "bbox": {
+        "x_min": 912,
+        "y_min": 558,
+        "x_max": 930,
+        "y_max": 570
+      },
+      "block_no": 42,
+      "line_no": 8,
+      "word_no": 0
+    },
+    {
+      "text": "Итого",
+      "bbox": {
+        "x_min": 424,
+        "y_min": 580,
+        "x_max": 461,
+        "y_max": 592
+      },
+      "block_no": 43,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "расход",
+      "bbox": {
+        "x_min": 464,
+        "y_min": 580,
+        "x_max": 509,
+        "y_max": 592
+      },
+      "block_no": 43,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "на",
+      "bbox": {
+        "x_min": 512,
+        "y_min": 580,
+        "x_max": 528,
+        "y_max": 592
+      },
+      "block_no": 43,
+      "line_no": 0,
+      "word_no": 2
+    },
+    {
+      "text": "заполнение",
+      "bbox": {
+        "x_min": 531,
+        "y_min": 580,
+        "x_max": 608,
+        "y_max": 592
+      },
+      "block_no": 43,
+      "line_no": 0,
+      "word_no": 3
+    },
+    {
+      "text": "системы:",
+      "bbox": {
+        "x_min": 610,
+        "y_min": 580,
+        "x_max": 670,
+        "y_max": 592
+      },
+      "block_no": 43,
+      "line_no": 0,
+      "word_no": 4
+    },
+    {
+      "text": "116,033",
+      "bbox": {
+        "x_min": 689,
+        "y_min": 580,
+        "x_max": 740,
+        "y_max": 592
+      },
+      "block_no": 43,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "4,835",
+      "bbox": {
+        "x_min": 768,
+        "y_min": 580,
+        "x_max": 804,
+        "y_max": 592
+      },
+      "block_no": 43,
+      "line_no": 2,
+      "word_no": 0
+    },
+    {
+      "text": "1,343",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 580,
+        "x_max": 875,
+        "y_max": 592
+      },
+      "block_no": 43,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "Пожаротушение",
+      "bbox": {
+        "x_min": 451,
+        "y_min": 602,
+        "x_max": 561,
+        "y_max": 613
+      },
+      "block_no": 44,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "Пожаротушение",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 618,
+        "x_max": 235,
+        "y_max": 630
+      },
+      "block_no": 45,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "При",
+      "bbox": {
+        "x_min": 550,
+        "y_min": 624,
+        "x_max": 577,
+        "y_max": 636
+      },
+      "block_no": 46,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "пожаре",
+      "bbox": {
+        "x_min": 579,
+        "y_min": 624,
+        "x_max": 629,
+        "y_max": 636
+      },
+      "block_no": 46,
+      "line_no": 3,
+      "word_no": 1
+    },
+    {
+      "text": "2х2,5",
+      "bbox": {
+        "x_min": 840,
+        "y_min": 624,
+        "x_max": 875,
+        "y_max": 636
+      },
+      "block_no": 46,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "(12)",
+      "bbox": {
+        "x_min": 910,
+        "y_min": 624,
+        "x_max": 936,
+        "y_max": 636
+      },
+      "block_no": 46,
+      "line_no": 7,
+      "word_no": 0
+    },
+    {
+      "text": "внутреннее",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 631,
+        "x_max": 203,
+        "y_max": 643
+      },
+      "block_no": 45,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "Пожаротушение",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 645,
+        "x_max": 235,
+        "y_max": 656
+      },
+      "block_no": 47,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "При",
+      "bbox": {
+        "x_min": 550,
+        "y_min": 651,
+        "x_max": 577,
+        "y_max": 663
+      },
+      "block_no": 47,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "пожаре",
+      "bbox": {
+        "x_min": 579,
+        "y_min": 651,
+        "x_max": 629,
+        "y_max": 663
+      },
+      "block_no": 47,
+      "line_no": 5,
+      "word_no": 1
+    },
+    {
+      "text": "10",
+      "bbox": {
+        "x_min": 849,
+        "y_min": 651,
+        "x_max": 865,
+        "y_max": 663
+      },
+      "block_no": 47,
+      "line_no": 8,
+      "word_no": 0
+    },
+    {
+      "text": "(13)",
+      "bbox": {
+        "x_min": 910,
+        "y_min": 651,
+        "x_max": 936,
+        "y_max": 663
+      },
+      "block_no": 47,
+      "line_no": 9,
+      "word_no": 0
+    },
+    {
+      "text": "наружное",
+      "bbox": {
+        "x_min": 128,
+        "y_min": 658,
+        "x_max": 193,
+        "y_max": 669
+      },
+      "block_no": 47,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "Согласно",
+      "bbox": {
+        "x_min": 154,
+        "y_min": 685,
+        "x_max": 227,
+        "y_max": 699
+      },
+      "block_no": 49,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "п.",
+      "bbox": {
+        "x_min": 229,
+        "y_min": 685,
+        "x_max": 244,
+        "y_max": 699
+      },
+      "block_no": 49,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "6.22",
+      "bbox": {
+        "x_min": 247,
+        "y_min": 685,
+        "x_max": 280,
+        "y_max": 699
+      },
+      "block_no": 49,
+      "line_no": 0,
+      "word_no": 2
+    },
+    {
+      "text": "СП",
+      "bbox": {
+        "x_min": 283,
+        "y_min": 685,
+        "x_max": 305,
+        "y_max": 699
+      },
+      "block_no": 49,
+      "line_no": 0,
+      "word_no": 3
+    },
+    {
+      "text": "124.13330",
+      "bbox": {
+        "x_min": 307,
+        "y_min": 685,
+        "x_max": 388,
+        "y_max": 699
+      },
+      "block_no": 49,
+      "line_no": 0,
+      "word_no": 4
+    },
+    {
+      "text": "аварийная",
+      "bbox": {
+        "x_min": 390,
+        "y_min": 685,
+        "x_max": 475,
+        "y_max": 699
+      },
+      "block_no": 49,
+      "line_no": 0,
+      "word_no": 5
+    },
+    {
+      "text": "подпитка",
+      "bbox": {
+        "x_min": 477,
+        "y_min": 685,
+        "x_max": 552,
+        "y_max": 699
+      },
+      "block_no": 49,
+      "line_no": 0,
+      "word_no": 6
+    },
+    {
+      "text": "системы",
+      "bbox": {
+        "x_min": 554,
+        "y_min": 685,
+        "x_max": 622,
+        "y_max": 699
+      },
+      "block_no": 49,
+      "line_no": 0,
+      "word_no": 7
+    },
+    {
+      "text": "теплоснабжения",
+      "bbox": {
+        "x_min": 624,
+        "y_min": 685,
+        "x_max": 757,
+        "y_max": 699
+      },
+      "block_no": 49,
+      "line_no": 0,
+      "word_no": 8
+    },
+    {
+      "text": "принимается",
+      "bbox": {
+        "x_min": 759,
+        "y_min": 685,
+        "x_max": 863,
+        "y_max": 699
+      },
+      "block_no": 49,
+      "line_no": 0,
+      "word_no": 9
+    },
+    {
+      "text": "в",
+      "bbox": {
+        "x_min": 866,
+        "y_min": 685,
+        "x_max": 876,
+        "y_max": 699
+      },
+      "block_no": 49,
+      "line_no": 0,
+      "word_no": 10
+    },
+    {
+      "text": "размере",
+      "bbox": {
+        "x_min": 878,
+        "y_min": 685,
+        "x_max": 946,
+        "y_max": 699
+      },
+      "block_no": 49,
+      "line_no": 0,
+      "word_no": 11
+    },
+    {
+      "text": "2%",
+      "bbox": {
+        "x_min": 118,
+        "y_min": 701,
+        "x_max": 142,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "от",
+      "bbox": {
+        "x_min": 146,
+        "y_min": 701,
+        "x_max": 164,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 1
+    },
+    {
+      "text": "объема",
+      "bbox": {
+        "x_min": 168,
+        "y_min": 701,
+        "x_max": 229,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 2
+    },
+    {
+      "text": "тепловой",
+      "bbox": {
+        "x_min": 233,
+        "y_min": 701,
+        "x_max": 308,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 3
+    },
+    {
+      "text": "сети.",
+      "bbox": {
+        "x_min": 311,
+        "y_min": 701,
+        "x_max": 351,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 4
+    },
+    {
+      "text": "При",
+      "bbox": {
+        "x_min": 355,
+        "y_min": 701,
+        "x_max": 387,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 5
+    },
+    {
+      "text": "объеме",
+      "bbox": {
+        "x_min": 391,
+        "y_min": 701,
+        "x_max": 453,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 6
+    },
+    {
+      "text": "тепловой",
+      "bbox": {
+        "x_min": 456,
+        "y_min": 701,
+        "x_max": 531,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 7
+    },
+    {
+      "text": "сети",
+      "bbox": {
+        "x_min": 535,
+        "y_min": 701,
+        "x_max": 570,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 8
+    },
+    {
+      "text": "295",
+      "bbox": {
+        "x_min": 575,
+        "y_min": 701,
+        "x_max": 604,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 9
+    },
+    {
+      "text": "м³",
+      "bbox": {
+        "x_min": 608,
+        "y_min": 701,
+        "x_max": 627,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 10
+    },
+    {
+      "text": "расчетный",
+      "bbox": {
+        "x_min": 631,
+        "y_min": 701,
+        "x_max": 716,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 11
+    },
+    {
+      "text": "расход",
+      "bbox": {
+        "x_min": 720,
+        "y_min": 701,
+        "x_max": 775,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 12
+    },
+    {
+      "text": "аварийной",
+      "bbox": {
+        "x_min": 779,
+        "y_min": 701,
+        "x_max": 866,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 13
+    },
+    {
+      "text": "подпитки",
+      "bbox": {
+        "x_min": 870,
+        "y_min": 701,
+        "x_max": 946,
+        "y_max": 715
+      },
+      "block_no": 49,
+      "line_no": 1,
+      "word_no": 14
+    },
+    {
+      "text": "составляет",
+      "bbox": {
+        "x_min": 118,
+        "y_min": 717,
+        "x_max": 204,
+        "y_max": 731
+      },
+      "block_no": 49,
+      "line_no": 2,
+      "word_no": 0
+    },
+    {
+      "text": "5,9",
+      "bbox": {
+        "x_min": 208,
+        "y_min": 717,
+        "x_max": 232,
+        "y_max": 731
+      },
+      "block_no": 49,
+      "line_no": 2,
+      "word_no": 1
+    },
+    {
+      "text": "м³/ч.",
+      "bbox": {
+        "x_min": 235,
+        "y_min": 717,
+        "x_max": 275,
+        "y_max": 731
+      },
+      "block_no": 49,
+      "line_no": 2,
+      "word_no": 2
+    },
+    {
+      "text": "В",
+      "bbox": {
+        "x_min": 154,
+        "y_min": 733,
+        "x_max": 165,
+        "y_max": 747
+      },
+      "block_no": 50,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "соответствии",
+      "bbox": {
+        "x_min": 169,
+        "y_min": 733,
+        "x_max": 273,
+        "y_max": 747
+      },
+      "block_no": 50,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "с",
+      "bbox": {
+        "x_min": 277,
+        "y_min": 733,
+        "x_max": 286,
+        "y_max": 747
+      },
+      "block_no": 50,
+      "line_no": 0,
+      "word_no": 2
+    },
+    {
+      "text": "п.",
+      "bbox": {
+        "x_min": 289,
+        "y_min": 733,
+        "x_max": 305,
+        "y_max": 747
+      },
+      "block_no": 50,
+      "line_no": 0,
+      "word_no": 3
+    },
+    {
+      "text": "6.16",
+      "bbox": {
+        "x_min": 308,
+        "y_min": 733,
+        "x_max": 342,
+        "y_max": 747
+      },
+      "block_no": 50,
+      "line_no": 0,
+      "word_no": 4
+    },
+    {
+      "text": "СП",
+      "bbox": {
+        "x_min": 345,
+        "y_min": 733,
+        "x_max": 368,
+        "y_max": 747
+      },
+      "block_no": 50,
+      "line_no": 0,
+      "word_no": 5
+    },
+    {
+      "text": "124.13330",
+      "bbox": {
+        "x_min": 371,
+        "y_min": 733,
+        "x_max": 452,
+        "y_max": 747
+      },
+      "block_no": 50,
+      "line_no": 0,
+      "word_no": 6
+    },
+    {
+      "text": "(таблица",
+      "bbox": {
+        "x_min": 455,
+        "y_min": 733,
+        "x_max": 526,
+        "y_max": 747
+      },
+      "block_no": 50,
+      "line_no": 0,
+      "word_no": 7
+    },
+    {
+      "text": "3)",
+      "bbox": {
+        "x_min": 530,
+        "y_min": 733,
+        "x_max": 546,
+        "y_max": 747
+      },
+      "block_no": 50,
+      "line_no": 0,
+      "word_no": 8
+    },
+    {
+      "text": "максимальная",
+      "bbox": {
+        "x_min": 549,
+        "y_min": 733,
+        "x_max": 665,
+        "y_max": 747
+      },
+      "block_no": 50,
+      "line_no": 0,
+      "word_no": 9
+    },
+    {
+      "text": "производительность",
+      "bbox": {
+        "x_min": 668,
+        "y_min": 733,
+        "x_max": 833,
+        "y_max": 747
+      },
+      "block_no": 50,
+      "line_no": 0,
+      "word_no": 10
+    },
+    {
+      "text": "подпитки",
+      "bbox": {
+        "x_min": 836,
+        "y_min": 733,
+        "x_max": 912,
+        "y_max": 747
+      },
+      "block_no": 50,
+      "line_no": 0,
+      "word_no": 11
+    },
+    {
+      "text": "для",
+      "bbox": {
+        "x_min": 916,
+        "y_min": 733,
+        "x_max": 945,
+        "y_max": 747
+      },
+      "block_no": 50,
+      "line_no": 0,
+      "word_no": 12
+    },
+    {
+      "text": "тепловой",
+      "bbox": {
+        "x_min": 118,
+        "y_min": 748,
+        "x_max": 193,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "сети",
+      "bbox": {
+        "x_min": 196,
+        "y_min": 748,
+        "x_max": 231,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 1
+    },
+    {
+      "text": "диаметром",
+      "bbox": {
+        "x_min": 233,
+        "y_min": 748,
+        "x_max": 324,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 2
+    },
+    {
+      "text": "Ду",
+      "bbox": {
+        "x_min": 327,
+        "y_min": 748,
+        "x_max": 348,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 3
+    },
+    {
+      "text": "400",
+      "bbox": {
+        "x_min": 351,
+        "y_min": 748,
+        "x_max": 380,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 4
+    },
+    {
+      "text": "составляет",
+      "bbox": {
+        "x_min": 382,
+        "y_min": 748,
+        "x_max": 468,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 5
+    },
+    {
+      "text": "65",
+      "bbox": {
+        "x_min": 470,
+        "y_min": 748,
+        "x_max": 490,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 6
+    },
+    {
+      "text": "м³/ч.",
+      "bbox": {
+        "x_min": 493,
+        "y_min": 748,
+        "x_max": 533,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 7
+    },
+    {
+      "text": "С",
+      "bbox": {
+        "x_min": 535,
+        "y_min": 748,
+        "x_max": 546,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 8
+    },
+    {
+      "text": "учетом",
+      "bbox": {
+        "x_min": 548,
+        "y_min": 748,
+        "x_max": 605,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 9
+    },
+    {
+      "text": "объема",
+      "bbox": {
+        "x_min": 608,
+        "y_min": 748,
+        "x_max": 669,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 10
+    },
+    {
+      "text": "сети",
+      "bbox": {
+        "x_min": 671,
+        "y_min": 748,
+        "x_max": 706,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 11
+    },
+    {
+      "text": "и",
+      "bbox": {
+        "x_min": 708,
+        "y_min": 748,
+        "x_max": 720,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 12
+    },
+    {
+      "text": "необходимости",
+      "bbox": {
+        "x_min": 722,
+        "y_min": 748,
+        "x_max": 847,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 13
+    },
+    {
+      "text": "исключения",
+      "bbox": {
+        "x_min": 849,
+        "y_min": 748,
+        "x_max": 946,
+        "y_max": 763
+      },
+      "block_no": 50,
+      "line_no": 1,
+      "word_no": 14
+    },
+    {
+      "text": "777/155-1c-850-ТМ",
+      "bbox": {
+        "x_min": 620,
+        "y_min": 786,
+        "x_max": 760,
+        "y_max": 801
+      },
+      "block_no": 2,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "Комплекс",
+      "bbox": {
+        "x_min": 505,
+        "y_min": 827,
+        "x_max": 571,
+        "y_max": 842
+      },
+      "block_no": 4,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "зданий",
+      "bbox": {
+        "x_min": 575,
+        "y_min": 827,
+        "x_max": 624,
+        "y_max": 842
+      },
+      "block_no": 4,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "и",
+      "bbox": {
+        "x_min": 629,
+        "y_min": 827,
+        "x_max": 638,
+        "y_max": 842
+      },
+      "block_no": 4,
+      "line_no": 0,
+      "word_no": 2
+    },
+    {
+      "text": "сооружений",
+      "bbox": {
+        "x_min": 642,
+        "y_min": 827,
+        "x_max": 724,
+        "y_max": 842
+      },
+      "block_no": 4,
+      "line_no": 0,
+      "word_no": 3
+    },
+    {
+      "text": "объекта",
+      "bbox": {
+        "x_min": 728,
+        "y_min": 827,
+        "x_max": 791,
+        "y_max": 842
+      },
+      "block_no": 4,
+      "line_no": 0,
+      "word_no": 4
+    },
+    {
+      "text": "777/155-1с",
+      "bbox": {
+        "x_min": 795,
+        "y_min": 827,
+        "x_max": 876,
+        "y_max": 842
+      },
+      "block_no": 4,
+      "line_no": 0,
+      "word_no": 5
+    },
+    {
+      "text": "Зона",
+      "bbox": {
+        "x_min": 666,
+        "y_min": 843,
+        "x_max": 700,
+        "y_max": 859
+      },
+      "block_no": 5,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "6",
+      "bbox": {
+        "x_min": 705,
+        "y_min": 843,
+        "x_max": 715,
+        "y_max": 859
+      },
+      "block_no": 5,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "Разработал",
+      "bbox": {
+        "x_min": 97,
+        "y_min": 875,
+        "x_max": 173,
+        "y_max": 889
+      },
+      "block_no": 7,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "Рябинин",
+      "bbox": {
+        "x_min": 181,
+        "y_min": 875,
+        "x_max": 231,
+        "y_max": 889
+      },
+      "block_no": 7,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "09.26",
+      "bbox": {
+        "x_min": 371,
+        "y_min": 875,
+        "x_max": 407,
+        "y_max": 889
+      },
+      "block_no": 7,
+      "line_no": 2,
+      "word_no": 0
+    },
+    {
+      "text": "Стадия",
+      "bbox": {
+        "x_min": 754,
+        "y_min": 875,
+        "x_max": 802,
+        "y_max": 889
+      },
+      "block_no": 9,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "Лист",
+      "bbox": {
+        "x_min": 839,
+        "y_min": 876,
+        "x_max": 873,
+        "y_max": 890
+      },
+      "block_no": 9,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "Листов",
+      "bbox": {
+        "x_min": 907,
+        "y_min": 875,
+        "x_max": 954,
+        "y_max": 889
+      },
+      "block_no": 9,
+      "line_no": 2,
+      "word_no": 0
+    },
+    {
+      "text": "Проверил",
+      "bbox": {
+        "x_min": 99,
+        "y_min": 895,
+        "x_max": 157,
+        "y_max": 909
+      },
+      "block_no": 10,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "Заикин",
+      "bbox": {
+        "x_min": 178,
+        "y_min": 895,
+        "x_max": 223,
+        "y_max": 909
+      },
+      "block_no": 10,
+      "line_no": 1,
+      "word_no": 0
+    },
+    {
+      "text": "09.26",
+      "bbox": {
+        "x_min": 370,
+        "y_min": 895,
+        "x_max": 405,
+        "y_max": 909
+      },
+      "block_no": 10,
+      "line_no": 2,
+      "word_no": 0
+    },
+    {
+      "text": "Сооружение",
+      "bbox": {
+        "x_min": 521,
+        "y_min": 895,
+        "x_max": 602,
+        "y_max": 910
+      },
+      "block_no": 8,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "850",
+      "bbox": {
+        "x_min": 607,
+        "y_min": 895,
+        "x_max": 634,
+        "y_max": 910
+      },
+      "block_no": 8,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "П",
+      "bbox": {
+        "x_min": 774,
+        "y_min": 904,
+        "x_max": 783,
+        "y_max": 920
+      },
+      "block_no": 10,
+      "line_no": 3,
+      "word_no": 0
+    },
+    {
+      "text": "1",
+      "bbox": {
+        "x_min": 853,
+        "y_min": 904,
+        "x_max": 860,
+        "y_max": 920
+      },
+      "block_no": 10,
+      "line_no": 4,
+      "word_no": 0
+    },
+    {
+      "text": "2",
+      "bbox": {
+        "x_min": 926,
+        "y_min": 905,
+        "x_max": 936,
+        "y_max": 919
+      },
+      "block_no": 10,
+      "line_no": 5,
+      "word_no": 0
+    },
+    {
+      "text": "Утвердил",
+      "bbox": {
+        "x_min": 97,
+        "y_min": 914,
+        "x_max": 157,
+        "y_max": 928
+      },
+      "block_no": 10,
+      "line_no": 6,
+      "word_no": 0
+    },
+    {
+      "text": "Ярославцева",
+      "bbox": {
+        "x_min": 180,
+        "y_min": 914,
+        "x_max": 260,
+        "y_max": 928
+      },
+      "block_no": 10,
+      "line_no": 7,
+      "word_no": 0
+    },
+    {
+      "text": "09.26",
+      "bbox": {
+        "x_min": 371,
+        "y_min": 914,
+        "x_max": 407,
+        "y_max": 928
+      },
+      "block_no": 10,
+      "line_no": 9,
+      "word_no": 0
+    },
+    {
+      "text": "Расчет",
+      "bbox": {
+        "x_min": 425,
+        "y_min": 943,
+        "x_max": 479,
+        "y_max": 958
+      },
+      "block_no": 11,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "водопотребления",
+      "bbox": {
+        "x_min": 483,
+        "y_min": 943,
+        "x_max": 605,
+        "y_max": 958
+      },
+      "block_no": 11,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "и",
+      "bbox": {
+        "x_min": 610,
+        "y_min": 943,
+        "x_max": 619,
+        "y_max": 958
+      },
+      "block_no": 11,
+      "line_no": 0,
+      "word_no": 2
+    },
+    {
+      "text": "водоотведения",
+      "bbox": {
+        "x_min": 623,
+        "y_min": 943,
+        "x_max": 729,
+        "y_max": 958
+      },
+      "block_no": 11,
+      "line_no": 0,
+      "word_no": 3
+    },
+    {
+      "text": "котельной",
+      "bbox": {
+        "x_min": 499,
+        "y_min": 957,
+        "x_max": 574,
+        "y_max": 973
+      },
+      "block_no": 12,
+      "line_no": 0,
+      "word_no": 0
+    },
+    {
+      "text": "20,88",
+      "bbox": {
+        "x_min": 579,
+        "y_min": 957,
+        "x_max": 619,
+        "y_max": 973
+      },
+      "block_no": 12,
+      "line_no": 0,
+      "word_no": 1
+    },
+    {
+      "text": "МВт",
+      "bbox": {
+        "x_min": 624,
+        "y_min": 957,
+        "x_max": 655,
+        "y_max": 973
+      },
+      "block_no": 12,
+      "line_no": 0,
+      "word_no": 2
+    }
+  ]
+}

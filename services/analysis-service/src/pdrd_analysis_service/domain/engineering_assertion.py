@@ -22,6 +22,7 @@ from pdrd_analysis_service.domain.document_context import (
 )
 
 CLAIM_TYPES = (
+    "arithmetic",
     "contradiction",
     "missing_justification",
     "documentation",

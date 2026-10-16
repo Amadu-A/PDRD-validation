@@ -43,6 +43,10 @@ class DocumentFact:
     source_pages: tuple[int, ...] = ()
     source_regions: tuple[dict[str, Any], ...] = ()
     extraction_method: str = ""
+    calculation_group: str = ""
+    calculation_rule: str = ""
+    calculation_evidence: str = ""
+    column_binding: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -453,6 +457,15 @@ def document_fact_from_mapping(raw: object) -> DocumentFact | None:
             if isinstance(region, dict)
         ),
         extraction_method=str(raw.get("extraction_method") or ""),
+        **{
+            key: str(raw.get(key) or "")
+            for key in (
+                "calculation_group",
+                "calculation_rule",
+                "calculation_evidence",
+                "column_binding",
+            )
+        },
     )
 
 

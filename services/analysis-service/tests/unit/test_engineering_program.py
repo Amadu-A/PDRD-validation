@@ -253,6 +253,9 @@ def table_values(total="155.122", complete=True):
             row_label="Итого",
             column_label="м³/сут",
             source_row_ids=["total"],
+            calculation_rule="sum",
+            calculation_evidence="Сумма строк",
+            evidence_text=f"S1 water_day: {total} м³/сут. Сумма строк",
         )
     )
     if complete:

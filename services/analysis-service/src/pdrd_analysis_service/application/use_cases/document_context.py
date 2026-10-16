@@ -88,19 +88,34 @@ def _located(pages: tuple[DocumentPage, ...]) -> tuple[LocatedDocumentFact, ...]
     )
 
 
-def document_engineering_report(pages, document_id):
+def document_engineering_report(pages, document_id, *, enabled=True):
     """Строит единый программный протокол документа после Understanding, без изменения prompt."""
+    from pdrd_analysis_service.domain.calculation_tables import (
+        calculation_tables_by_page,
+    )
+
+    tables = calculation_tables_by_page(
+        tuple((page.page, page.text_words) for page in pages),
+        link_continuations=enabled,
+    )
+
     facts = tuple(
         LocatedDocumentFact(page.page, index, fact)
         for page in pages
         for index, fact in enumerate(
-            (*page.facts, *explicit_project_dependencies(page.text, page.page)), 1
+            (
+                *page.facts,
+                *explicit_project_dependencies(page.text, page.page),
+                *tables[page.page],
+            ),
+            1,
         )
     )
     registry = build_decision_registry(
         document_id=document_id,
         facts=facts,
         page_texts={page.page: page.text for page in pages},
+        document_context_enabled=enabled,
     )
     return run_engineering_program(
         registry, page_texts={page.page: page.text for page in pages}

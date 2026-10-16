@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from decimal import Decimal
 
 from pdrd_analysis_service.application.vision_execution import current_vision_execution
@@ -14,6 +14,7 @@ from pdrd_analysis_service.domain.analysis import (
     FindingDraft,
     FindingVisualRegion,
 )
+from pdrd_analysis_service.domain.calculation_tables import column_unit_key
 from pdrd_analysis_service.domain.design_decisions import (
     DecisionRegistry,
     build_decision_registry,
@@ -23,6 +24,7 @@ from pdrd_analysis_service.domain.document_context import (
     LocatedDocumentFact,
     document_fact_from_mapping,
     fact_search_text,
+    normalize_label,
     scope_key,
 )
 from pdrd_analysis_service.domain.engineering_assertion import (
@@ -529,54 +531,300 @@ def augment_page_findings(
 
 
 def audit_engineering_candidates(findings, report):
-    """Не разрешает смысловому кандидату подменить программную проверку суммы таблицы."""
+    """Проверяет структурный предмет арифметики, сохраняя неопределённость и контрдоказательства."""
     result = []
     for finding in findings:
-        assertion = read_assertion(finding.origin_assertions)
-        if (
-            assertion is None
-            or assertion.claim_type != "contradiction"
-            or not re.search(r"сумм|итог", finding.comment, re.I)
+        if any(
+            origin.get("origin") == "programmatic_engineering_check"
+            for origin in finding.origin_assertions
         ):
             result.append(finding)
             continue
-        tables = {
-            item.fact.table_id for item in assertion.observations if item.fact.table_id
-        }
-        if not tables:
+        assertion = read_assertion(finding.origin_assertions)
+        observations = assertion.observations if assertion else ()
+        arithmetic_claim = (
+            assertion is not None and assertion.claim_type == "arithmetic"
+        ) or any(
+            origin.get("origin") == "vlm" and origin.get("claim_type") == "arithmetic"
+            for origin in finding.origin_assertions
+        )
+        totals = tuple(
+            item
+            for item in observations
+            if item.fact.relation in {"sum_total", "table_total"}
+        )
+        structural_sum = (
+            bool(totals)
+            and (
+                len(totals) == 1
+                or any(item.fact.relation == "sum_component" for item in observations)
+            )
+            and (
+                len({item.page for item in observations}) == 1
+                or any(item.fact.relation == "sum_component" for item in observations)
+            )
+            and all(
+                item.fact.relation
+                in {
+                    "sum_total",
+                    "sum_component",
+                    "table_total",
+                    "table_cell",
+                    "table_end",
+                }
+                for item in observations
+            )
+        )
+        cells = tuple(
+            item.observation
+            for item in report.registry.evidence
+            if item.observation.page == finding.page
+            and item.observation.fact.column_binding == "pdf_geometry"
+        )
+        wrong_units = []
+        for observed in observations:
+            for actual in cells:
+                a, b = observed.fact, actual.fact
+                if (
+                    observed.page == actual.page
+                    and a.unit_raw
+                    and column_unit_key(a.unit_raw) != column_unit_key(b.unit_raw)
+                    and _same_cell_value(a.value_raw, b.value_raw)
+                    and normalize_label(a.row_label or a.subject_name)
+                    == normalize_label(b.row_label)
+                    and {region.get("role") for region in b.source_regions}
+                    >= {"column_header", "cell"}
+                ):
+                    wrong_units.append(actual)
+        if not arithmetic_claim and not structural_sum and not wrong_units:
             result.append(finding)
             continue
+        if arithmetic_claim and not totals:
+            # Числа связывают предмет с реальной ячейкой; слова замечания не являются фильтром.
+            numbers = {
+                value.replace(",", ".")
+                for value in re.findall(
+                    r"(?<![\w.])\d+(?:[.,]\d+)?(?![\w.])", finding.evidence
+                )
+            }
+            totals = tuple(
+                item
+                for item in cells
+                if item.fact.relation == "table_total"
+                and any(
+                    _same_cell_value(item.fact.value_raw, value) for value in numbers
+                )
+            )
+        resolved_totals = []
+        for total in totals:
+            matches = [
+                item
+                for item in cells
+                if item.fact.relation == "table_total"
+                and item.page == total.page
+                and _same_cell_value(item.fact.value_raw, total.fact.value_raw)
+                and column_unit_key(item.fact.unit_raw)
+                == column_unit_key(total.fact.unit_raw)
+            ]
+            # Только единственная ячейка своего листа: неоднозначную привязку не выбираем.
+            resolved_totals.append(matches[0] if len(matches) == 1 else total)
+        totals = tuple(resolved_totals)
+        tables = {item.fact.table_id for item in totals}
         checks = [
             check
             for check in report.checks
             if check.rule == "table_sum"
-            and any(item.fact.table_id in tables for item in check.observations)
+            and any(
+                total.fact_id == item.fact_id
+                or (
+                    total.page == item.page
+                    and total.fact.table_id == item.fact.table_id
+                    and total.fact.column_label == item.fact.column_label
+                    and total.fact.calculation_group == item.fact.calculation_group
+                    and total.fact.source_row_ids == item.fact.source_row_ids
+                )
+                for total in totals
+                for item in check.observations
+                if item.fact.relation in {"sum_total", "table_total"}
+            )
         ]
-        if any(check.status == "confirmed" for check in checks):
-            result.append(finding)
-            continue
-        reason = (
-            "verified_table_counterevidence"
-            if checks and all(check.status == "no_finding" for check in checks)
-            else "table_calculation_not_established"
+        reason = "table_calculation_not_established"
+        status, comment, recommendation = (
+            "hypothesis",
+            finding.comment,
+            finding.recommendation_draft,
+        )
+        if wrong_units:
+            reason = "column_unit_counterevidence"
+        elif checks and all(check.status == "no_finding" for check in checks):
+            reason = "verified_table_counterevidence"
+        elif any(check.status == "confirmed" for check in checks):
+            # Каноническое доказанное замечание добавляет program_findings; текст модели остаётся в истории.
+            reason = "superseded_by_verified_table_calculation"
+        elif totals and all(
+            item.fact.column_binding == "pdf_geometry" for item in totals
+        ):
+            status = "needs_review"
+            label = "; ".join(
+                dict.fromkeys(
+                    f"{item.fact.row_label}: {item.fact.value_raw} {item.fact.unit_raw}"
+                    for item in totals
+                )
+            )
+            comment = (
+                f"Для показателя «{label}» правило формирования итога не установлено в доступных фактах. "
+                "Требуется уточнить состав расчётной группы и режим."
+            )
+            recommendation = (
+                "Уточнить, отражает итог сумму, производительность или расход выбранного режима, "
+                "и предоставить правило расчёта. Ошибка суммы не подтверждена."
+            )
+            modes = {
+                normalize_label(item.fact.scope_operating_mode)
+                for item in cells
+                if item.fact.scope_operating_mode
+                and any(
+                    total.fact.table_id == item.fact.table_id
+                    and total.fact.calculation_group == item.fact.calculation_group
+                    and total.fact.column_label == item.fact.column_label
+                    for total in totals
+                )
+            }
+            if len(modes) > 1:
+                status, reason = "hypothesis", "mixed_operating_modes_not_additive"
+                comment, recommendation = finding.comment, finding.recommendation_draft
+        snapshot = tuple(
+            item.observation
+            for item in report.registry.evidence
+            if item.observation.fact.table_id in tables
+        ) or tuple(wrong_units)
+        previous = next(
+            (
+                origin
+                for origin in finding.origin_assertions
+                if origin.get("origin") == "engineering_candidate_gate"
+                and origin.get("review_kind") == "table_arithmetic"
+            ),
+            {},
         )
         result.append(
             replace(
                 finding,
-                status="hypothesis",
+                status=status,
+                comment=comment,
+                recommendation_draft=recommendation,
                 origin_assertions=(
-                    *finding.origin_assertions,
+                    *(
+                        origin
+                        for origin in finding.origin_assertions
+                        if origin is not previous
+                    ),
                     {
                         "origin": "engineering_candidate_gate",
+                        "review_kind": "table_arithmetic",
                         "reason_code": reason,
-                        "original_status": finding.status,
-                        "original_comment": finding.comment,
+                        "original_status": previous.get(
+                            "original_status", finding.status
+                        ),
+                        "original_comment": previous.get(
+                            "original_comment", finding.comment
+                        ),
+                        "original_recommendation": previous.get(
+                            "original_recommendation", finding.recommendation_draft
+                        ),
+                        "document_id": report.registry.document_id,
+                        "document_context_enabled": report.registry.document_context_enabled,
+                        "facts": [asdict(item) for item in snapshot],
                         "checks": [check.as_dict() for check in checks],
                     },
                 ),
             )
         )
     return tuple(result)
+
+
+def _same_cell_value(left, right):
+    """Числовая идентичность не зависит от записанных нулей, но не превращает пустоту в ноль."""
+    pattern = r"[+-]?\d+(?:[.,]\d+)?"
+    return bool(
+        re.fullmatch(pattern, left)
+        and re.fullmatch(pattern, right)
+        and Decimal(left.replace(",", ".")) == Decimal(right.replace(",", "."))
+    )
+
+
+def finalize_arithmetic_candidate(finding):
+    """Повторяет табличный контроль по snapshot перед финализацией, без доверия одному статусу."""
+    gate = next(
+        (
+            origin
+            for origin in finding.origin_assertions
+            if origin.get("origin") == "engineering_candidate_gate"
+            and origin.get("review_kind") == "table_arithmetic"
+        ),
+        None,
+    )
+    assertion = read_assertion(finding.origin_assertions)
+    typed = any(
+        origin.get("origin") == "vlm" and origin.get("claim_type") == "arithmetic"
+        for origin in finding.origin_assertions
+    )
+    if (
+        gate is None
+        and not typed
+        and not (assertion and assertion.claim_type == "arithmetic")
+    ):
+        return finding
+    try:
+        observations = tuple(
+            LocatedDocumentFact(
+                raw["page"], raw["index"], document_fact_from_mapping(raw["fact"])
+            )
+            for raw in (gate or {}).get("facts", ())
+        )
+        if any(item.fact is None for item in observations):
+            raise ValueError("Некорректный snapshot таблицы")
+        texts = {}
+        for item in observations:
+            texts.setdefault(item.page, []).append(item.fact.evidence_text)
+        registry = build_decision_registry(
+            document_id=(gate or {}).get("document_id", "final-arithmetic"),
+            facts=observations,
+            page_texts={page: "\n".join(parts) for page, parts in texts.items()},
+            document_context_enabled=(gate or {}).get(
+                "document_context_enabled", False
+            ),
+        )
+        report = run_engineering_program(
+            registry,
+            page_texts={page: "\n".join(parts) for page, parts in texts.items()},
+        )
+        original = replace(
+            finding,
+            status=(gate or {}).get("original_status", finding.status),
+            comment=(gate or {}).get("original_comment", finding.comment),
+            recommendation_draft=(gate or {}).get(
+                "original_recommendation", finding.recommendation_draft
+            ),
+        )
+        return audit_engineering_candidates((original,), report)[0]
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return replace(finding, status="hypothesis")
+
+
+def protected_table_question(finding):
+    """Защищает воспроизводимый конкретный вопрос о табличном итоге от уверенного ответа VLM."""
+    if finding.status != "needs_review" or not any(
+        origin.get("review_kind") == "table_arithmetic"
+        for origin in finding.origin_assertions
+    ):
+        return False
+    checked = finalize_arithmetic_candidate(finding)
+    return (
+        checked.status == finding.status
+        and checked.comment == finding.comment
+        and checked.recommendation_draft == finding.recommendation_draft
+    )
 
 
 def _document_source(item):

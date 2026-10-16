@@ -123,7 +123,13 @@ def evaluate_decisions(
     tables: dict[tuple, list[LocatedDocumentFact]] = defaultdict(list)
     for item in grounded:
         if item.fact.table_id:
-            key = (normalize_label(item.fact.table_id), *scope_key(item.fact)[:6])
+            scope = scope_key(item.fact)
+            key = (
+                normalize_label(item.fact.table_id),
+                *scope[:3],
+                *scope[4:6],
+                item.fact.calculation_group,
+            )
             if not registry.document_context_enabled:
                 key = (*key, item.page)
             tables[key].append(item)
@@ -511,7 +517,9 @@ def scalar_type_count(value):
 
 
 def _table_sums(members):
-    totals = tuple(item for item in members if item.fact.relation == "sum_total")
+    totals = tuple(
+        item for item in members if item.fact.relation in {"sum_total", "table_total"}
+    )
     if not totals:
         return ()
     closure = tuple(item for item in members if item.fact.relation == "table_end")
@@ -522,6 +530,93 @@ def _table_sums(members):
             item for item in parts if item.fact.column_label == total.fact.column_label
         )
         observations = (*selected, total, *closure)
+        statistics = defaultdict(set)
+        for item in selected:
+            text = normalize_label(
+                item.fact.row_label
+                + " "
+                + item.fact.property_name
+                + " "
+                + item.fact.scope_condition
+            )
+            consumer = engineering_object_key(item.fact)
+            if item.fact.column_binding == "pdf_geometry":
+                base = normalize_label(
+                    re.sub(
+                        r"средн\w*|максим\w*|[()]", "", item.fact.row_label, flags=re.I
+                    )
+                )
+                if len(base) > 3:
+                    consumer = "row:" + base
+            for pattern, role in (
+                (r"средн|average|mean", "average"),
+                (r"максим|maximum|peak", "maximum"),
+            ):
+                if re.search(pattern, text):
+                    statistics[consumer].add(role)
+        if any(roles == {"average", "maximum"} for roles in statistics.values()):
+            results.extend(
+                _unavailable(
+                    "table_sum",
+                    observations,
+                    "alternative_statistics_not_additive",
+                    "independent_consumers_or_explicit_mode_selection",
+                )
+            )
+            continue
+        rule_quote = normalize_label(total.fact.calculation_evidence)
+        if (
+            total.fact.calculation_rule != "sum"
+            or not rule_quote
+            or rule_quote not in normalize_label(total.fact.evidence_text)
+            or not re.search(r"сумм\w*\s+(?:всех\s+)?строк|sum\s+of\s+rows", rule_quote)
+        ):
+            results.extend(
+                _unavailable(
+                    "table_sum",
+                    observations,
+                    "total_rule_not_established",
+                    "explicit_additive_rule",
+                )
+            )
+            continue
+        modes = {
+            normalize_label(item.fact.scope_operating_mode)
+            for item in (*selected, total)
+        }
+        if len(modes) != 1 or "" in modes:
+            results.extend(
+                _unavailable(
+                    "table_sum",
+                    observations,
+                    "incomparable_or_unknown_operating_modes",
+                    "compatible_operating_modes",
+                )
+            )
+            continue
+        if any(item.fact.column_binding == "ambiguous" for item in (*selected, total)):
+            results.extend(
+                _unavailable(
+                    "table_sum",
+                    observations,
+                    "column_binding_ambiguous",
+                    "verified_column_binding",
+                )
+            )
+            continue
+        if not total.fact.calculation_group and any(
+            engineering_object_key(item.fact) != engineering_object_key(total.fact)
+            for item in selected
+        ):
+            results.extend(
+                _unavailable(
+                    "table_sum",
+                    observations,
+                    "calculation_group_not_established",
+                    "same_object_or_explicit_calculation_group",
+                )
+            )
+            continue
         row_ids = {
             row for item in (*selected, total) for row in item.fact.source_row_ids
         }

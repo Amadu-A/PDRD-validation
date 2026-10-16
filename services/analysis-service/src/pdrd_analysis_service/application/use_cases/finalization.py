@@ -11,7 +11,9 @@ from typing import Any
 from pdrd_analysis_service.application.candidate_trace import trace_candidate
 from pdrd_analysis_service.application.engineering_program import (
     equipment_review_question,
+    finalize_arithmetic_candidate,
     protected_equipment_question,
+    protected_table_question,
     verified_equipment_check,
     verified_programmatic_check,
 )
@@ -437,7 +439,7 @@ def _is_protected_duplicate_review(finding: FindingDraft) -> bool:
 
 def _is_protected_factual_review(finding: FindingDraft) -> bool:
     """Сохраняет конкретное подозрение с проверенным исходным evidence, не объявляя его нарушением."""
-    if verified_programmatic_check(finding):
+    if protected_table_question(finding) or verified_programmatic_check(finding):
         return True
     if verified_equipment_check(finding) or protected_equipment_question(finding):
         return True
@@ -539,6 +541,7 @@ class FinalizeFindings:
         pre_rejected = []
         accepted = []
         for finding in findings:
+            finding = finalize_arithmetic_candidate(finding)
             finding = equipment_review_question(finding)
             reason = (
                 "invalid_programmatic_proof"
@@ -547,6 +550,12 @@ class FinalizeFindings:
                     for origin in finding.origin_assertions
                 )
                 and not verified_programmatic_check(finding)
+                else None
+                if finding.status == "hypothesis"
+                and any(
+                    origin.get("review_kind") == "table_arithmetic"
+                    for origin in finding.origin_assertions
+                )
                 else unsupported_engineering_claim(finding.comment)
             )
             if reason is not None:
@@ -630,6 +639,7 @@ class FinalizeFindings:
             finding
             for finding in findings
             if finding.status != "hypothesis"
+            and not protected_table_question(finding)
             and not verified_programmatic_check(finding)
             and not verified_equipment_check(finding)
             and not protected_equipment_question(finding)
@@ -1257,7 +1267,9 @@ FINDING-LOCAL NORMATIVE CANDIDATES:
             category=finding.category,
             severity=finding.severity,
             status="needs_review"
-            if assertion is not None and assertion.verification == "unverified"
+            if finding.status != "hypothesis"
+            and assertion is not None
+            and assertion.verification == "unverified"
             else finding.status,
             comment=finding.comment,
             evidence=finding.evidence,

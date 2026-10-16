@@ -403,6 +403,7 @@ def build_normative_check_schema(
                         "claim_type": {
                             "type": "string",
                             "enum": [
+                                "arithmetic",
                                 "contradiction",
                                 "missing_justification",
                                 "documentation",

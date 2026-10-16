@@ -9,6 +9,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from pdrd_analysis_service.application.engineering_program import (
+    audit_engineering_candidates,
+    program_findings,
+)
 from pdrd_analysis_service.application.ports.vision_model import VisionModelError
 from pdrd_analysis_service.application.use_cases.document_context import (
     CrossPageCancelled,
@@ -170,7 +174,13 @@ async def check_cross_page_consistency(
     """Проверяет группы кандидатов ограниченными пакетами VLM."""
     use_case = container.check_cross_page_consistency
     if use_case is None or not request.enabled:
-        return CheckConsistencyResponse(findings=[], items=request.page_checks)
+        pages = tuple(page.to_domain() for page in request.pages)
+        report = document_engineering_report(
+            pages, str(request.document_id), enabled=False
+        )
+        return _checked_response(
+            request, report, program_findings(report), expose_findings=False
+        )
     probe = container.analysis_progress_probe
 
     async def cancelled() -> bool:
@@ -212,18 +222,36 @@ async def check_cross_page_consistency(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(error),
         ) from error
-    merged = merge_cross_page_findings(
-        page_findings=audit_document_findings(
-            {
-                item.page_number: tuple(
-                    finding.to_domain() for finding in item.result.findings
-                )
-                for item in request.page_checks
-            },
-            report,
-        ),
-        cross_findings=findings,
+    return _checked_response(request, report, findings)
+
+
+def _checked_response(request, report, findings, *, expose_findings=True):
+    """Сериализует проверенные локальные кандидаты; D=false не включает межстраничную модель."""
+    findings = audit_engineering_candidates(findings, report)
+    audited = audit_document_findings(
+        {
+            item.page_number: tuple(
+                finding.to_domain() for finding in item.result.findings
+            )
+            for item in request.page_checks
+        },
+        report,
     )
+    if expose_findings:
+        merged = merge_cross_page_findings(
+            page_findings=audited, cross_findings=findings
+        )
+    else:
+        merged = {}
+        for page, local in audited.items():
+            merged.update(
+                merge_cross_page_findings(
+                    page_findings={page: local},
+                    cross_findings=tuple(
+                        finding for finding in findings if finding.page == page
+                    ),
+                )
+            )
     return CheckConsistencyResponse(
         items=[
             PageCheckPayload(
@@ -239,5 +267,7 @@ async def check_cross_page_consistency(
             )
             for item in request.page_checks
         ],
-        findings=[_finding_draft_payload(finding) for finding in findings],
+        findings=[_finding_draft_payload(finding) for finding in findings]
+        if expose_findings
+        else [],
     )

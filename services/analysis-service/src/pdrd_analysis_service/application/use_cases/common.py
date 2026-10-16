@@ -427,6 +427,7 @@ def _origin_assertion(
     regions = candidate.get("visual_regions")
     return {
         "origin": "vlm",
+        "claim_type": str(candidate.get("claim_type") or ""),
         "candidate_id": candidate_key(candidate, page=page),
         "hypothesis_ids": list(string_tuple(candidate.get("hypothesis_ids"), limit=3)),
         "raw_index": raw_index,

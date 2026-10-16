@@ -16,6 +16,7 @@ def test_registry_and_connections_have_no_model_network_storage_or_transport_acc
         PACKAGE / "domain/design_decisions.py",
         PACKAGE / "domain/signal_connections.py",
         PACKAGE / "domain/engineering_calculations.py",
+        PACKAGE / "domain/calculation_tables.py",
         PACKAGE / "domain/engineering_checks.py",
         PACKAGE / "domain/project_dependencies.py",
         PACKAGE / "domain/requirement_applicability.py",
