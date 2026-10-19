@@ -21,6 +21,7 @@ from pdrd_analysis_service.application.engineering_program import (
     finalize_arithmetic_candidate,
     program_findings,
     run_engineering_program,
+    verified_programmatic_check,
 )
 from pdrd_analysis_service.application.evidence_audit import (
     audit_findings_evidence,
@@ -41,12 +42,15 @@ from pdrd_analysis_service.domain.document_context import (
     fact_search_text,
     normalize_label,
     normalized_value,
+    property_key,
+    scope_key,
     subject_key,
 )
 from pdrd_analysis_service.domain.engineering_assertion import (
     assertion_from_facts,
     assertion_subsumes,
     deterministic_unit_mismatch,
+    engineering_object_key,
     merge_assertions,
     read_assertion,
     same_assertion,
@@ -951,6 +955,72 @@ class CheckCrossPageConsistency:
         )
 
 
+def _same_requirement_claim(program, candidate):
+    """Объединяет маршруты только по точному положению и тому же утверждению проекта."""
+    check = next(
+        (
+            origin.get("check", {})
+            for origin in program.origin_assertions
+            if origin.get("origin") == "programmatic_engineering_check"
+        ),
+        {},
+    )
+    if (
+        check.get("rule") != "requirement_plan"
+        or (check.get("calculation") or {}).get("rule") != "numeric_bound"
+    ):
+        return False
+    if any(
+        origin.get("origin") == "programmatic_engineering_check"
+        for origin in candidate.origin_assertions
+    ):
+        return False
+    assertion = read_assertion(candidate.origin_assertions)
+    if assertion is None or assertion.claim_type != "contradiction":
+        return False
+    calculation = check["calculation"]
+    from pdrd_analysis_service.domain.evidence_audit import literal_contains
+
+    if not literal_contains(
+        candidate.comment + " " + candidate.evidence, calculation["quote"]
+    ):
+        return False
+    sources = (
+        *program.basis_sources,
+        *program.technical_assignment_basis_sources,
+        *program.user_package_basis_sources,
+    )
+    other_sources = (
+        *candidate.basis_sources,
+        *candidate.technical_assignment_basis_sources,
+        *candidate.user_package_basis_sources,
+    )
+    # Совпадение локального N1 без совпадения фактического фрагмента ничего не доказывает.
+    if not any(
+        source in other_sources
+        and source.source_id in check["source_ids"]
+        and literal_contains(source.text, calculation["quote"])
+        for source in sources
+    ):
+        return False
+    observed = read_assertion(program.origin_assertions).observations
+
+    def identity(item):
+        """Определяет предмет претензии без сравнения близости свободного текста."""
+        return (
+            engineering_object_key(item.fact),
+            property_key(item.fact),
+            scope_key(item.fact),
+            normalized_value(item.fact),
+        )
+
+    if {identity(item) for item in assertion.observations} != {
+        identity(item) for item in observed
+    }:
+        return False
+    return verified_programmatic_check(program)
+
+
 def merge_cross_page_findings(
     *,
     page_findings: dict[int, tuple[FindingDraft, ...]],
@@ -979,6 +1049,10 @@ def merge_cross_page_findings(
         assertion = read_assertion(finding.origin_assertions)
         audit = evidence_audit(finding) or {}
         return (
+            any(
+                origin.get("origin") == "programmatic_engineering_check"
+                for origin in finding.origin_assertions
+            ),
             len({normalized_value(item.fact) for item in assertion.observations})
             if assertion
             else 0,
@@ -1006,6 +1080,7 @@ def merge_cross_page_findings(
                     and (evidence_audit(cross) or {}).get("disposition") == "supported"
                     and assertion_subsumes(right, left)
                 )
+                requirement_duplicate = _same_requirement_claim(cross, finding)
                 # Внутренняя диагностика не поглощает полезный вопрос или подтверждённую запись.
                 if (finding.status == "hypothesis") != (
                     cross.status == "hypothesis"
@@ -1013,6 +1088,7 @@ def merge_cross_page_findings(
                     continue
                 if (
                     structured_duplicate
+                    or requirement_duplicate
                     or subsumed
                     or (
                         finding.category == "document_consistency"
@@ -1031,6 +1107,8 @@ def merge_cross_page_findings(
                     merge_reasons[finding.finding_id] = (
                         "subsumed_by_supported_comparison"
                         if subsumed
+                        else "same_verified_requirement_claim"
+                        if requirement_duplicate
                         else "same_table_total_rule"
                         if right is not None
                         and right.verification_rule == "table_total_question"

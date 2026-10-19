@@ -143,6 +143,19 @@ def subject_key(fact: DocumentFact) -> str:
 def property_key(fact: DocumentFact) -> str:
     """Отличает смысл параметра от одной лишь физической размерности."""
     name = normalize_label(fact.property_name)
+    if _PROPERTY_ALIASES.get(name) == "system_purpose" or (
+        name
+        in {
+            "назначение",
+            "назначение сети",
+            "наименование сети",
+            "purpose",
+            "system_purpose",
+        }
+        and re.search(r"водоснабж|водопровод|водоотвед|канализац", fact.value_raw, re.I)
+    ):
+        return "relationship:system_purpose"
+    name = normalize_label(fact.property_name)
     kind = normalize_label(fact.property_type or fact.kind)
     if not name or not kind:
         return ""
@@ -213,7 +226,7 @@ def normalized_value(fact: DocumentFact) -> tuple[str, str] | None:
                 return "nominal_diameter", value
             if re.search(r"[ø⌀ф]\s*" + literal_number, fact.evidence_text, re.I):
                 return "outer_diameter", value
-    if _PROPERTY_ALIASES.get(prop) == "system_purpose":
+    if property_key(fact).endswith(":system_purpose"):
         for pattern, purpose in (
             (r"водоотвед|канализац", "water_disposal"),
             (r"водоснабж|водопровод", "water_supply"),

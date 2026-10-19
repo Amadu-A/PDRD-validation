@@ -470,6 +470,33 @@ async def test_empty_normative_search_does_not_call_embedding() -> None:
     assert embedding.texts == ()
 
 
+async def test_independent_query_budget_preserves_baseline_sources_and_ids():
+    """Более высокий score новой темы не вытесняет источник действующего маршрута."""
+    use_case = SearchNormative(
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=FakeVectorStore(),
+        collection="normative",
+        embedding_model="test-embedding",
+        top_k=4,
+        max_sources=1,
+    )
+    baseline = await use_case.execute(["base"])
+    combined = await use_case.execute(["base", "extra"], protected_query_count=1)
+    assert combined.sources[: len(baseline.sources)] == baseline.sources
+    assert len(combined.sources) == 2
+    assert (
+        combined.sources[1].point_id == "shared"
+        and combined.sources[1].source_id == "N2"
+    )
+    assert len(combined.sources) <= 2 * use_case.max_sources
+
+
+def test_protected_query_boundary_cannot_exceed_request_length():
+    """Некорректная граница не меняет scope и не доходит до embedding."""
+    with pytest.raises(ValidationError):
+        NormativeSearchRequest(queries=["base"], protected_query_count=2)
+
+
 async def test_scoped_search_uses_exact_section_and_document_filter() -> None:
     """Scoped retrieval передаёт Qdrant только разрешённые document IDs."""
     state = FakeState()

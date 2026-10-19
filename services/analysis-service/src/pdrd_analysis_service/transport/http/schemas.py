@@ -606,6 +606,7 @@ class NormativeQueriesRequest(BaseModel):
     page_facts: PageFactsPayload
 
     extracted_text: str
+    section_id: str | None = Field(default=None, max_length=200)
 
     project_context_texts: list[str] = Field(
         default_factory=list,
@@ -616,6 +617,7 @@ class NormativeQueriesResponse(BaseModel):
     """Список normative/user retrieval queries."""
 
     queries: list[str]
+    protected_query_count: int | None = None
 
 
 class CheckNormsRequest(BaseModel):

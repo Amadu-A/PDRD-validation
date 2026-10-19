@@ -22,6 +22,7 @@ class NormativeSearchRequest(BaseModel):
     )
 
     queries: list[str]
+    protected_query_count: int | None = Field(default=None, ge=0, le=100)
 
     section_id: UUID | None = None
 
@@ -34,6 +35,10 @@ class NormativeSearchRequest(BaseModel):
         self,
     ) -> Self:
         """Требует section_id и document_ids только совместно."""
+        if self.protected_query_count is not None and self.protected_query_count > len(
+            self.queries
+        ):
+            raise ValueError("protected_query_count превышает количество запросов.")
         if (self.section_id is None) != (self.document_ids is None):
             raise ValueError(
                 "section_id и document_ids должны передаваться вместе.",
@@ -82,6 +87,7 @@ class TechnicalAssignmentGuidedSearchRequest(
     )
 
     queries: list[str]
+    protected_query_count: int | None = Field(default=None, ge=0, le=100)
 
     technical_assignment_id: UUID
 

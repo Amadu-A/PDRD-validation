@@ -23,6 +23,7 @@ from pdrd_analysis_service.domain.engineering_assertion import (
 from pdrd_analysis_service.domain.evidence_audit import (
     EvidenceAudit,
     audit_assertion,
+    bind_evidence,
     diagnostic_language,
     literal_contains,
 )
@@ -39,18 +40,26 @@ def _bind_legacy_context(finding):
         for origin in finding.origin_assertions
         if origin.get("origin") == "vlm" and origin.get("claim_type")
     }
+    prop = candidate_property(finding.comment + " " + finding.evidence)
+    if (
+        types == {"documentation"}
+        and prop == "Назначение системы"
+        and not re.search(r"обоснован|расч[её]т|почему", finding.comment, re.I)
+    ):
+        types = {"contradiction"}
     if types and not types <= {"contradiction", "missing_justification"}:
         return finding
     if not types and not re.search(
-        r"различ|расхожд|несоответств|противореч|обоснован", finding.comment, re.I
+        r"различ|расхожд|несоответств|противореч|обоснован|назван|наименован|обозначен[аоы]?\b",
+        finding.comment,
+        re.I,
     ):
         return finding
-    prop = candidate_property(finding.comment + " " + finding.evidence)
     patterns = {
         "Толщина стенки": r"толщин",
         "Диаметр": r"диаметр|типоразмер",
         "Длина": r"длин|протяж",
-        "Назначение системы": r"назначени|наименовани",
+        "Назначение системы": r"назначени|наименовани|system_purpose|purpose|system_type",
         "Расход воды": r"расход",
         "Напор": r"напор",
         "Абсолютная отметка": r"отметк|высот",
@@ -305,6 +314,45 @@ def _audit_finding(finding, *, page_texts, stage):
     if (
         assertion is not None
         and assertion.claim_type == "missing_justification"
+        and literal_contains(finding.comment, assertion.observations[0].fact.identifier)
+        and literal_contains(finding.comment, assertion.observations[0].fact.value_raw)
+        and re.search(
+            r"(?:отсутств|нет|не\s+(?:представлен|привед[её]н))[^.!?]{0,70}расч[её]т|расч[её]т[^.!?]{0,70}(?:отсутств|не\s+представлен)",
+            finding.comment,
+            re.I,
+        )
+        and all(
+            bind_evidence(item, page_texts).status == "supported"
+            for item in assertion.observations
+        )
+    ):
+        first = assertion.observations[0].fact
+        finding = replace(
+            finding,
+            comment=(
+                f"Для {first.identifier} принято {first.property_name}: {first.value_raw} {first.unit_raw}. "
+                "Уточнить расчёт и исходные условия, связывающие принятое решение с обоснованием "
+                "в предоставленной части документации."
+            ),
+            recommendation_draft=(
+                "Указать соответствующий расчёт; "
+                "отсутствие обоснования во всём проекте не установлено."
+            ),
+            origin_assertions=(
+                *finding.origin_assertions,
+                {
+                    "origin": "checked_scope_wording",
+                    "checked_pages": sorted(page_texts),
+                    "original": {
+                        "comment": finding.comment,
+                        "recommendation_draft": finding.recommendation_draft,
+                    },
+                },
+            ),
+        )
+    if (
+        assertion is not None
+        and assertion.claim_type == "missing_justification"
         and assertion.property_key.endswith(":system_purpose")
         and re.search(
             r"^(?:уточнить|сверить|согласовать)\s+(?:назначение|наименование)\b",
@@ -340,6 +388,19 @@ def _audit_finding(finding, *, page_texts, stage):
     counterevidence = structural_counterevidence(
         finding.comment, finding.evidence, page_texts
     )
+    if re.search(
+        r"норматив\w*[^.!?]{0,60}(?:может\s+не\s+(?:покрывать|учитывать)|возможно\s+не\s+охватывает)",
+        finding.comment,
+        re.I,
+    ):
+        counterevidence = "normative_applicability_claim_not_established"
+    if assertion is None and re.search(
+        r"(?:во\s+вс[её]м\s+проекте|в\s+проекте)[^.!?]{0,70}"
+        r"(?:отсутств\w*|нет|не\s+представлен\w*)[^.!?]{0,50}расч[её]т",
+        finding.comment,
+        re.I,
+    ):
+        counterevidence = "project_wide_calculation_absence_not_established"
     if counterevidence:
         return replace(
             finding,

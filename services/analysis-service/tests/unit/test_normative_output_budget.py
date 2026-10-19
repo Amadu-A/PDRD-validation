@@ -63,9 +63,9 @@ def test_high_recall_prompt_forbids_count_reduction_for_compaction() -> None:
     """Prompt сокращает текст, а не количество generated candidates."""
     assert "НЕ сокращай количество candidate findings" in _HIGH_RECALL_FINDING_POLICY
 
-    assert "comment: не более 160" in _HIGH_RECALL_FINDING_POLICY
+    assert "comment: одна краткая законченная фраза" in _HIGH_RECALL_FINDING_POLICY
 
-    assert "evidence: не более 180" in _HIGH_RECALL_FINDING_POLICY
+    assert "длина не является основанием обрезать цитату" in _HIGH_RECALL_FINDING_POLICY
 
     assert 'recommendation_draft=""' in _HIGH_RECALL_FINDING_POLICY
 

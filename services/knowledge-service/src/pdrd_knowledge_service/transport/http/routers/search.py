@@ -166,6 +166,11 @@ async def search_normative(
             request.queries,
             section_id=request.section_id,
             document_ids=request.document_ids,
+            **(
+                {"protected_query_count": request.protected_query_count}
+                if request.protected_query_count is not None
+                else {}
+            ),
         )
 
     except (
@@ -327,6 +332,11 @@ async def search_technical_assignment_guided(
             technical_assignment_id=request.technical_assignment_id,
             section_id=request.section_id,
             normative_document_ids=request.normative_document_ids,
+            **(
+                {"protected_query_count": request.protected_query_count}
+                if request.protected_query_count is not None
+                else {}
+            ),
         )
 
     except (

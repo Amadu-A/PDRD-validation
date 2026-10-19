@@ -89,6 +89,7 @@ class SearchNormative:
         source_prefix: str = "N",
         query_instruction: str = NORMATIVE_QUERY_INSTRUCTION,
         allow_unscoped: bool = True,
+        protected_query_count: int | None = None,
     ) -> NormativeSearchResult:
         """Выполняет embedding и managed scoped vector search."""
         scope = await self._resolve_scope(
@@ -200,9 +201,18 @@ class SearchNormative:
             raw_points_count - accepted_points_count,
         )
 
-        merged = self._merge_points(
-            filtered_groups,
-        )
+        if protected_query_count is None:
+            merged = self._merge_points(filtered_groups)
+        else:
+            # Базовая подборка и её IDs сохраняются даже при более высоком score новых тем.
+            boundary = len(self._normalize_queries(queries[:protected_query_count]))
+            merged = self._merge_points(filtered_groups[:boundary])
+            existing = {point.point_id for point in merged}
+            merged.extend(
+                point
+                for point in self._merge_points(filtered_groups[boundary:])
+                if point.point_id not in existing
+            )
 
         sources = self._build_sources(
             points=merged,

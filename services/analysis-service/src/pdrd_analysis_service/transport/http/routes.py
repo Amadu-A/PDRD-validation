@@ -512,6 +512,7 @@ async def understand_page_controlled(
 @router.post(
     "/internal/v1/pages/normative-queries",
     response_model=NormativeQueriesResponse,
+    response_model_exclude_none=True,
 )
 async def normative_queries(
     request: NormativeQueriesRequest,
@@ -526,6 +527,7 @@ async def normative_queries(
     queries = container.build_normative_queries.execute(
         page_facts=(request.page_facts.to_domain()),
         extracted_text=(request.extracted_text),
+        section_id=request.section_id,
         project_context_texts=tuple(
             request.project_context_texts,
         ),
@@ -534,6 +536,15 @@ async def normative_queries(
     return NormativeQueriesResponse(
         queries=list(
             queries,
+        ),
+        protected_query_count=(
+            container.build_normative_queries.baseline_count(
+                page_facts=request.page_facts.to_domain(),
+                extracted_text=request.extracted_text,
+                project_context_texts=tuple(request.project_context_texts),
+            )
+            if container.build_normative_queries.requirement_plan_enabled
+            else None
         ),
     )
 

@@ -4,7 +4,7 @@
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from pdrd_analysis_service.application.candidate_trace import trace_candidate
@@ -151,8 +151,10 @@ Semantic filtering после VLM не используется.
 
 Формируй каждый candidate максимально компактно:
 
-- comment: не более 160 символов, одна конкретная фраза;
-- evidence: не более 180 символов, только наблюдаемый факт;
+- comment: одна краткая законченная фраза; не обрывай слова,
+  условия, обозначения труб и ссылки ради лимита символов;
+- evidence: краткий наблюдаемый факт с полными значениями
+  и единицами; длина не является основанием обрезать цитату;
 - recommendation_draft="" всегда; рекомендация будет
   сформирована отдельным этапом finalization;
 - не повторяй один и тот же нормативный текст одновременно
@@ -463,6 +465,25 @@ class BuildNormativeQueries:
     """Строит retrieval queries без обращения к VLM."""
 
     max_queries: int = 7
+    requirement_plan_enabled: bool = False
+    max_additional_queries: int = 4
+    priority_documents_by_section: dict[str, list[str]] = field(default_factory=dict)
+
+    def baseline_count(
+        self,
+        *,
+        page_facts: PageFacts,
+        extracted_text: str,
+        project_context_texts: tuple[str, ...] = (),
+    ) -> int:
+        """Сохраняет границу базовых запросов для раздельных retrieval-бюджетов N и T/U."""
+        return len(
+            replace(self, requirement_plan_enabled=False).execute(
+                page_facts=page_facts,
+                extracted_text=extracted_text,
+                project_context_texts=project_context_texts,
+            )
+        )
 
     def execute(
         self,
@@ -473,6 +494,7 @@ class BuildNormativeQueries:
             str,
             ...,
         ] = (),
+        section_id: str | None = None,
     ) -> tuple[
         str,
         ...,
@@ -551,9 +573,28 @@ class BuildNormativeQueries:
                 normalized,
             )
 
-        return tuple(
-            result[: self.max_queries],
+        original = tuple(result[: self.max_queries])
+        if not self.requirement_plan_enabled:
+            return original
+        from pdrd_analysis_service.domain.requirement_queries import (
+            independent_requirement_queries,
         )
+
+        additional = independent_requirement_queries(
+            discipline=page_facts.discipline,
+            text=extracted_text + " " + " ".join(project_context_texts),
+            priority_documents=tuple(
+                self.priority_documents_by_section.get(section_id or "", ())
+            ),
+            limit=self.max_additional_queries,
+        )
+        combined = tuple(dict.fromkeys((*original, *additional)))
+        logger.info(
+            "normative_plan_queries base=%s additional=%s new_vlm_calls=0",
+            len(original),
+            len(combined) - len(original),
+        )
+        return combined
 
 
 @dataclass(frozen=True, slots=True)
@@ -567,6 +608,7 @@ class CheckPageAgainstNorms:
     max_issues: int
 
     normative_text_limit: int
+    requirement_plan_enabled: bool = False
 
     async def _discover_candidates(
         self,
@@ -774,6 +816,8 @@ class CheckPageAgainstNorms:
         GenerationMetrics,
     ]:
         """Проверяет сам лист и сопоставляет его с N/T/U evidence."""
+        if self.requirement_plan_enabled and check_cancellation is not None:
+            await check_cancellation()
         program = prepare_page_program(
             page_number=page_number,
             page_facts=page_facts,
@@ -781,6 +825,7 @@ class CheckPageAgainstNorms:
             normative=normative_sources,
             technical=technical_assignment_sources,
             user=user_package_sources,
+            requirement_plan_enabled=self.requirement_plan_enabled,
         )
         normative_source_ids = tuple(
             source.source_id for source in normative_sources if source.source_id
@@ -1258,6 +1303,8 @@ class CheckPageAgainstNorms:
             candidate_selection.represented_count,
             provenance_lossless,
         )
+        if self.requirement_plan_enabled:
+            metrics = replace(metrics, requirement_plan=program.requirement_plan)
 
         return (
             summary,

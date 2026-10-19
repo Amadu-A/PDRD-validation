@@ -226,7 +226,17 @@ def _safe_generated_text(
     invented = {
         match.casefold() for match in reference.findall(normalized_generated)
     } - allowed
-    if normalized_generated and not invented:
+    unfinished = (
+        normalized_generated.endswith(("...", "…", ",", ":", ";", "—"))
+        or normalized_generated.count("«") != normalized_generated.count("»")
+        or normalized_generated.count("(") != normalized_generated.count(")")
+        or bool(
+            re.search(
+                r"\s(?:и|или|для|при|по|согласно|в|на)\s*$", normalized_generated, re.I
+            )
+        )
+    )
+    if normalized_generated and not invented and not unfinished:
         return normalized_generated
 
     normalized_fallback = fallback.strip()

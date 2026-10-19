@@ -135,6 +135,9 @@ def build_container() -> ApplicationContainer:
         ),
         build_normative_queries=BuildNormativeQueries(
             max_queries=(settings.pipeline.max_normative_queries),
+            requirement_plan_enabled=settings.normative_plan.enabled,
+            max_additional_queries=settings.normative_plan.max_additional_queries,
+            priority_documents_by_section=settings.normative_plan.priority_documents_by_section,
         ),
         check_page_against_norms=(
             CheckPageAgainstNorms(
@@ -142,6 +145,7 @@ def build_container() -> ApplicationContainer:
                 num_predict=(settings.pipeline.norm_check_num_predict),
                 max_issues=(settings.pipeline.max_issues),
                 normative_text_limit=(settings.pipeline.normative_text_limit),
+                requirement_plan_enabled=settings.normative_plan.enabled,
             )
         ),
         check_page_against_technical_assignment=(

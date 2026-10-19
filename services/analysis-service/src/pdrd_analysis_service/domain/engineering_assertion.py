@@ -130,16 +130,14 @@ def read_assertion(origins: tuple[dict, ...]) -> EngineeringAssertion | None:
                 origin.get("verification", "unverified"),
                 origin.get("verification_rule", ""),
             )
-            if (
-                assertion.property_key.endswith(":system_purpose")
-                and observations
-                and all(
-                    property_key(item.fact) == "relationship:system_purpose"
-                    for item in observations
-                )
+            if observations and all(
+                property_key(item.fact) == "relationship:system_purpose"
+                for item in observations
             ):
                 assertion = replace(
-                    assertion, property_key="relationship:system_purpose"
+                    assertion,
+                    property_key="relationship:system_purpose",
+                    object_key=engineering_object_key(observations[0].fact),
                 )
             if observations and len(assertion.conditions) == 7:
                 canonical = scope_key(observations[0].fact)

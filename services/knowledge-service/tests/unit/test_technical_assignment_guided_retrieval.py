@@ -389,6 +389,57 @@ class _FakeNormativeSearch:
         return self.general
 
 
+async def test_independent_normative_topics_keep_original_t_search_and_combined_n_prefix():
+    """Новая N-тема не вытесняет T или прежнюю N-подборку при заполненном общем бюджете."""
+    section, document, assignment = uuid4(), uuid4(), uuid4()
+    general = tuple(
+        _normative_source(
+            source_id=f"GN{i}",
+            point_id=f"point-{i}",
+            document_id=document,
+            section_id=section,
+            score=0.8,
+        )
+        for i in (1, 2)
+    )
+    queries_seen = []
+
+    class TechnicalSearch:
+        """Запоминает только действующие T-запросы без дополнительной нормативной темы."""
+
+        async def execute(self, queries, **kwargs):
+            """Пустое T-извлечение достаточно для проверки независимости бюджетов."""
+            queries_seen.append(queries)
+            return TechnicalAssignmentSearchResult(tuple(queries), (), "test")
+
+    class NormativeSearch:
+        """Возвращает базовый и дополнительный источники с раздельным бюджетом."""
+
+        max_sources = 1
+
+        async def execute(self, queries, **kwargs):
+            """Контролирует передачу защищённой границы через оркестратор."""
+            assert kwargs["protected_query_count"] == 1
+            return NormativeSearchResult(tuple(queries), general, "test")
+
+    use_case = SearchTechnicalAssignmentGuidedNormative(
+        TechnicalSearch(), NormativeSearch(), lambda: _FakeNormativeUnitOfWork(()), 1
+    )
+    result = await use_case.execute(
+        ["base", "independent"],
+        protected_query_count=1,
+        technical_assignment_id=assignment,
+        section_id=section,
+        normative_document_ids=[document],
+    )
+    assert queries_seen == [["base"]]
+    assert [source.point_id for source in result.normative_sources] == [
+        "point-1",
+        "point-2",
+    ]
+    assert [source.source_id for source in result.normative_sources] == ["N1", "N2"]
+
+
 @pytest.mark.asyncio
 async def test_search_t_uses_separate_collection_and_releases_gpu() -> None:
     """T retrieval имеет свой Qdrant scope и explicit release."""

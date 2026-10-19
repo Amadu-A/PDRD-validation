@@ -53,6 +53,7 @@ class GenerationMetrics:
     content_length: int
     thinking_length: int
     slot_wait_ms: float = field(default=0.0, kw_only=True)
+    requirement_plan: dict | None = field(default=None, kw_only=True)
 
     def as_dict(
         self,
@@ -72,6 +73,11 @@ class GenerationMetrics:
             "content_length": self.content_length,
             "thinking_length": self.thinking_length,
             "slot_wait_ms": self.slot_wait_ms,
+            **(
+                {"requirement_plan": self.requirement_plan}
+                if self.requirement_plan is not None
+                else {}
+            ),
         }
 
 

@@ -283,7 +283,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ page_facts: $('Understand Combined Page').item.json.facts, extracted_text: $('Prepare Combined Context').item.json.page.text, project_context_texts: $json.project_context_texts ?? [] }) }}",
+        "body": "={{ JSON.stringify({ section_id: $('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id ?? null, page_facts: $('Understand Combined Page').item.json.facts, extracted_text: $('Prepare Combined Context').item.json.page.text, project_context_texts: $json.project_context_texts ?? [] }) }}",
         "options": {
           "timeout": 1800000
         }
@@ -304,7 +304,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{\n  JSON.stringify(\n    $('POST /analysis/v2/pdf-cad').first().json.body?.technical_assignment_id\n      ? {\n          queries: $json.queries ?? [],\n          technical_assignment_id:\n            $('POST /analysis/v2/pdf-cad').first().json.body.technical_assignment_id,\n          section_id:\n            $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id,\n          normative_document_ids: JSON.parse(\n            $('POST /analysis/v2/pdf-cad').first().json.body?.normative_document_ids\n              ?? '[]'\n          ),\n        }\n      : {\n          queries: $json.queries ?? [],\n          ...(\n            $('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id\n              ? {\n                  section_id:\n                    $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id,\n                  document_ids: JSON.parse(\n                    $('POST /analysis/v2/pdf-cad').first().json.body?.normative_document_ids\n                      ?? '[]'\n                  ),\n                }\n              : {}\n          ),\n        }\n  )\n}}",
+        "body": "={{\n  JSON.stringify(\n    $('POST /analysis/v2/pdf-cad').first().json.body?.technical_assignment_id\n      ? {\n          queries: $json.queries ?? [],\n          ...($json.protected_query_count != null ? { protected_query_count: $json.protected_query_count } : {}),\n          technical_assignment_id:\n            $('POST /analysis/v2/pdf-cad').first().json.body.technical_assignment_id,\n          section_id:\n            $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id,\n          normative_document_ids: JSON.parse(\n            $('POST /analysis/v2/pdf-cad').first().json.body?.normative_document_ids\n              ?? '[]'\n          ),\n        }\n      : {\n          queries: $json.queries ?? [],\n          ...($json.protected_query_count != null ? { protected_query_count: $json.protected_query_count } : {}),\n          ...(\n            $('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id\n              ? {\n                  section_id:\n                    $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id,\n                  document_ids: JSON.parse(\n                    $('POST /analysis/v2/pdf-cad').first().json.body?.normative_document_ids\n                      ?? '[]'\n                  ),\n                }\n              : {}\n          ),\n        }\n  )\n}}",
         "options": {
           "timeout": 1800000
         }
@@ -342,7 +342,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ queries: $('Build Normative Queries').item.json.queries ?? [], ...($('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id ? { section_id: $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id, document_ids: JSON.parse($('POST /analysis/v2/pdf-cad').first().json.body?.user_package_document_ids ?? '[]') } : {}) }) }}",
+        "body": "={{ JSON.stringify({ queries: ($('Build Normative Queries').item.json.queries ?? []).slice(0, $('Build Normative Queries').item.json.protected_query_count ?? undefined), ...($('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id ? { section_id: $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id, document_ids: JSON.parse($('POST /analysis/v2/pdf-cad').first().json.body?.user_package_document_ids ?? '[]') } : {}) }) }}",
         "options": {
           "timeout": 1800000
         }

@@ -453,10 +453,13 @@ class SearchTechnicalAssignmentGuidedNormative:
         technical_assignment_id: UUID,
         section_id: UUID,
         normative_document_ids: list[UUID],
+        protected_query_count: int | None = None,
     ) -> TechnicalAssignmentGuidedSearchResult:
         """Ищет T, general N и T-targeted N без score multiplication."""
         technical_assignment_result = await self.search_technical_assignment.execute(
-            queries,
+            queries
+            if protected_query_count is None
+            else queries[:protected_query_count],
             technical_assignment_id=technical_assignment_id,
             section_id=section_id,
         )
@@ -468,6 +471,11 @@ class SearchTechnicalAssignmentGuidedNormative:
             expected_area=CatalogArea.NORMATIVE,
             source_prefix="GN",
             allow_unscoped=False,
+            **(
+                {"protected_query_count": protected_query_count}
+                if protected_query_count is not None
+                else {}
+            ),
         )
 
         references = self._collect_references(
@@ -513,6 +521,9 @@ class SearchTechnicalAssignmentGuidedNormative:
         normative_sources = self._merge_normative_sources(
             targeted=targeted_normative_result.sources,
             general=general_normative_result.sources,
+            max_sources=(self.combined_max_sources + self.search_normative.max_sources)
+            if protected_query_count is not None
+            else None,
         )
 
         diagnostics = self._build_diagnostics(
@@ -818,6 +829,7 @@ class SearchTechnicalAssignmentGuidedNormative:
             NormativeSource,
             ...,
         ],
+        max_sources: int | None = None,
     ) -> tuple[
         NormativeSource,
         ...,
@@ -842,12 +854,9 @@ class SearchTechnicalAssignmentGuidedNormative:
                 source,
             )
 
-            if (
-                len(
-                    ordered,
-                )
-                >= self.combined_max_sources
-            ):
+            if len(
+                ordered,
+            ) >= (self.combined_max_sources if max_sources is None else max_sources):
                 break
 
         return tuple(

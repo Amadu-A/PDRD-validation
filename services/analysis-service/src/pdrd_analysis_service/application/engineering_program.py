@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from pdrd_analysis_service.application.evidence_audit import audit_findings_evidence
@@ -42,6 +43,11 @@ from pdrd_analysis_service.domain.requirement_applicability import (
     RequirementEvidence,
     check_requirement,
 )
+from pdrd_analysis_service.domain.requirement_plan import (
+    build_requirement_plan,
+    requirement_checks,
+    requirement_coverage,
+)
 from pdrd_analysis_service.domain.signal_connections import check_signal_connections
 
 
@@ -51,6 +57,7 @@ class EngineeringReport:
 
     registry: DecisionRegistry
     checks: tuple[EngineeringCheck, ...]
+    requirement_plan: dict | None = None
 
     def as_dict(self):
         """Воспроизводит полный протокол без повторного VLM-чтения."""
@@ -58,16 +65,46 @@ class EngineeringReport:
             **self.registry.as_dict(),
             "checks": [check.as_dict() for check in self.checks],
             "new_vlm_calls": 0,
+            **(
+                {"requirement_plan": self.requirement_plan}
+                if self.requirement_plan is not None
+                else {}
+            ),
         }
 
 
 def run_engineering_program(
-    registry: DecisionRegistry, *, page_texts: dict[int, str], requirement_sources=()
+    registry: DecisionRegistry,
+    *,
+    page_texts: dict[int, str],
+    requirement_sources=(),
+    requirement_plan_enabled: bool = False,
+    assessed_on: str | None = None,
 ) -> EngineeringReport:
     """Не выполняет retrieval или генерацию; источники уже принадлежат текущему сценарию."""
+    requirement_sources = tuple(requirement_sources)
     checks = list(evaluate_decisions(registry, page_texts=page_texts))
     checks.extend(check_signal_connections(registry))
+    plan = None
+    if requirement_plan_enabled:
+        records = build_requirement_plan(
+            tuple(item.observation for item in registry.evidence),
+            page_texts=page_texts,
+            sources=tuple(requirement_sources),
+            assessed_on=assessed_on or datetime.now(UTC).date().isoformat(),
+        )
+        checks.extend(requirement_checks(records))
+        plan = {
+            "checks": [record.as_dict() for record in records],
+            "coverage": requirement_coverage(records),
+            "source_counts": {
+                kind: sum(source.kind == kind for source in requirement_sources)
+                for kind in ("N", "T", "U")
+            },
+        }
     for evidence in registry.evidence:
+        if requirement_plan_enabled:
+            break
         if not program_evidence_eligible(evidence):
             continue
         item = evidence.observation
@@ -178,13 +215,15 @@ def run_engineering_program(
                 "justification_chain",
                 "reference_resolution",
                 "requirement_applicability",
+                "requirement_plan",
+                "requirement_plan_conflict",
             }
             and linked & {item.fact_id for item in part.observations}
         ]
         requirements = [
             part
             for part in relevant
-            if part.rule == "requirement_applicability"
+            if part.rule in {"requirement_applicability", "requirement_plan"}
             and linked & {item.fact_id for item in part.observations}
         ]
         dependencies_grounded = {
@@ -259,13 +298,20 @@ def run_engineering_program(
                 },
                 missing_data=("resolve_calculation_and_verify_accepted_value",),
             )
-    return EngineeringReport(registry, tuple(checks))
+    return EngineeringReport(registry, tuple(checks), plan)
 
 
 def requirement_evidence(*, normative=(), technical=(), user=()):
     """Не меняет роли источников и не включает опыт E в доказательства."""
     return tuple(
-        RequirementEvidence(kind, source.source_id, source.text, source.page)
+        RequirementEvidence(
+            kind,
+            source.source_id,
+            source.text,
+            source.page,
+            source.source_file or "",
+            source.point_id,
+        )
         for kind, sources in (("N", normative), ("T", technical), ("U", user))
         for source in sources
     )
@@ -411,7 +457,12 @@ def program_findings(
                     source.source_id for source in selected_u
                 ),
                 user_package_basis_sources=selected_u,
-                visual_regions=(),
+                visual_regions=tuple(
+                    FindingVisualRegion(**region)
+                    for region in first.fact.visual_regions
+                )
+                if check.rule.startswith("requirement_plan")
+                else (),
                 object_ref=first.fact.identifier,
                 document_context_source_ids=tuple(
                     source.source_id for source in sources
@@ -428,6 +479,19 @@ def program_findings(
                         ],
                     }
                     for source in sources
+                )
+                or (
+                    tuple(
+                        {
+                            "page": item.page,
+                            "fact_id": item.fact_id,
+                            "text": item.fact.evidence_text,
+                            "visual_regions": list(item.fact.visual_regions),
+                        }
+                        for item in check.observations
+                    )
+                    if check.rule.startswith("requirement_plan")
+                    else ()
                 ),
                 origin_assertions=(
                     assertion.as_origin(),
@@ -453,6 +517,7 @@ def prepare_page_program(
     normative=(),
     technical=(),
     user=(),
+    requirement_plan_enabled: bool = False,
 ):
     """Проверяет исходные факты и переданные основания до смыслового Check Norms."""
     from pdrd_analysis_service.domain.engineering_facts import (
@@ -487,6 +552,7 @@ def prepare_page_program(
         requirement_sources=requirement_evidence(
             normative=normative, technical=technical, user=user
         ),
+        requirement_plan_enabled=requirement_plan_enabled,
     )
     return report
 
@@ -1010,6 +1076,32 @@ def _wording(check):
             f"а переданный источник требует «{values['source_quote']}» в сопоставимых условиях.",
             "Сверить принятое значение с указанным требованием и исходными условиями.",
         )
+    if check.rule == "requirement_plan":
+        address = (
+            f"{values['document']}, п. {values['clause']}"
+            if values["clause"]
+            else values["document"]
+        )
+        if values["rule"] == "required_calculation":
+            return (
+                f"Для {obj} источник «{address}» прямо требует расчётного обоснования: «{values['quote']}». "
+                "По переданным фактам этого объекта требуется уточнить связь принятого решения с расчётом.",
+                "Указать расчёт и связь с принятым решением; отсутствие расчёта во всём проекте не установлено.",
+            )
+        project = check.observations[0].fact
+        return (
+            f"Для {obj} принято {project.property_name}: {project.value_raw} {project.unit_raw}. "
+            f"Применимое требование «{address}»: «{values['quote']}». "
+            "Сопоставленные значение и ограничение несовместимы с учётом единиц и допуска округления.",
+            "Проверить приведённое требование для указанных условий и привести принятое значение в соответствие.",
+        )
+    if check.rule == "requirement_plan_conflict":
+        return (
+            f"Для {obj} несовместимы нормативное требование «{values['normative']}» "
+            f"и дополнительное требование «{values['customer']}» в одних условиях.",
+            "Уточнить противоречащее ТЗ или пользовательское требование; "
+            "оно не отменяет применимое нормативное ограничение.",
+        )
     if check.rule == "requirement_conflict":
         return (
             f"Для {obj} переданные требования несовместимы: нормативный источник — «{values['normative']}», "
@@ -1089,6 +1181,8 @@ def verified_programmatic_check(finding: FindingDraft) -> bool:
             registry,
             page_texts={page: "\n".join(texts) for page, texts in by_page.items()},
             requirement_sources=sources,
+            requirement_plan_enabled=raw["rule"].startswith("requirement_plan"),
+            assessed_on=(raw.get("calculation") or {}).get("assessed_on"),
         )
         for check in report.checks:
             if (

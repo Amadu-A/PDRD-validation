@@ -54,6 +54,14 @@ class EngineeringCheck:
                 self.property_key,
                 self.source_ids,
                 tuple(sorted(item.fact_id for item in self.observations)),
+                *(
+                    (
+                        (self.calculation or {}).get("requirement_id"),
+                        (self.calculation or {}).get("normative_requirement_id"),
+                    )
+                    if self.rule.startswith("requirement_plan")
+                    else ()
+                ),
             ),
         )
 

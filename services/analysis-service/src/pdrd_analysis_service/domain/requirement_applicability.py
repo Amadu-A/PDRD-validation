@@ -29,6 +29,8 @@ class RequirementEvidence:
     source_id: str
     text: str
     page: int | str | None
+    source_file: str = ""
+    point_id: str = ""
 
 
 def check_requirement(

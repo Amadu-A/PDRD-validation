@@ -272,6 +272,14 @@ class DocumentContextSettings(BaseModel):
     validation_num_predict: int = Field(default=1800, ge=100, le=10000)
 
 
+class NormativePlanSettings(BaseModel):
+    """Отключаемый дополнительный маршрут; приоритеты не ограничивают нормативный scope."""
+
+    enabled: bool = False
+    max_additional_queries: int = Field(default=4, ge=1, le=8)
+    priority_documents_by_section: dict[str, list[str]] = Field(default_factory=dict)
+
+
 class Settings(BaseSettings):
     """Настройки рабочего процесса Analysis Service."""
 
@@ -313,6 +321,7 @@ class Settings(BaseSettings):
     pipeline: PipelineSettings = Field(
         default_factory=PipelineSettings,
     )
+    normative_plan: NormativePlanSettings = Field(default_factory=NormativePlanSettings)
 
     project_context: ProjectContextSettings = Field(
         default_factory=ProjectContextSettings,

@@ -13,7 +13,9 @@ def structural_counterevidence(
     codes = set(re.findall(r"\bИОС\s*\d+(?:\.\d+)*", comment + " " + evidence, re.I))
     codes = {re.sub(r"\s+", "", code).casefold() for code in codes}
     if len(codes) == 2 and re.search(
-        r"различ|расхожд|несоответств|противореч|ошиб", comment, re.I
+        r"различ|разн\w*|расхожд|несоответств|противореч|ошиб|не\s+совпад|не\s+согласован",
+        comment,
+        re.I,
     ):
         first, second = sorted(codes, key=len)
         if second.startswith(first + ".") and all(
@@ -45,4 +47,10 @@ def structural_counterevidence(
         r"(?<!\w)" + re.escape(missing[1]) + r"\)\s+\S", text, re.I
     ):
         return "claimed_missing_section_present_in_source"
+    if re.search(
+        r"(?:отсутств\w*|пропущ\w*|пропуск)\s+(?:(?:номер\w*\s+)?раздел\w*|пункт\w*)\s*[«\"']?\d+|раздел\s+\d+\s+(?:отсутств|пропущ)",
+        comment,
+        re.I,
+    ):
+        return "section_composition_requirement_not_established"
     return None

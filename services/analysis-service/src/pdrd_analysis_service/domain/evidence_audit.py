@@ -274,6 +274,23 @@ def audit_assertion(
     }
     if assertion.claim_type == "contradiction" and len(roles) > 1:
         return result("incomplete", "diagnostic", "different_parameter_roles")
+    if assertion.claim_type == "contradiction" and len(facts) >= 2:
+        definitions = {normalized_value(item.fact) for item in facts}
+        if None not in definitions:
+            dimensions = {value[0] for value in definitions}
+            if dimensions & {"nominal_diameter", "outer_diameter"} == {
+                "nominal_diameter",
+                "outer_diameter",
+            }:
+                return result(
+                    "counterevidence", "diagnostic", "different_parameter_definitions"
+                )
+            if len(definitions) == 1:
+                return result(
+                    "counterevidence",
+                    "diagnostic",
+                    "equivalent_values_or_compatible_descriptions",
+                )
     supported = tuple(
         item
         for item, binding in zip(facts, bindings, strict=True)
