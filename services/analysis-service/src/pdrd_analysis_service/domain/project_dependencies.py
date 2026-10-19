@@ -28,6 +28,34 @@ _CONNECTION = re.compile(
 def explicit_project_dependencies(text: str, page: int) -> tuple[DocumentFact, ...]:
     """Не читает чертёж заново и не восстанавливает скрытые формулы или кабельные связи."""
     facts = []
+    # Повторённый предмет ссылки сравнивается как документальная связь, а не как размер трубы.
+    topic_reference = re.compile(
+        r"(?P<topic>[А-ЯЁA-Z][^.!?\n]{3,100}?)\s+"
+        r"(?:представлен[аоы]?|привед[её]н[аоы]?|показан[аоы]?)\s+в\s+"
+        r"(?P<kind>таблице|приложении|разделе)\s+(?P<key>\d+(?:\.\d+)*)(?!\w|\.\d)"
+    )
+    content = re.sub(r"\s+", " ", text)
+    for match in topic_reference.finditer(content):
+        topic = match["topic"].strip()
+        # Не переносим заголовок и предыдущее предложение в идентичность предмета.
+        topic = re.split(r"[.:]", topic)[-1].strip()
+        target_kind = {
+            "таблице": "таблица",
+            "приложении": "приложение",
+            "разделе": "раздел",
+        }[match["kind"]]
+        facts.append(
+            _fact(
+                page,
+                evidence=match[0],
+                subject_type="document_topic",
+                identifier=topic,
+                property_type="topic_reference",
+                property_name="Адрес внутренней ссылки",
+                value_raw=target_kind + " " + match["key"],
+                relation="topic_reference",
+            )
+        )
     for pattern, definition in ((_REFERENCE, False), (_DEFINITION, True)):
         for match in pattern.finditer(text):
             if not definition and re.match(

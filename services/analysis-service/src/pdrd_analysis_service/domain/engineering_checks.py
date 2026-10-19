@@ -13,6 +13,7 @@ from pdrd_analysis_service.domain.design_decisions import DecisionRegistry, stab
 from pdrd_analysis_service.domain.document_context import (
     LocatedDocumentFact,
     normalize_label,
+    normalized_value,
     property_key,
     scope_key,
 )
@@ -102,6 +103,28 @@ def evaluate_decisions(
         results.append(
             replace(check, observations=tuple(mentions) + check.observations[1:])
         )
+    topics: dict[tuple, list[LocatedDocumentFact]] = defaultdict(list)
+    for item in grounded:
+        if item.fact.relation == "topic_reference":
+            key = (
+                engineering_object_key(item.fact),
+                item.page,
+            )
+            topics[key].append(item)
+    for mentions in topics.values():
+        targets = {normalize_label(item.fact.value_raw) for item in mentions}
+        if len(targets) > 1:
+            results.append(
+                EngineeringCheck(
+                    "topic_reference_consistency",
+                    "confirmed",
+                    engineering_object_key(mentions[0].fact),
+                    "topic_reference",
+                    tuple(mentions),
+                    "same_topic_different_reference_targets",
+                    {"targets": sorted(targets)},
+                )
+            )
     groups: dict[tuple, list[LocatedDocumentFact]] = defaultdict(list)
     local_identities = {
         item.evidence_id
@@ -135,7 +158,91 @@ def evaluate_decisions(
             tables[key].append(item)
     for members in tables.values():
         results.extend(_table_sums(tuple(members)))
+    if registry.document_context_enabled:
+        results.extend(_design_basis_questions(grounded, page_texts))
     return tuple(results)
+
+
+def _design_basis_questions(
+    facts: tuple[LocatedDocumentFact, ...], page_texts: dict[int, str]
+) -> tuple[EngineeringCheck, ...]:
+    """Проверяет две конкретные зависимости принятых решений, не объявляя пробелы нарушением."""
+    result = []
+    seen = set()
+    for item in facts:
+        fact = item.fact
+        fire = _fact_kind(fact) == "design_fire_flow" and bool(
+            re.search(r"пожар", fact.evidence_text, re.I)
+        )
+        pipe = fact.relation == "accepted_pipe_choice"
+        if not (fire or pipe):
+            continue
+        related = tuple(
+            other
+            for other in facts
+            if engineering_object_key(other.fact) == engineering_object_key(fact)
+        )
+        if not fire and not any(
+            property_key(other.fact).endswith(":system_purpose") for other in related
+        ):
+            continue
+        dependency = "fire_flow_basis" if fire else "pipe_selection_basis"
+        key = (
+            engineering_object_key(fact),
+            dependency,
+            scope_key(fact),
+            fact.value_raw,
+            fact.unit_raw,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        from pdrd_analysis_service.domain.physical_identity import physical_key
+
+        segment = physical_key(item) if pipe else None
+        comparable = tuple(
+            other
+            for other in related
+            if scope_key(other.fact)[:6] == scope_key(fact)[:6]
+            and (fire or (segment is not None and physical_key(other) == segment))
+        )
+        kinds = {_fact_kind(other.fact) for other in comparable}
+        required = (
+            ("design_input", "requirement_reference")
+            if fire
+            else ("design_flow", "internal_diameter", "flow_velocity", "head_loss")
+        )
+        # Наличие связанного расчёта ограничивает автоматический вывод: его проверяет обычная цепочка.
+        if any(
+            other.fact.property_type == "calculation_reference" for other in comparable
+        ):
+            continue
+        missing = tuple(kind for kind in required if kind not in kinds)
+        if pipe and segment is None:
+            missing += ("calculation_segment",)
+        if pipe and not fact.scope_operating_mode:
+            missing += ("operating_mode",)
+        if not missing:
+            continue
+        observations = (item, *(other for other in related if other != item))
+        result.append(
+            EngineeringCheck(
+                "design_basis_dependency",
+                "needs_review",
+                engineering_object_key(fact),
+                dependency,
+                observations,
+                "specific_design_prerequisites_not_observed",
+                {
+                    "accepted": fact.value_raw + " " + fact.unit_raw,
+                    "dependency": dependency,
+                    "checked_pages": sorted(page_texts),
+                    "missing": list(missing),
+                },
+                missing_data=missing,
+            )
+        )
+    return tuple(result)
 
 
 def _arithmetic_check(item: LocatedDocumentFact) -> EngineeringCheck | None:
@@ -228,6 +335,8 @@ def _typed(members, kind):
 
 def _fact_kind(fact):
     """Известные явные названия не меняют исходную модель факта."""
+    if fact.property_type == "design_fire_flow":
+        return fact.property_type
     aliases = {
         "гарантированный напор": "available_head",
         "располагаемый напор": "available_head",
@@ -709,7 +818,16 @@ def _unavailable(rule, observations, reason, missing):
 def literal_fact_value(item: LocatedDocumentFact) -> bool:
     """Тип/отношение модели не подменяют числовое значение и роли исходной записи."""
     fact = item.fact
-    if fact.property_type in {"document_reference", "document_definition"}:
+    if property_key(fact).endswith(":system_purpose"):
+        value = normalized_value(fact)
+        return value is not None and value == normalized_value(
+            replace(fact, value_raw=fact.evidence_text)
+        )
+    if fact.property_type in {
+        "document_reference",
+        "document_definition",
+        "topic_reference",
+    }:
         parsed = explicit_project_dependencies(fact.evidence_text, item.page)
         if any(
             other.identifier == fact.identifier
@@ -726,7 +844,10 @@ def literal_fact_value(item: LocatedDocumentFact) -> bool:
     value = normalize_label(fact.value_raw).replace(",", ".")
     quote = normalize_label(fact.evidence_text).replace(",", ".")
     return bool(
-        value and re.search(r"(?<![\w.])" + re.escape(value) + r"(?![\w.])", quote)
+        value
+        and re.search(
+            r"(?<![\w.])(?:[ø⌀]|dn\s*|ду\s*)?" + re.escape(value) + r"(?![\w.])", quote
+        )
     )
 
 

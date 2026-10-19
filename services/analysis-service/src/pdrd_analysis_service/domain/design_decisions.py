@@ -325,7 +325,8 @@ def _grounding(item: LocatedDocumentFact, page_texts: dict[int, str]) -> str:
     if quote and quote in text:
         numeric = normalize_label(fact.value_raw).replace(",", ".")
         if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", numeric) and not re.search(
-            r"(?<![\w.])" + re.escape(numeric) + r"(?![\w.])", quote.replace(",", ".")
+            r"(?<![\w.])(?:[ø⌀]|dn\s*|ду\s*)?" + re.escape(numeric) + r"(?![\w.])",
+            quote.replace(",", "."),
         ):
             return "ambiguous"
         return "literal_text"

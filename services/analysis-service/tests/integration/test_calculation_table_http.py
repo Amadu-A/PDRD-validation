@@ -99,10 +99,24 @@ async def test_existing_http_table_audit_and_finalization_preserve_candidates_wi
         )
         assert response.status_code == 200, response.text
         findings = response.json()["items"][0]["result"]["findings"]
-        assert len(findings) == len(candidates)
+        assert len(findings) == 4
         assert [item["status"] for item in findings] == ["hypothesis"] * 3 + [
             "needs_review"
-        ] * 3
+        ]
+        question = findings[-1]
+        assert all(
+            value in question["comment"] for value in ("116,033", "4,835", "1,343")
+        )
+        merged = [
+            origin
+            for origin in question["origin_assertions"]
+            if origin.get("origin") == "merged_finding"
+        ]
+        assert len(merged) == 2
+        assert {
+            question["finding_id"],
+            *(origin["finding_id"] for origin in merged),
+        } == {"p30-f3", "p30-f4", "p30-f5"}
         assert all(item["page"] == 30 for item in findings)
         final = await client.post(
             "/internal/v1/findings/finalize",

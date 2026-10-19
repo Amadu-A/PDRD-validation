@@ -100,6 +100,13 @@ def pdf_label_facts(text_words, *, page, page_text):
 
 def geometric_property(fact):
     """Отделяет размеры и отметки от системных расходов и назначения."""
+    if fact.subject_type in {
+        "document_reference",
+        "document_topic",
+        "document",
+        "section",
+    } or fact.relation in {"references", "defines_reference", "topic_reference"}:
+        return False
     return bool(
         re.search(
             r"диаметр|толщин|типоразмер|длин|протяж|отметк|высот|diameter|length|elevation",

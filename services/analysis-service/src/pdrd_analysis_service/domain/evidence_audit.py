@@ -293,7 +293,7 @@ def audit_assertion(
         )
         return result(
             status,
-            "question" if question_anchors else "diagnostic",
+            "question" if len(question_anchors) >= 2 else "diagnostic",
             "incomplete_comparison_evidence",
         )
     if assertion.claim_type == "missing_justification":
@@ -303,7 +303,30 @@ def audit_assertion(
             "incomplete", "question", "conclusion_not_programmatically_verified"
         )
     if len(facts) < 2:
-        return result("incomplete", "question", "second_comparison_value_unavailable")
+        return result("incomplete", "diagnostic", "second_comparison_value_unavailable")
+    if all(
+        re.search(r"сейсм|seismic", item.fact.property_name, re.I) for item in facts
+    ):
+        intervals = [
+            re.fullmatch(
+                r"\s*(\d+(?:[.,]\d+)?)(?:\s*[-–—]\s*(\d+(?:[.,]\d+)?))?\s*",
+                item.fact.value_raw,
+            )
+            for item in facts
+        ]
+        if all(intervals):
+            lows = [float(match[1].replace(",", ".")) for match in intervals]
+            highs = [
+                float((match[2] or match[1]).replace(",", ".")) for match in intervals
+            ]
+            if max(lows) <= min(highs):
+                return result(
+                    "counterevidence", "diagnostic", "compatible_seismic_range"
+                )
+        if not all(scope_key(item.fact)[5] for item in facts):
+            return result(
+                "incomplete", "question", "seismic_design_conditions_not_established"
+            )
     values = {normalized_value(item.fact) for item in facts}
     if None in values:
         return result("incomplete", "question", "value_semantics_unidentified")
@@ -316,6 +339,10 @@ def audit_assertion(
             "diagnostic",
             "equivalent_values_or_compatible_descriptions",
         )
+    if "count" in dimensions and any(
+        not item.fact.table_id or not item.fact.row_label for item in facts
+    ):
+        return result("incomplete", "diagnostic", "specification_group_not_established")
     if any(item.fact.subject_type == "unclassified" for item in facts):
         return result("unidentified", "question", "object_type_not_established")
     from pdrd_analysis_service.domain.physical_identity import comparison_identity

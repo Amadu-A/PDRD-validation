@@ -83,6 +83,7 @@ def audit_final_findings(
     merged = merge_cross_page_findings(
         page_findings={page: tuple(items) for page, items in by_page.items()},
         cross_findings=(),
+        stage="final_evidence_deduplication",
     )
     result = []
     for items in merged.values():

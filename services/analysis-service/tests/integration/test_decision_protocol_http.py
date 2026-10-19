@@ -99,4 +99,6 @@ async def test_existing_http_keeps_protocol_sources_and_geometry_without_extra_c
         if item.message.startswith("design_decision_registry ")
     )
     assert document_id in log and "new_vlm_calls=0" in log
-    assert "Б-012" not in log and "-37" not in log
+    # Случайный UUID сам может содержать «-37»; проверяется утечка исходных значений вне ID задания.
+    counters = log.replace(document_id, "<document>")
+    assert "Б-012" not in counters and "-37" not in counters

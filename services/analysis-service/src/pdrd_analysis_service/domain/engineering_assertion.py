@@ -160,6 +160,11 @@ def same_assertion(left: EngineeringAssertion, right: EngineeringAssertion) -> b
     if left.identity != right.identity:
         return False
     if (
+        left.verification_rule == right.verification_rule == "table_total_question"
+        and any(condition.startswith("table-rule:") for condition in left.conditions)
+    ):
+        return True
+    if (
         left.verification == right.verification == "deterministic"
         and left.verification_rule == right.verification_rule == "engineering_program"
         and any(condition.startswith("program-check:") for condition in left.conditions)

@@ -61,7 +61,12 @@ def candidate(*items, claim_type="contradiction", finding_id="candidate-1", **ex
         "document_consistency",
         "warning",
         "confirmed",
-        "Выявлено расхождение параметра",
+        (
+            f"Уточнить исходные условия и расчёт, определяющие {items[0].fact.property_name} "
+            f"объекта {items[0].fact.identifier}: {items[0].fact.value_raw} {items[0].fact.unit_raw}."
+            if claim_type == "missing_justification"
+            else "Выявлено расхождение параметра"
+        ),
         "; ".join(item.fact.evidence_text for item in items),
         "Проверить проектное решение",
         0.9,
@@ -144,18 +149,19 @@ async def test_false_comparison_kept_in_diagnostics_with_original_ids_text_sourc
     assert evidence_audit(guarded)["original"]["comment"] == original.comment
 
 
-async def test_missing_second_wall_value_yields_question_using_only_supported_side():
-    """Неподтверждённые 6,6 мм не становятся прочитанным значением или нарушением."""
+async def test_invented_second_wall_value_remains_diagnostic_with_original_evidence():
+    """Одна реальная запись и выдуманная вторая сторона не образуют вопрос о расхождении."""
     a, invented = fact("Ø110x10"), fact("Ø110x6,6", 2)
     actual = replace(
         invented, fact=replace(invented.fact, evidence_text="S1 Диаметр: Ø110x10 мм")
     )
     guarded = audit(candidate(a, invented), a, actual)
-    assert guarded.status == "needs_review"
-    assert "Ø110x10" in guarded.comment and "6,6" not in guarded.comment
+    assert guarded.status == "hypothesis"
     _, final, metrics = await finalize(guarded)
-    assert final[0].status == "needs_review" and metrics["vlm_call_count"] == 0
-    assert "6,6" not in final[0].evidence
+    assert not final and metrics["vlm_call_count"] == 0
+    assert (
+        metrics["rejected_findings"][0]["candidate"]["finding_id"] == guarded.finding_id
+    )
     assert "6,6" in evidence_audit(guarded)["original"]["evidence"]
 
 
@@ -392,12 +398,12 @@ async def test_related_modes_in_justification_context_do_not_turn_questions_into
     )
     first = replace(
         candidate(a, b, claim_type="missing_justification"),
-        comment="Уточнить обоснование рабочего расхода S1 10 л/с.",
+        comment="Уточнить исходные условия и расчёт рабочего расхода S1 10 л/с.",
     )
     second = replace(
         first,
         finding_id="emergency",
-        comment="Уточнить обоснование аварийного расхода S1 12 л/с.",
+        comment="Уточнить исходные условия и расчёт аварийного расхода S1 12 л/с.",
     )
     guarded = tuple(audit(item, a, b) for item in (first, second))
     merged = merge_cross_page_findings(page_findings={1: guarded}, cross_findings=())
@@ -455,9 +461,6 @@ async def test_legacy_hypothesis_does_not_leak_pipeline_diagnostics_or_get_promo
     )
     guarded = audit(original, item)
     _, final, metrics = await finalize(guarded)
-    assert final[0].status == "hypothesis" and metrics["vlm_call_count"] == 0
-    assert (
-        "engineering_context" not in final[0].comment
-        and "evidence" not in final[0].comment
-    )
+    assert not final and metrics["vlm_call_count"] == 0
+    assert metrics["rejected_findings"][0]["candidate"]["comment"] == original.comment
     assert evidence_audit(guarded)["original"]["comment"] == original.comment

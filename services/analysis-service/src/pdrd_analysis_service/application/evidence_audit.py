@@ -227,7 +227,7 @@ def _source_limits(finding):
 
 
 def _question(assertion, audit):
-    """Формулирует вопрос только по подтверждённым исходным записям, без выдуманной второй стороны."""
+    """Различает две прочитанные записи и называет предел именно этого сравнения."""
     observations = tuple(
         item
         for item, binding in zip(assertion.observations, audit.bindings, strict=True)
@@ -242,16 +242,24 @@ def _question(assertion, audit):
     )
     subject = first.identifier
     prop = first.property_name
-    if assertion.claim_type == "missing_justification":
-        return (
-            f"Уточнить обоснование параметра «{prop}» объекта {subject}: {values}.",
-            "Указать исходные условия и расчётное либо документальное основание принятого решения.",
-        )
+    limitation = {
+        "same_physical_segment_not_established": (
+            "Принадлежат ли эти записи одному физическому участку? Указать его границы"
+        ),
+        "incomplete_comparison_evidence": "Уточнить привязку обеих записей к объекту и указанным условиям сравнения",
+        "cited_source_unavailable": (
+            "Предоставить указанный источник для проверки применимости требования к этому решению"
+        ),
+        "object_type_not_established": "Уточнить, описывают ли записи один вид объекта",
+        "value_semantics_unidentified": "Уточнить определения приведённых показателей и условия их сопоставления",
+    }.get(
+        audit.reason_code,
+        "Уточнить, какое из приведённых значений принято для сопоставленных условий",
+    )
     return (
-        f"Сверить параметр «{prop}» объекта {subject}: {values}. "
-        "Подтвердить, к какому участку и условиям относится принятое значение.",
-        "Сопоставить указанные записи для того же объекта, участка и режима; "
-        "подтвердить принятое решение по исходной документации.",
+        f"Для {subject} приведены записи «{prop}»: {values}. {limitation}.",
+        "Уточнить указанный предмет сравнения по исходной документации; "
+        "ошибочность принятого значения пока не доказана.",
     )
 
 
@@ -261,16 +269,23 @@ def _specific_original_question(finding, assertion):
     return (
         assertion.claim_type == "missing_justification"
         and bool(
-            re.match(
-                r"^(?:уточнить|указать|подтвердить|обосновать|как|где|чем|какая|какой)\b",
+            re.search(
+                r"расч[её]т(?!н)|исходн\w*\s+(?:данн|услов)|нормативн\w*\s+обоснован|"
+                r"температур|скорост|потер\w*\s+напор|правил\w*\s+(?:формирован|сумм)|"
+                r"применим|пожар\w*\s+расход|расход\w*[^.!?]{0,50}пожар",
                 text,
                 re.I,
             )
         )
-        and literal_contains(text, assertion.observations[0].fact.identifier)
+        and literal_contains(
+            text + " " + finding.evidence, assertion.observations[0].fact.identifier
+        )
         and not diagnostic_language(text + " " + finding.recommendation_draft)
-        and not re.search(
-            r"отсутств|\bнет\b|не\s+(?:привед[её]н|представлен|указан)", text, re.I
+        and (
+            not re.search(
+                r"отсутств|\bнет\b|не\s+(?:привед[её]н|представлен|указан)", text, re.I
+            )
+            or bool(re.search(r"в\s+(?:проверенн|представленн|доступн)\w*", text, re.I))
         )
         and set(re.findall(r"\d+(?:[.,]\d+)?", text.replace(",", ".")))
         <= {
@@ -318,6 +333,37 @@ def _audit_finding(finding, *, page_texts, stage):
     implementation_text = diagnostic_language(
         finding.comment + " " + finding.recommendation_draft
     )
+    from pdrd_analysis_service.domain.structural_evidence import (
+        structural_counterevidence,
+    )
+
+    counterevidence = structural_counterevidence(
+        finding.comment, finding.evidence, page_texts
+    )
+    if counterevidence:
+        return replace(
+            finding,
+            status="hypothesis",
+            origin_assertions=(
+                *finding.origin_assertions,
+                {
+                    "origin": AUDIT_ORIGIN,
+                    "stage": stage,
+                    "status": "counterevidence",
+                    "disposition": "diagnostic",
+                    "reason_code": counterevidence,
+                    "original": {
+                        "status": finding.status,
+                        "comment": finding.comment,
+                        "evidence": finding.evidence,
+                        "recommendation_draft": finding.recommendation_draft,
+                    },
+                    "page_texts": {
+                        str(page): text for page, text in page_texts.items()
+                    },
+                },
+            ),
+        )
     if assertion is None and not implementation_text:
         from pdrd_analysis_service.domain.project_dependencies import (
             normative_reference_continuations,
@@ -423,6 +469,27 @@ def _audit_finding(finding, *, page_texts, stage):
         )
     )
     missing_sources = _source_limits(finding)
+    if audit.disposition == "question" and assertion is not None:
+        anchored = tuple(
+            item
+            for item, binding in zip(
+                assertion.observations, audit.bindings, strict=True
+            )
+            if binding.question_anchor
+        )
+        meaningful_original = _specific_original_question(finding, assertion)
+        if (
+            assertion.claim_type == "missing_justification" and not meaningful_original
+        ) or (
+            assertion.claim_type != "missing_justification"
+            and len({(item.fact.value_raw, item.fact.unit_raw) for item in anchored})
+            < 2
+        ):
+            audit = replace(
+                audit,
+                disposition="diagnostic",
+                reason_code="engineering_question_basis_not_established",
+            )
     if missing_sources and audit.disposition == "supported":
         audit = replace(
             audit,
@@ -439,9 +506,10 @@ def _audit_finding(finding, *, page_texts, stage):
         # Не повышаем уже отложенную гипотезу и не возвращаем отвергнутую арифметику.
         if status != "hypothesis":
             status = "needs_review"
-        comment, recommendation = _question(assertion, audit)
         if _specific_original_question(finding, assertion):
             comment, recommendation = finding.comment, finding.recommendation_draft
+        else:
+            comment, recommendation = _question(assertion, audit)
     elif audit.disposition == "supported":
         # Реальное расхождение остаётся, но технический пересказ заменяется его исходными сторонами.
         first = assertion.observations[0].fact

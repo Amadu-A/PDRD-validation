@@ -18,6 +18,7 @@ from pdrd_analysis_service.application.decision_protocol import (
 from pdrd_analysis_service.application.engineering_program import (
     EngineeringReport,
     audit_engineering_candidates,
+    finalize_arithmetic_candidate,
     program_findings,
     run_engineering_program,
 )
@@ -954,6 +955,7 @@ def merge_cross_page_findings(
     *,
     page_findings: dict[int, tuple[FindingDraft, ...]],
     cross_findings: tuple[FindingDraft, ...],
+    stage: str = "document_deduplication",
 ) -> dict[int, tuple[FindingDraft, ...]]:
     """Объединяет повтор одного доказанного противоречия, сохраняя все типы оснований."""
     structured = tuple(
@@ -987,6 +989,7 @@ def merge_cross_page_findings(
         source_ids = set(cross.document_context_source_ids)
         pages = {source.page for source in cross.document_context_basis_sources}
         duplicates = []
+        merge_reasons = {}
         for findings in result.values():
             for finding in tuple(findings):
                 selected = set(finding.document_context_source_ids)
@@ -1004,7 +1007,9 @@ def merge_cross_page_findings(
                     and assertion_subsumes(right, left)
                 )
                 # Внутренняя диагностика не поглощает полезный вопрос или подтверждённую запись.
-                if (finding.status == "hypothesis") != (cross.status == "hypothesis"):
+                if (finding.status == "hypothesis") != (
+                    cross.status == "hypothesis"
+                ) and not subsumed:
                     continue
                 if (
                     structured_duplicate
@@ -1023,6 +1028,14 @@ def merge_cross_page_findings(
                     )
                 ):
                     duplicates.append(finding)
+                    merge_reasons[finding.finding_id] = (
+                        "subsumed_by_supported_comparison"
+                        if subsumed
+                        else "same_table_total_rule"
+                        if right is not None
+                        and right.verification_rule == "table_total_question"
+                        else "same_engineering_assertion"
+                    )
                     findings.remove(finding)
         updates = {}
         for field, id_field in (
@@ -1103,6 +1116,9 @@ def merge_cross_page_findings(
             *(
                 {
                     "origin": "merged_finding",
+                    "stage": stage,
+                    "reason_code": merge_reasons[item.finding_id],
+                    "merged_into": cross.finding_id,
                     "finding_id": item.finding_id,
                     "page": item.page,
                     "comment": item.comment,
@@ -1146,6 +1162,11 @@ def merge_cross_page_findings(
         merged = replace(
             cross,
             **updates,
+            evidence="; ".join(
+                dict.fromkeys(
+                    item.evidence for item in (cross, *duplicates) if item.evidence
+                )
+            ),
             origin_assertions=origins,
             evidence_locations=tuple(evidence),
             basis="\n".join(
@@ -1194,6 +1215,21 @@ def merge_cross_page_findings(
                         and origin != assertion.as_origin()
                     ),
                 ),
+            )
+        if (
+            duplicates
+            and assertion is not None
+            and assertion.verification_rule == "table_total_question"
+        ):
+            merged = finalize_arithmetic_candidate(merged)
+        for duplicate in duplicates:
+            trace_candidate(
+                stage,
+                duplicate.finding_id,
+                page=duplicate.page,
+                decision="merge",
+                reason=merge_reasons[duplicate.finding_id],
+                merged_into=merged.finding_id,
             )
         result.setdefault(cross.page, []).append(merged)
     return {page: tuple(findings) for page, findings in result.items()}

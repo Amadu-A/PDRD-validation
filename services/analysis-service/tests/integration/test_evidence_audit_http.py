@@ -15,9 +15,58 @@ from pdrd_analysis_service.transport.http.document_context_routes import _option
 from pdrd_analysis_service.transport.http.routes import _finding_draft_payload
 
 from tests.functional.test_engineering_evidence_gate import candidate, fact
+from tests.functional.test_quality_completeness import source_pages
 
 from .test_engineering_program_http import ForbiddenVision
 from .test_http_api import build_app, facts_payload
+
+
+async def test_real_reference_passes_http_contract_and_finalization_without_generation():
+    """Настоящие DTO читают сырой PDF-текст и проверяют ссылки без готового finding во входе."""
+    app, model = build_app(), ForbiddenVision()
+    app.state.container = replace(
+        app.state.container,
+        check_cross_page_consistency=CheckCrossPageConsistency(
+            model, _options(app.state.container)
+        ),
+        finalize_findings=FinalizeFindings(model, 4000, 8, 1000, 0.5),
+    )
+    pages = [page for page in source_pages() if page.page == 20]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/v1/document-context/check-consistency",
+            json={
+                "document_id": str(uuid4()),
+                "enabled": True,
+                "pages": [
+                    {
+                        "page_number": page.page,
+                        "extracted_text": page.text,
+                        "page_facts": {
+                            **facts_payload(),
+                            "document_facts": [asdict(f) for f in page.facts],
+                        },
+                    }
+                    for page in pages
+                ],
+            },
+        )
+        assert response.status_code == 200, response.text
+        findings = response.json()["findings"]
+        assert len(findings) == 1 and "таблица 3" in findings[0]["comment"]
+        final = await client.post(
+            "/internal/v1/findings/finalize",
+            json={"findings": findings, "experience_by_finding": {}},
+        )
+        assert final.status_code == 200, final.text
+        assert len(final.json()["findings"]) == 1
+        assert final.json()["metrics"]["vlm_call_count"] == 0
+        assert (
+            final.json()["findings"][0]["document_context_source_ids"]
+            == findings[0]["document_context_source_ids"]
+        )
 
 
 @pytest.mark.parametrize("enabled", [True, False])

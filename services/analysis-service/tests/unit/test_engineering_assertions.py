@@ -291,7 +291,10 @@ async def test_deterministic_conversion_needs_no_model_but_mixed_modes_do():
     drafts = await CheckCrossPageConsistency(model, options).execute(
         pages=(
             DocumentPage(
-                1, "S1: 0,738 м³/ч; 0,5205 л/с", "", tuple(item.fact for item in facts)
+                1,
+                "S1: 0,738 м³/ч; S1: 0,5205 л/с",
+                "",
+                tuple(item.fact for item in facts),
             ),
         )
     )

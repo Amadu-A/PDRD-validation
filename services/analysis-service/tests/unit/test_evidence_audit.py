@@ -196,13 +196,13 @@ def test_actual_wall_difference_for_same_explicit_segment_is_supported():
     assert assess(first, second).status == "supported"
 
 
-def test_missing_second_value_remains_specific_question():
-    """Отсутствие второй стороны не объявляется отсутствием расчёта во всём документе."""
+def test_missing_or_invented_second_value_remains_diagnostic():
+    """Один скаляр без предметной претензии не создаёт пользовательский вопрос."""
     assert assess(observation()).reason_code == "second_comparison_value_unavailable"
     first = observation()
     second = observation("12", page=2, quote="S1 Расход воды 10 л/с")
     result = assess(first, second)
-    assert result.status == "counterevidence" and result.disposition == "question"
+    assert result.status == "counterevidence" and result.disposition == "diagnostic"
 
 
 def test_compatible_purposes_and_actual_terminology_error_have_different_outcomes():
@@ -277,8 +277,8 @@ def test_consumption_and_wastewater_totals_are_not_required_to_be_equal():
     )
 
 
-def test_visual_object_binding_uncertainty_keeps_question_but_does_not_confirm_comparison():
-    """Прочитанное число рядом с областью и отдельным тегом остаётся предметом проверки инженера."""
+def test_single_visual_value_keeps_binding_diagnostic_without_creating_claim():
+    """Неоднозначная привязка одного числа сохраняется для диагностики, не порождая замечание."""
     first = observation(
         "Ø110x10",
         prop="Диаметр",
@@ -290,7 +290,7 @@ def test_visual_object_binding_uncertainty_keeps_question_but_does_not_confirm_c
     )
     result = assess(first, texts={1: "S1\nДиаметр Ø110x10 мм"})
     assert (
-        result.disposition == "question"
+        result.disposition == "diagnostic"
         and result.bindings[0].reason_code == "object_binding_ambiguous"
     )
 

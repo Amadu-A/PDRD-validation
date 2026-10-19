@@ -65,6 +65,7 @@ def explicit_design_parameters(text: str) -> tuple[DocumentFact, ...]:
     content = re.sub(r"\s+", " ", text)
     facts = []
     for match in _DESIGN_PARAMETER.finditer(content):
+        fire_condition = re.search(r"\b(?:наружн|внутренн)\w+", match["context"], re.I)
         context = re.sub(
             r"\b(?:принят\w*|составля\w*|равн\w*|объ[её]мом)\b",
             "",
@@ -81,10 +82,22 @@ def explicit_design_parameters(text: str) -> tuple[DocumentFact, ...]:
             {
                 "kind": "parameter",
                 "subject_type": "design_decision",
-                "subject_name": subject,
-                "identifier": "",
-                "property_type": "parameter",
+                "subject_name": "Наружное пожаротушение"
+                if re.search(r"наружн\w*.*пожаротушени", context, re.I)
+                else subject,
+                "identifier": "пожаротушение"
+                if re.search(r"пожаротушени", context, re.I)
+                else "",
+                "property_type": "design_fire_flow"
+                if re.search(r"пожаротушени", context, re.I)
+                else "parameter",
                 "property_name": match["name"],
+                "relation": "accepted_fire_demand"
+                if re.search(r"пожаротушени", context, re.I)
+                else "",
+                "scope_condition": fire_condition[0]
+                if fire_condition and re.search(r"пожаротушени", context, re.I)
+                else "",
                 "value_raw": match["value"],
                 "unit_raw": match["unit"],
                 "evidence_text": match[0],
@@ -94,6 +107,34 @@ def explicit_design_parameters(text: str) -> tuple[DocumentFact, ...]:
         if fact is not None:
             facts.append(fact)
     return tuple(facts)
+
+
+def explicit_pipe_choices(text: str) -> tuple[DocumentFact, ...]:
+    """Читает диаметр явно обозначенного водопровода; границы участка и режим не выдумывает."""
+    content = re.sub(r"\s+", " ", text)
+    pattern = re.compile(
+        r"(?P<quote>(?:[Пп]ротивопожарный\s+)?водопровод\s+(?P<tag>[А-ЯA-Z]\d+(?:-\d+)?)\s+"
+        r"(?:прокладывается|выполнен)[^.;]{0,160}?[øØ⌀](?P<diameter>\d+(?:[.,]\d+)?)\s*мм[^.;]{0,50})"
+    )
+    result = []
+    for match in pattern.finditer(content):
+        fact = document_fact_from_mapping(
+            {
+                "kind": "parameter",
+                "subject_type": "system",
+                "identifier": match["tag"],
+                "property_type": "outer_diameter",
+                "property_name": "Наружный диаметр",
+                "value_raw": match["diameter"],
+                "unit_raw": "мм",
+                "relation": "accepted_pipe_choice",
+                "evidence_text": match["quote"],
+                "extraction_method": "pdf_text",
+            }
+        )
+        if fact is not None:
+            result.append(fact)
+    return tuple(result)
 
 
 def merge_text_engineering_facts(
@@ -109,6 +150,7 @@ def merge_text_engineering_facts(
             *explicit_system_purposes(text),
             *explicit_design_parameters(text),
             *explicit_flow_rows(text, page),
+            *explicit_pipe_choices(text),
         )
     )
     return (

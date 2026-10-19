@@ -713,6 +713,56 @@ def audit_engineering_candidates(findings, report):
             ),
             {},
         )
+        origins = finding.origin_assertions
+        if status == "needs_review" and totals:
+            rows = {
+                (
+                    item.page,
+                    item.fact.table_id,
+                    item.fact.row_label,
+                    item.fact.calculation_group,
+                    scope_key(item.fact)[:6],
+                )
+                for item in totals
+            }
+            if len(rows) == 1 and all(row[1] and row[2] for row in rows):
+                question = EngineeringAssertion(
+                    "table:" + totals[0].fact.table_id,
+                    "table:total_rule",
+                    "arithmetic",
+                    (
+                        stable_id(
+                            "table-rule:",
+                            (
+                                tuple(sorted(rows)),
+                                tuple(
+                                    sorted(
+                                        {
+                                            (
+                                                check.rule,
+                                                check.reason_code,
+                                                check.missing_data,
+                                            )
+                                            for check in checks
+                                        }
+                                    )
+                                ),
+                            ),
+                        ),
+                    ),
+                    totals,
+                    "unverified",
+                    "table_total_question",
+                )
+                origins = (
+                    question.as_origin(),
+                    *(
+                        {**origin, "origin": "engineering_assertion_history"}
+                        if origin.get("origin") == "engineering_assertion"
+                        else origin
+                        for origin in origins
+                    ),
+                )
         result.append(
             replace(
                 finding,
@@ -720,11 +770,7 @@ def audit_engineering_candidates(findings, report):
                 comment=comment,
                 recommendation_draft=recommendation,
                 origin_assertions=(
-                    *(
-                        origin
-                        for origin in finding.origin_assertions
-                        if origin is not previous
-                    ),
+                    *(origin for origin in origins if origin is not previous),
                     {
                         "origin": "engineering_candidate_gate",
                         "review_kind": "table_arithmetic",
@@ -871,6 +917,38 @@ def _wording(check):
             f"В записанном равенстве {values['expression']}={values['stated']} результат не совпадает "
             f"с вычисленным {values['expected']} {values['unit']}.",
             "Проверить исходное равенство и исправить результат вычисления.",
+        )
+    if check.rule == "topic_reference_consistency":
+        return (
+            f"Для одного предмета «{obj}» даны разные адреса: {', '.join(values['targets'])}. "
+            "Повторные указания не определяют однозначную внутреннюю ссылку.",
+            "Проверить содержимое указанных таблиц, приложений или разделов и уточнить адрес каждой ссылки.",
+        )
+    if check.rule == "design_basis_dependency":
+        pages = ", ".join(map(str, values["checked_pages"]))
+        if values["dependency"] == "fire_flow_basis":
+            return (
+                f"Принят расход {values['accepted']} для решения «{obj}». Указать расчётное и нормативное обоснование "
+                "этого пожарного расхода: назначение и характеристики защищаемого объекта, расчётные условия "
+                f"и применимое требование. В проверенных материалах (стр. {pages}) цепочка основания не установлена.",
+                "Связать принятое значение с исходными условиями и применимым пунктом нормы; "
+                "нарушение численного требования без этих условий не подтверждено.",
+            )
+        labels = {
+            "design_flow": "расчётный расход",
+            "internal_diameter": "внутренний диаметр",
+            "flow_velocity": "скорость",
+            "head_loss": "потери напора",
+            "calculation_segment": "границы расчётного участка",
+            "operating_mode": "расчётный режим",
+        }
+        missing = ", ".join(labels[key] for key in values["missing"])
+        return (
+            f"Для {obj} принят наружный диаметр {values['accepted']}. Уточнить гидравлическое обоснование "
+            f"выбора: не установлены связанные показатели ({missing}) для одного расчётного участка и режима "
+            f"в проверенных материалах (стр. {pages}).",
+            "Указать расчётный участок, режим и связанные расход, внутренний диаметр, скорость и потери; "
+            "DN не подставлять вместо внутреннего диаметра. Коэффициенты и условия должны следовать из расчёта.",
         )
     if check.rule == "procurement_quantity":
         return (
@@ -1022,7 +1100,7 @@ def verified_programmatic_check(finding: FindingDraft) -> bool:
             if check.reason_code != raw["reason_code"] or check.status != raw["status"]:
                 continue
             rendered = check
-            if check.rule == "reference_resolution":
+            if check.rule in {"reference_resolution", "design_basis_dependency"}:
                 rendered = replace(check, calculation=raw["calculation"])
             comment, recommendation = _wording(rendered)
             if (

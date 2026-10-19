@@ -250,6 +250,12 @@ def discover_conflicts(
     groups: dict[tuple[str, str, tuple[str, ...]], list[LocatedDocumentFact]] = {}
     for located in facts:
         fact = located.fact
+        # Назначение пожарного расхода ещё не идентифицирует защищаемый объект.
+        # Сам факт остаётся в реестре и проверке обоснования, но не доказывает равенство расходов разных объектов.
+        if fact.relation == "accepted_fire_demand" and not (
+            fact.scope_system or fact.scope_location
+        ):
+            continue
         if _printed_sheet_number(fact) is not None:
             continue
         subject = subject_key(fact)
