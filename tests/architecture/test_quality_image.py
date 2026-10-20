@@ -27,6 +27,8 @@ QUALITY_DOCKERIGNORE = REPOSITORY_ROOT / "ops" / "Dockerfile.quality.dockerignor
 
 USER_SERVICE_DOCKERFILE = REPOSITORY_ROOT / "services" / "user-service" / "Dockerfile"
 
+KNOWLEDGE_DOCKERFILE = REPOSITORY_ROOT / "services" / "knowledge-service" / "Dockerfile"
+
 USER_SERVICE_DOCKERIGNORE = (
     REPOSITORY_ROOT / "services" / "user-service" / ".dockerignore"
 )
@@ -161,6 +163,43 @@ def test_user_service_image_packages_migrations_and_runs_unprivileged() -> None:
     assert "pip install --no-cache-dir ." in content
     assert "USER app" in content
     assert "pdrd_user_service.main:app" in content
+
+
+def test_knowledge_build_checks_actual_migration_graph_as_runtime_user_without_database() -> (
+    None
+):
+    """Root quality runner не заменяет чтение настоящего Alembic graph от runtime UID.
+
+    Встроенная проверка сборки должна прочитать все ревизии после USER app,
+    не подключаясь к БД и не выполняя upgrade на стадии создания образа.
+    """
+    instructions = [
+        line.strip()
+        for line in KNOWLEDGE_DOCKERFILE.read_text(encoding="utf-8")
+        .replace("\\\n", " ")
+        .splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    runtime = instructions.index("FROM base AS runtime")
+    user = None
+    checked = False
+    for instruction in instructions[runtime + 1 :]:
+        if instruction.startswith("USER "):
+            user = instruction.removeprefix("USER ").strip()
+        if instruction.startswith("RUN ") and " -m alembic " in instruction:
+            assert user == "app", (
+                "Alembic smoke должен выполняться от того же пользователя, что runtime."
+            )
+            assert shlex.split(instruction.removeprefix("RUN ")) == [
+                "python",
+                "-m",
+                "alembic",
+                "-c",
+                "/app/alembic.ini",
+                "heads",
+            ]
+            checked = True
+    assert checked, "В сборке Knowledge отсутствует чтение миграций от USER app."
 
 
 def test_user_service_build_context_excludes_secrets_and_test_artifacts() -> None:

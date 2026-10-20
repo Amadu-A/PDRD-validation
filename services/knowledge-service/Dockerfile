@@ -26,6 +26,11 @@ COPY alembic.ini /app/alembic.ini
 COPY alembic /app/alembic
 COPY src /app/src
 
+# Git checkout и build context могут содержать закрытые права 0600/0700.
+# Runtime-пользователю нужны чтение кода и проход по каталогам, без права записи.
+RUN find /app -type d -exec chmod 0755 {} + \
+    && find /app -type f -exec chmod 0644 {} +
+
 RUN pip install \
     --no-cache-dir \
     .
@@ -60,6 +65,9 @@ RUN useradd \
 ENV HOME=/home/app
 
 USER app
+
+# Чтение всей цепочки ревизий от runtime UID; heads не подключается к БД.
+RUN python -m alembic -c /app/alembic.ini heads
 
 EXPOSE 8401
 
