@@ -463,6 +463,9 @@ erDiagram
     normative_categories o|--o{ normative_categories : "FK parent_id; SET NULL"
     normative_categories o|--o{ normative_documents : "FK category_id; SET NULL"
     normative_documents ||--o{ normative_outbox_messages : "FK aggregate_id; CASCADE"
+    normative_documents ||--o{ normative_requirement_generations : "FK document_id; CASCADE"
+    normative_requirement_generations ||--o{ normative_requirements : "FK generation_id; CASCADE"
+    normative_documents ||--o{ normative_status_evidence : "FK document_id; CASCADE"
     normative_sections ||--o{ technical_assignments : "FK section_id; RESTRICT"
     technical_assignments ||--o{ technical_assignment_outbox_messages : "FK aggregate_id; CASCADE"
     normative_sections {
@@ -493,6 +496,25 @@ erDiagram
         uuid aggregate_id FK
         jsonb payload
     }
+    normative_requirement_generations {
+        uuid id PK
+        uuid document_id FK
+        string state
+        boolean active
+        jsonb payload
+    }
+    normative_requirements {
+        uuid generation_id PK, FK
+        string requirement_id PK
+        int ordinal
+        jsonb payload
+    }
+    normative_status_evidence {
+        uuid id PK
+        uuid document_id FK
+        string source_sha256
+        jsonb payload
+    }
     technical_assignments {
         uuid id PK
         uuid section_id FK
@@ -511,9 +533,11 @@ flowchart LR
     KS["Knowledge Service"] --> SQL[("PostgreSQL: knowledge")]
     KS --> NFILES["/data/normative: PDF/DOC/DOCX N и личных U"]
     KS --> TFILES["/data/technical-assignments: источники ТЗ"]
-    SQL --> OUT["Outbox N/U и ТЗ"]
+    SQL --> OUT["Outbox N/U, атомарные N и ТЗ"]
     OUT --> QUEUE["RabbitMQ: отдельные очереди"]
     QUEUE --> IDX["Knowledge / T indexer"]
+    QUEUE --> ATOMIC["Атомарные N: нативный текст, без embedding"]
+    ATOMIC --> SQL
     IDX --> EMB["shared-embedding"]
     IDX --> QD[("Qdrant: aliases N/U и T")]
     KS --> QD
@@ -1766,6 +1790,15 @@ Gateway проксирует только разрешённые действи�
 
 ## Управляемый нормативный каталог
 
+Этап A полного N-first добавляет в существующий Knowledge атомарный каталог
+требований и журнал подтверждений нормативного статуса. Старый chunk retrieval
+сохраняется. Готовый корпус не переиндексируется при старте: для выбранного
+документа оператор явно запускает `requirements/index`. `READY` не подтверждает
+актуальность редакции или обязательность. Полный каталог ещё не подключён к
+независимому плану анализа — это следующий этап B.
+Архитектура, ограничения, миграция, проверки реальных СП и инструкция приёмки:
+[Атомарный нормативный каталог — этап A](docs/normative-atomic-stage-a.md).
+
 ```text
 GET    /api/v1/normative/sections
 POST   /api/v1/normative/sections
@@ -1787,6 +1820,12 @@ DELETE /api/v1/normative/documents/{document_id}
 
 POST   /api/v1/normative/documents/{document_id}/index
 GET    /api/v1/normative/documents/{document_id}/content
+
+GET    /api/v1/normative/documents/{document_id}/requirements/index
+POST   /api/v1/normative/documents/{document_id}/requirements/index
+GET    /api/v1/normative/documents/{document_id}/requirements
+GET    /api/v1/normative/documents/{document_id}/status-evidence
+POST   /api/v1/normative/documents/{document_id}/status-evidence
 ```
 
 ## Личные пакеты

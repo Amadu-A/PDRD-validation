@@ -83,6 +83,10 @@ celery_app.conf.update(
     task_default_delivery_mode="persistent",
     task_create_missing_queues=False,
     task_routes={
+        "pdrd.knowledge.normative_requirements.index": {
+            "queue": broker_settings.queue_name,
+            "routing_key": broker_settings.routing_key,
+        },
         "pdrd.knowledge.normative.index": {
             "queue": broker_settings.queue_name,
             "routing_key": (broker_settings.routing_key),
@@ -93,6 +97,10 @@ celery_app.conf.update(
         },
     },
     task_annotations={
+        "pdrd.knowledge.normative_requirements.index": {
+            "soft_time_limit": broker_settings.task_soft_time_limit_seconds,
+            "time_limit": broker_settings.task_hard_time_limit_seconds,
+        },
         "pdrd.knowledge.normative.index": {
             "soft_time_limit": broker_settings.task_soft_time_limit_seconds,
             "time_limit": broker_settings.task_hard_time_limit_seconds,

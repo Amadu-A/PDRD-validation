@@ -9,6 +9,9 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 
+from pdrd_knowledge_service.infrastructure.database.normative_requirements import (
+    SqlAlchemyNormativeRequirementRepository,
+)
 from pdrd_knowledge_service.infrastructure.database.outbox_repository import (
     SqlAlchemyNormativeOutboxRepository,
 )
@@ -28,6 +31,7 @@ class SqlAlchemyNormativeCatalogUnitOfWork:
     ) -> None:
         """Создаёт независимую session для Unit of Work."""
         self._session = session_factory()
+        self.requirements = SqlAlchemyNormativeRequirementRepository(self._session)
 
         self.sections = SqlAlchemyNormativeSectionRepository(
             self._session,

@@ -42,6 +42,9 @@ from pdrd_knowledge_service.application.ports.vector_store import (
 from pdrd_knowledge_service.application.use_cases.normative_documents import (
     NormativeDocumentNotFoundError,
 )
+from pdrd_knowledge_service.application.use_cases.normative_requirements import (
+    NormativeRequirementCatalog,
+)
 from pdrd_knowledge_service.domain.normative_catalog import (
     IndexingStatus,
     NormativeDocument,
@@ -108,6 +111,7 @@ class IndexNormativeDocument:
     office_converter: NormativeOfficeToPdfConverter | None = None
 
     clock: Clock = utc_now
+    atomic_requirements: NormativeRequirementCatalog | None = None
 
     async def execute(self, *, document_id: UUID) -> NormativeDocument:
         """Держит общую блокировку до завершения записи векторов и PDF."""
@@ -193,7 +197,7 @@ class IndexNormativeDocument:
                     records=records[start : start + self.upsert_batch_size],
                 )
 
-            return await self._mark_ready(
+            ready_document = await self._mark_ready(
                 document_id=document_id,
             )
 
@@ -218,6 +222,14 @@ class IndexNormativeDocument:
                 "Не удалось проиндексировать нормативный документ "
                 f"{document_id}: {type(error).__name__}: {error}",
             ) from error
+
+        # Ошибка постановки атомарного каталога не удаляет уже готовые текстовые чанки.
+        if (
+            self.atomic_requirements is not None
+            and ready_document.area.value == "normative"
+        ):
+            await self.atomic_requirements.queue(document_id=document_id)
+        return ready_document
 
     async def _prepare_pdf_content(
         self,

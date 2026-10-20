@@ -24,11 +24,30 @@ from pdrd_knowledge_service.infrastructure.messaging.technical_assignment_worker
 )
 from pdrd_knowledge_service.infrastructure.messaging.worker_runtime import (
     execute_normative_indexing,
+    execute_normative_requirements_indexing,
 )
 
 LOGGER = logging.getLogger(
     __name__,
 )
+
+
+@celery_app.task(name="pdrd.knowledge.normative_requirements.index", ignore_result=True)
+def normative_requirements_index(document_id: str, generation_id: str) -> None:
+    """Восстанавливаемая задача атомарного каталога в существующей нормативной очереди."""
+    try:
+        asyncio.run(
+            execute_normative_requirements_indexing(
+                document_id=UUID(document_id), generation_id=str(UUID(generation_id))
+            )
+        )
+    except Exception:
+        LOGGER.exception(
+            "normative_requirements_index_failed document_id=%s generation_id=%s",
+            document_id,
+            generation_id,
+        )
+        raise
 
 
 @celery_app.task(

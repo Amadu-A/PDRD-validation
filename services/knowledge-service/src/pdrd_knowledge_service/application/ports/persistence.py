@@ -10,6 +10,9 @@ from typing import (
 )
 from uuid import UUID
 
+from pdrd_knowledge_service.application.ports.normative_requirements import (
+    NormativeRequirementRepository,
+)
 from pdrd_knowledge_service.domain.normative_catalog import (
     NormativeCategory,
     NormativeDocument,
@@ -186,6 +189,7 @@ class NormativeCatalogUnitOfWork(Protocol):
     categories: NormativeCategoryRepository
     documents: NormativeDocumentRepository
     outbox: NormativeOutboxRepository
+    requirements: NormativeRequirementRepository
 
     async def __aenter__(
         self,

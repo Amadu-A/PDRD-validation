@@ -21,6 +21,32 @@ class NormativeCatalogFacade:
 
     manager: NormativeCatalogManager
 
+    async def requirement_index_state(self, *, document_id: UUID) -> dict:
+        """Показывает активное поколение отдельно от ожидаемого или неудачного."""
+        return await self.manager.requirement_index_state(document_id=document_id)
+
+    async def list_requirements(self, *, document_id: UUID, query: dict) -> dict:
+        """Выдаёт атомарные требования с происхождением и точной пагинацией."""
+        return await self.manager.list_requirements(
+            document_id=document_id, query=query
+        )
+
+    async def queue_requirements(self, *, document_id: UUID) -> dict:
+        """Запрашивает построение атомарного каталога отдельно от текстовых чанков."""
+        return await self.manager.queue_requirements(document_id=document_id)
+
+    async def status_evidence(self, *, document_id: UUID) -> dict:
+        """Выдаёт свидетельства статуса редакции и отдельных требований."""
+        return await self.manager.status_evidence(document_id=document_id)
+
+    async def record_status_evidence(
+        self, *, document_id: UUID, payload: dict, actor_id: UUID
+    ) -> dict:
+        """Сохраняет доказательство от авторизованного оператора каталога."""
+        return await self.manager.record_status_evidence(
+            document_id=document_id, payload=payload, actor_id=actor_id
+        )
+
     async def list_sections(
         self,
     ) -> tuple[

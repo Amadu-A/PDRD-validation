@@ -23,6 +23,7 @@ def configure_experience_logging() -> None:
         "pdrd_knowledge_service.application.use_cases.trusted_experience",
         "pdrd_knowledge_service.transport.http.embedding_lifecycle",
         "pdrd_knowledge_service.infrastructure.embedding.request_runtime",
+        "pdrd_knowledge_service.application.use_cases.normative_requirements",
     ):
         logger = logging.getLogger(module)
         if not any(

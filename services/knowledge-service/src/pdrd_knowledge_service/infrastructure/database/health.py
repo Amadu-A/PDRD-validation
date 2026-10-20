@@ -23,6 +23,9 @@ _CATALOG_READINESS_QUERY = text(
         AND to_regclass(
             'knowledge.normative_documents'
         ) IS NOT NULL
+        AND to_regclass('knowledge.normative_requirement_generations') IS NOT NULL
+        AND to_regclass('knowledge.normative_requirements') IS NOT NULL
+        AND to_regclass('knowledge.normative_status_evidence') IS NOT NULL
     """
 )
 

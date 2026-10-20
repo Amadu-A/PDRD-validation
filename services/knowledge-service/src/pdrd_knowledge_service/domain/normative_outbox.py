@@ -13,6 +13,7 @@ class NormativeOutboxMessage:
     """Сообщение durable очереди нормативной индексации."""
 
     INDEX_REQUESTED_EVENT: ClassVar[str] = "normative.index.requested"
+    REQUIREMENTS_REQUESTED_EVENT: ClassVar[str] = "normative.requirements.requested"
 
     message_id: UUID
 

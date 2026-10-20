@@ -61,6 +61,9 @@ from pdrd_api_gateway.transport.http.routers.health import (
 from pdrd_api_gateway.transport.http.routers.normative_catalog import (
     router as normative_catalog_router,
 )
+from pdrd_api_gateway.transport.http.routers.normative_requirements import (
+    router as normative_requirements_router,
+)
 from pdrd_api_gateway.transport.http.routers.project_context_preflight import (
     router as project_context_preflight_router,
 )
@@ -168,6 +171,7 @@ def create_app(
     )
 
     application.include_router(review_router)
+    application.include_router(normative_requirements_router)
     application.include_router(experience_router)
     application.include_router(experience_versions_router)
     application.include_router(experience_quality_router)

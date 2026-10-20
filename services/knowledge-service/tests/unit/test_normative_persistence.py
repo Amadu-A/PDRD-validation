@@ -91,6 +91,9 @@ def test_knowledge_tables_belong_to_knowledge_schema() -> None:
         f"{KNOWLEDGE_SCHEMA}.normative_categories",
         f"{KNOWLEDGE_SCHEMA}.normative_documents",
         f"{KNOWLEDGE_SCHEMA}.normative_outbox_messages",
+        f"{KNOWLEDGE_SCHEMA}.normative_requirement_generations",
+        f"{KNOWLEDGE_SCHEMA}.normative_requirements",
+        f"{KNOWLEDGE_SCHEMA}.normative_status_evidence",
         f"{KNOWLEDGE_SCHEMA}.technical_assignments",
         f"{KNOWLEDGE_SCHEMA}.technical_assignment_outbox_messages",
     }

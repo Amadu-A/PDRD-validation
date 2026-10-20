@@ -19,6 +19,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import (
     Mapped,
     mapped_column,
@@ -28,6 +29,77 @@ from pdrd_knowledge_service.infrastructure.database.base import (
     KNOWLEDGE_SCHEMA,
     Base,
 )
+
+
+class NormativeRequirementGenerationModel(Base):
+    """Неактивное поколение не заменяет рабочий нормативный индекс при сбое."""
+
+    __tablename__ = "normative_requirement_generations"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('queued','building','ready','failed')",
+            name="ck_requirement_generation_state",
+        ),
+        CheckConstraint(
+            "NOT active OR state = 'ready'",
+            name="ck_requirement_generation_active_ready",
+        ),
+        Index(
+            "uq_requirement_active_generation",
+            "document_id",
+            unique=True,
+            postgresql_where=text("active"),
+        ),
+        {"schema": KNOWLEDGE_SCHEMA},
+    )
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    document_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey(f"{KNOWLEDGE_SCHEMA}.normative_documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+
+class NormativeRequirementModel(Base):
+    """Одна атомарная запись в конкретном поколении; порядок не зависит от ранжирования."""
+
+    __tablename__ = "normative_requirements"
+    __table_args__ = (
+        UniqueConstraint(
+            "generation_id", "ordinal", name="uq_normative_requirement_ordinal"
+        ),
+        CheckConstraint("ordinal >= 0", name="ck_normative_requirement_ordinal"),
+        {"schema": KNOWLEDGE_SCHEMA},
+    )
+    generation_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey(
+            f"{KNOWLEDGE_SCHEMA}.normative_requirement_generations.id",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    requirement_id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+
+class NormativeStatusEvidenceModel(Base):
+    """Журнал проверяемого статуса в существующем нормативном каталоге."""
+
+    __tablename__ = "normative_status_evidence"
+    __table_args__ = ({"schema": KNOWLEDGE_SCHEMA},)
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    document_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey(f"{KNOWLEDGE_SCHEMA}.normative_documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
 
 class NormativeSectionModel(Base):

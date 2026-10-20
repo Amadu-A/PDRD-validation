@@ -53,6 +53,9 @@ from pdrd_knowledge_service.application.use_cases.normative_documents import (
 from pdrd_knowledge_service.application.use_cases.normative_indexing_queue import (
     QueueNormativeDocument,
 )
+from pdrd_knowledge_service.application.use_cases.normative_requirements import (
+    NormativeRequirementCatalog,
+)
 from pdrd_knowledge_service.application.use_cases.normative_sections import (
     CreateNormativeSection,
     DeleteNormativeSection,
@@ -158,6 +161,7 @@ class ApplicationContainer:
     normative_documents: NormativeDocumentUseCases | None = None
 
     queue_normative_document: QueueNormativeDocument | None = None
+    normative_requirements: NormativeRequirementCatalog | None = None
 
     register_technical_assignment: RegisterTechnicalAssignment | None = None
 
@@ -439,6 +443,9 @@ def build_container() -> ApplicationContainer:
     )
 
     return ApplicationContainer(
+        normative_requirements=NormativeRequirementCatalog(
+            normative_catalog_uow_factory
+        ),
         settings=settings,
         search_normative=search_normative,
         search_user_packages=(search_user_packages),

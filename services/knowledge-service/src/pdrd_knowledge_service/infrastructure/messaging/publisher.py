@@ -38,6 +38,7 @@ class CeleryNormativeOutboxPublisher:
         NormativeOutboxMessage.INDEX_REQUESTED_EVENT: (
             "pdrd.knowledge.normative.index"
         ),
+        NormativeOutboxMessage.REQUIREMENTS_REQUESTED_EVENT: "pdrd.knowledge.normative_requirements.index",
     }
 
     def __init__(

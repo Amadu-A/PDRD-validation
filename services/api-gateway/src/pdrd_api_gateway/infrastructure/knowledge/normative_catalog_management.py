@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping
 from datetime import datetime
 from typing import cast
+from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
@@ -421,18 +422,65 @@ class HttpNormativeCatalogManager:
             mime_type=mime_type,
         )
 
+    async def requirement_index_state(self, *, document_id: UUID) -> dict:
+        """Не создаёт задание при проверке состояния каталога."""
+        return await self._requirements_json(
+            "GET", f"/internal/v1/normative/documents/{document_id}/requirements/index"
+        )
+
+    async def list_requirements(self, *, document_id: UUID, query: dict) -> dict:
+        """Передаёт проверенные параметры, не применяя top-K к нормативному каталогу."""
+        return await self._requirements_json(
+            "GET",
+            f"/internal/v1/normative/documents/{document_id}/requirements?{urlencode(query)}",
+        )
+
+    async def queue_requirements(self, *, document_id: UUID) -> dict:
+        """Не вызывает старую операцию переиндексации чанков."""
+        return await self._requirements_json(
+            "POST", f"/internal/v1/normative/documents/{document_id}/requirements/index"
+        )
+
+    async def status_evidence(self, *, document_id: UUID) -> dict:
+        """Читает свидетельства конкретного нормативного документа."""
+        return await self._requirements_json(
+            "GET", f"/internal/v1/normative/documents/{document_id}/status-evidence"
+        )
+
+    async def record_status_evidence(
+        self, *, document_id: UUID, payload: dict, actor_id: UUID
+    ) -> dict:
+        """Автор берётся из серверной сессии, а не из клиентского заголовка."""
+        return await self._requirements_json(
+            "POST",
+            f"/internal/v1/normative/documents/{document_id}/status-evidence",
+            json_body=payload,
+            headers={"X-PDRD-Actor-ID": str(actor_id)},
+        )
+
+    async def _requirements_json(self, method, path, **kwargs) -> dict:
+        """Протокольный сбой не подменяется пустым нормативным каталогом."""
+        body = await self._request_json(method=method, path=path, **kwargs)
+        if not isinstance(body, dict):
+            raise NormativeCatalogProtocolError(
+                "Knowledge вернул неверный ответ атомарного каталога."
+            )
+        return body
+
     async def _request_json(
         self,
         *,
         method: str,
         path: str,
         json_body: object | None = None,
+        headers: dict[str, str] | None = None,
     ) -> object:
         """Выполняет HTTP-запрос и разбирает JSON."""
         response = await self._request(
             method=method,
             path=path,
             json_body=json_body,
+            headers=headers,
         )
 
         return self._response_json(
@@ -445,6 +493,7 @@ class HttpNormativeCatalogManager:
         method: str,
         path: str,
         json_body: object | None = None,
+        headers: dict[str, str] | None = None,
         data: dict[
             str,
             str,
@@ -481,6 +530,7 @@ class HttpNormativeCatalogManager:
                         base_url + path,
                         data=data,
                         files=files,
+                        **({"headers": headers} if headers else {}),
                     )
 
                 else:
@@ -490,6 +540,7 @@ class HttpNormativeCatalogManager:
                         json=json_body,
                         data=data,
                         files=files,
+                        **({"headers": headers} if headers else {}),
                     )
 
         except httpx.HTTPError as error:

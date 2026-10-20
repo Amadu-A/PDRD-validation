@@ -134,7 +134,29 @@ class NormativeDocumentContent:
 
 
 class NormativeCatalogManager(Protocol):
-    """Контракт полного управления normative catalog."""
+    """Контракт полного управления нормативным каталогом."""
+
+    async def requirement_index_state(self, *, document_id: UUID) -> dict:
+        """Читает состояние построения, не начиная переиндексацию."""
+        ...
+
+    async def list_requirements(self, *, document_id: UUID, query: dict) -> dict:
+        """Читает атомарный каталог конкретного поколения без similarity-отбора."""
+        ...
+
+    async def queue_requirements(self, *, document_id: UUID) -> dict:
+        """Явно ставит только атомарную индексацию в существующую очередь."""
+        ...
+
+    async def status_evidence(self, *, document_id: UUID) -> dict:
+        """Возвращает доказательства статуса исходного документа."""
+        ...
+
+    async def record_status_evidence(
+        self, *, document_id: UUID, payload: dict, actor_id: UUID
+    ) -> dict:
+        """Передаёт аттестацию с доверенной идентичностью автора."""
+        ...
 
     async def list_sections(
         self,

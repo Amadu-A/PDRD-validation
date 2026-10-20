@@ -5,6 +5,7 @@
 from collections.abc import Callable
 from dataclasses import (
     dataclass,
+    replace,
 )
 from datetime import (
     UTC,
@@ -23,6 +24,7 @@ from pdrd_knowledge_service.application.use_cases.index_normative_document impor
     NormativeIndexingExecutionError,
 )
 from pdrd_knowledge_service.domain.normative_catalog import (
+    CatalogArea,
     IndexingStatus,
     NormativeDocument,
 )
@@ -50,6 +52,57 @@ INDEXING_TIME = BASE_TIME + timedelta(
 READY_TIME = BASE_TIME + timedelta(
     seconds=2,
 )
+
+
+@pytest.mark.parametrize(
+    "scenario", ["normal", "queue_failure", "user_package", "already_ready"]
+)
+async def test_atomic_queue_follows_successful_new_normative_index_only(scenario):
+    """Новый атомарный путь не удаляет готовые чанки и не переиндексирует личные/старые документы."""
+    source = make_document(
+        status=IndexingStatus.READY
+        if scenario == "already_ready"
+        else IndexingStatus.QUEUED
+    )
+    if scenario == "user_package":
+        source = replace(
+            source, area=CatalogArea.USER_PACKAGE, owner_user_id=UUID(int=7)
+        )
+    state, vectors, calls = FakeState(source), FakeVectorStore(), []
+
+    class Queue:
+        """Ставит атомарную задачу только после существующего успешного chunk-indexing."""
+
+        async def queue(self, *, document_id):
+            """Имитирует отказ публикации без разрушения уже готовых векторов."""
+            assert state.document.index_status is IndexingStatus.READY
+            assert len(vectors.records) == 2
+            calls.append(document_id)
+            if scenario == "queue_failure":
+                raise RuntimeError("atomic queue failure")
+
+    times = iter((INDEXING_TIME, READY_TIME))
+    use_case = replace(
+        build_use_case(
+            state=state,
+            storage=FakeStorage(),
+            extractor=FakePdfExtractor(),
+            embedding_provider=FakeEmbeddingProvider(),
+            vector_store=vectors,
+            clock=lambda: next(times),
+        ),
+        atomic_requirements=Queue(),
+    )
+    if scenario == "queue_failure":
+        with pytest.raises(RuntimeError, match="atomic queue failure"):
+            await use_case.execute(document_id=DOCUMENT_ID)
+    else:
+        await use_case.execute(document_id=DOCUMENT_ID)
+    assert state.document.index_status is IndexingStatus.READY
+    if scenario != "already_ready":
+        assert len(vectors.records) == 2 and len(vectors.delete_calls) == 1
+    assert calls == ([DOCUMENT_ID] if scenario in {"normal", "queue_failure"} else [])
+
 
 SECTION_ID = UUID(
     "11111111-1111-1111-1111-111111111111",

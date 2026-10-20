@@ -8,6 +8,10 @@ from uuid import UUID
 from pdrd_knowledge_service.application.use_cases.index_normative_document import (
     IndexNormativeDocument,
 )
+from pdrd_knowledge_service.application.use_cases.normative_requirements import (
+    BuildNormativeRequirements,
+    NormativeRequirementCatalog,
+)
 from pdrd_knowledge_service.core.embedding_runtime import build_embedding_runtime
 from pdrd_knowledge_service.core.settings import (
     get_settings,
@@ -73,6 +77,7 @@ async def execute_normative_indexing(
     )
 
     use_case = IndexNormativeDocument(
+        atomic_requirements=NormativeRequirementCatalog(unit_of_work_factory),
         unit_of_work_factory=unit_of_work_factory,
         section_locks=PostgresCatalogSectionLocks(engine),
         storage=LocalFilesystemNormativeDocumentStorage(
@@ -103,5 +108,27 @@ async def execute_normative_indexing(
             document_id=document_id,
         )
 
+    finally:
+        await engine.dispose()
+
+
+async def execute_normative_requirements_indexing(
+    *, document_id: UUID, generation_id: str
+) -> dict:
+    """Запускает отдельную задачу того же worker без embedding и векторных мутаций."""
+    settings = get_settings()
+    engine = build_async_engine(settings.database)
+    factory = partial(
+        SqlAlchemyNormativeCatalogUnitOfWork, build_session_factory(engine)
+    )
+    try:
+        return await BuildNormativeRequirements(
+            unit_of_work_factory=factory,
+            storage=LocalFilesystemNormativeDocumentStorage(
+                root_path=settings.storage.root_path
+            ),
+            pdf_extractor=PyMuPdfNormativePdfExtractor(),
+            section_locks=PostgresCatalogSectionLocks(engine),
+        ).execute(document_id=document_id, generation_id=generation_id)
     finally:
         await engine.dispose()
