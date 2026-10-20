@@ -53,7 +53,8 @@ services:
         python -m alembic -c alembic.ini upgrade head
         python -m alembic -c alembic.ini current --check-heads --verbose
         cd /workspace
-        python -m pytest -q services/knowledge-service/tests/integration
+        # Общая конфигурация сохраняет importlib и пространство имён тестов monorepo.
+        python -m pytest -q -c pyproject.toml services/knowledge-service/tests/integration
     networks: [knowledge-test-only]
 networks:
   knowledge-test-only:

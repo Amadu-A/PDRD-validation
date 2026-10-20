@@ -11,7 +11,13 @@ Architecture tests внутри Docker должны видеть frontend, n8n, 
 запуска pip install.
 """
 
+import os
+import shlex
+import subprocess
+import sys
 from pathlib import Path
+
+import yaml
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
@@ -77,6 +83,49 @@ def test_quality_dockerfile_prepares_editable_services_before_pip() -> None:
     assert repository_position >= 0
 
     assert services_position < pip_install_position < repository_position
+
+
+def test_knowledge_runner_collects_integration_tests_with_its_actual_command() -> None:
+    """Проверяет загрузку всего серверного набора, включая относительные импорты.
+
+    Общий запуск pytest может скрыть неверный выбор сервисной конфигурации.
+    Здесь команда берётся из Compose и выполняется отдельно без обращения к БД и GPU.
+    """
+    stack = yaml.safe_load(
+        (REPOSITORY_ROOT / "ops/compose.knowledge-test.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    runner = stack["services"]["knowledge-test-runner"]
+    commands = "\n".join(runner["command"]).splitlines()
+    test_command = next(
+        shlex.split(line)
+        for line in commands
+        if line.strip().startswith("python -m pytest")
+    )
+    result = subprocess.run(
+        [sys.executable, *test_command[1:], "--collect-only", "-p", "no:cacheprovider"],
+        cwd=REPOSITORY_ROOT,
+        env={
+            **os.environ,
+            **{key: str(value) for key, value in runner["environment"].items()},
+            "PYTHONIOENCODING": "utf-8",
+        },
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (
+        "test_embedding_http_lifecycle.py::"
+        "test_real_search_route_distinguishes_input_validation_from_overload"
+    ) in result.stdout
+    assert (
+        "test_embedding_slots_database.py::"
+        "test_api_and_indexer_share_slots_and_release_after_failure"
+    ) in result.stdout
 
 
 def test_quality_context_keeps_architecture_inputs() -> None:
