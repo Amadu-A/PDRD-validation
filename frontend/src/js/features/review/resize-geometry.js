@@ -6,6 +6,11 @@ export const RESIZE_DIRECTIONS = Object.freeze(["n", "e", "s", "w", "ne", "se", 
 
 /** Противоположная сторона неподвижна; рамка не выворачивается и не выходит за лист. */
 export function resizedBox(box, direction, delta, { minWidth = 15, minHeight = 15 } = {}) {
+  if (direction === "move") {
+    const x = Math.max(-box.x_min, Math.min(1000 - box.x_max, delta.x));
+    const y = Math.max(-box.y_min, Math.min(1000 - box.y_max, delta.y));
+    return { x_min: box.x_min + x, y_min: box.y_min + y, x_max: box.x_max + x, y_max: box.y_max + y };
+  }
   if (!RESIZE_DIRECTIONS.includes(direction)) {
     throw new Error("Неизвестная граница области.");
   }

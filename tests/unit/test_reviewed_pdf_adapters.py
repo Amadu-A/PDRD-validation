@@ -73,6 +73,18 @@ async def test_internal_contract_preserves_fractional_regions():
     assert manifest.findings[0].regions[0].x_min == 10.25
 
 
+async def test_review_export_preserves_added_display_regions_without_gold():
+    """Пять ручных рамок отображения остаются VLM, а не подтверждением Gold."""
+    payload = deepcopy(MANIFEST)
+    payload["findings"][0]["regions"] = [{**BOX, "x_min": 10.25 + n} for n in range(5)]
+    manifest = await HttpReviewedPdfSource(Service(payload)).load(
+        context=ReviewContext("engineer:1", JOB, "export")
+    )
+    assert len(manifest.findings[0].regions) == 5
+    assert manifest.findings[0].origin == "vlm"
+    assert manifest.findings[0].experience_tag == "wise"
+
+
 @pytest.mark.parametrize(
     "case", ["job", "page", "tag", "manual", "nan", "bool", "duplicate", "number"]
 )

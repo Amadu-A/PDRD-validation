@@ -2,7 +2,10 @@
 
 """Tests native PyMuPDF annotation export."""
 
+from dataclasses import replace
+
 import fitz
+import pytest
 from pdrd_document_service.application.ports.pdf_annotation import (
     PdfFindingAnnotation,
     PdfReportField,
@@ -59,6 +62,83 @@ def _source_pdf() -> bytes:
     document.close()
 
     return content
+
+
+@pytest.mark.parametrize("page_number", [1, 2])
+def test_duplicate_geometry_has_identical_render_and_text_does_not_overlap_number(
+    page_number,
+):
+    """Растр дубликатов совпадает с одной рамкой; поля текста и номера не пересекаются."""
+    box = PdfNormalizedBoundingBox(100, 300, 200, 380)
+    finding = PdfFindingAnnotation(
+        1, "single", page_number, "Проверить объект на листе", "Полный текст", (box,)
+    )
+    writer = PyMuPdfAnnotationWriter()
+    samples = []
+    for item in (finding, replace(finding, regions=(box, box, box))):
+        pdf = writer.build(
+            content=_source_pdf(),
+            annotations=(item,),
+            report=PdfTextReport("Проверка", (), "", (), ()),
+        )
+        with fitz.open(stream=pdf, filetype="pdf") as document:
+            page = document[page_number - 1]
+            samples.append(page.get_pixmap(annots=True).samples)
+            freetext = [a for a in page.annots() if a.type[1] == "FreeText"]
+            card, badge = freetext
+            # Проверяем фактический appearance native FreeText, а не только payload.
+            text_blocks = card.get_text("dict")
+            assert text_blocks.get("blocks")
+            for block in text_blocks.get("blocks", []):
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        assert (fitz.Rect(span["bbox"]) & badge.rect).is_empty
+    assert samples[0] == samples[1]
+
+
+def test_duplicate_rectangles_are_removed_only_inside_one_finding_and_unlocated_is_explicit():
+    """Совпадающая область двух findings сохраняет независимые карточки и номера."""
+    box = PdfNormalizedBoundingBox(100, 100, 200, 180)
+    regions = (box, box)
+    annotations = tuple(
+        PdfFindingAnnotation(
+            i,
+            f"finding-{i}",
+            1,
+            f"Самостоятельная проверка {i}",
+            f"Доказательство {i}",
+            regions if i < 3 else (),
+        )
+        for i in (1, 2, 3)
+    )
+    result = PyMuPdfAnnotationWriter().build(
+        content=_source_pdf(),
+        annotations=annotations,
+        report=PdfTextReport("Проверка", (), "", (), ()),
+    )
+    with fitz.open(stream=result, filetype="pdf") as document:
+        page = document[0]
+        page_annotations = tuple(page.annots())
+        for number in (1, 2):
+            own = [
+                item
+                for item in page_annotations
+                if item.info["title"] == f"Замечание №{number}"
+            ]
+            assert (
+                sum(item.type[1] == "Square" for item in own) == 2
+            )  # область + рамка карточки
+            assert sum(item.type[1] == "Line" for item in own) == 1
+        unlocated = [
+            item for item in page_annotations if item.info["title"] == "Замечание №3"
+        ]
+        assert not any(item.type[1] == "Line" for item in unlocated)
+        assert any(
+            "Точное место на листе не определено" in " ".join(item.get_text().split())
+            for item in unlocated
+            if item.type[1] == "FreeText"
+        )
+    assert annotations[0].regions == regions
 
 
 def test_writer_preserves_original_pages_and_appends_report() -> None:
@@ -267,16 +347,10 @@ def test_writer_adds_full_page_callout_when_bbox_is_unavailable() -> None:
         )
 
         visible_text = "\n".join(
-            str(
-                annotation.info.get(
-                    "content",
-                    "",
-                )
-            )
-            for annotation in free_text_annotations
+            annotation.get_text() for annotation in free_text_annotations
         )
 
-        assert "Проверить лист целиком." in visible_text
+        assert "Проверить лист целиком." in " ".join(visible_text.split())
 
         assert "PDRD [" not in visible_text
 

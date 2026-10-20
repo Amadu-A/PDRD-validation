@@ -10,6 +10,7 @@ import { RESIZE_DIRECTIONS, resizedBox, sameBox } from "./resize-geometry.js";
 const LABELS = {
   n: "верх", e: "право", s: "низ", w: "лево",
   ne: "верх справа", se: "низ справа", sw: "низ слева", nw: "верх слева",
+  move: "перемещение без изменения размера",
 };
 
 /** Возвращает очистку подписок и отмену незавершённого жеста. */
@@ -19,6 +20,7 @@ export function attachBoxResize({
   onStart = () => {},
   rollback = preview,
   scrollContent = false,
+  movable = false,
 }) {
   const cleanups = [];
   const handles = [];
@@ -57,7 +59,7 @@ export function attachBoxResize({
     }
   }
 
-  for (const direction of RESIZE_DIRECTIONS) {
+  for (const direction of [...RESIZE_DIRECTIONS, ...(movable ? ["move"] : [])]) {
     const handle = document.createElement("button");
     handle.type = "button";
     handle.className = `review-resize__handle review-resize__handle--${direction}`;
@@ -65,6 +67,10 @@ export function attachBoxResize({
     handle.tabIndex = 0;
     handle.setAttribute("aria-label", `${label}: ${LABELS[direction]}. Стрелки — изменить размер, Esc — отменить.`);
     handle.title = `${label}: потяните границу`;
+    if (direction === "move") {
+      handle.textContent = "⠿";
+      handle.title = `${label}: перетащите карточку`;
+    }
     node.append(handle);
     handles.push(handle);
 

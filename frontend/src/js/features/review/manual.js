@@ -266,6 +266,7 @@ export function createManualAnnotationController({
         const resize = attachBoxResize({
           node, page, minimum, label,
           scrollContent: key === "calloutBox",
+          movable: key === "calloutBox",
           bounds: () => image.getBoundingClientRect(),
           getBox: () => ({ ...note[key] }),
           enabled: () => isEnabled() && mode === "idle" && onGet(findingId).decision !== "rejected",

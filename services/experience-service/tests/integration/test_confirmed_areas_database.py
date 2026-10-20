@@ -198,6 +198,44 @@ def review_changes(engine, reviews, areas) -> ChangeReview:
     )
 
 
+async def test_display_region_count_roundtrip_and_acceptance(engine):
+    """PostgreSQL сохраняет 0/6 областей без потери оригинала и подтверждает их по решению."""
+    job = uuid4()
+    reviews, areas = adapters(engine)
+    changes = review_changes(engine, reviews, areas)
+    opened = initial(job)
+    original = opened.findings[0].proposed_regions
+    regions = tuple(Rectangle(100 + n, 150, 300, 350) for n in range(6))
+    try:
+        await reviews.insert(opened)
+        for boxes in ((), regions):
+            saved = await reviews.load(job)
+            changed = await changes.change_geometry(
+                job_id=job,
+                finding_id="vlm:1",
+                regions=boxes,
+                callout_box=None,
+                actor="integration:1",
+                expected_revision=saved.revision,
+            )
+            restored = await reviews.load(job)
+            assert restored == changed
+            assert restored.findings[0].display_regions == boxes
+            assert restored.findings[0].proposed_regions == original
+            assert await areas.load_status(review=restored) == ()
+        accepted = await changes.decide(
+            job_id=job,
+            finding_id="vlm:1",
+            decision=Decision.ACCEPTED,
+            actor="integration:1",
+            expected_revision=restored.revision,
+        )
+        assert len((await areas.load_status(review=accepted))[0].regions) == 6
+        assert (await reviews.load(job)).findings[0].proposed_regions == original
+    finally:
+        await cleanup(engine, job)
+
+
 async def test_accept_current_geometry_and_idempotent_audit(engine):
     """Одна галочка сохраняет исправленную область как Wise и не дублирует аудит."""
     job = uuid4()

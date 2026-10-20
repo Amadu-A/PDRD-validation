@@ -10,6 +10,30 @@ import { FakeElement } from "./helpers/fake-dom.js";
 
 const BOX = { x_min: 100, y_min: 200, x_max: 500, y_max: 600 };
 
+test("перемещение сохраняет размер и ограничено листом", () => {
+  assert.deepEqual(resizedBox(BOX, "move", { x: 25, y: -30 }), { x_min: 125, y_min: 170, x_max: 525, y_max: 570 });
+  assert.deepEqual(resizedBox(BOX, "move", { x: -2000, y: 2000 }), { x_min: 0, y_min: 600, x_max: 400, y_max: 1000 });
+});
+
+test("жест перемещения карточки сохраняется целиком, Escape откатывает без commit", () => {
+  globalThis.document = { createElement: (tag) => new FakeElement(tag) };
+  const node = new FakeElement(); const page = new FakeElement();
+  let shown = BOX; let saved = BOX; let commits = 0;
+  const resize = attachBoxResize({ node, page, label: "Карточка", movable: true,
+    bounds: () => ({ width: 1000, height: 1000 }), getBox: () => ({ ...saved }),
+    preview: (value) => { shown = value; }, commit: (value) => { saved = value; commits += 1; } });
+  const handle = node.children.find((child) => child.dataset.resizeDirection === "move");
+  const point = { button: 0, pointerId: 1, clientX: 100, clientY: 200, preventDefault() {}, stopPropagation() {} };
+  handle.dispatch("pointerdown", point);
+  handle.dispatch("pointermove", { ...point, clientX: 125, clientY: 230 });
+  page.dispatch("keydown", { key: "Escape", preventDefault() {} });
+  assert.deepEqual(shown, BOX); assert.equal(commits, 0);
+  handle.dispatch("pointerdown", point);
+  handle.dispatch("pointerup", { ...point, clientX: 125, clientY: 230 });
+  assert.deepEqual(saved, { x_min: 125, y_min: 230, x_max: 525, y_max: 630 });
+  assert.equal(commits, 1); resize.dispose();
+});
+
 test("все восемь границ двигают только выбранные стороны", () => {
   for (const direction of RESIZE_DIRECTIONS) {
     const result = resizedBox(BOX, direction, { x: 30, y: -40 });

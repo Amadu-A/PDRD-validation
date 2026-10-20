@@ -42,6 +42,58 @@ def _region(x: int, y: int, w: int, h: int, label: str) -> AnalysisVisualRegion:
     )
 
 
+def test_primary_regions_survive_empty_evidence_geometry_and_more_than_four_regions():
+    """Пустой evidence_location не заменяет primary VLM, все области остаются с provenance."""
+    regions = [
+        {
+            "x_min": 100 + n * 40,
+            "y_min": 100,
+            "x_max": 130 + n * 40,
+            "y_max": 160,
+            "label": f"Область {n}",
+            "confidence": 0.8,
+        }
+        for n in range(6)
+    ]
+    finding = {
+        "finding_id": "same-system",
+        "page": 13,
+        "visual_regions": regions,
+        "evidence_locations": [
+            {"page": 13, "text": "Исходное число"},
+            {"page": 15, "text": "Другое число"},
+        ],
+    }
+    primary = GetAnalysisVisualization._targets_for_page(
+        findings=[finding], page_number=13
+    )[0]
+    secondary = GetAnalysisVisualization._targets_for_page(
+        findings=[finding], page_number=15
+    )[0]
+    assert len(primary.visual_regions) == 6
+    assert [region.label for region in primary.visual_regions] == [
+        f"Область {n}" for n in range(6)
+    ]
+    assert secondary.visual_regions == ()
+    assert len(finding["visual_regions"]) == 6
+
+
+def test_saved_fractional_geometry_is_not_rounded_or_replaced():
+    """Точные координаты исходного факта сохраняются; неверные рамки не рисуются."""
+    box = {"x_min": 100.25, "y_min": 100.5, "x_max": 130.75, "y_max": 160.125}
+    regions = GetAnalysisVisualization._visual_regions_from_finding(
+        {
+            "visual_regions": [
+                box,
+                {**box, "x_min": True},
+                {**box, "y_min": float("nan")},
+            ]
+        }
+    )
+    assert len(regions) == 1
+    assert regions[0].bbox == AnalysisBoundingBox(**box)
+
+
 def test_duplicate_8_9_2_uses_two_exact_pdf_labels_not_wrong_vlm_rectangles() -> None:
     """Два 8.9.2 уточняются по точным словам PDF, минуя ошибочный 8.9.1."""
     matcher = FindingAnchorMatcher()

@@ -188,7 +188,7 @@ test("без маршрута или корректной страницы ис�
   assert.equal(card.querySelectorAll(".analysis-result__source-kind").length, 0);
 });
 
-test("общая карточка сохраняет самостоятельный текст и ссылки каждого замечания", (t) => {
+test("один объект и одинаковые bbox не объединяют самостоятельные карточки", (t) => {
   setup(t);
   const location = { status: "located", bbox: { x_min: 100, y_min: 100, x_max: 200, y_max: 200 } };
   const items = [
@@ -198,12 +198,43 @@ test("общая карточка сохраняет самостоятельн�
       technical_assignment_sources: [{ technical_assignment_id: "t1", page: 2 }] },
   ];
   const report = drawingReport(items);
-  const rows = report.querySelectorAll(".analysis-result__group-member");
+  const rows = report.querySelectorAll(".analysis-result__annotation");
   assert.equal(rows.length, 2);
+  assert.equal(report.querySelectorAll(".analysis-result__annotation--group").length, 0);
   for (const [index, row] of rows.entries()) {
     assert.equal(row.dataset.findingId, items[index].finding_id);
-    assert.equal(row.querySelector(".analysis-result__group-member-text").textContent, items[index].comment);
+    assert.equal(row.querySelector(".analysis-result__annotation-title").textContent, items[index].comment);
     assert.equal(row.querySelectorAll(".analysis-result__source-link").length, 1);
     assert.equal(row.querySelectorAll(".analysis-result__source-kind").length, 0);
   }
+});
+
+test("повтор bbox внутри finding рисуется один раз, связи другого finding независимы", (t) => {
+  setup(t);
+  const region = { bbox: { x_min: 100, y_min: 100, x_max: 200, y_max: 200 } };
+  const items = [1, 2].map((id) => ({ finding_id: `f${id}`, page: 7, object_ref: "В2", comment: `Проверка ${id}`,
+    location: { status: "located", regions: [region, { ...region, source: "другое доказательство" }] } }));
+  const original = structuredClone(items);
+  const report = drawingReport(items);
+  const boxes = report.querySelectorAll(".analysis-result__bbox");
+  const cards = report.querySelectorAll(".analysis-result__annotation");
+  assert.equal(boxes.length, 2);
+  cards[0].click();
+  assert.equal(boxes[0].classList.contains("analysis-result__bbox--active"), true);
+  assert.equal(boxes[1].classList.contains("analysis-result__bbox--active"), false);
+  boxes[1].click();
+  assert.equal(cards[0].classList.contains("analysis-result__annotation--active"), false);
+  assert.equal(cards[1].classList.contains("analysis-result__annotation--active"), true);
+  assert.deepEqual(items, original, "Исходные координаты и provenance не переписываются рендером");
+});
+
+test("вторичная страница не заимствует primary bbox, выбор сохраняется по finding_id", (t) => {
+  setup(t);
+  const item = { ...finding, location: { status: "located", bbox: { x_min: 100, y_min: 100, x_max: 200, y_max: 200 } } };
+  const report = drawingReport([item]);
+  const cards = report.querySelectorAll(".analysis-result__annotation");
+  assert.equal(report.querySelectorAll(".analysis-result__bbox").length, 1);
+  assert.match(cards[1].querySelector(".analysis-result__annotation-unlocated").textContent, /не определено/);
+  cards[1].click();
+  assert.ok(cards.every((card) => card.classList.contains("analysis-result__annotation--active")));
 });

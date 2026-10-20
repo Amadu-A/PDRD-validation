@@ -31,7 +31,7 @@ export function reviewCalloutBox(callout) {
   return box ? { ...box } : null;
 }
 
-/** Меняет состав рамок сохранённой находки, сохраняя связи соседей общей карточки. */
+/** Меняет состав рамок одной находки, сохраняя независимые связи соседних карточек. */
 export function replaceReviewRegions(adapter, record, boxes) {
   const group = adapter.groups?.find((item) => item.callout === record.callout);
   if (!group || !adapter.createReviewBoxes || !adapter.svg) {
@@ -42,6 +42,7 @@ export function replaceReviewRegions(adapter, record, boxes) {
     node.dataset.findingId = record.findingId;
     const polyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
     polyline.classList.add("analysis-result__connector");
+    polyline.dataset.findingId = record.findingId;
     return { bboxNode: node, polyline };
   });
   for (const { node } of record.bboxEntries) node.remove();

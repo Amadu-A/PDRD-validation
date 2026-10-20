@@ -29,7 +29,7 @@ from pdrd_api_gateway.application.use_cases.get_analysis_job import GetAnalysisJ
 from pdrd_api_gateway.application.use_cases.reviewed_pdf_payload import reviewed_payload
 from pdrd_api_gateway.core.observability import log_execution_time
 
-RENDERER_VERSION = "reviewed-v1"
+RENDERER_VERSION = "reviewed-v2"
 
 
 @dataclass(frozen=True, slots=True)

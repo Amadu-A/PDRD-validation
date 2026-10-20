@@ -1,5 +1,10 @@
 /* frontend/src/css/blocks/review-resize.css */
 
+/* Исправление локализации существующего замечания не создаёт новую Gold-запись. */
+.review-geometry__tools { display: flex; gap: 3px; }
+.review-geometry__remove { position: absolute; top: 0; right: 0; z-index: 7; }
+.review-geometry__layer { position: absolute; z-index: 9; cursor: crosshair; touch-action: none; }
+
 /* Границы объектов работают как в редакторе: растягивание стороны или угла. */
 .review-resize__box {
   overflow: visible;
@@ -112,6 +117,16 @@
   top: 0;
   left: 0;
   cursor: nwse-resize;
+}
+
+.review-resize__handle--move {
+  top: 1px;
+  left: calc(50% - 8px);
+  z-index: 11;
+  width: 16px;
+  height: 14px;
+  color: var(--color-accent);
+  cursor: move;
 }
 
 .review-resize__handle:hover,

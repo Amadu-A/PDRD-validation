@@ -35,6 +35,7 @@ def reviewed_area_confirmations(
         regions = finding.display_regions
         if regions is None:
             regions = tuple(area.bbox for area in finding.proposed_regions)
+        regions = tuple(dict.fromkeys(regions))
         if not regions and not any(
             location.proposed_regions for location in finding.evidence_locations
         ):

@@ -365,7 +365,7 @@ async def test_restore_edit_reject_undo_and_gold_through_both_services(flow):
         {
             "action": "geometry",
             "finding_id": "vlm:2",
-            "regions": [BOX],
+            "regions": [{**BOX, "x_max": BOX["x_min"]}],
             "callout_box": CARD,
         },
         {
@@ -395,7 +395,7 @@ async def test_restore_edit_reject_undo_and_gold_through_both_services(flow):
     ],
 )
 async def test_invalid_or_forged_commands_leave_review_unchanged(flow, body):
-    """Нельзя подменить инженера/оригинал, придумать область или выйти за лист."""
+    """Нельзя подменить инженера/оригинал, сохранить пустую рамку или выйти за лист."""
     async with client(flow) as browser:
         await browser.post(flow.endpoint + "/open")
         response = await command(browser, flow, 0, **body)
@@ -517,6 +517,57 @@ async def test_vlm_geometry_remains_unconfirmed_and_approval_is_invalidated(flow
         assert state["findings"][0]["proposed_regions"][0]["bbox"] == BOX
         assert state["findings"][0]["display_regions"][0]["x_max"] == 180
         assert (await command(browser, flow, 4, action="approve")).status_code == 422
+
+
+@pytest.mark.parametrize("index", [0, 1])
+async def test_display_region_composition_roundtrip_preserves_original_and_neighbor(
+    flow, index
+):
+    """Добавление и удаление рамок проходит обе HTTP-границы, CAS и повторное открытие."""
+    async with client(flow) as browser:
+        opened = (await browser.post(flow.endpoint + "/open")).json()
+        original = opened["findings"][index]["proposed_regions"]
+        neighbor = opened["findings"][1 - index]
+        for revision, count in enumerate((0, 6, 2, 0)):
+            regions = [{**BOX, "x_min": BOX["x_min"] + n} for n in range(count)]
+            changed = await command(
+                browser,
+                flow,
+                revision,
+                action="geometry",
+                finding_id=f"vlm:{index + 1}",
+                regions=regions,
+                callout_box=CARD,
+            )
+            assert changed.status_code == 200, changed.text
+            restored = (await browser.post(flow.endpoint + "/open")).json()
+            row = restored["findings"][index]
+            assert row["display_regions"] == regions
+            assert row["proposed_regions"] == original
+            assert row["origin"] == "vlm"
+            assert restored["area_confirmations"] == []
+            assert restored["findings"][1 - index] == neighbor
+
+        added = await command(
+            browser,
+            flow,
+            4,
+            action="geometry",
+            finding_id=f"vlm:{index + 1}",
+            regions=[{**BOX, "x_min": BOX["x_min"] + n} for n in range(6)],
+            callout_box=CARD,
+        )
+        assert added.status_code == 200
+        accepted = await command(
+            browser,
+            flow,
+            5,
+            action="decide",
+            finding_id=f"vlm:{index + 1}",
+            decision="accepted",
+        )
+        assert accepted.status_code == 200, accepted.text
+        assert len(accepted.json()["area_confirmations"][0]["regions"]) == 6
 
 
 def test_review_requires_explicit_closed_environment_and_is_not_production_auth():

@@ -15,7 +15,7 @@ function checkedBoxes(boxes) {
       throw new Error("Сервер вернул неверную геометрию Review.");
     }
     return Object.fromEntries(KEYS.map((name) => [name, box[name]]));
-  });
+  }).filter((box, index, all) => all.findIndex((other) => key(other) === key(box)) === index);
 }
 
 /** Вторичные доказательства остаются доступными для чтения; правятся только основные области. */

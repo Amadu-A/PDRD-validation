@@ -122,10 +122,6 @@ class _Finding(_Contract):
                 raise ValueError("Неполное ручное замечание.")
         elif self.experience_tag == "gold":
             raise ValueError("Неверный источник Gold.")
-        elif len(self.regions) > 4 and not self.document_context_basis_sources:
-            raise ValueError(
-                "Дополнительные рамки требуют сохранённых D-доказательств."
-            )
         return self
 
 

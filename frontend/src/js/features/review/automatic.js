@@ -1,7 +1,7 @@
 // frontend/src/js/features/review/automatic.js
 
 /**
- * Review-адаптер рамок VLM и общих карточек групп: скрытие отклонённых частей,
+ * Review-адаптер независимых рамок и карточек: скрытие отклонённых находок,
  * растягивание и Undo. Пользовательская геометрия — локальное предложение,
  * она не становится подтверждённой серверной областью VLM.
  */
@@ -15,6 +15,7 @@ import {
 import { restoredReviewGeometry } from "./restore-geometry.js";
 import { positionBox } from "./geometry.js";
 import { attachBoxResize } from "./resize.js";
+import { attachRegionEditor } from "./region-editor.js";
 
 function issueBox(entry) {
   return {
@@ -40,9 +41,12 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
   let entries = [];
   let resizers = [];
   let visualizationRoot = null;
+  let regionEditors = [];
   const calloutBoxes = new Map();
 
   function dispose() {
+    for (const editor of regionEditors) editor.dispose();
+    regionEditors = [];
     for (const resize of resizers) resize.dispose();
     resizers = [];
     entries = [];
@@ -60,11 +64,24 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
       for (const record of adapter.records) {
         if (!record.findingId) continue;
         const entry = {
-          ...record, adapter, rejected: false,
+          ...record, page, adapter, rejected: record.item.classList.contains("is-hidden"),
           boxes: record.bboxEntries.map(issueBox), resizers: [],
-          editableCount: record.secondaryEvidence ? 0 : Math.min(record.bboxEntries.length, 4),
+          editableCount: record.secondaryEvidence ? 0 : record.bboxEntries.length,
         };
         entries.push(entry);
+        const pin = reviewCalloutBox(record.callout);
+        if (pin) calloutBoxes.set(record.callout, pin);
+
+        if (!record.secondaryEvidence) regionEditors.push(attachRegionEditor({
+          entry,
+          enabled: () => isEnabled() && !entry.rejected,
+          onStart() { cancelActive(); onStart(); },
+          onChange(boxes) {
+            const before = entry.boxes.slice(0, entry.editableCount).map((box) => ({ ...box }));
+            changeRegions(entry, boxes);
+            onRecord(entry.pageNumber, "изменение состава областей", () => changeRegions(entry, before));
+          },
+        }));
 
         record.bboxEntries.forEach((bbox, index) => {
           const apply = (box) => {
@@ -124,6 +141,7 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
         const resize = attachBoxResize({
           node: record.callout, page, label: "Карточка замечания VLM",
           scrollContent: true,
+          movable: true,
           minimum: { minWidth: 130, minHeight: 80 },
           bounds: () => adapter.imagePane.getBoundingClientRect(),
           getBox: () => reviewCalloutBox(record.callout) ?? measuredBox(record.callout, adapter.imagePane),
@@ -162,6 +180,11 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
       entry.callout.classList.toggle("is-hidden", allRejected);
       entry.adapter.redraw();
     }
+    refreshAccess();
+  }
+
+  function refreshAccess() {
+    for (const editor of regionEditors) editor.refreshAccess();
   }
 
   function snapshot(findingId) {
@@ -174,6 +197,18 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
 
   function cancelActive() {
     for (const resize of resizers) resize.cancel();
+    for (const editor of regionEditors) editor.cancel();
+  }
+
+  /** Перестраивает рамки только выбранной находки; соседние правки и закрепления остаются. */
+  function changeRegions(entry, boxes) {
+    const root = visualizationRoot;
+    const current = entries.find((item) => item.findingId === entry.findingId && item.pageNumber === entry.pageNumber);
+    if (!current) return;
+    dispose();
+    replaceReviewRegions(current.adapter, current, boxes);
+    mount(root);
+    onGeometry([entry.findingId]);
   }
 
   /** Восстанавливает только операционные правки; они не подтверждают области VLM. */
@@ -212,5 +247,5 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
     }
   }
 
-  return { mount, dispose, setRejected, snapshot, cancelActive, restore };
+  return { mount, dispose, setRejected, snapshot, cancelActive, restore, refreshAccess };
 }

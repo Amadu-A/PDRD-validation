@@ -145,7 +145,7 @@ async def test_location_and_annotated_pdf_cache_round_trip(
         content=pdf_content,
     )
 
-    versioned_pdf_path = document_directory / "annotated-v7.pdf"
+    versioned_pdf_path = document_directory / "annotated-v8.pdf"
 
     assert versioned_pdf_path.read_bytes() == pdf_content
 

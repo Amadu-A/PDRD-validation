@@ -67,7 +67,7 @@ def _regions(location: dict[str, Any]) -> tuple[ProposedRegion, ...]:
 
     regions: list[ProposedRegion] = []
 
-    for raw in raw_regions[:4]:
+    for raw in raw_regions:
         if not isinstance(raw, dict) or not isinstance(raw.get("bbox"), dict):
             continue
 

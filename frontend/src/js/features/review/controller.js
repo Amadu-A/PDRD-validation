@@ -556,6 +556,7 @@ export function createReviewController({
     locked = isLocked;
     syncMessage = message;
     if (locked) { manual.cancelActive(); automatic.cancelActive(); }
+    automatic.refreshAccess();
     for (const rows of views.values()) for (const view of rows) {
       for (const key of ["accept", "reject"]) view.controls[key].disabled = locked || !canDecide;
       view.controls.edit.disabled = locked || !(view.item.dataset.reviewOrigin === REVIEW_ORIGINS.MANUAL

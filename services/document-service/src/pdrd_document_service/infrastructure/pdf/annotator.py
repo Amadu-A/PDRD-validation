@@ -540,7 +540,7 @@ class PyMuPdfAnnotationWriter:
                 [],
             )
 
-            for bbox in annotation.regions:
+            for bbox in dict.fromkeys(annotation.regions):
                 visual_rect, _ = self._annotation_rect(
                     page=page,
                     bbox=bbox,
@@ -679,7 +679,7 @@ class PyMuPdfAnnotationWriter:
                 page=page,
                 bbox=bbox,
             )
-            for bbox in annotation.regions
+            for bbox in dict.fromkeys(annotation.regions)
         )
 
         visual_regions = tuple(
@@ -845,25 +845,23 @@ class PyMuPdfAnnotationWriter:
             )
 
         visible_text = self._visible_card_text(
-            annotation.title,
+            annotation.title
+            if annotation.regions
+            else "Точное место на листе не определено.\n" + annotation.title,
             page=page,
         )
 
         card = page.add_freetext_annot(
             card_rect,
-            pinned_card_text(visible_text)
-            if annotation.callout_box is not None
-            else ("     " + visible_text),
+            pinned_card_text(visible_text),
             fontsize=font_size,
             text_color=self._CARD_TEXT_COLOR,
             fill_color=palette.fill,
             border_width=0,
             opacity=0.90,
             rotate=page.rotation if annotation.callout_box is not None else 0,
-            richtext=annotation.callout_box is not None,
-            style=pinned_card_style(font_size)
-            if annotation.callout_box is not None
-            else None,
+            richtext=True,
+            style=pinned_card_style(font_size),
         )
 
         # Не записываем full content в FreeText:

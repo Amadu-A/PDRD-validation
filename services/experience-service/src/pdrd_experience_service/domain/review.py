@@ -756,9 +756,9 @@ class ReviewSession:
                 record.issue_box == regions[0] and record.callout_box == callout_box
             )
         else:
-            if len(regions) != len(record.proposed_regions):
+            if len(regions) > 9600:
                 raise ReviewError(
-                    "Нельзя создавать новые области VLM через правку отображения."
+                    "Слишком много областей отображения одного замечания."
                 )
             existing = record.display_regions
             if existing is None:

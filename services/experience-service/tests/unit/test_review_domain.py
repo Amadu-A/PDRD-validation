@@ -51,6 +51,39 @@ def opened() -> ReviewSession:
     )
 
 
+def test_manual_display_regions_can_be_added_and_removed_without_changing_original_or_neighbour():
+    """Локализация нелокализованной находки не превращает её в Gold и не меняет доказательства."""
+    original = opened()
+    changed = original.change_geometry(
+        finding_id="vlm:1",
+        regions=(ISSUE, Rectangle(300, 20, 400, 300)),
+        callout_box=CALLOUT,
+        actor="engineer:1",
+        at=NOW,
+        expected_revision=0,
+    )
+    assert (
+        changed.findings[0].proposed_regions
+        == original.findings[0].proposed_regions
+        == ()
+    )
+    assert changed.findings[0].origin == original.findings[0].origin
+    assert changed.findings[0].experience_tag != "gold"
+    assert changed.findings[1] == original.findings[1]
+    assert changed.findings[0].display_regions == (ISSUE, Rectangle(300, 20, 400, 300))
+    cleared = changed.change_geometry(
+        finding_id="vlm:1",
+        regions=(),
+        callout_box=CALLOUT,
+        actor="engineer:1",
+        at=NOW,
+        expected_revision=changed.revision,
+    )
+    assert cleared.findings[0].display_regions == ()
+    assert len(cleared.findings) == 2 and cleared.findings[1] == original.findings[1]
+    assert len(cleared.history) == len(original.history) + 2
+
+
 def decide(
     session: ReviewSession,
     finding_id: str,

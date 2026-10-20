@@ -183,7 +183,7 @@ def build_confirmation(
 
     if (
         not isinstance(regions, tuple)
-        or len(regions) > 4
+        or len(regions) > (9600 if mode is ConfirmationMode.DECISION else 4)
         or (
             not regions
             and not (
@@ -196,7 +196,7 @@ def build_confirmation(
         or any(not isinstance(box, Rectangle) for box in regions)
         or len(set(regions)) != len(regions)
     ):
-        raise ReviewError("Нужны от одной до четырёх неповторяющихся областей.")
+        raise ReviewError("Нужны неповторяющиеся области в пределах лимита операции.")
 
     if any(
         isinstance(value, bool)
@@ -226,6 +226,8 @@ def build_confirmation(
         current_regions = finding.display_regions
         if current_regions is None:
             current_regions = tuple(area.bbox for area in finding.proposed_regions)
+        # Дубли доказательств сохраняются в исходном finding, но рисуются один раз.
+        current_regions = tuple(dict.fromkeys(current_regions))
         if finding.decision is not Decision.ACCEPTED or regions != current_regions:
             raise ReviewError(
                 "Решение подтверждает только текущую сохранённую область замечания."

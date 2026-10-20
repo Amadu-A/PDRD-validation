@@ -92,7 +92,7 @@ class GeometryCommand(FindingCommand):
     """Геометрия отображения, не подтверждение для обучающей базы."""
 
     action: Literal["geometry"]
-    regions: list[Box] = Field(max_length=4)
+    regions: list[Box] = Field(max_length=9600)
     callout_box: Box | None
 
 

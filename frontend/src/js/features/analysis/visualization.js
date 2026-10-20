@@ -5,13 +5,13 @@
  *
  * BBox приходит в нормализованных координатах 0..1000.
  * Одно замечание может содержать несколько областей доказательств.
- * Несколько замечаний одного явно обозначенного объекта могут делить
- * одну карточку; каждый подпункт сохраняет свой ID, источники и подсветку.
+ * Каждый finding имеет собственную карточку, области, соединители и действия Review.
  * Карточки размещаются поверх листа автоматически.
  * Неподтверждённые гипотезы не получают рамки локализации.
  * Текст и сведения об источниках вставляются только через textContent.
  */
 
+import { createFindingSelection } from "./visualization-selection.js";
 import { preferredSourceArray, focusDocumentEvidence } from "./finding-provenance.js";
 import { registerVisualizationReview, reviewCalloutBox } from "./visualization-review.js";
 
@@ -20,7 +20,6 @@ const CALLOUT_GAP_PX = 14;
 const CARD_OVERLAP_WEIGHT = 12;
 const REGION_OVERLAP_WEIGHT = 5;
 const DISTANCE_WEIGHT = 0.015;
-const GROUP_AREA_GAP = 100;
 
 const GENERIC_FINDING_PREFIX = (
   "на листе выявлено несоответствие"
@@ -168,7 +167,10 @@ function normalizedBoxes(
     );
 
   if (regionBoxes.length) {
-    return regionBoxes;
+    return regionBoxes.filter((box, index, boxes) => boxes.findIndex((other) => (
+      other.xMin === box.xMin && other.yMin === box.yMin
+      && other.xMax === box.xMax && other.yMax === box.yMax
+    )) === index);
   }
 
   const legacyBox = normalizeRawBox(
@@ -279,7 +281,7 @@ function findingsForPage(
               locations.get(
                 findingId,
               )
-              ?? finding.location
+              ?? (normalizedPage(finding.page ?? finding.page_number) === pageNumber ? finding.location : null)
               ?? {
                 status: "unlocated",
                 bbox: null,
@@ -507,7 +509,7 @@ function localizationText(
   const location = finding.location;
 
   if (
-    location?.status !== "located"
+    location?.status !== "located" || normalizedBoxes(finding).length === 0
   ) {
     return (
       "Точное место на листе "
@@ -1820,161 +1822,34 @@ function drawConnector(
 }
 
 
-function setFindingActive(
-  item,
-  active,
-) {
-  item.callout.classList.toggle(
-    "analysis-result__annotation--active",
-    active,
-  );
-  item.callout.classList.toggle(
-    "analysis-result__group-member--active",
-    active,
-  );
-
-  item.bboxEntries.forEach(
-    ({
-      node,
-    }) => {
-      node.classList.toggle(
-        "analysis-result__bbox--active",
-        active,
-      );
-    },
-  );
-
-  item.connectorEntries.forEach(
-    ({
-      polyline,
-    }) => {
-      polyline.classList.toggle(
-        "analysis-result__connector--active",
-        active,
-      );
-    },
-  );
-}
-
-
-function bindFindingInteractions(
-  item,
-  { bindCallout = true } = {},
-) {
-  const activate = (event) => {
-    if (event?.target?.closest?.(".analysis-result__hypotheses")) {
-      setFindingActive(item, false);
-      return;
-    }
-    setFindingActive(
-      item,
-      true,
-    );
-  };
-
-  const deactivate = () => {
-    setFindingActive(
-      item,
-      false,
-    );
-  };
-
+/** Связывает собственные рамки и карточку с единым выбором finding по ID. */
+function bindFindingInteractions(item, selection, { bindCallout = true } = {}) {
+  const id = item.callout.dataset.findingId;
+  const enter = () => selection.enter(id);
+  const leave = () => selection.leave(id);
+  const select = () => selection.select(id);
   if (bindCallout) {
-    item.callout.addEventListener(
-      "pointerenter",
-      activate,
-    );
-
-    item.callout.addEventListener(
-      "pointerleave",
-      deactivate,
-    );
-
-    item.callout.addEventListener(
-      "focusin",
-      activate,
-    );
-
-    item.callout.addEventListener(
-      "focusout",
-      (event) => {
-        if (
-          event.relatedTarget
-          && item.callout.contains(
-            event.relatedTarget,
-          )
-        ) {
-          return;
-        }
-
-        deactivate();
-      },
-    );
-
-    if (item.callout.classList.contains("analysis-result__annotation")) {
-      item.callout.querySelectorAll(".analysis-result__hypotheses")
-        .forEach((details) => {
-          details.addEventListener("pointerenter", deactivate);
-          details.addEventListener("focusin", deactivate);
-        });
-      item.callout.querySelector(".analysis-result__annotation-header")
-        ?.addEventListener("pointerenter", activate);
-    }
+    selection.register(item);
+    item.callout.addEventListener("pointerenter", enter);
+    item.callout.addEventListener("pointerleave", leave);
+    item.callout.addEventListener("focusin", enter);
+    item.callout.addEventListener("focusout", (event) => {
+      if (!event.relatedTarget || !item.callout.contains(event.relatedTarget)) leave();
+    });
+    item.callout.addEventListener("click", select);
+    item.callout.addEventListener("keydown", (event) => {
+      if (event.target === item.callout && ["Enter", " "].includes(event.key)) {
+        event.preventDefault();
+        select();
+      }
+    });
   }
-
-  item.bboxEntries.forEach(
-    ({
-      node,
-    }) => {
-      node.addEventListener(
-        "pointerenter",
-        activate,
-      );
-
-      node.addEventListener(
-        "pointerleave",
-        deactivate,
-      );
-    },
-  );
-}
-
-
-function findingObjectAnchor(finding) {
-  const explicit = String(finding.object_ref ?? "").trim();
-  return explicit.toLocaleLowerCase("ru-RU");
-}
-
-
-function boxesAreNear(left, right) {
-  return left.some((a) => right.some((b) => (
-    Math.max(a.xMin - b.xMax, b.xMin - a.xMax, 0) <= GROUP_AREA_GAP
-    && Math.max(a.yMin - b.yMax, b.yMin - a.yMax, 0) <= GROUP_AREA_GAP
-  )));
-}
-
-
-function findingGroups(findings) {
-  const groups = [];
-  findings.forEach((entry) => {
-    const anchor = findingObjectAnchor(entry.finding);
-    const boxes = normalizedBoxes(entry.finding);
-    const existing = anchor && boxes.length
-      ? groups.find((group) => (
-        group.anchor === anchor
-        && group.members.every((member) => boxesAreNear(
-          boxes,
-          normalizedBoxes(member.finding),
-        ))
-      ))
-      : null;
-    if (existing) {
-      existing.members.push(entry);
-    } else {
-      groups.push({ anchor, members: [entry], hypotheses: [] });
-    }
-  });
-  return groups;
+  for (const { node } of item.bboxEntries) {
+    node.addEventListener("pointerenter", enter);
+    node.addEventListener("pointerleave", leave);
+    node.addEventListener("click", select);
+  }
+  selection.redraw();
 }
 
 
@@ -1999,36 +1874,6 @@ function createHypothesisDetails(hypotheses) {
     details.append(item);
   });
   return details;
-}
-
-
-/** Создаёт общую карточку с самостоятельными текстом, ссылками и управлением каждого замечания. */
-function createGroupedCallout(group, dependencies) {
-  const callout = createElement("article", "analysis-result__annotation analysis-result__annotation--group");
-  callout.tabIndex = 0;
-  callout.append(createElement(
-    "strong",
-    "analysis-result__group-title",
-    `${String(group.members[0].finding.object_ref).trim()}: ${group.members.length} замечания`,
-  ));
-  const rows = [];
-  group.members.forEach(({ finding, findingIndex }) => {
-    const row = createElement("div", "analysis-result__group-member");
-    row.tabIndex = 0;
-    row.dataset.findingId = String(finding.finding_id ?? "");
-    const header = createElement("div", "analysis-result__annotation-header");
-    header.append(createElement("span", "analysis-result__annotation-number", findingIndex + 1));
-    header.append(createElement("span", "analysis-result__group-member-text analysis-result__annotation-title", findingDisplayText(finding)));
-    header.append(createFindingDetailControl(finding, findingIndex, dependencies));
-    row.append(header);
-    appendFindingLinks(row, finding, dependencies);
-    callout.append(row);
-    rows.push(row);
-  });
-  if (group.hypotheses.length) {
-    callout.append(createHypothesisDetails(group.hypotheses));
-  }
-  return { callout, rows };
 }
 
 
@@ -2135,105 +1980,41 @@ function appendPageVisualization(
     page,
   );
 
-  const groups = findingGroups(findings);
   const hypotheses = (Array.isArray(payload.findings) ? payload.findings : [])
-    .filter((finding) => (
-      finding.status === "hypothesis"
-      && normalizedPage(finding.page ?? finding.page_number) === pageNumber
-    ));
-  const unattachedHypotheses = [];
-  hypotheses.forEach((hypothesis) => {
-    const anchor = findingObjectAnchor(hypothesis);
-    const matches = anchor
-      ? groups.filter((group) => group.anchor === anchor)
-      : [];
-    if (matches.length === 1) {
-      matches[0].hypotheses.push(hypothesis);
-    } else {
-      unattachedHypotheses.push(hypothesis);
-    }
-  });
-
+    .filter((finding) => finding.status === "hypothesis"
+      && normalizedPage(finding.page ?? finding.page_number) === pageNumber);
   const items = [];
   const reviewRecords = [];
 
-  groups.forEach((group) => {
-      const isGrouped = group.members.length > 1;
-      const groupControl = isGrouped
-        ? createGroupedCallout(group, dependencies)
-        : null;
-      const { finding, findingIndex } = group.members[0];
-      const callout = groupControl?.callout
-        ?? createCallout(finding, findingIndex, dependencies);
-      if (!isGrouped && group.hypotheses.length) {
-        callout.append(createHypothesisDetails(group.hypotheses));
-      }
-
-      const bboxEntries = [];
-      const connectorEntries = [];
-      group.members.forEach((member, memberIndex) => {
-        const memberBoxes = createBoundingBoxes(
-          member.finding,
-          member.findingIndex,
-        );
-        const memberConnectors = memberBoxes.map(({ node }) => {
-          node.dataset.findingId = String(member.finding.finding_id ?? "");
-          imagePane.append(node);
-          const polyline = document.createElementNS(
-            "http://www.w3.org/2000/svg",
-            "polyline",
-          );
-          polyline.classList.add("analysis-result__connector");
-          svg.append(polyline);
-          return { bboxNode: node, polyline };
-        });
-        bboxEntries.push(...memberBoxes);
-        connectorEntries.push(...memberConnectors);
-        const reviewItem = isGrouped ? groupControl.rows[memberIndex] : callout;
-        reviewItem.dataset.reviewPage = String(pageNumber);
-        reviewRecords.push({
-          findingId: String(member.finding.finding_id ?? "").trim(),
-          finding: member.finding, findingIndex: member.findingIndex,
-          pageNumber, item: reviewItem, callout,
-          secondaryEvidence: Number(member.finding.page ?? member.finding.page_number) !== pageNumber,
-          documentEvidence: Array.isArray(member.finding.document_context_basis_sources) && member.finding.document_context_basis_sources.length > 0,
-          bboxEntries: memberBoxes, connectorEntries: memberConnectors,
-        });
-        if (isGrouped) {
-          bindFindingInteractions({
-            callout: groupControl.rows[memberIndex],
-            bboxEntries: memberBoxes,
-            connectorEntries: memberConnectors,
-          });
-        }
-      });
-
-      callout.style.left = "0";
-      callout.style.top = "0";
-      callout.style.visibility = (
-        "hidden"
-      );
-
-      annotationOverlay.append(
-        callout,
-      );
-
-      const item = {
-        finding,
-        findingIndex,
-        bboxEntries,
-        callout,
-        connectorEntries,
-      };
-
-      if (!isGrouped) {
-        bindFindingInteractions(item);
-      }
-
-      items.push(
-        item,
-      );
-  });
+  for (const { finding, findingIndex } of findings) {
+    const callout = createCallout(finding, findingIndex, dependencies);
+    callout.dataset.reviewPage = String(pageNumber);
+    const bboxEntries = createBoundingBoxes(finding, findingIndex);
+    const connectorEntries = bboxEntries.map(({ node }) => {
+      node.dataset.findingId = String(finding.finding_id ?? "");
+      imagePane.append(node);
+      const polyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+      polyline.classList.add("analysis-result__connector");
+      polyline.dataset.findingId = String(finding.finding_id ?? "");
+      svg.append(polyline);
+      return { bboxNode: node, polyline };
+    });
+    const item = { finding, findingIndex, bboxEntries, callout, connectorEntries };
+    reviewRecords.push({
+      findingId: String(finding.finding_id ?? "").trim(), finding, findingIndex,
+      pageNumber, item: callout, callout,
+      secondaryEvidence: Number(finding.page ?? finding.page_number) !== pageNumber,
+      documentEvidence: Array.isArray(finding.document_context_basis_sources)
+        && finding.document_context_basis_sources.length > 0,
+      bboxEntries, connectorEntries,
+    });
+    callout.style.left = "0";
+    callout.style.top = "0";
+    callout.style.visibility = "hidden";
+    annotationOverlay.append(callout);
+    bindFindingInteractions(item, dependencies.findingSelection);
+    items.push(item);
+  }
 
   if (!findings.length) {
     annotationOverlay.append(
@@ -2262,8 +2043,8 @@ function appendPageVisualization(
     stage,
   );
 
-  if (unattachedHypotheses.length) {
-    section.append(createHypothesisDetails(unattachedHypotheses));
+  if (hypotheses.length) {
+    section.append(createHypothesisDetails(hypotheses));
   }
 
   parent.append(
@@ -2317,7 +2098,7 @@ function appendPageVisualization(
     }, record.findingIndex),
     bindReviewBoxes: (record) => bindFindingInteractions({
       callout: record.item, bboxEntries: record.bboxEntries, connectorEntries: record.connectorEntries,
-    }, { bindCallout: false }),
+    }, dependencies.findingSelection, { bindCallout: false }),
   });
 
   annotationOverlay.addEventListener("toggle", scheduleRedraw, true);
@@ -2369,6 +2150,7 @@ export function appendAnalysisVisualization(
   parent,
   dependencies,
 ) {
+  dependencies = { ...dependencies, findingSelection: createFindingSelection() };
   const hasPdf = (
     payload.source_mode === "pdf_only"
     || payload.source_mode === "pdf_cad"

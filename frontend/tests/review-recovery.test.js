@@ -23,6 +23,7 @@ function setup(t, freshCounts, savedCounts, grouped = false) {
   const previous = { document: globalThis.document, window: globalThis.window, fetch: globalThis.fetch };
   const downloads = [];
   const root = new FakeElement();
+  const viewport = new FakeElement();
   globalThis.document = {
     body: new FakeElement("body"),
     createElement: (tag) => {
@@ -35,7 +36,9 @@ function setup(t, freshCounts, savedCounts, grouped = false) {
     createTextNode: (text) => Object.assign(new FakeElement("text"), { textContent: text }),
   };
   globalThis.window = { location: { href: `https://pdrd.test/?job_id=${JOB}` }, history: { replaceState() {} },
-    setTimeout: (callback) => callback(), requestAnimationFrame() {}, addEventListener() {}, removeEventListener() {} };
+    setTimeout: (callback) => callback(), requestAnimationFrame() {},
+    addEventListener: viewport.addEventListener.bind(viewport),
+    removeEventListener: viewport.removeEventListener.bind(viewport) };
   globalThis.fetch = async () => new Response(JSON.stringify({ eligible: 4, excluded: 0, created: 4 }));
   let persistence;
   t.after(() => { persistence?.clear(); Object.assign(globalThis, previous); });
@@ -95,8 +98,61 @@ function setup(t, freshCounts, savedCounts, grouped = false) {
   };
   persistence = createReviewPersistence({ api });
   persistence.mount(root, { jobId: JOB });
-  return { root, page, adapter, commands, pdfRequests, downloads, persistence, server: () => copy() };
+  return { root, page, adapter, viewport, commands, pdfRequests, downloads, persistence, server: () => copy() };
 }
+
+test("незавершённое выделение отменяется при resize и потере захвата без сохранения", async (t) => {
+  const f = setup(t, [0], [0]);
+  const record = f.adapter.records[0];
+  assert.equal(record.callout.querySelector("[data-review-region-add]").disabled, true);
+  await settle();
+  assert.equal(record.callout.querySelector("[data-review-region-add]").disabled, false);
+  for (const event of ["resize", "lostpointercapture"]) {
+    record.callout.querySelector("[data-review-region-add]").click();
+    const layer = f.root.querySelector(".review-geometry__layer");
+    layer.dispatch("pointerdown", { button: 0, pointerId: 1, clientX: 100, clientY: 100, preventDefault() {} });
+    if (event === "resize") f.viewport.dispatch(event);
+    else layer.dispatch(event);
+    assert.equal(f.root.querySelector(".review-geometry__layer"), null);
+    assert.equal(record.bboxEntries.length, 0);
+    assert.equal(f.commands.length, 0);
+  }
+});
+
+test("ручное добавление и удаление области сохраняется независимо от соседнего finding", async (t) => {
+  const f = setup(t, [0, 1], [0, 1], true);
+  await settle();
+  const [first, second] = f.adapter.records;
+  assert.notEqual(first.callout, second.callout);
+  resize(second.callout, "w"); await settle();
+  resize(second.callout, "move", "ArrowLeft"); await settle();
+  const neighborPin = reviewCalloutBox(second.callout);
+  action(second.item, "accept").click(); await settle();
+  const originalSecond = structuredClone(f.server().findings[1]);
+  first.callout.querySelector("[data-review-region-add]").click();
+  const layer = f.root.querySelector(".review-geometry__layer");
+  assert.ok(layer);
+  const point = (x, y) => ({ button: 0, clientX: x, clientY: y, pointerId: 1, preventDefault() {} });
+  layer.dispatch("pointerdown", point(100, 100));
+  layer.dispatch("pointerup", point(250, 230));
+  await settle(); await settle();
+  assert.equal(first.bboxEntries.length, 1);
+  assert.equal(f.server().findings[0].display_regions.length, 1);
+  assert.equal(f.server().findings[0].proposed_regions.length, 0);
+  assert.deepEqual(f.server().findings[1], originalSecond);
+  assert.deepEqual(reviewCalloutBox(second.callout), neighborPin);
+  first.bboxEntries[0].node.querySelector("[data-review-region-remove]").click();
+  await settle(); await settle();
+  assert.equal(first.bboxEntries.length, 0);
+  assert.equal(first.connectorEntries.length, 0);
+  assert.equal(f.server().findings[0].display_regions.length, 0);
+  assert.ok(first.callout.querySelector(".analysis-result__annotation-unlocated"));
+  assert.deepEqual(f.server().findings[1], originalSecond);
+  f.persistence.mount(f.root, { jobId: JOB }); await settle();
+  assert.equal(first.bboxEntries.length, 0);
+  assert.deepEqual(f.server().findings[1], originalSecond);
+  assert.deepEqual(reviewCalloutBox(second.callout), neighborPin);
+});
 
 for (const [fresh, saved] of [[2, 0], [0, 2], [1, 3], [5, 4], [1, 1]]) {
   test(`восстановление ${fresh} → ${saved} рамок разблокирует Review без фиктивного сохранения`, async (t) => {
@@ -131,6 +187,9 @@ for (const grouped of [false, true]) {
     resize(record.bboxEntries[0].node, "e"); await settle();
     resize(record.callout, "w"); await settle();
     assert.ok(reviewCalloutBox(record.callout));
+    const beforeMove = reviewCalloutBox(record.callout);
+    resize(record.callout, "move", "ArrowLeft"); await settle();
+    assert.deepEqual(reviewCalloutBox(record.callout), { ...beforeMove, x_min: beforeMove.x_min - 5, x_max: beforeMove.x_max - 5 });
     assert.ok(f.commands.some((command) => command.action === "geometry" && command.callout_box));
     action(record.item, "edit").click();
     const dialog = f.root.querySelector(".review-editor");
@@ -151,6 +210,10 @@ for (const grouped of [false, true]) {
     form.dispatch("submit", { preventDefault() {} }); await settle();
     const gold = f.root.querySelector(".manual-annotation__card");
     assert.ok(gold);
+    const goldBefore = f.server().findings.find((row) => row.origin === "manual").callout_box;
+    resize(gold, "move"); await settle();
+    const goldAfter = f.server().findings.find((row) => row.origin === "manual").callout_box;
+    assert.deepEqual(goldAfter, { ...goldBefore, x_min: goldBefore.x_min + 5, x_max: goldBefore.x_max + 5 });
     action(gold, "edit").click();
     form.children.find((child) => child.tagName === "TEXTAREA").value = "Исправленное Gold";
     form.dispatch("submit", { preventDefault() {} }); await settle();

@@ -5,6 +5,7 @@
 import hashlib
 import json
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -715,13 +716,16 @@ class GetAnalysisVisualization:
                         else str(finding.get("evidence", ""))
                     ),
                     visual_regions=(
-                        tuple(
+                        (
+                            cls._visual_regions_from_finding(finding)
+                            if finding_page == page_number
+                            else ()
+                        )
+                        + tuple(
                             region
                             for item in matching_evidence
                             for region in cls._visual_regions_from_finding(item)
                         )
-                        if matching_evidence
-                        else cls._visual_regions_from_finding(finding)
                     ),
                 )
             )
@@ -754,7 +758,7 @@ class GetAnalysisVisualization:
 
         regions: list[AnalysisVisualRegion,] = []
 
-        for raw_region in raw_regions[:4]:
+        for raw_region in raw_regions:
             if not isinstance(
                 raw_region,
                 dict,
@@ -762,28 +766,16 @@ class GetAnalysisVisualization:
                 continue
 
             try:
-                bbox = AnalysisBoundingBox(
-                    x_min=int(
-                        raw_region.get(
-                            "x_min",
-                        )
-                    ),
-                    y_min=int(
-                        raw_region.get(
-                            "y_min",
-                        )
-                    ),
-                    x_max=int(
-                        raw_region.get(
-                            "x_max",
-                        )
-                    ),
-                    y_max=int(
-                        raw_region.get(
-                            "y_max",
-                        )
-                    ),
-                )
+                coordinates = {
+                    key: float(raw_region[key])
+                    for key in ("x_min", "y_min", "x_max", "y_max")
+                }
+                if any(
+                    isinstance(raw_region[key], bool) or not math.isfinite(value)
+                    for key, value in coordinates.items()
+                ):
+                    continue
+                bbox = AnalysisBoundingBox(**coordinates)
 
                 confidence = min(
                     max(
@@ -799,6 +791,7 @@ class GetAnalysisVisualization:
                 )
 
             except (
+                KeyError,
                 TypeError,
                 ValueError,
             ):

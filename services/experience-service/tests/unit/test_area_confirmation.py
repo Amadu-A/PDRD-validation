@@ -2,6 +2,7 @@
 
 """Проверяет бизнес-правила подтверждения и отзыв области без PostgreSQL."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -94,6 +95,60 @@ def test_accept_unlocated_finding_does_not_invent_confirmation() -> None:
     assert (
         reviewed_area_confirmations(review=accepted, actor="engineer:1", at=NOW) == ()
     )
+
+
+def test_repeated_proof_geometry_is_confirmed_once_without_removing_provenance():
+    """Разные источники одной рамки не мешают принятию и остаются в оригинале."""
+    session = opened()
+    original = session.findings[0]
+    proofs = (
+        *original.proposed_regions,
+        replace(original.proposed_regions[0], source="pdf_text"),
+    )
+    session = replace(
+        session,
+        findings=(replace(original, proposed_regions=proofs), *session.findings[1:]),
+    )
+    accepted = session.decide(
+        finding_id="vlm:1",
+        decision=Decision.ACCEPTED,
+        actor="engineer:1",
+        at=NOW,
+        expected_revision=0,
+    )
+    (area,) = reviewed_area_confirmations(review=accepted, actor="engineer:1", at=NOW)
+    assert area.regions == (BOX,)
+    assert accepted.findings[0].proposed_regions == proofs
+
+
+def test_decision_confirms_all_current_regions_without_relaxing_legacy_confirmation():
+    """Принятие не теряет шестую рамку; отдельный redrawn API сохраняет свой лимит."""
+    regions = tuple(Rectangle(100 + n, 150, 250, 300) for n in range(6))
+    changed = opened().change_geometry(
+        finding_id="vlm:1",
+        regions=regions,
+        callout_box=None,
+        actor="engineer:1",
+        at=NOW,
+        expected_revision=0,
+    )
+    assert reviewed_area_confirmations(review=changed, actor="engineer:1", at=NOW) == ()
+    accepted = changed.decide(
+        finding_id="vlm:1",
+        decision=Decision.ACCEPTED,
+        actor="engineer:1",
+        at=NOW,
+        expected_revision=changed.revision,
+    )
+    (area,) = reviewed_area_confirmations(review=accepted, actor="engineer:1", at=NOW)
+    assert area.regions == regions
+    assert (
+        accepted.findings[0].proposed_regions == opened().findings[0].proposed_regions
+    )
+    with pytest.raises(ReviewError):
+        confirm(accepted, regions=regions, mode=ConfirmationMode.REDRAWN, note="Правка")
+    with pytest.raises(ReviewError):
+        confirm(accepted, regions=regions[:-1], mode=ConfirmationMode.DECISION)
 
 
 def test_geometry_and_undo_invalidate_old_confirmation_signature() -> None:
