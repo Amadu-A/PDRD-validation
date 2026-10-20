@@ -5,17 +5,40 @@
 from dataclasses import dataclass
 from typing import Protocol
 
+from pdrd_knowledge_service.application.ports.embedding import (
+    EmbeddingProviderError,
+    EmbeddingTemporaryError,
+)
+
 
 class MultimodalEmbeddingProviderError(
-    RuntimeError,
+    EmbeddingProviderError,
 ):
     """Ошибка multimodal embedding provider."""
 
 
 class MultimodalEmbeddingTemporaryError(
     MultimodalEmbeddingProviderError,
+    EmbeddingTemporaryError,
 ):
     """Временная GPU/provider ошибка, допускающая retry."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason_code: str = "provider_unavailable",
+        status_code: int | None = None,
+        retry_after: float | None = None,
+    ) -> None:
+        """Передаёт типизированную временную причину через text-only адаптер."""
+        EmbeddingTemporaryError.__init__(
+            self,
+            message,
+            reason_code=reason_code,
+            status_code=status_code,
+            retry_after=retry_after,
+        )
 
 
 @dataclass(frozen=True, slots=True)

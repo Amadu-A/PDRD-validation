@@ -3,6 +3,7 @@
 """Подготовка источников и инженерная проверка физической страницы проекта."""
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -539,6 +540,21 @@ class BuildNormativeQueries:
             ).strip()
         )
 
+        if not plan and page_facts.page_type.casefold() in {
+            "title",
+            "cover",
+            "title_page",
+            "contents",
+            "титульный лист",
+            "содержание",
+        }:
+            # Реквизиты титула не заменяют инженерные вопросы и не нужны в общем embedding.
+            # Исходные факты, индивидуальные запросы и полный T-first feed сохраняются.
+            queries[-1] = (
+                f"Дисциплина: {page_facts.discipline}. Оформление титульного листа и содержания проекта: "
+                "обозначение документа, наименование, состав и нумерация листов; применимые требования."
+            )
+
         # Предметные вопросы используют те же факты и роли, что discovery и finalization.
         # Число retrieval-запросов остаётся ограниченным существующим max_queries.
         focused = [
@@ -560,7 +576,7 @@ class BuildNormativeQueries:
         seen: set[str,] = set()
 
         for query in queries:
-            normalized = query.strip()
+            normalized = re.sub(r"\s+", " ", query).strip()
 
             if not normalized or normalized in seen:
                 continue

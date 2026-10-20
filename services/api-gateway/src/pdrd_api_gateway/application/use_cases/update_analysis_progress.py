@@ -3,6 +3,7 @@
 """Use case durable progress analysis job."""
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import UUID
 
 from pdrd_api_gateway.application.ports.persistence import (
@@ -34,6 +35,32 @@ class UpdateAnalysisProgress:
     """Записывает monotonic progress callback из orchestration."""
 
     unit_of_work_factory: UnitOfWorkFactory
+
+    async def get_control(
+        self, *, document_id: UUID, max_runtime_seconds: float
+    ) -> dict:
+        """Читает отмену и оставшийся lifecycle без изменения этапа анализа."""
+        async with self.unit_of_work_factory() as unit_of_work:
+            job = await unit_of_work.analysis_jobs.get_by_document_id_for_update(
+                document_id
+            )
+            if job is None:
+                raise AnalysisProgressJobNotFoundError(
+                    "Задание для проверки lifecycle не найдено."
+                )
+            elapsed = (datetime.now(UTC) - job.created_at).total_seconds()
+            return {
+                "job_id": str(job.id),
+                "cancelled": job.status is AnalysisJobStatus.CANCELLED,
+                "remaining_seconds": max(0, max_runtime_seconds - elapsed)
+                if job.status
+                in {
+                    AnalysisJobStatus.PROCESSING,
+                    AnalysisJobStatus.QUEUED,
+                    AnalysisJobStatus.PENDING,
+                }
+                else 0,
+            }
 
     async def execute(
         self,

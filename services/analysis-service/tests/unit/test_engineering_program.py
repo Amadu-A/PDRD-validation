@@ -3,6 +3,7 @@
 """Проверки инженерных зависимостей на исходных фактах, без готовых model findings."""
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from decimal import Decimal
 from time import perf_counter
 
@@ -320,6 +321,21 @@ def test_procurement_correctly_computes_deficit_and_package_units(pack):
     assert program_findings(report(incomplete)) == ()
 
 
+def _dated_normative_status():
+    """Явное подтверждение учебного источника; не утверждение о реальном нормативе."""
+    day = datetime.now(UTC).date().isoformat()
+    return NormativeSource(
+        "N99",
+        "status",
+        1,
+        "СП 100.13330.2025",
+        None,
+        1,
+        0,
+        f"Статус СП 100.13330.2025 на {day}: действует; требования обязательны.",
+    )
+
+
 def test_source_constraints_and_independent_violations_keep_distinct_identity():
     """Два применимых требования не затираются одинаковым project fact ID."""
     values = [fact("flow", "5", "л/с", property_name="Расход воды")]
@@ -328,14 +344,15 @@ def test_source_constraints_and_independent_violations_keep_distinct_identity():
             f"N{i}",
             str(i),
             1,
-            "rules",
+            "СП 100.13330.2025",
             None,
             3,
             0,
-            f"S1 Расход воды не менее {limit} л/с",
+            f"4.1 S1 Расход воды не менее {limit} л/с",
         )
         for i, limit in [(1, 8), (2, 10)]
     ]
+    sources.append(_dated_normative_status())
     result = report(values, sources=requirement_evidence(normative=sources))
     findings = program_findings(result, normative=sources)
     assert len(findings) == 2 and len({finding.finding_id for finding in findings}) == 2
@@ -417,7 +434,14 @@ def test_customer_requirement_cannot_weaken_or_conflict_with_normative_source():
     """Несовместимое ТЗ становится конкретным вопросом, нормативное ограничение сохраняется."""
     values = [fact("flow", "15", "л/с", property_name="Расход воды")]
     normative = NormativeSource(
-        "N1", "n", 1, "rules", None, 3, 0, "S1 Расход воды не более 10 л/с"
+        "N1",
+        "n",
+        1,
+        "СП 100.13330.2025",
+        None,
+        3,
+        0,
+        "4.1 S1 Расход воды не более 10 л/с",
     )
     technical = TechnicalAssignmentSource(
         "T1",
@@ -433,11 +457,15 @@ def test_customer_requirement_cannot_weaken_or_conflict_with_normative_source():
     )
     result = report(
         values,
-        sources=requirement_evidence(normative=(normative,), technical=(technical,)),
+        sources=requirement_evidence(
+            normative=(normative, _dated_normative_status()), technical=(technical,)
+        ),
     )
     checks = [check for check in result.checks if check.rule == "requirement_conflict"]
     assert len(checks) == 1 and checks[0].status == "needs_review"
-    findings = program_findings(result, normative=(normative,), technical=(technical,))
+    findings = program_findings(
+        result, normative=(normative, _dated_normative_status()), technical=(technical,)
+    )
     assert len(findings) == 2
     assert all(verified_programmatic_check(finding) for finding in findings)
     assert {finding.status for finding in findings} == {"confirmed", "needs_review"}

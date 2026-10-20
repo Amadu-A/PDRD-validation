@@ -151,7 +151,26 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ context_id: $('Resolve Project Context Cache').first().json.context_id, enabled: $json.enabled ?? false, cache_key: $('Resolve Project Context Cache').first().json.cache_key ?? null, validation: { enabled: $json.enabled ?? false, pages_count: $json.pages_count ?? 0, classifications: $json.classifications ?? [], warnings: $json.warnings ?? [] }, pages: ($('Document Extract PDF CAD').first().json.explanatory_note_context?.pages ?? []).map((page) => ({ page_number: page.page_number, text: page.text })) }) }}",
         "options": {
-          "timeout": 900000
+          "timeout": 900000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 100
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-PDRD-Document-ID",
+              "value": "={{ $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}"
+            },
+            {
+              "name": "X-PDRD-Stage",
+              "value": "project_context"
+            }
+          ]
         }
       },
       "id": "20000000-0000-4000-8000-000000000005",
@@ -162,9 +181,7 @@
         -1800,
         0
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -240,7 +257,26 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ context_id: $('Prepare Combined Context').item.json.project_context.context_id, enabled: $('Prepare Combined Context').item.json.project_context.enabled, query: $json.query ?? '' }) }}",
         "options": {
-          "timeout": 900000
+          "timeout": 900000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 100
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-PDRD-Document-ID",
+              "value": "={{ $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}"
+            },
+            {
+              "name": "X-PDRD-Stage",
+              "value": "project_context"
+            }
+          ]
         }
       },
       "id": "20000000-0000-4000-8000-000000000009",
@@ -251,9 +287,7 @@
         -40,
         0
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -306,7 +340,26 @@
         "rawContentType": "application/json",
         "body": "={{\n  JSON.stringify(\n    $('POST /analysis/v2/pdf-cad').first().json.body?.technical_assignment_id\n      ? {\n          queries: $json.queries ?? [],\n          ...($json.protected_query_count != null ? { protected_query_count: $json.protected_query_count } : {}),\n          technical_assignment_id:\n            $('POST /analysis/v2/pdf-cad').first().json.body.technical_assignment_id,\n          section_id:\n            $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id,\n          normative_document_ids: JSON.parse(\n            $('POST /analysis/v2/pdf-cad').first().json.body?.normative_document_ids\n              ?? '[]'\n          ),\n        }\n      : {\n          queries: $json.queries ?? [],\n          ...($json.protected_query_count != null ? { protected_query_count: $json.protected_query_count } : {}),\n          ...(\n            $('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id\n              ? {\n                  section_id:\n                    $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id,\n                  document_ids: JSON.parse(\n                    $('POST /analysis/v2/pdf-cad').first().json.body?.normative_document_ids\n                      ?? '[]'\n                  ),\n                }\n              : {}\n          ),\n        }\n  )\n}}",
         "options": {
-          "timeout": 1800000
+          "timeout": 1800000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 100
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-PDRD-Document-ID",
+              "value": "={{ $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}"
+            },
+            {
+              "name": "X-PDRD-Stage",
+              "value": "requirements"
+            }
+          ]
         }
       },
       "id": "20000000-0000-4000-8000-000000000012",
@@ -317,13 +370,11 @@
         620,
         0
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
-        "jsCode": "const result = $json ?? {};\n\nconst guided = (\n  Array.isArray(result.technical_assignment_sources)\n  || Array.isArray(result.normative_sources)\n  || Array.isArray(result.conflict_candidates)\n);\n\nreturn {\n  json: {\n    normative_sources: guided\n      ? (\n          Array.isArray(result.normative_sources)\n            ? result.normative_sources\n            : []\n        )\n      : (\n          Array.isArray(result.sources)\n            ? result.sources\n            : []\n        ),\n\n    technical_assignment_sources: guided\n      && Array.isArray(result.technical_assignment_sources)\n        ? result.technical_assignment_sources\n        : [],\n\n    conflict_candidates: guided\n      && Array.isArray(result.conflict_candidates)\n        ? result.conflict_candidates\n        : [],\n\n    diagnostics: guided\n      && Array.isArray(result.diagnostics)\n        ? result.diagnostics\n        : [],\n\n    reference_resolutions: guided\n      && Array.isArray(result.reference_resolutions)\n        ? result.reference_resolutions\n        : [],\n\n    targeted_normative_sources: guided\n      && Array.isArray(result.targeted_normative_sources)\n        ? result.targeted_normative_sources\n        : [],\n\n    general_normative_sources: guided\n      && Array.isArray(result.general_normative_sources)\n        ? result.general_normative_sources\n        : [],\n\n    technical_assignment_embedding_model: guided\n      ? String(result.technical_assignment_embedding_model ?? '')\n      : '',\n\n    normative_embedding_model: guided\n      ? String(result.normative_embedding_model ?? '')\n      : String(result.embedding_model ?? ''),\n\n    technical_assignment_enabled: guided,\n  },\n};",
+        "jsCode": "const result = $json ?? {};\n\nconst guided = (\n  Array.isArray(result.technical_assignment_sources)\n  || Array.isArray(result.normative_sources)\n  || Array.isArray(result.conflict_candidates)\n);\n\nreturn {\n  json: {\n    normative_sources: guided\n      ? (\n          Array.isArray(result.normative_sources)\n            ? result.normative_sources\n            : []\n        )\n      : (\n          Array.isArray(result.sources)\n            ? result.sources\n            : []\n        ),\n\n    technical_assignment_sources: guided\n      && Array.isArray(result.technical_assignment_sources)\n        ? result.technical_assignment_sources\n        : [],\n\n    conflict_candidates: guided\n      && Array.isArray(result.conflict_candidates)\n        ? result.conflict_candidates\n        : [],\n\n    diagnostics: guided\n      && Array.isArray(result.diagnostics)\n        ? result.diagnostics\n        : [],\n\n    reference_resolutions: guided\n      && Array.isArray(result.reference_resolutions)\n        ? result.reference_resolutions\n        : [],\n\n    targeted_normative_sources: guided\n      && Array.isArray(result.targeted_normative_sources)\n        ? result.targeted_normative_sources\n        : [],\n\n    general_normative_sources: guided\n      && Array.isArray(result.general_normative_sources)\n        ? result.general_normative_sources\n        : [],\n\n    technical_assignment_embedding_model: guided\n      ? String(result.technical_assignment_embedding_model ?? '')\n      : '',\n\n    normative_embedding_model: guided\n      ? String(result.normative_embedding_model ?? '')\n      : String(result.embedding_model ?? ''),\n\n    technical_assignment_enabled: guided,\n    retrieval_metrics: result.retrieval_metrics ?? null,\n    retrieval_complete: result.retrieval_complete !== false,\n    cancelled: result.cancelled === true,\n  },\n};",
         "mode": "runOnceForEachItem"
       },
       "id": "20000000-0000-4000-8000-000000000023",
@@ -344,7 +395,26 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ queries: ($('Build Normative Queries').item.json.queries ?? []).slice(0, $('Build Normative Queries').item.json.protected_query_count ?? undefined), ...($('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id ? { section_id: $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id, document_ids: JSON.parse($('POST /analysis/v2/pdf-cad').first().json.body?.user_package_document_ids ?? '[]') } : {}) }) }}",
         "options": {
-          "timeout": 1800000
+          "timeout": 1800000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 100
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-PDRD-Document-ID",
+              "value": "={{ $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}"
+            },
+            {
+              "name": "X-PDRD-Stage",
+              "value": "user_packages"
+            }
+          ]
         }
       },
       "id": "20000000-0000-4000-8000-000000000022",
@@ -355,9 +425,7 @@
         1060,
         0
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -413,7 +481,26 @@
         "rawContentType": "application/json",
         "body": "={{\n  JSON.stringify({\n    queries: $json.normative_queries ?? [],\n    ...(\n      $('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id\n        ? {\n            section_id:\n              $('POST /analysis/v2/pdf-cad').first().json.body.normative_section_id,\n            document_ids: JSON.parse(\n              $('POST /analysis/v2/pdf-cad').first().json.body?.normative_document_ids\n                ?? '[]'\n            ),\n          }\n        : {}\n    ),\n  })\n}}",
         "options": {
-          "timeout": 1800000
+          "timeout": 1800000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 100
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-PDRD-Document-ID",
+              "value": "={{ $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}"
+            },
+            {
+              "name": "X-PDRD-Stage",
+              "value": "finding_norms"
+            }
+          ]
         }
       },
       "id": "20000000-0000-4000-8000-000000000025",
@@ -424,9 +511,7 @@
         1940,
         0
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -451,7 +536,26 @@
         "rawContentType": "application/json",
         "body": "={{ JSON.stringify({ queries: $json.experience_queries ?? [], section_id: $('POST /analysis/v2/pdf-cad').first().json.body?.normative_section_id ?? null }) }}",
         "options": {
-          "timeout": 1800000
+          "timeout": 1800000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 100
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-PDRD-Document-ID",
+              "value": "={{ $('POST /analysis/v2/pdf-cad').first().json.body.document_id }}"
+            },
+            {
+              "name": "X-PDRD-Stage",
+              "value": "experience"
+            }
+          ]
         }
       },
       "id": "20000000-0000-4000-8000-000000000015",
@@ -462,9 +566,7 @@
         2380,
         0
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000
+      "retryOnFail": false
     },
     {
       "parameters": {
@@ -513,7 +615,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const prepared = $('Prepare Combined Context').item.json;\nconst understanding = $('Understand Combined Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst requirements = $('Normalize Requirement Search').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst merged = $('Merge Finding Candidates').item.json;\nconst tFirst = $('Technical Assignment First Pass').item.json;\nconst enrichment = $('Prepare Experience Queries').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nconst reportFindings = findings.filter((finding) => finding.status !== 'hypothesis');\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\nconst candidateGroups = Object.values(candidatesByFinding)\n  .filter((value) => Array.isArray(value));\nconst tDecisions = Array.isArray(tFirst.decisions)\n  ? tFirst.decisions\n  : [];\n\nreturn { json: {\n  status: 'completed',\n  source_mode: 'pdf_cad',\n  file_name: prepared.source.pdf_file_name,\n  pdf_file_name: prepared.source.pdf_file_name,\n  cad_file_name: prepared.source.cad_file_name,\n  total_pages: prepared.source.total_pdf_pages,\n  selected_pages: [prepared.source.selected_page],\n  analyzed_pages: 1,\n  findings_count: reportFindings.length,\n  hypotheses_count: findings.length - reportFindings.length,\n  summary: reportFindings.length ? `Найдено замечаний: ${reportFindings.length}.` : 'Замечания по выбранному PDF + CAD листу не найдены.',\n  finalization: {\n    summary: finalization.summary ?? '',\n    metrics: finalization.metrics ?? {},\n  },\n  findings,\n  cad: prepared.cad,\n  explanatory_note_context: prepared.project_context,\n  page: {\n    page_number: prepared.page.page_number,\n    heuristic_page_type: prepared.page.page_type,\n    width_points: prepared.page.width_points,\n    height_points: prepared.page.height_points,\n    facts: understanding.facts ?? {},\n    normative_queries: queries.queries ?? [],\n    normative_sources: requirements.normative_sources ?? [],\n    technical_assignment_sources: requirements.technical_assignment_sources ?? [],\n    conflict_candidates: requirements.conflict_candidates ?? [],\n    requirement_diagnostics: requirements.diagnostics ?? [],\n    reference_resolutions: requirements.reference_resolutions ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    technical_assignment_first_pass: {\n      enabled: Boolean(tFirst.enabled),\n      requirements_count: Number(tFirst.requirements_count ?? 0),\n      decisions_count: tDecisions.length,\n      satisfied_count: tDecisions.filter((decision) => decision.status === 'satisfied').length,\n      not_applicable_count: tDecisions.filter((decision) => decision.status === 'not_applicable').length,\n      violated_count: tDecisions.filter((decision) => decision.status === 'violated').length,\n      needs_review_count: tDecisions.filter((decision) => decision.status === 'insufficient_evidence').length,\n      findings_count: Array.isArray(tFirst.findings) ? tFirst.findings.length : 0,\n      summary: String(tFirst.summary ?? ''),\n      metrics: Array.isArray(tFirst.metrics) ? tFirst.metrics : [],\n    },\n    finding_candidates: {\n      normative_check_count: Array.isArray(check.findings) ? check.findings.length : 0,\n      merged_count: Array.isArray(merged.findings) ? merged.findings.length : 0,\n    },\n    normative_enrichment: {\n      queries_count: $('Prepare Finding Normative Queries').item.json.normative_queries?.length ?? 0,\n      candidates_count: candidateGroups.reduce((total, sources) => total + sources.length, 0),\n    },\n    normative_check: { summary: check.summary ?? '', findings: check.findings ?? [], metrics: check.metrics ?? {} },\n    project_context_sources: augmentation.sources ?? [],\n  },\n  pipeline: ['combined_document_extract','explanatory_note_validation','project_context_cache','technical_assignment_requirement_feed','page_understanding','technical_assignment_first_pass','project_context_retrieval','normative_queries','requirement_search','user_package_search','normative_check','finding_candidate_merge','finding_normative_search','experience_search','finalization',],\n  limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Техническое задание проверяется независимым exhaustive T-first проходом и не является нормативным доказательством.', 'T-guided retrieval используется дополнительно и не управляет сохранением T-first findings.', 'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n} };",
+        "jsCode": "// Счётчики операций сохраняются отдельно от конфиденциальных текстов и векторов.\nconst retrievalOperations = [];\nfunction collectRetrieval(items) {\n  for (const item of items) {\n    if (item.json?.retrieval_metrics) retrievalOperations.push({\n      retrieval_metrics: item.json.retrieval_metrics,\n      retrieval_complete: item.json.retrieval_complete !== false,\n      cancelled: item.json.cancelled === true,\n    });\n  }\n}\n// Явные имена ограничивают runData, передаваемый Task Runner; динамический $ запрещён.\ntry { collectRetrieval($('Create Project Context').all()); } catch { /* Необязательный этап не запускался. */ }\ntry { collectRetrieval($('Search Project Context').all()); } catch { /* Необязательный этап не запускался. */ }\ntry { collectRetrieval($('Search Requirements').all()); } catch { /* Необязательный этап не запускался. */ }\ntry { collectRetrieval($('Search User Packages').all()); } catch { /* Необязательный этап не запускался. */ }\ntry { collectRetrieval($('Search Finding Norms').all()); } catch { /* Необязательный этап не запускался. */ }\ntry { collectRetrieval($('Search Experience').all()); } catch { /* Необязательный этап не запускался. */ }\nconst retrievalCancelled = retrievalOperations.some((item) => item.cancelled);\nif (retrievalOperations.some((item) => !item.retrieval_complete && !item.cancelled)) {\n  throw new Error('Обязательный поиск источников не завершён: результат не может считаться успешным.');\n}\nconst prepared = $('Prepare Combined Context').item.json;\nconst understanding = $('Understand Combined Page').item.json;\nconst queries = $('Build Normative Queries').item.json;\nconst requirements = $('Normalize Requirement Search').item.json;\nconst userPackages = $('Search User Packages').item.json;\nconst check = $('Check Norms').item.json;\nconst merged = $('Merge Finding Candidates').item.json;\nconst tFirst = $('Technical Assignment First Pass').item.json;\nconst enrichment = $('Prepare Experience Queries').item.json;\nconst augmentation = $('Augment Project Context').item.json;\nconst finalization = $json;\nconst findings = (finalization.findings ?? []).map((finding) => ({\n  ...finding,\n  project_context_sources: augmentation.sources ?? [],\n}));\n\nconst reportFindings = findings.filter((finding) => finding.status !== 'hypothesis');\n\nconst candidatesByFinding =\n  enrichment.normative_candidates_by_finding\n  && typeof enrichment.normative_candidates_by_finding === 'object'\n    ? enrichment.normative_candidates_by_finding\n    : {};\nconst candidateGroups = Object.values(candidatesByFinding)\n  .filter((value) => Array.isArray(value));\nconst tDecisions = Array.isArray(tFirst.decisions)\n  ? tFirst.decisions\n  : [];\n\nreturn { json: {\n  status: retrievalCancelled ? 'cancelled' : 'completed',\n    retrieval_operations: retrievalOperations,\n  source_mode: 'pdf_cad',\n  file_name: prepared.source.pdf_file_name,\n  pdf_file_name: prepared.source.pdf_file_name,\n  cad_file_name: prepared.source.cad_file_name,\n  total_pages: prepared.source.total_pdf_pages,\n  selected_pages: [prepared.source.selected_page],\n  analyzed_pages: 1,\n  findings_count: reportFindings.length,\n  hypotheses_count: findings.length - reportFindings.length,\n  summary: reportFindings.length ? `Найдено замечаний: ${reportFindings.length}.` : 'Замечания по выбранному PDF + CAD листу не найдены.',\n  finalization: {\n    summary: finalization.summary ?? '',\n    metrics: finalization.metrics ?? {},\n  },\n  findings,\n  cad: prepared.cad,\n  explanatory_note_context: prepared.project_context,\n  page: {\n    page_number: prepared.page.page_number,\n    heuristic_page_type: prepared.page.page_type,\n    width_points: prepared.page.width_points,\n    height_points: prepared.page.height_points,\n    facts: understanding.facts ?? {},\n    normative_query_counts: {\n      base: Number(queries.protected_query_count ?? queries.queries?.length ?? 0),\n      additional: Math.max(0, (queries.queries?.length ?? 0) - Number(queries.protected_query_count ?? queries.queries?.length ?? 0)),\n      unique: new Set((queries.queries ?? []).map((value) => String(value).replace(/\\s+/g, ' ').trim())).size,\n    },\n    normative_queries: queries.queries ?? [],\n    normative_sources: requirements.normative_sources ?? [],\n    technical_assignment_sources: requirements.technical_assignment_sources ?? [],\n    conflict_candidates: requirements.conflict_candidates ?? [],\n    requirement_diagnostics: requirements.diagnostics ?? [],\n    reference_resolutions: requirements.reference_resolutions ?? [],\n    user_package_sources: userPackages.sources ?? [],\n    technical_assignment_first_pass: {\n      enabled: Boolean(tFirst.enabled),\n      requirements_count: Number(tFirst.requirements_count ?? 0),\n      decisions_count: tDecisions.length,\n      satisfied_count: tDecisions.filter((decision) => decision.status === 'satisfied').length,\n      not_applicable_count: tDecisions.filter((decision) => decision.status === 'not_applicable').length,\n      violated_count: tDecisions.filter((decision) => decision.status === 'violated').length,\n      needs_review_count: tDecisions.filter((decision) => decision.status === 'insufficient_evidence').length,\n      findings_count: Array.isArray(tFirst.findings) ? tFirst.findings.length : 0,\n      summary: String(tFirst.summary ?? ''),\n      metrics: Array.isArray(tFirst.metrics) ? tFirst.metrics : [],\n    },\n    finding_candidates: {\n      normative_check_count: Array.isArray(check.findings) ? check.findings.length : 0,\n      merged_count: Array.isArray(merged.findings) ? merged.findings.length : 0,\n    },\n    normative_enrichment: {\n      queries_count: $('Prepare Finding Normative Queries').item.json.normative_queries?.length ?? 0,\n      candidates_count: candidateGroups.reduce((total, sources) => total + sources.length, 0),\n    },\n    normative_check: { summary: check.summary ?? '', findings: check.findings ?? [], metrics: check.metrics ?? {} },\n    project_context_sources: augmentation.sources ?? [],\n  },\n  pipeline: ['combined_document_extract','explanatory_note_validation','project_context_cache','technical_assignment_requirement_feed','page_understanding','technical_assignment_first_pass','project_context_retrieval','normative_queries','requirement_search','user_package_search','normative_check','finding_candidate_merge','finding_normative_search','experience_search','finalization',],\n  limitations: ['Контекст ПЗ и пользовательские пакеты являются контекстом проекта, а не нормативным доказательством.', 'Техническое задание проверяется независимым exhaustive T-first проходом и не является нормативным доказательством.', 'T-guided retrieval используется дополнительно и не управляет сохранением T-first findings.', 'Дополнительный нормативный поиск не удаляет инженерные замечания при отсутствии подтверждения.', 'Точное расположение finding на изображении будет добавлено на этапе визуализации.'],\n} };",
         "mode": "runOnceForEachItem"
       },
       "id": "20000000-0000-4000-8000-000000000018",
@@ -1537,6 +1639,204 @@
         -360,
         -40
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "90aaf6f4-95eb-4b1a-b662-28bdbc4389e3",
+              "leftValue": "={{ String($input.all().some((entry) => entry.json?.cancelled === true)) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1653fa0f-b8e6-4f26-af5f-532c6450b87e",
+      "name": "Continue Create Project Context Retrieval Response",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1640,
+        90
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "91af4f76-8244-41d7-b819-4f6dbd1d29a1",
+              "leftValue": "={{ String($input.all().some((entry) => entry.json?.cancelled === true)) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8ba6e3c8-6700-443d-a32c-1082b5eba9fe",
+      "name": "Continue Search Project Context Retrieval Response",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        120,
+        90
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7b0aeee5-348d-4782-827c-f1aa4b5c86a4",
+              "leftValue": "={{ String($input.all().some((entry) => entry.json?.cancelled === true)) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f08a4b11-94f8-475a-a29d-9d80bb15446f",
+      "name": "Continue Search Requirements Retrieval Response",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        780,
+        90
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a330ddd8-081b-4e8d-8fdc-730f319c8046",
+              "leftValue": "={{ String($input.all().some((entry) => entry.json?.cancelled === true)) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f49e4091-c8eb-4c75-b269-474feeaf9a84",
+      "name": "Continue Search User Packages Retrieval Response",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1220,
+        90
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7d2728b5-83de-4275-a8d4-c9d5fd337098",
+              "leftValue": "={{ String($input.all().some((entry) => entry.json?.cancelled === true)) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "affab61a-2bdf-40dd-9f11-7cb61ff298d8",
+      "name": "Continue Search Finding Norms Retrieval Response",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2100,
+        90
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0233030a-fd87-4b9f-9f51-89cdd3b653e4",
+              "leftValue": "={{ String($input.all().some((entry) => entry.json?.cancelled === true)) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b7d4bf7f-b9fa-4d92-a6ce-55e55071bb01",
+      "name": "Continue Search Experience Retrieval Response",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2540,
+        90
+      ]
     }
   ],
   "pinData": {},
@@ -1594,7 +1894,7 @@
       "main": [
         [
           {
-            "node": "Has Technical Assignment",
+            "node": "Continue Create Project Context Retrieval Response",
             "type": "main",
             "index": 0
           }
@@ -1643,7 +1943,7 @@
       "main": [
         [
           {
-            "node": "Augment Project Context",
+            "node": "Continue Search Project Context Retrieval Response",
             "type": "main",
             "index": 0
           }
@@ -1676,7 +1976,7 @@
       "main": [
         [
           {
-            "node": "Normalize Requirement Search",
+            "node": "Continue Search Requirements Retrieval Response",
             "type": "main",
             "index": 0
           }
@@ -1698,12 +1998,7 @@
       "main": [
         [
           {
-            "node": "Progress Check Requirements",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Gate Check Requirements",
+            "node": "Continue Search User Packages Retrieval Response",
             "type": "main",
             "index": 0
           }
@@ -1736,7 +2031,7 @@
       "main": [
         [
           {
-            "node": "Prepare Experience Queries",
+            "node": "Continue Search Finding Norms Retrieval Response",
             "type": "main",
             "index": 0
           }
@@ -1758,7 +2053,7 @@
       "main": [
         [
           {
-            "node": "Build Experience Map",
+            "node": "Continue Search Experience Retrieval Response",
             "type": "main",
             "index": 0
           }
@@ -2371,6 +2666,119 @@
         [
           {
             "node": "Technical Assignment First Pass",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Create Project Context Retrieval Response": {
+      "main": [
+        [
+          {
+            "node": "Has Technical Assignment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Search Project Context Retrieval Response": {
+      "main": [
+        [
+          {
+            "node": "Augment Project Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Search Requirements Retrieval Response": {
+      "main": [
+        [
+          {
+            "node": "Normalize Requirement Search",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Search User Packages Retrieval Response": {
+      "main": [
+        [
+          {
+            "node": "Progress Check Requirements",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Check Requirements",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Search Finding Norms Retrieval Response": {
+      "main": [
+        [
+          {
+            "node": "Prepare Experience Queries",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Search Experience Retrieval Response": {
+      "main": [
+        [
+          {
+            "node": "Build Experience Map",
             "type": "main",
             "index": 0
           }

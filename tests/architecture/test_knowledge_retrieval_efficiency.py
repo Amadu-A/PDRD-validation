@@ -153,7 +153,7 @@ def test_grouped_use_case_contains_one_embedding_call_site() -> None:
 
 
 def test_embedding_adapters_use_one_resident_batch_without_release_lifecycle() -> None:
-    """Shared vLLM получает batch одним HTTP call без model unload."""
+    """Runtime управляет повтором микропорций; каждая физическая попытка имеет один POST без unload."""
     text_function = _async_function(
         TEXT_EMBEDDING_PATH,
         name="embed",
@@ -174,7 +174,7 @@ def test_embedding_adapters_use_one_resident_batch_without_release_lifecycle() -
 
     multimodal_function = _async_function(
         MULTIMODAL_EMBEDDING_PATH,
-        name="embed",
+        name="_embed_once",
     )
 
     multimodal_calls = _called_attributes(
@@ -189,6 +189,10 @@ def test_embedding_adapters_use_one_resident_batch_without_release_lifecycle() -
     )
 
     assert "release" not in multimodal_calls
+    runtime_calls = _called_attributes(
+        _async_function(MULTIMODAL_EMBEDDING_PATH, name="embed")
+    )
+    assert runtime_calls.count("execute") == 1 and "post" not in runtime_calls
 
     text_source = TEXT_EMBEDDING_PATH.read_text(
         encoding="utf-8",

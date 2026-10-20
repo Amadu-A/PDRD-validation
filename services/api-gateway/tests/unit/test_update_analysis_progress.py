@@ -2,6 +2,7 @@
 
 """Unit tests durable analysis progress checkpoints."""
 
+from datetime import timedelta
 from uuid import (
     UUID,
     uuid4,
@@ -132,6 +133,28 @@ def build_processing_job() -> AnalysisJob:
     job.mark_processing()
 
     return job
+
+
+@pytest.mark.parametrize("state", ["processing", "cancelled", "expired", "completed"])
+async def test_read_control_preserves_stage_and_uses_job_lifecycle(state):
+    """Поиск читает оставшееся время и отмену, не откатывая T-first и не продлевая задание."""
+    job = build_processing_job()
+    job.progress_stage = AnalysisProgressStage.CHECKING_TECHNICAL_ASSIGNMENT
+    if state == "expired":
+        job.created_at -= timedelta(seconds=100)
+    elif state == "cancelled":
+        job.mark_cancelled()
+    elif state == "completed":
+        job.status = AnalysisJobStatus.COMPLETED
+    factory = FakeUnitOfWorkFactory(jobs={job.document_id: job})
+    control = await UpdateAnalysisProgress(factory).get_control(
+        document_id=job.document_id, max_runtime_seconds=60
+    )
+    assert control["job_id"] == str(job.id)
+    assert control["cancelled"] is (state == "cancelled")
+    assert (control["remaining_seconds"] > 0) is (state == "processing")
+    assert job.progress_stage is AnalysisProgressStage.CHECKING_TECHNICAL_ASSIGNMENT
+    assert factory.counters == {"updates": 0, "commits": 0}
 
 
 async def test_gpu_wait_does_not_replace_stage_or_survive_late_callback() -> None:

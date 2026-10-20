@@ -174,7 +174,7 @@ def evaluate_decisions(
 def _design_basis_questions(
     facts: tuple[LocatedDocumentFact, ...], page_texts: dict[int, str]
 ) -> tuple[EngineeringCheck, ...]:
-    """Проверяет две конкретные зависимости принятых решений, не объявляя пробелы нарушением."""
+    """Проверяет конкретные зависимости принятых решений, не объявляя пробелы нарушением."""
     result = []
     seen = set()
     for item in facts:
@@ -183,18 +183,28 @@ def _design_basis_questions(
             re.search(r"пожар", fact.evidence_text, re.I)
         )
         pipe = fact.relation == "accepted_pipe_choice"
-        if not (fire or pipe):
+        storage = fact.relation == "accepted_storage_choice"
+        protection = fact.relation == "accepted_protection_solution"
+        if not (fire or pipe or storage or protection):
             continue
         related = tuple(
             other
             for other in facts
             if engineering_object_key(other.fact) == engineering_object_key(fact)
         )
-        if not fire and not any(
+        if pipe and not any(
             property_key(other.fact).endswith(":system_purpose") for other in related
         ):
             continue
-        dependency = "fire_flow_basis" if fire else "pipe_selection_basis"
+        dependency = (
+            "fire_flow_basis"
+            if fire
+            else "fire_storage_basis"
+            if storage
+            else "protected_object_basis"
+            if protection
+            else "pipe_selection_basis"
+        )
         key = (
             engineering_object_key(fact),
             dependency,
@@ -212,16 +222,32 @@ def _design_basis_questions(
             other
             for other in related
             if scope_key(other.fact)[:6] == scope_key(fact)[:6]
-            and (fire or (segment is not None and physical_key(other) == segment))
+            and (not pipe or (segment is not None and physical_key(other) == segment))
         )
         kinds = {_fact_kind(other.fact) for other in comparable}
         required = (
-            ("design_input", "requirement_reference")
+            (
+                "useful_fire_volume",
+                "design_fire_flow",
+                "fire_duration",
+                "guaranteed_refill_flow",
+                "design_input",
+                "calculation_reference",
+            )
+            if storage
+            else (
+                "design_input",
+                "requirement_reference",
+                "calculation_reference",
+                "document_reference",
+            )
+            if protection
+            else ("design_input", "requirement_reference")
             if fire
             else ("design_flow", "internal_diameter", "flow_velocity", "head_loss")
         )
         # Наличие связанного расчёта ограничивает автоматический вывод: его проверяет обычная цепочка.
-        if any(
+        if not (storage or protection) and any(
             other.fact.property_type == "calculation_reference" for other in comparable
         ):
             continue
@@ -854,7 +880,8 @@ def literal_fact_value(item: LocatedDocumentFact) -> bool:
     return bool(
         value
         and re.search(
-            r"(?<![\w.])(?:[ø⌀]|dn\s*|ду\s*)?" + re.escape(value) + r"(?![\w.])", quote
+            r"(?<![\w.])(?:[ø⌀]|dn\s*|ду\s*)?" + re.escape(value) + r"(?!\w|\.\d)",
+            quote,
         )
     )
 

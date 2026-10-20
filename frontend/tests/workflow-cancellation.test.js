@@ -14,7 +14,10 @@ for (const mode of ["pdf", "cad", "pdf-cad"]) {
     for (const guard of guards) {
       const condition = guard.parameters.conditions.conditions[0];
       for (const cancelled of [true, false, undefined]) {
-        const actual = vm.runInNewContext(condition.leftValue.slice(3, -2), { $json: { cancelled, items: [] } }, { timeout: 500 });
+        const json = {cancelled, items: []};
+        const actual = vm.runInNewContext(condition.leftValue.slice(3, -2), {
+          $json: json, $input: {all: () => [{json}]},
+        }, { timeout: 500 });
         assert.equal(condition.operator.operation, "notEquals");
         const output = actual !== condition.rightValue ? 0 : 1;
         const targets = workflow.connections[guard.name].main[output].map((entry) => entry.node);

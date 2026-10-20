@@ -270,45 +270,19 @@ def test_every_analysis_workflow_has_finding_local_normative_enrichment() -> Non
         assert "normative_candidates_by_finding" in serialized, path
 
 
-def test_requirement_retrieval_retries_transient_errors() -> None:
-    """I/O retrieval сохраняет bounded n8n retry."""
+def test_embedding_retrieval_has_one_retry_owner_and_lifecycle_headers() -> None:
+    """Повторами embedding управляет Knowledge, n8n не умножает бюджет и передаёт отмену."""
     for path in WORKFLOW_PATHS:
-        workflow = _workflow(
-            path,
-        )
-
-        nodes = _nodes_by_name(
-            workflow,
-        )
-
-        node = nodes["Search Requirements"]
-
-        assert (
-            node.get(
-                "retryOnFail",
-            )
-            is True
-        ), path
-
-        assert (
-            int(
-                node.get(
-                    "maxTries",
-                    0,
-                )
-            )
-            >= 2
-        ), path
-
-        assert (
-            int(
-                node.get(
-                    "waitBetweenTries",
-                    0,
-                )
-            )
-            >= 1000
-        ), path
+        node = _nodes_by_name(_workflow(path))["Search Requirements"]
+        assert node["retryOnFail"] is False, path
+        assert "maxTries" not in node and "waitBetweenTries" not in node, path
+        headers = {
+            item["name"]: item["value"]
+            for item in node["parameters"]["headerParameters"]["parameters"]
+        }
+        assert "document_id" in headers["X-PDRD-Document-ID"], path
+        assert headers["X-PDRD-Stage"] == "requirements", path
+        assert node["parameters"]["options"]["batching"]["batch"]["batchSize"] == 1
 
 
 def test_t_first_vlm_has_no_n8n_level_retry() -> None:

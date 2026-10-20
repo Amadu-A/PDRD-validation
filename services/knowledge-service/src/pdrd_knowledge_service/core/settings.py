@@ -420,6 +420,20 @@ class OfficeConversionSettings(BaseModel):
     )
 
 
+class EmbeddingRequestSettings(BaseModel):
+    """Ограниченный бюджет клиента; не параметры очереди общей модели."""
+
+    max_attempts: int = Field(default=5, ge=1, le=8)
+    max_elapsed_seconds: float = Field(default=120, gt=0, le=600)
+    backoff_seconds: float = Field(default=1, gt=0, le=10)
+    max_backoff_seconds: float = Field(default=15, gt=0, le=60)
+    max_batch_size: int = Field(default=4, ge=1, le=8)
+    max_concurrency: int = Field(default=1, ge=1, le=4)
+    max_waiters: int = Field(default=32, ge=1, le=128)
+    cache_entries: int = Field(default=256, ge=1, le=2048)
+    cache_ttl_seconds: float = Field(default=3600, gt=0, le=7200)
+
+
 class EmbeddingSettings(BaseModel):
     """Подключение к общему сервису эмбеддингов."""
 
@@ -718,6 +732,11 @@ class Settings(BaseSettings):
     embedding: EmbeddingSettings = Field(
         default_factory=EmbeddingSettings,
     )
+
+    embedding_requests: EmbeddingRequestSettings = Field(
+        default_factory=EmbeddingRequestSettings
+    )
+    analysis_control_base_url: str = "http://api-gateway:8000"
 
     multimodal_embedding: MultimodalEmbeddingSettings = Field(
         default_factory=(MultimodalEmbeddingSettings),

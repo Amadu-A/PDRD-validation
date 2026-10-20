@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from decimal import Decimal
 
@@ -170,6 +171,13 @@ def _document_code(source) -> str:
     return match[0] if match else ""
 
 
+def requirement_currency(
+    source, sources, assessed_on: str
+) -> tuple[str, tuple[dict, ...]]:
+    """Даёт старому и независимому маршрутам одинаковую проверку редакции и обязательности N."""
+    return _currency(source, sources, assessed_on)
+
+
 def _rule_context(quote: str, bound) -> str:
     """Не переносит ограничение между предложениями и разными объектами одного фрагмента."""
     if bound is None:
@@ -211,6 +219,17 @@ def _subject_matches(quote: str, item: LocatedDocumentFact) -> bool:
         re.search(source_pattern, quote, re.I)
         and re.search(project_pattern, item.fact.evidence_text, re.I)
         for source_pattern, project_pattern in _CLASSES
+    )
+
+
+def _unrelated_fuel_pumps(quote: str, facts: tuple[LocatedDocumentFact, ...]) -> bool:
+    """Отделяет явно топливные насосы от водоснабжения; общие нормы котельных не отсекает."""
+    if not re.search(r"насос\w*\s+жидк\w*\s+топлив", quote, re.I):
+        return False
+    texts = tuple(item.fact.evidence_text for item in facts)
+    return bool(
+        any(re.search(r"водоснабж|водопровод", text, re.I) for text in texts)
+        and not any(re.search(r"жидк\w*\s+топлив|мазут", text, re.I) for text in texts)
     )
 
 
@@ -404,6 +423,16 @@ def build_requirement_plan(
                     ):
                         records.append(
                             replace(record, reason_code="incomplete_requirement_source")
+                        )
+                        continue
+                    if source.kind == "N" and _unrelated_fuel_pumps(context, facts):
+                        records.append(
+                            replace(
+                                record,
+                                applicability="not_applicable",
+                                result="not_applicable",
+                                reason_code="different_physical_system",
+                            )
                         )
                         continue
                     if bound is None and not calculation:
@@ -744,4 +773,13 @@ def requirement_coverage(records: tuple[RequirementRecord, ...]) -> dict:
             for state in sorted({r.result for r in records})
         },
         "new_vlm_calls": 0,
+        "reason_codes": dict(Counter(r.reason_code for r in records)),
+        "rules": dict(Counter(r.rule for r in records)),
+        "applicability": dict(Counter(r.applicability for r in records)),
+        "currency": dict(Counter(r.currency for r in records)),
+        "unbound_objects": sum(not r.object_key for r in records),
+        "unbound_properties": sum(not r.property_key for r in records),
+        "missing_project_values": sum(
+            r.reason_code == "project_object_or_property_not_observed" for r in records
+        ),
     }

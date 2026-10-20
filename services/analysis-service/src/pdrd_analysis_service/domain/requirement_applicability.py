@@ -116,6 +116,22 @@ def check_requirement(
             **base,
         )
     match = matches[0]
+    prefix = re.sub(r"^\d+(?:\.\d+)+\.?\s+", "", text[: match.start()]).strip(" ,:")
+    prefix = re.sub(r"^для\s+", "", prefix).strip()
+    if prefix != tag:
+        return EngineeringCheck(
+            status="not_evaluable",
+            reason_code="qualified_subject_scope_not_established",
+            missing_data=("explicit_subject_qualifiers",),
+            **base,
+        )
+    if prop == "диаметр":
+        return EngineeringCheck(
+            status="not_evaluable",
+            reason_code="diameter_definition_not_established",
+            missing_data=("same_diameter_definition",),
+            **base,
+        )
     tags = re.findall(
         r"(?<!\w)[a-zа-я]{1,4}\d+(?:[.-]\d+)*(?!\w)", text[: match.start()]
     )

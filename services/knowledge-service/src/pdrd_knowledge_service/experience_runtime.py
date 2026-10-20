@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from pdrd_knowledge_service.core.embedding_runtime import build_embedding_runtime
 from pdrd_knowledge_service.core.experience import (
     build_experience_container,
     build_version_worker,
@@ -28,6 +29,10 @@ from pdrd_knowledge_service.core.settings import Settings
 from pdrd_knowledge_service.domain.experience_quality import (
     quality_report,
     validate_evaluation_cases,
+)
+from pdrd_knowledge_service.infrastructure.database.engine import build_async_engine
+from pdrd_knowledge_service.infrastructure.embedding.request_runtime import (
+    EmbeddingRequestRuntime,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,11 +51,28 @@ def write_json(path: Path, data: dict) -> None:
 
 async def run(arguments: Namespace, settings: Settings) -> None:
     """Выполняет выбранную команду с явно внедрённой конфигурацией."""
+    engine = build_async_engine(settings.database)
+    try:
+        await _run(
+            arguments,
+            settings,
+            build_embedding_runtime(
+                settings, engine, stage="experience_" + arguments.command
+            ),
+        )
+    finally:
+        await engine.dispose()
+
+
+async def _run(
+    arguments: Namespace, settings: Settings, runtime: EmbeddingRequestRuntime
+) -> None:
+    """Встраивает ручной E-index в общий допуск embedding, не меняя флаг рабочего поиска."""
     if len(settings.experience.key.get_secret_value()) < 32:
         raise ValueError(
             "Индекс E требует отдельный служебный ключ длиной не менее 32 символов."
         )
-    container = build_experience_container(settings, shadow=True)
+    container = build_experience_container(settings, shadow=True, runtime=runtime)
     version = None
     if getattr(arguments, "version", None):
         container, version = await prepare_version_search(

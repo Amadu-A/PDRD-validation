@@ -151,6 +151,7 @@ def merge_text_engineering_facts(
             *explicit_design_parameters(text),
             *explicit_flow_rows(text, page),
             *explicit_pipe_choices(text),
+            *explicit_protection_choices(text),
         )
     )
     return (
@@ -167,6 +168,60 @@ def merge_text_engineering_facts(
             )
         ),
     )
+
+
+def explicit_protection_choices(text: str) -> tuple[DocumentFact, ...]:
+    """Читает явно принятый состав запаса и защищаемые объекты, не вычисляя полезный объём."""
+    content = re.sub(r"\s+", " ", text)
+    result = []
+    storage = re.compile(
+        r"(?P<quote>(?:Проектом\s+)?предусматривается\s+установка\s+[^.!?]{0,50}?"
+        r"(?P<object>резервуар\w*\s+противопожарного\s+запаса\s+воды),?\s+объ[её]мом\s+"
+        r"(?P<values>\d+(?:[.,]\d+)?\s*м[³3](?:\s*[,и]\s*\d+(?:[.,]\d+)?\s*м[³3])+))",
+        re.I,
+    )
+    for match in storage.finditer(content):
+        fact = document_fact_from_mapping(
+            {
+                "kind": "parameter",
+                "subject_type": "storage_group",
+                "identifier": match["object"],
+                "property_type": "fire_reserve_choice",
+                "property_name": "Состав противопожарного запаса",
+                "relation": "accepted_storage_choice",
+                "value_raw": match["values"],
+                "evidence_text": match["quote"],
+                "extraction_method": "pdf_text",
+            }
+        )
+        if fact is not None:
+            result.append(fact)
+    protected = re.compile(
+        r"(?P<quote>(?:Для\s+целей\s+)?(?:наружного\s+и\s+внутреннего|наружного|внутреннего)\s+"
+        r"пожаротушения\s+(?P<objects>[^.;]{3,140}?)\s+предусмотрен\w*\s+"
+        r"(?P<solution>[^.;]{3,900}))",
+        re.I,
+    )
+    for match in protected.finditer(content):
+        for subject in re.split(r"\s+и\s+", match["objects"]):
+            if not re.match(r"(?:здани|склад|сооружени|помещени)", subject, re.I):
+                continue
+            fact = document_fact_from_mapping(
+                {
+                    "kind": "parameter",
+                    "subject_type": "protected_object",
+                    "identifier": subject,
+                    "property_type": "fire_protection_solution",
+                    "property_name": "Решение пожаротушения",
+                    "relation": "accepted_protection_solution",
+                    "value_raw": match["solution"],
+                    "evidence_text": match["quote"],
+                    "extraction_method": "pdf_text",
+                }
+            )
+            if fact is not None:
+                result.append(fact)
+    return tuple(result)
 
 
 def explicit_flow_rows(text: str, page: int) -> tuple[DocumentFact, ...]:

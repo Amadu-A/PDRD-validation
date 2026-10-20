@@ -17,11 +17,14 @@ R = TypeVar("R")
 
 
 def configure_experience_logging() -> None:
-    """Подключает только логгеры E, сохраняя настройки Uvicorn и других операций."""
-    for module in ("index_experience", "trusted_experience"):
-        logger = logging.getLogger(
-            f"pdrd_knowledge_service.application.use_cases.{module}"
-        )
+    """Подключает компактные события E/embedding, сохраняя настройки Uvicorn и остальных операций."""
+    for module in (
+        "pdrd_knowledge_service.application.use_cases.index_experience",
+        "pdrd_knowledge_service.application.use_cases.trusted_experience",
+        "pdrd_knowledge_service.transport.http.embedding_lifecycle",
+        "pdrd_knowledge_service.infrastructure.embedding.request_runtime",
+    ):
+        logger = logging.getLogger(module)
         if not any(
             getattr(handler, "experience_timing", False) for handler in logger.handlers
         ):

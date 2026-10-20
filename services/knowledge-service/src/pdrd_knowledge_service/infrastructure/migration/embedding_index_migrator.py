@@ -11,6 +11,7 @@ from pdrd_knowledge_service.application.use_cases.embedding_migration import (
     MigrateEmbeddingIndexes,
     PersistedEmbeddingCollectionRebuilder,
 )
+from pdrd_knowledge_service.core.embedding_runtime import build_embedding_runtime
 from pdrd_knowledge_service.core.settings import (
     get_settings,
 )
@@ -79,7 +80,9 @@ async def run_migration() -> None:
         health_timeout_seconds=(settings.qdrant.health_timeout_seconds),
     )
 
+    runtime = build_embedding_runtime(settings, engine, stage="embedding_migration")
     text_embedding = HttpTextEmbeddingProvider(
+        runtime=runtime,
         base_url=settings.embedding.base_url,
         request_timeout_seconds=(settings.embedding.request_timeout_seconds),
         connect_timeout_seconds=(settings.embedding.connect_timeout_seconds),
@@ -87,6 +90,7 @@ async def run_migration() -> None:
     )
 
     multimodal_embedding = HttpMultimodalEmbeddingProvider(
+        runtime=runtime,
         base_url=(settings.multimodal_embedding.base_url),
         request_timeout_seconds=(settings.multimodal_embedding.request_timeout_seconds),
         connect_timeout_seconds=(settings.multimodal_embedding.connect_timeout_seconds),

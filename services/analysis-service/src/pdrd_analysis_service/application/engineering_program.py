@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -47,6 +48,7 @@ from pdrd_analysis_service.domain.requirement_plan import (
     build_requirement_plan,
     requirement_checks,
     requirement_coverage,
+    requirement_currency,
 )
 from pdrd_analysis_service.domain.signal_connections import check_signal_connections
 
@@ -83,15 +85,17 @@ def run_engineering_program(
 ) -> EngineeringReport:
     """Не выполняет retrieval или генерацию; источники уже принадлежат текущему сценарию."""
     requirement_sources = tuple(requirement_sources)
+    assessed_on = assessed_on or datetime.now(UTC).date().isoformat()
     checks = list(evaluate_decisions(registry, page_texts=page_texts))
     checks.extend(check_signal_connections(registry))
     plan = None
+    records = ()
     if requirement_plan_enabled:
         records = build_requirement_plan(
             tuple(item.observation for item in registry.evidence),
             page_texts=page_texts,
             sources=tuple(requirement_sources),
-            assessed_on=assessed_on or datetime.now(UTC).date().isoformat(),
+            assessed_on=assessed_on,
         )
         checks.extend(requirement_checks(records))
         plan = {
@@ -102,9 +106,8 @@ def run_engineering_program(
                 for kind in ("N", "T", "U")
             },
         }
+    legacy_outcomes = Counter()
     for evidence in registry.evidence:
-        if requirement_plan_enabled:
-            break
         if not program_evidence_eligible(evidence):
             continue
         item = evidence.observation
@@ -115,12 +118,77 @@ def run_engineering_program(
                 and item.fact.identifier.casefold() in source.text.casefold()
                 and item.fact.property_name.casefold() in source.text.casefold()
             ):
-                checks.append(check_requirement(item, source))
+                check = check_requirement(item, source)
+                covered_conflict = any(
+                    record.result == "source_conflict"
+                    and source.source_id in record.source_ids
+                    and record.object_key == check.object_key
+                    and record.property_key == check.property_key
+                    and {value.fact_id for value in record.observations}
+                    == {item.fact_id}
+                    for record in records
+                )
+                if covered_conflict:
+                    legacy_outcomes["covered_by_requirement_plan_conflict"] += 1
+                    continue
+                if source.kind == "N":
+                    currency, proof = requirement_currency(
+                        source, requirement_sources, assessed_on
+                    )
+                    if (
+                        currency != "current_mandatory"
+                        or not source.point_id
+                        or not re.search(r"(?m)^\s*\d+(?:\.\d+)+\s", source.text)
+                    ):
+                        check = replace(
+                            check,
+                            status="not_evaluable",
+                            reason_code="normative_edition_or_binding_unverified",
+                        )
+                    else:
+                        check = replace(
+                            check,
+                            source_ids=tuple(
+                                dict.fromkeys(
+                                    (source.source_id, *(p["source_id"] for p in proof))
+                                )
+                            ),
+                            calculation={
+                                **(check.calculation or {}),
+                                "assessed_on": assessed_on,
+                                "currency": currency,
+                            },
+                        )
+                duplicate = any(
+                    part.rule == "requirement_plan"
+                    and part.status in {"confirmed", "no_finding"}
+                    and part.object_key == check.object_key
+                    and part.property_key == check.property_key
+                    and source.source_id in part.source_ids
+                    and {v.fact_id for v in part.observations} == {item.fact_id}
+                    and all(
+                        str((part.calculation or {}).get(key)).casefold()
+                        == str((check.calculation or {}).get(key)).casefold()
+                        for key in ("project", "limit", "operator", "dimension")
+                    )
+                    for part in checks
+                )
+                legacy_outcomes[
+                    "covered_by_requirement_plan" if duplicate else check.reason_code
+                ] += 1
+                if not duplicate:
+                    checks.append(check)
+    if plan is not None:
+        plan["legacy_checks"] = dict(legacy_outcomes)
     constraints = [
         check
         for check in checks
-        if check.rule == "requirement_applicability"
+        if check.rule in {"requirement_applicability", "requirement_plan"}
         and check.status in {"confirmed", "no_finding"}
+        and all(
+            key in check.calculation
+            for key in ("source_kind", "dimension", "limit", "operator", "source_quote")
+        )
     ]
     replacements = {}
     conflicts = {}
@@ -298,6 +366,20 @@ def run_engineering_program(
                 },
                 missing_data=("resolve_calculation_and_verify_accepted_value",),
             )
+    if plan is not None:
+        plan["legacy_records"] = [
+            {
+                "check_id": check.check_id,
+                "source_kind": (check.calculation or {}).get("source_kind", ""),
+                "source_ids": list(check.source_ids),
+                "object_key": check.object_key,
+                "property_key": check.property_key,
+                "result": check.status,
+                "reason_code": check.reason_code,
+            }
+            for check in checks
+            if check.rule == "requirement_applicability"
+        ]
     return EngineeringReport(registry, tuple(checks), plan)
 
 
@@ -992,6 +1074,24 @@ def _wording(check):
         )
     if check.rule == "design_basis_dependency":
         pages = ", ".join(map(str, values["checked_pages"]))
+        if values["dependency"] == "fire_storage_basis":
+            return (
+                f"Принят состав резервуаров: {values['accepted']}. Уточнить расчётное обоснование запаса: "
+                "полезный объём в расчётном режиме, расход и продолжительность пожаротушения, "
+                "гарантированное пополнение и доступность запаса при резервировании. "
+                f"В проверенных материалах (стр. {pages}) связанная цепочка этих исходных данных не установлена.",
+                "Предоставить водный баланс с условиями применения нормы. Геометрические объёмы резервуаров "
+                "не приравниваются к полезному запасу; его недостаточность не доказана.",
+            )
+        if values["dependency"] == "protected_object_basis":
+            return (
+                f"Для защищаемого объекта «{obj}» принято решение: {values['accepted']}. "
+                "Уточнить применимые требования к этому объекту и увязать с ними вид пожаротушения, "
+                "исходные характеристики объекта, расчётный расход и отображение защиты на схеме. "
+                f"В проверенных материалах (стр. {pages}) эта связь не установлена.",
+                "Привести категорию и характеристики конкретного объекта, применимый нормативный пункт "
+                "и расчётную либо графическую привязку принятого решения. Отсутствие защиты не доказано.",
+            )
         if values["dependency"] == "fire_flow_basis":
             return (
                 f"Принят расход {values['accepted']} для решения «{obj}». Указать расчётное и нормативное обоснование "
@@ -1194,6 +1294,12 @@ def verified_programmatic_check(finding: FindingDraft) -> bool:
             if check.reason_code != raw["reason_code"] or check.status != raw["status"]:
                 continue
             rendered = check
+            if check.rule == "design_basis_dependency" and any(
+                (check.calculation or {}).get(key)
+                != (raw.get("calculation") or {}).get(key)
+                for key in ("accepted", "dependency", "missing")
+            ):
+                return False
             if check.rule in {"reference_resolution", "design_basis_dependency"}:
                 rendered = replace(check, calculation=raw["calculation"])
             comment, recommendation = _wording(rendered)

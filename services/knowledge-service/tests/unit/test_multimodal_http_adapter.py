@@ -17,6 +17,10 @@ from pdrd_knowledge_service.infrastructure.embedding import (
 from pdrd_knowledge_service.infrastructure.embedding.multimodal_http import (
     HttpMultimodalEmbeddingProvider,
 )
+from pdrd_knowledge_service.infrastructure.embedding.request_runtime import (
+    EmbeddingRequestPolicy,
+    EmbeddingRequestRuntime,
+)
 
 
 def _provider(
@@ -31,6 +35,7 @@ def _provider(
         health_timeout_seconds=10.0,
         model="shared-embedding",
         output_dimension=output_dimension,
+        runtime=EmbeddingRequestRuntime(EmbeddingRequestPolicy(max_attempts=1)),
     )
 
 

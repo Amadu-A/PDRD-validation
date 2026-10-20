@@ -22,6 +22,7 @@ from fastapi import (
 )
 from sqlalchemy.exc import SQLAlchemyError
 
+from pdrd_api_gateway.application.normative_diagnostics import normative_diagnostics
 from pdrd_api_gateway.application.ports.normative_catalog import (
     NormativeCatalogReadError,
 )
@@ -672,6 +673,16 @@ async def get_analysis_result(
                 error,
             ),
         ) from error
+
+
+@router.get("/{job_id}/diagnostics/normative")
+async def get_normative_diagnostics(
+    job_id: UUID,
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+) -> dict:
+    """Возвращает короткую сводку сохранённого результата с теми же правами владельца задания."""
+    result = await get_analysis_result(job_id, container)
+    return normative_diagnostics(result, job_id=str(job_id))
 
 
 @router.get(

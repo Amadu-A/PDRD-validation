@@ -451,6 +451,8 @@ def test_workflows_publish_progress_through_cancellation_gate() -> None:
         ) in config["cases"]:
             if f"Continue {source_name} Response" in nodes:
                 source_name = f"Continue {source_name} Response"
+            elif f"Continue {source_name} Retrieval Response" in nodes:
+                source_name = f"Continue {source_name} Retrieval Response"
             progress_node = nodes[progress_name]
             continue_node = nodes[continue_name]
             gate_node = nodes[gate_name]
@@ -672,6 +674,20 @@ def test_cancelled_checkpoint_returns_explicit_webhook_response() -> None:
             ) in config["cases"]
         }
         expected_sources.add(("Continue Technical Assignment", 0))
+        expected_sources.update(
+            (f"Continue {name} Retrieval Response", 0)
+            for name in (
+                "Search Requirements",
+                "Search User Packages",
+                "Search Finding Norms",
+                "Search Experience",
+                "Create Project Context",
+                "Search Project Context",
+                "Create Document Context",
+                "Search Document Context",
+            )
+            if name in nodes
+        )
         if config["path"].name != "analysis-v2-pdf.json":
             expected_sources.update(
                 {

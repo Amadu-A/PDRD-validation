@@ -13,6 +13,7 @@ from fastapi import (
 
 from pdrd_knowledge_service.application.ports.embedding import (
     EmbeddingProviderError,
+    EmbeddingTemporaryError,
 )
 from pdrd_knowledge_service.application.ports.experience_feed import ExperienceFeedError
 from pdrd_knowledge_service.application.ports.multimodal_embedding import (
@@ -77,6 +78,20 @@ def _translate_managed_search_error(
     error: Exception,
 ) -> HTTPException:
     """Преобразует managed retrieval error в HTTP contract."""
+    if isinstance(error, EmbeddingProviderError):
+        return HTTPException(
+            status_code=503
+            if isinstance(error, EmbeddingTemporaryError)
+            else 422
+            if error.status_code in {400, 413, 422}
+            else 502,
+            detail={
+                "code": error.reason_code,
+                "message": str(error),
+                "retry_managed": True,
+                "provider_status": error.status_code,
+            },
+        )
     if isinstance(
         error,
         (

@@ -35,8 +35,16 @@ def test_document_context_is_built_once_and_used_before_page_check() -> None:
         workflow["connections"]["Use Equipment Search"]["main"][1][0]["node"]
         == "Use Document Context"
     )
-    assert _next(workflow, "Create Document Context") == ["Understand Page"]
+    assert _next(workflow, "Create Document Context") == [
+        "Continue Create Document Context Retrieval Response"
+    ]
+    assert _next(workflow, "Continue Create Document Context Retrieval Response") == [
+        "Understand Page"
+    ]
     assert _next(workflow, "Search Document Context") == [
+        "Continue Search Document Context Retrieval Response"
+    ]
+    assert _next(workflow, "Continue Search Document Context Retrieval Response") == [
         "Gate Collect Page Document Context"
     ]
     assert _next(workflow, "Build Page Document Context") == [

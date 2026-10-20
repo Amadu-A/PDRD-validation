@@ -179,7 +179,12 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
     assert _successors(workflow, "Continue Build Document Context") == [
         "Create Document Context"
     ]
-    assert _successors(workflow, "Create Document Context") == ["Understand Page"]
+    assert _successors(workflow, "Create Document Context") == [
+        "Continue Create Document Context Retrieval Response"
+    ]
+    assert _successors(
+        workflow, "Continue Create Document Context Retrieval Response"
+    ) == ["Understand Page"]
 
     assert _successors(
         workflow,

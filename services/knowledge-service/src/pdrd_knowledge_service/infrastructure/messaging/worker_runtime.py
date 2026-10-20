@@ -8,6 +8,7 @@ from uuid import UUID
 from pdrd_knowledge_service.application.use_cases.index_normative_document import (
     IndexNormativeDocument,
 )
+from pdrd_knowledge_service.core.embedding_runtime import build_embedding_runtime
 from pdrd_knowledge_service.core.settings import (
     get_settings,
 )
@@ -62,6 +63,9 @@ async def execute_normative_indexing(
     )
 
     embedding_provider = HttpTextEmbeddingProvider(
+        runtime=build_embedding_runtime(
+            settings, engine, stage="normative_indexing", document_id=str(document_id)
+        ),
         base_url=settings.embedding.base_url,
         request_timeout_seconds=(settings.embedding.request_timeout_seconds),
         connect_timeout_seconds=(settings.embedding.connect_timeout_seconds),

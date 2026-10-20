@@ -88,6 +88,7 @@ from pdrd_knowledge_service.application.use_cases.trusted_experience import (
 from pdrd_knowledge_service.application.use_cases.user_packages import (
     SearchUserPackages,
 )
+from pdrd_knowledge_service.core.embedding_runtime import build_embedding_runtime
 from pdrd_knowledge_service.core.experience import build_experience_container
 from pdrd_knowledge_service.core.settings import (
     Settings,
@@ -236,7 +237,9 @@ def build_container() -> ApplicationContainer:
         )
     )
 
+    embedding_runtime = build_embedding_runtime(settings, database_engine)
     embedding_provider = HttpTextEmbeddingProvider(
+        runtime=embedding_runtime,
         base_url=(settings.embedding.base_url),
         request_timeout_seconds=(settings.embedding.request_timeout_seconds),
         connect_timeout_seconds=(settings.embedding.connect_timeout_seconds),
@@ -244,6 +247,7 @@ def build_container() -> ApplicationContainer:
     )
 
     multimodal_embedding_provider = HttpMultimodalEmbeddingProvider(
+        runtime=embedding_runtime,
         base_url=(settings.multimodal_embedding.base_url),
         request_timeout_seconds=(settings.multimodal_embedding.request_timeout_seconds),
         connect_timeout_seconds=(settings.multimodal_embedding.connect_timeout_seconds),
@@ -389,7 +393,9 @@ def build_container() -> ApplicationContainer:
         managed_search=search_normative,
     )
 
-    search_experience = build_experience_container(settings).search
+    search_experience = build_experience_container(
+        settings, runtime=embedding_runtime
+    ).search
 
     check_readiness = CheckReadiness(
         database_probe=DatabaseReadinessProbe(

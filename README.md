@@ -4,13 +4,13 @@
 
 PDRD Validation — локальный сервис проверки проектной и рабочей документации по нормативной базе, техническому заданию, пользовательским пакетам документов, контексту проекта и Базе Опыта.
 
-Пользователь загружает PDF, DXF/DWG или PDF вместе с соответствующим CAD-файлом, при необходимости прикладывает Техническое задание и выбирает нормативный раздел/пользовательские документы. Система извлекает текст и геометрию, формирует машинный контекст листа, выполняет semantic retrieval по источникам разных типов, запускает локальный VLM-анализ и возвращает структурированные замечания с разделённой доказательной базой `N/T/U/D/E`.
+Пользователь загружает PDF, DXF/DWG или PDF вместе с соответствующим CAD-файлом, при необходимости прикладывает Техническое задание и выбирает нормативный раздел/пользовательские документы. Система извлекает текст и геометрию, формирует машинный контекст листа, выполняет semantic retrieval по источникам разных типов, запускает локальный VLM-анализ и возвращает структурированные замечания с разделённой доказательной базой `N/T/U/D/E/EQ`.
 
 Открыть проект: **[https://pdrd.itcneoterm.local/](https://pdrd.itcneoterm.local/)**. Корпоративный вход и регистрация работают только через HTTPS.
 
-Обычный PDF/CAD можно проверить без нормативного раздела — как гостю, так и авторизованному пользователю. Для нормативного поиска, промпта раздела и личных пакетов учитываются назначенные пользователю разделы и владелец документов.
+На главной форме запуск доступен после выбора раздела и файла; до выбора раздела кнопка заблокирована и объясняет причину при наведении. Раздел обязателен и для гостя, и для авторизованного пользователя. Совместимость внутренних API с пустым нормативным snapshot не означает доступность такого запуска через форму. Для нормативного поиска, промпта раздела и личных пакетов учитываются назначенные пользователю разделы и владелец документов.
 
-Тяжёлые GPU-задачи выполняются с общим cross-process GPU lease. Analysis VLM и unified embedding runtime не должны одновременно загружать несовместимые тяжёлые модели в одну GPU без предварительной проверки VRAM.
+VLM и embedding работают в отдельных resident shared runtime. Проектный GPU lease, где он применяется, не управляет их размещением или выгрузкой. Допуск VLM, допуск embedding и очередь самого shared vLLM — отдельные механизмы; сообщение «engine busy» само по себе не доказывает нехватку VRAM.
 
 ## Возможности
 
@@ -60,6 +60,7 @@ PDRD Validation — локальный сервис проверки проек�
 | `U1`, `U2`, ... | User Package | пользовательские документы проекта/заказчика |
 | `D-p0007-f0001`, `D-p0010-c0` | Проверяемый PDF | связи страниц, проектные факты и внутренние противоречия, без нормативного статуса |
 | `E1`, `E2`, ... | Experience | База Опыта, используемая при finalization/recommendation |
+| `EQ…` | Документация оборудования | Проверенные паспорта/характеристики конкретных моделей; не нормативное основание N |
 
 Главные правила:
 
@@ -110,7 +111,8 @@ experience_sources                  = E
 | **API Gateway** | Публичный API, проверка прав/владельца, история, задания, неизменяемый снимок N/T/U, Outbox и артефакты | PostgreSQL `public.analysis_jobs`, `public.outbox_messages`; `/data/analyses` | Основной стек |
 | **Document Service** | Проверка числа PDF-страниц, извлечение PDF/CAD, DWG → DXF, изображения, crop, автоматический и Reviewed PDF | Собственной БД нет; обрабатывает переданные файлы | Основной стек |
 | **Knowledge Service** | Каталог N/U, промпты разделов, личные пакеты, lifecycle ТЗ, индексация, поиск и временный контекст проекта | PostgreSQL `knowledge`, Qdrant, `/data/normative`, `/data/technical-assignments` | Основной стек |
-| **Analysis Service** | VLM-анализ листа, проверка требований, правила доказательной базы N/T/U/D/E, финализация | Собственной БД нет; технический VLM-кеш `/data/vlm-cache` | Основной стек |
+| **Analysis Service** | Understanding, инженерная программа по фактам, независимый T-first и план N/T/U, аудит доказательств, финализация | Собственной БД нет; технический VLM-кеш `/data/vlm-cache` | Основной стек |
+| **Equipment Search Service** | Поиск документации оборудования через SearXNG, проверка найденных документов и асинхронное обновление EQ | PostgreSQL `equipment_search`, `/data/equipment-documents` | Основной стек; поиск включается в задании |
 | **User Service** | Профили, внешние идентичности, роли, назначения разделов, права Review/удаления и аудит | PostgreSQL `users`; без паролей | `identity` |
 | **Auth Service** | Локальная/email-аутентификация, LDAPS, подтверждение email, серверные сессии, CSRF и ограничение попыток | PostgreSQL `auth`; хеши только собственных паролей и токенов | `auth` вместе с `identity` |
 | **Admin Service** | Административный API: проверка сессии, роли, разделы и отдельные права пользователя | Собственной БД нет; API Auth/User/Knowledge | `auth` |
@@ -122,7 +124,7 @@ experience_sources                  = E
 
 **Shared infrastructure** имеет самостоятельный жизненный цикл в сети `ai-shared`: `shared-vlm`, `shared-embedding`, RabbitMQ и n8n. Проект не поднимает второй GPU runtime. Каталог `services/multimodal-embedding-service` сохранён как прежняя реализация для совместимости и тестов; в текущем Compose он не запускается. Вызовы идут в общий OpenAI-совместимый embedding endpoint.
 
-**Инфраструктура проекта:** PostgreSQL с независимыми схемами `public`/`knowledge`/`users`/`auth`/`experience`, Qdrant и постоянные тома файлов. Сервисы не читают чужие схемы SQL напрямую; межсервисные UUID являются логическими ссылками, без внешних ключей между схемами.
+**Инфраструктура проекта:** PostgreSQL с независимыми схемами `public`/`knowledge`/`users`/`auth`/`experience`/`equipment_search`, Qdrant и постоянные тома файлов. Сервисы не читают чужие схемы SQL напрямую; межсервисные UUID являются логическими ссылками, без внешних ключей между схемами.
 
 Направление зависимостей backend:
 
@@ -146,7 +148,7 @@ Infrastructure ──implements──> Application ports
 flowchart TD
     U["Пользователь"] --> TLS["HTTPS pdrd.itcneoterm.local:443"]
     TLS --> FE["Frontend / Nginx: HTTP upstream :8080"]
-    FE --> GW["API Gateway :8200"]
+    FE --> GW["API Gateway :8000; host :8200"]
     GW --> AUTH["Auth Service: проверка действующей сессии"]
     AUTH --> US["User Service: профиль и права"]
     GW --> ADMIN["Admin Service"]
@@ -167,6 +169,8 @@ flowchart TD
     KS2 --> QD[("Project Qdrant")]
     KS2 --> EMB["Shared vLLM embedding endpoint"]
     AS --> VLM["Shared vLLM vision endpoint"]
+    GW --> EQS["Equipment Search Service / EQ"]
+    EQS --> WEB["SearXNG и проверяемые документы оборудования"]
     N8N --> W
     W --> PG
     W --> FS
@@ -204,7 +208,7 @@ flowchart TD
 
     PDF --> TEXT["Page extraction"]
     TEXT --> CHUNK["Chunking"]
-    CHUNK --> EMB["Unified text embedding\nQwen3-VL-Embedding-8B"]
+    CHUNK --> EMB["Unified text embedding\nshared-embedding / 4096"]
     EMB --> MANAGED[("dva_catalog_active")]
 
     IDX --> PG
@@ -228,7 +232,7 @@ flowchart TD
 
     TW --> TSTORE
     TW --> PAGE["Page text + rendered image"]
-    PAGE --> EMB["Qwen3-VL-Embedding-8B"]
+    PAGE --> EMB["shared-embedding / 4096"]
     EMB --> TQ[("dva_technical_assignment_active")]
     TW --> READY["index_status=ready"]
 
@@ -237,46 +241,36 @@ flowchart TD
 
 ТЗ индексируется до запуска n8n. Analysis job не начинает orchestration, пока связанный T-index не перешёл в `READY`.
 
-## 4. Анализ одного листа с N/T/U
+## 4. Анализ листа и инженерная проверка
 
 ```mermaid
 flowchart TD
-    DOC["Document extraction"] --> FACTS["Page understanding (stage-scoped)"]
-    FACTS --> PZQ["Project Context query"]
-    PZQ --> PZ{"ПЗ включена?"}
-    PZ -->|да| PZS["Temporary Project Context"]
-    PZ -->|нет| EMPTY["Без ПЗ"]
-    PZS --> Q["Grouped/typed retrieval queries"]
-    EMPTY --> Q
-    FACTS --> Q
-    Q --> REQ{"ТЗ подключено?"}
-    REQ -->|нет| NS["General N retrieval"]
-    REQ -->|да| TS["T multimodal retrieval"]
-    TS --> TN["T-guided N retrieval"]
-    TN --> MERGE["Typed requirement context"]
-    NS --> MERGE
-    TS --> MERGE
-    Q --> US["Search User Packages"]
-    MERGE --> NCTX["N1, N2, ..."]
-    MERGE --> TCTX["T1, T2, ..."]
-    US --> UCTX["U1, U2, ..."]
-    NCTX --> CHECK["VLM requirements check"]
-    TCTX --> CHECK
-    UCTX --> CHECK
-    CHECK --> FQ["Finding-local normative queries"]
-    FQ --> FN["Finding-local N retrieval"]
-    FN --> FINALCTX["Normative enrichment"]
-    CHECK --> EQ["Optional Experience queries"]
-    FINALCTX --> EQ
-    EQ --> ENABLED{"Experience enabled?"}
-    ENABLED -->|нет: текущий default| EMPTY_E["No E evidence"]
-    ENABLED -->|да: после trusted ingestion| ES["Trusted E retrieval"]
-    EMPTY_E --> FINAL["Finalization"]
-    ES --> FINAL
-    FINAL --> RESULT["Final findings: N/T/U/D/E separately"]
+    EXTRACT["Document: текст, растры, геометрия, физические страницы"] --> UNDER["Understanding: атомарные факты"]
+    UNDER --> TF["Exhaustive T-first: полный feed требований ТЗ и исходные ID"]
+    UNDER --> CONTEXT["D / PZ при включённых опциях"]
+    CONTEXT --> QUERIES["Базовые темы и независимые темы N-first при включённом флаге"]
+    TF --> QUERIES
+    QUERIES --> N["General N / T-guided N retrieval"]
+    QUERIES --> U["Search User Packages"]
+    N --> CHECK["Check Norms: модельные кандидаты и программная проверка N/T/U"]
+    U --> CHECK
+    UNDER --> PROGRAM["Единый реестр: объект, свойство, условия, доказательства"]
+    N --> PROGRAM
+    U --> PROGRAM
+    PROGRAM --> RULES["Расчёты, согласованность, основания; старые проверки и независимый requirement_plan"]
+    CHECK --> MERGE["Объединение одной претензии с сохранением всех доказательств"]
+    RULES --> MERGE
+    TF --> MERGE
+    MERGE --> ENRICH["Finding-local N и optional E"]
+    ENRICH --> FINAL["Finalization: аудит и воспроизведение программного доказательства"]
+    FINAL --> RESULT["Findings, метрики, страницы, Review и отдельные виды источников"]
 ```
 
-`E` в `.env.example` отключён: наличие в workflow шага Experience не означает работающую доверенную базу. Промежуточные гипотезы не удаляются, но не становятся подтверждёнными замечаниями без дополнительной проверки.
+T-first самостоятельный: T-guided retrieval не ограничивает полный проход требований ТЗ. `U` остаётся пользовательским требованием. `D` и ПЗ описывают проект, `E` даёт проверенный опыт, `EQ` — документацию конкретного оборудования; эти источники не становятся нормативом `N`.
+
+`ANALYSIS_SERVICE_NORMATIVE_PLAN__ENABLED` включает независимые проверки уже найденных N/T/U-положений, даже если модель не предложила замечание. Репозиторный default — `false`; состояние сервера определяется его `.env`. Новый план дополняет прежние проверяемые классы. Неизвестная редакция, обязательность, применимость или недостающие данные отражаются в диагностике и не доказывают N-нарушение. Программные шаги не вызывают VLM заново.
+
+`E` в `.env.example` отключён до оценки на отложенных документах и подключения рабочей версии. Наличие узла Experience в workflow само по себе не подтверждает наличие доверенного рабочего индекса.
 
 ### 4.1. Контекст всего PDF и межстраничная проверка
 
@@ -286,7 +280,7 @@ flowchart TD
     EXTRACT --> ARTIFACT["Gateway: сохранить растры и геометрию визуализации"]
     ARTIFACT --> COMPACT["n8n: компактные метаданные без растров для Task Runner"]
     COMPACT --> MODE{"Учитывать контекст всего проекта?"}
-    MODE -->|Нет: быстрый режим| LIGHT["Прежние лёгкие промпт и схема Understanding, без D-фактов"]
+    MODE -->|Нет| LIGHT["Локальное Understanding; без временного D-индекса"]
     LIGHT --> LOCAL["Проверка N/T/U: обход всех специальных D HTTP-узлов"]
     MODE -->|Да| UNDERSTAND["Понимание листов и атомарные факты D"]
     UNDERSTAND --> INDEX["Knowledge: временный Qdrant D текущего задания"]
@@ -307,22 +301,18 @@ flowchart TD
 ```
 
 Чекбокс находится под «Использовать пояснительную записку», по умолчанию выключен
-и независимо управляет D в PDF-only. Подпись предупреждает об увеличении времени
-примерно в 2,5 раза. D содержит факты проверяемых страниц одного PDF. Для сравнения
+и независимо управляет D в PDF-only. Указанная в интерфейсе оценка времени приблизительна и не является измеренной гарантией. D содержит факты проверяемых страниц одного PDF. Для сравнения
 всего PDF в пределах 200 страниц оставьте поле диапазона пустым.
 
 D не является нормативом и не выбирает правильное из противоречащих значений.
 Для сопоставимой группы формируется один `finding_id`; решение Review общее,
 а доказательства и отметки PDF относятся к своим физическим страницам.
 При выключенном D workflow обходит индексирование, поиск, сбор контекста и
-межстраничную проверку вместе с их уведомлениями. Промпт и схема Understanding
-совпадают с прежним лёгким режимом `main`; пустые D-инструкции не добавляются
-в N/T/U и финализацию. Общий контракт результата и порядок страниц сохраняются.
+межстраничную проверку вместе с их уведомлениями. Это не отключает извлечение доступных локальных инженерных фактов. Общий контракт результата и порядок физических страниц сохраняются.
 
 `source_kinds` вычисляет сервер из сохранённых типизированных массивов.
 Карточка на чертеже содержит номер, конкретный текст и рабочие ссылки N/T/U/D;
-полный текст доступен через кнопку «i». Шрифт уменьшен примерно в 1,5 раза,
-цвета и управление Review сохранены. Классификация и её объяснение находятся
+полный текст доступен через кнопку «i». Классификация и её объяснение находятся
 в текстовом списке под страницами. Если источника или адреса нет, ссылка на
 чертеже не создаётся. Для ПЗ адрес к исходному PDF пока отсутствует;
 её контекст отображается в полном отчёте.
@@ -344,6 +334,35 @@ Code-узлы PDF получают текст и метаданные. Раст�
 описаны в [отчёте инженерного качества](docs/engineering-quality.md).
 Отчёт содержит исходную матрицу 35 кейсов, границы мок-проверок и порядок
 серверной приёмки; реальный новый benchmark требует отдельного прогона.
+
+### 4.2. Устойчивость поиска и диагностика
+
+```mermaid
+flowchart LR
+    CLIENT["n8n: страницы / задания; индексаторы N/T/E"] --> NORMAL["Точные input: нормализация пробелов и дедупликация"]
+    NORMAL --> CACHE{"Есть в job-кэше?"}
+    CACHE -->|Да| RESTORE["Векторы в исходном порядке; source/page IDs сохраняются"]
+    CACHE -->|Нет| FIFO["Ограниченная локальная FIFO"]
+    FIFO --> SLOT["Общий PostgreSQL session slot на физический HTTP-запрос"]
+    SLOT --> HTTP["shared-embedding; text batch до 4, image по 1"]
+    HTTP -->|Успех| CACHEPUT["Сохранить завершённую микропорцию"]
+    CACHEPUT --> RESTORE
+    HTTP -->|Временный отказ| RELEASE["Освободить слот"]
+    RELEASE --> WAIT["Backoff + jitter + Retry-After; отмена / deadline"]
+    WAIT -->|Бюджет остался| FIFO
+    WAIT -->|Отмена| CANCEL["cancelled: завершить весь batch до обработчиков источников"]
+    WAIT -->|Бюджет исчерпан| UNAVAILABLE["503 с диагностикой; поиск не завершён"]
+```
+
+Один runtime Knowledge разделяется между N, T-guided, U, D, ПЗ и E. Индексаторы и мигратор используют те же PostgreSQL advisory slots; новая таблица не создаётся. Это допуск запросов PDRD, а не управление чужими клиентами shared runtime. Локальная FIFO обслуживает ожидающие микропорции; глобальные session slots ограничивают суммарную ёмкость API и процессов индексации.
+
+По умолчанию разрешён один физический запрос, до 32 локальных ожидающих задач, до 4 повторов неуспешных микропорций в пределах embedding-операции (пятый отказ завершает её) и бюджет 120 секунд, дополнительно ограниченных оставшимся lifecycle задания. Backoff — от 1 секунды, потолок 15 секунд с jitter; `Retry-After` может потребовать большего ожидания в пределах общего deadline. Во время backoff слот не удерживается. Успешные микропорции не повторяются. Кэш изолирован job ID, моделью, размерностью, инструкцией и точным нормализованным input; сходные инженерные вопросы не объединяются.
+
+В embedding-узлах n8n выключен дополнительный `retryOnFail`: владельцем повторов является Knowledge. [HTTP batching n8n 2.34.5](https://github.com/n8n-io/n8n/blob/n8n%402.34.5/packages/nodes-base/nodes/HttpRequest/V3/HttpRequestV3.node.ts) задаёт интервал отправки 100 мс между items; это не гарантия числа активных HTTP-запросов. Реальный допуск ограничивается сервером. Постоянная ошибка или исчерпание бюджета завершают поиск ошибкой, а не пустым набором норм; отмена возвращается явно и не считается успешным поиском. IF перед обработчиком источников проверяет весь batch: отмена одной страницы останавливает пакет целиком и не нарушает его индексы.
+
+Настройки клиента: `KNOWLEDGE_SERVICE_EMBEDDING_REQUESTS__*` в [.env.example](.env.example). Они не меняют модели, Qdrant или очереди shared vLLM. Для анализа конкретного 503 нужны runtime-метрики и журнал отказа; busy не равен OOM.
+
+Короткая сводка завершённого задания: `GET /api/v1/analyses/{job_id}/diagnostics/normative` с обычными правами доступа к заданию. Она содержит счётчики embedding и ожидания, N/T/U, исходы и причины `requirement_plan`, судьбу нормативных кандидатов. Отсутствующая телеметрия старых результатов обозначается как неизвестная. Полный протокол остаётся в сохранённых метриках результата. `wait_ms` отделяет локальный допуск/backoff от `provider_ms`; последний включает HTTP и серверное ожидание, поэтому не равен чистому времени генерации GPU. Логи `embedding_retrieval` содержат job/stage/operation ID и счётчики без текстов и векторов.
 
 ## 5. GPU coordination
 
@@ -373,6 +392,7 @@ Shared runtimes управляют собственным размещением
 | User Service | `users` | `users.alembic_version_users` |
 | Auth Service | `auth` | `auth.alembic_version_auth` |
 | Experience Service | `experience` | `experience.alembic_version_experience` |
+| Equipment Search Service | `equipment_search` | `equipment_search.alembic_version_equipment_search` |
 
 Общая схема логических связей: пунктир обозначает ссылку по UUID/контракту API, **не внешний ключ PostgreSQL**.
 
@@ -861,6 +881,22 @@ flowchart LR
 ```
 
 Runtime не хранит прикладных таблиц проекта; Qdrant и метаданные индекса принадлежат Knowledge. Веса моделей и хранение shared runtime управляются отдельным стеком shared infrastructure.
+
+### 6.10. Equipment Search Service
+
+```mermaid
+flowchart TD
+    GW["Gateway: запуск, статус, отмена, resume, SSE и документы EQ"] --> EQ["Equipment Search Service"]
+    EQ --> SEARCH["SearXNG: поиск кандидатов"]
+    EQ --> DOC["Document Service: извлечение"]
+    EQ --> KNOW["Knowledge: извлечённые факты оборудования"]
+    EQ --> AS["Analysis: ограниченная проверка документов"]
+    EQ --> DB[("equipment_search: equipment_jobs / job_models / job_versions / search_events")]
+    EQ --> CATALOG[("manufacturers / source_domains / source_audit / documents")]
+    EQ --> FILES["equipment_documents: /data/equipment-documents"]
+```
+
+Задание поиска и его ревизии сохраняются отдельно от анализа. Возобновление использует уже обработанные модели, бюджет и журнал событий. Полученные EQ-факты не становятся N-доказательствами. Gateway предоставляет `/api/v1/analyses/{job_id}/equipment-search`, `/report`, `/events`, `/cancel`, `/resume` и `/equipment-documents/{source_id}`; принятые обновления Review применяются отдельной командой. 404 у SSE и сбой скачивания PDF проверяются как разные HTTP-операции.
 
 ## 7. Qdrant — stable aliases и physical collections
 
@@ -1887,7 +1923,8 @@ PDRD-validation/
 │   ├── api-gateway/                   # public: задания, история, Outbox, очистка
 │   ├── document-service/              # извлечение/рендеринг PDF/CAD; без SQL
 │   ├── knowledge-service/             # knowledge: N/U/T, Qdrant и индексаторы
-│   ├── analysis-service/              # VLM pipeline и кеш; без SQL
+│   ├── analysis-service/              # VLM, инженерная программа и кеш; без SQL
+│   ├── equipment-search-service/      # equipment_search: документация оборудования / EQ
 │   ├── user-service/                  # users: профили, роли, разделы и аудит
 │   ├── auth-service/                  # auth: LDAPS, локальные пароли и сессии
 │   ├── admin-service/                 # административные сценарии через API; без SQL
@@ -1904,7 +1941,7 @@ PDRD-validation/
 ├── ops/
 │   ├── certificates/                 # CA bundle AD и локальные файлы сертификатов
 │   ├── check-quality.ps1             # общий Windows quality gate
-│   ├── check-quality.sh              # Linux: общий и пять изолированных наборов
+│   ├── check-quality.sh              # Linux: общий и шесть изолированных наборов
 │   ├── Dockerfile.quality
 │   ├── compose.user-test.yaml         # изолированные PostgreSQL-проверки
 │   ├── compose.auth-test.yaml
@@ -1940,6 +1977,7 @@ PDRD-validation/
 
 | Переменная | Когда обязательна | Назначение |
 |---|---|---|
+| `PDRD_EQUIPMENT_INTERNAL_KEY` | Всегда | Служебные запросы Equipment Search и ключ SearXNG; задать отдельное случайное значение |
 | `PDRD_POSTGRES_PASSWORD` | Всегда | Пароль PostgreSQL проекта; Compose передаёт его каждому владельцу схемы |
 | `PDRD_RABBITMQ_PASSWORD` | Всегда | Пароль уже существующего пользователя RabbitMQ в shared infrastructure |
 | `PDRD_RETENTION_INTERNAL_KEY` | Всегда при `scripts/up.sh` | Отдельный ключ Gateway → Knowledge для очистки копии ТЗ |
@@ -2034,11 +2072,12 @@ PDRD_EMBEDDING_SCHEMA_VERSION=2
 cd ~/projects/PDRD-validation || exit 1
 git status --short
 git pull --ff-only
-bash scripts/up.sh
-bash scripts/check-stack.sh
+bash ops/check-quality.sh && bash scripts/up.sh && bash scripts/check-stack.sh
 ```
 
-Перед pull рабочая копия должна быть чистой; ветка сервера должна соответствовать проверенной опубликованной ветке. `up.sh` читает `.env`, проверяет обязательные параметры/shared infrastructure, собирает сервисы, выполняет миграции и запускает выбранные профили. `check-stack.sh` проверяет готовность и версии миграций Gateway, Knowledge, User, Auth и Experience по включённым профилям. `knowledge-embedding-migrator` проверяет embedding fingerprint до старта Knowledge runtime. Новый отдельный deploy-скрипт для истории/хранения не нужен.
+На сервере используется remote приватного `neo-term-it/PDRD-validation`; проверить `git remote -v` и текущую ветку перед pull. Перед pull рабочая копия должна быть чистой; ветка сервера должна соответствовать проверенной опубликованной ветке. `up.sh` читает `.env`, проверяет обязательные параметры/shared infrastructure, собирает сервисы, выполняет миграции и запускает выбранные профили. `check-stack.sh` проверяет готовность и версии миграций Gateway, Knowledge, User, Auth, Experience и Equipment Search по включённым профилям. `knowledge-embedding-migrator` проверяет embedding fingerprint до старта Knowledge runtime. Новый отдельный deploy-скрипт для истории/хранения не нужен.
+
+После изменения JSON в `n8n/workflows/` для всех трёх V2 workflow выполнить **Import → Save → Publish**. `scripts/up.sh` не публикует изменения в shared n8n. До сопоставимого E2E зафиксировать SHA ветки, версии опубликованных workflow, входные SHA-256, нормативный snapshot, настройки моделей и флаг N-first. Мок-тесты и локальное воспроизведение фактов не подтверждают серверную инженерную приёмку.
 
 ## Адрес проекта и HTTPS
 
@@ -2080,6 +2119,8 @@ docker compose logs --tail=100 api-gateway-outbox
 
 Обычная остановка — `docker compose down`. **Не использовать `docker compose down -v` для обновления:** он уничтожает постоянные данные. Не пересоздавать shared stack ради обновления проекта.
 
+Отчёт о текущем этапе, границы измерений и порядок серверной приёмки: [Quality, этап 6](docs/quality-resilience-stage6.md).
+
 # Тестирование
 
 ## Windows: общий quality gate
@@ -2100,13 +2141,13 @@ git diff -- README.md
 
 ## Linux: общие и изолированные тесты
 
-Из корня репозитория запустите общий набор и пять изолированных интеграционных наборов одной командой:
+Из корня репозитория запустите общий набор и шесть изолированных интеграционных наборов одной командой:
 
 ```bash
 bash ops/check-quality.sh
 ```
 
-Скрипт выводит шесть этапов: зависимости, Ruff, Python- и frontend-тесты в `quality-tests`, затем PostgreSQL-проверки Gateway, Knowledge, Experience, User и Auth. Интеграционные наборы запускаются **в отдельных тестовых проектах** с временными БД; Knowledge дополнительно использует тестовый Qdrant. Они не должны получать рабочие database URL или production volumes.
+Скрипт выводит семь этапов: зависимости, Ruff, Python- и frontend-тесты в `quality-tests`, затем PostgreSQL-проверки Gateway, Knowledge, Experience, User, Auth и Equipment Search. Интеграционные наборы запускаются **в отдельных тестовых проектах** с временными БД; Knowledge дополнительно использует тестовый Qdrant. Они не должны получать рабочие database URL или production volumes.
 
 | Подсистема | Compose-файл | Остановка с кодом тестов |
 |---|---|---|
@@ -2115,6 +2156,7 @@ bash ops/check-quality.sh
 | Gateway | `ops/compose.gateway-test.yaml` | `--exit-code-from gateway-test-runner` |
 | Knowledge | `ops/compose.knowledge-test.yaml` | `--exit-code-from knowledge-test-runner` |
 | Experience | `ops/compose.experience-test.yaml` | `--exit-code-from experience-test-runner` |
+| Equipment Search | `ops/compose.equipment-test.yaml` | `--exit-code-from equipment-test-runner` |
 
 Для проверки и последующего обновления сервисов:
 
@@ -2122,7 +2164,7 @@ bash ops/check-quality.sh
 bash ops/check-quality.sh && bash scripts/up.sh
 ```
 
-`up.sh` запускается только после успешного завершения всех шести этапов. При ошибке скрипт печатает название этапа, возвращает исходный код ошибки и останавливается. Текущий тестовый проект очищается через `down --remove-orphans`, в том числе при ошибке runner или прерывании запуска. Если не удалось выполнить саму очистку, проверка также завершается ошибкой. Рабочий стек эти команды очистки не затрагивают. После исправления причины повторите `bash ops/check-quality.sh`.
+`up.sh` запускается только после успешного завершения всех семи этапов. При ошибке скрипт печатает название этапа, возвращает исходный код ошибки и останавливается. Текущий тестовый проект очищается через `down --remove-orphans`, в том числе при ошибке runner или прерывании запуска. Если не удалось выполнить саму очистку, проверка также завершается ошибкой. Рабочий стек эти команды очистки не затрагивают. После исправления причины повторите `bash ops/check-quality.sh`.
 
 Проверка доступного общего VLM runtime запускается отдельно:
 
@@ -2135,7 +2177,7 @@ docker compose --profile vlm-runtime-test run --rm --build vlm-runtime-tests
 ## Ручная приёмка
 
 - Открыть `https://pdrd.itcneoterm.local/`; проверить локального администратора, AD-вход, выход и повторный вход с тем же `user_id`.
-- Выполнить обычный PDF/CAD **без раздела** гостем и авторизованным пользователем; проверить понятный отказ свыше 200 выбранных страниц и допустимый диапазон большого PDF.
+- Проверить блокировку запуска без раздела и подсказку; после выбора раздела и файла выполнить PDF/CAD гостем и авторизованным пользователем; проверить понятный отказ свыше 200 выбранных страниц и допустимый диапазон большого PDF.
 - Проверить историю в кабинете/на главной, изоляцию двух пользователей и открытие `?job_id=...` без нового VLM-запуска.
 - Проверить назначенные разделы, чтение промпта, собственные пакеты и запрет доступа к чужому UUID.
 - Проверить создание/переименование раздела руководителем, удаление с отдельным разрешением и запрет удаления без него; новый раздел доступен активным проектировщикам/руководителям.
@@ -2206,7 +2248,9 @@ Shared runtime checks осуществляются через опубликов
 - immutable T snapshot и READY barrier перед analysis;
 - multimodal T retrieval;
 - T-guided normative retrieval;
-- N/T/U typed evidence;
+- N/T/U/D/E/EQ typed evidence;
+- exhaustive T-first, реестр инженерных утверждений и воспроизводимые программные проверки;
+- независимый requirement_plan под отдельным флагом и компактная диагностика причин непроверенных требований;
 - finding-local normative enrichment;
 - контракт поиска Experience присутствует в finalization; рабочий E выключен до отложенной оценки качества и подключения проверенной версии;
 - shared vLLM vision и embedding logical endpoints, 4096-dimension vector contract;
@@ -2230,7 +2274,7 @@ Shared runtime checks осуществляются через опубликов
 Каталог и ручные версии Experience поддерживают нормативные разделы,
 выбор/удаление примеров и дедупликацию повторных прогонов.
 Сохранение каталога выполняется при утверждении PDF; отдельной кнопки нет.
-Рабочий E выключен до парной оценки на отложенном наборе и подключения рабочих версий.
+По умолчанию рабочий E выключен до парной оценки на отложенном наборе и подключения рабочих версий.
 В этапе 9 сейчас реализован реестр/подготовка; фактическое обучение и смена весов впереди.
 
 Принятие замечания одной зелёной галочкой принимает его текущую сохранённую область:

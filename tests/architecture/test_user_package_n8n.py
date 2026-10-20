@@ -144,8 +144,8 @@ def _functional_successor(
             current_name,
         )
 
-        if not successor.startswith(
-            "Gate ",
+        if not (
+            successor.startswith("Gate ") or successor.endswith(" Retrieval Response")
         ):
             return successor
 

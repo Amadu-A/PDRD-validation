@@ -168,33 +168,12 @@ def test_pdf_document_scoped_gpu_stages_have_longer_http_budget() -> None:
     assert expected["Validate Project Context"] == 600_000
 
 
-def test_io_search_nodes_keep_local_n8n_retry() -> None:
-    """Убирается только дорогой VLM retry, а не полезный I/O retry."""
+def test_embedding_nodes_do_not_multiply_managed_retry_budget() -> None:
+    """Одна политика Knowledge действует для N/T-guided/U/D/PZ/E во всех workflow."""
     for file_name in _WORKFLOWS:
-        workflow = _load_workflow(
-            file_name,
-        )
-
-        nodes = workflow["nodes"]
-
-        assert isinstance(
-            nodes,
-            list,
-        )
-
-        search_requirements = next(
-            node
-            for node in nodes
-            if isinstance(
-                node,
-                dict,
-            )
-            and node.get(
-                "name",
-            )
-            == "Search Requirements"
-        )
-
-        assert search_requirements["retryOnFail"] is True
-
-        assert search_requirements["maxTries"] == 3
+        for node in _load_workflow(file_name)["nodes"]:
+            if node.get("parameters", {}).get("sendHeaders") and "X-PDRD-Stage" in str(
+                node["parameters"]
+            ):
+                assert node["retryOnFail"] is False
+                assert "maxTries" not in node and "waitBetweenTries" not in node

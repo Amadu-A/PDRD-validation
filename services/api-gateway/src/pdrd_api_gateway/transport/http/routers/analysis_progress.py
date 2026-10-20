@@ -236,6 +236,21 @@ async def get_analysis_progress(
     )
 
 
+@router.get("/internal/v1/analysis-progress/{document_id}")
+async def get_analysis_control(
+    document_id: UUID,
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+) -> dict:
+    """Даёт внутренним адаптерам deadline и отмену без сдвига пользовательского progress."""
+    try:
+        return await require_update_analysis_progress(container).get_control(
+            document_id=document_id,
+            max_runtime_seconds=container.settings.lifecycle.max_runtime_seconds,
+        )
+    except AnalysisProgressJobNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
 @router.post(
     "/internal/v1/analysis-progress/{document_id}",
     response_model=AnalysisProgressUpdateResponse,

@@ -139,7 +139,7 @@ async def test_reference_discovery_from_real_page_without_model_or_canned_findin
 
 
 async def test_real_adopted_decisions_produce_concrete_questions_and_keep_sources():
-    """Пожарный расход и выбор трубы имеют разные зависимости и не подменяются доказанным нарушением."""
+    """Расход, труба и защита двух разных объектов сохраняют отдельные проверяемые вопросы."""
     report = document_engineering_report(source_pages(), "dependency-proof")
     drafts = tuple(
         f
@@ -150,7 +150,7 @@ async def test_real_adopted_decisions_produce_concrete_questions_and_keep_source
         )
     )
     _, final, metrics = await finalize(*drafts)
-    assert len(final) == 2 and metrics["vlm_call_count"] == 0
+    assert len(final) == 4 and metrics["vlm_call_count"] == 0
     assert all(
         f.status == "needs_review" and f.document_context_basis_sources for f in final
     )
@@ -164,6 +164,12 @@ async def test_real_adopted_decisions_produce_concrete_questions_and_keep_source
         for f in final
     )
     assert not any("Сверить параметр" in f.comment for f in final)
+    assert {"здания котельной", "склада угля"} <= {
+        origin["check"]["object_key"].split(":", 1)[-1]
+        for finding in final
+        for origin in finding.origin_assertions
+        if origin.get("check", {}).get("property_key") == "protected_object_basis"
+    }
 
 
 async def test_single_scalar_without_claim_stays_lossless_diagnostic():

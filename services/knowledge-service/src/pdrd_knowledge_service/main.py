@@ -13,6 +13,10 @@ from pdrd_knowledge_service.core.container import (
     build_container,
 )
 from pdrd_knowledge_service.core.observability import configure_experience_logging
+from pdrd_knowledge_service.infrastructure.analysis_control import HttpAnalysisControl
+from pdrd_knowledge_service.transport.http.embedding_lifecycle import (
+    EmbeddingLifecycleMiddleware,
+)
 from pdrd_knowledge_service.transport.http.routers.document_context import (
     router as document_context_router,
 )
@@ -60,6 +64,10 @@ def create_app(
     )
 
     application.state.container = application_container
+    application.add_middleware(
+        EmbeddingLifecycleMiddleware,
+        check_control=HttpAnalysisControl(settings.analysis_control_base_url).get,
+    )
 
     application.include_router(
         health_router,

@@ -30,7 +30,7 @@ async def test_evaluation_writes_report_with_dataset_hash_without_enabling_main_
     monkeypatch.setattr(
         runtime,
         "build_experience_container",
-        lambda settings, shadow: ExperienceContainer(index, search),
+        lambda settings, shadow, runtime: ExperienceContainer(index, search),
     )
     version = VersionIndexJob(
         UUID(int=100),
@@ -105,7 +105,7 @@ async def test_preview_prints_tag_and_learning_use_without_writing_quality_repor
     monkeypatch.setattr(
         runtime,
         "build_experience_container",
-        lambda settings, shadow: ExperienceContainer(index, search),
+        lambda settings, shadow, runtime: ExperienceContainer(index, search),
     )
     report = tmp_path / "missing-report.json"
     settings = Settings(
@@ -127,7 +127,7 @@ async def test_sync_disabled_configuration_does_not_mutate_index(monkeypatch):
     monkeypatch.setattr(
         runtime,
         "build_experience_container",
-        lambda settings, shadow: ExperienceContainer(index, search),
+        lambda settings, shadow, runtime: ExperienceContainer(index, search),
     )
     settings = Settings(
         _env_file=None, experience=ExperienceIndexSettings(key="x" * 64)

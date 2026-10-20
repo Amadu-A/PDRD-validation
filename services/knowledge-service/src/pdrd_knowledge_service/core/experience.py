@@ -30,6 +30,9 @@ from pdrd_knowledge_service.domain.experience_admission import require_quality_m
 from pdrd_knowledge_service.infrastructure.embedding.multimodal_http import (
     HttpMultimodalEmbeddingProvider,
 )
+from pdrd_knowledge_service.infrastructure.embedding.request_runtime import (
+    EmbeddingRequestRuntime,
+)
 from pdrd_knowledge_service.infrastructure.embedding.text_http import (
     HttpTextEmbeddingProvider,
 )
@@ -68,7 +71,10 @@ class ExperienceContainer:
 
 
 def build_experience_container(
-    settings: Settings, *, shadow: bool = False
+    settings: Settings,
+    *,
+    shadow: bool = False,
+    runtime: EmbeddingRequestRuntime | None = None,
 ) -> ExperienceContainer:
     """Создаёт HTTP-адаптеры; проверочный режим доступен CLI, не параметру браузера."""
     options = settings.experience
@@ -93,6 +99,8 @@ def build_experience_container(
         "health_timeout_seconds": settings.embedding.health_timeout_seconds,
         "output_dimension": settings.embedding_dimension,
     }
+    if runtime is not None:
+        common["runtime"] = runtime
     trusted_search = SearchTrustedExperience(
         HttpTextEmbeddingProvider(**common),
         vectors,

@@ -5,14 +5,24 @@
 import base64
 import logging
 import time
+from contextlib import suppress
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
 
+from pdrd_knowledge_service.application.embedding_execution import (
+    current_embedding_execution,
+)
+from pdrd_knowledge_service.application.ports.embedding import EmbeddingTemporaryError
 from pdrd_knowledge_service.application.ports.multimodal_embedding import (
     MultimodalEmbeddingInput,
     MultimodalEmbeddingProviderError,
     MultimodalEmbeddingTemporaryError,
+)
+from pdrd_knowledge_service.infrastructure.embedding.request_runtime import (
+    EmbeddingRequestRuntime,
 )
 
 logger = logging.getLogger(
@@ -50,6 +60,7 @@ class HttpMultimodalEmbeddingProvider:
         health_timeout_seconds: float,
         model: str = _DEFAULT_MODEL,
         output_dimension: int = _DEFAULT_OUTPUT_DIMENSION,
+        runtime: EmbeddingRequestRuntime | None = None,
     ) -> None:
         """Сохраняет stable logical shared-embedding contract."""
         normalized_base_url = base_url.rstrip(
@@ -84,6 +95,7 @@ class HttpMultimodalEmbeddingProvider:
         self._connect_timeout_seconds = connect_timeout_seconds
 
         self._health_timeout_seconds = health_timeout_seconds
+        self._runtime = runtime or EmbeddingRequestRuntime()
 
     async def embed(
         self,
@@ -96,6 +108,24 @@ class HttpMultimodalEmbeddingProvider:
         if not inputs:
             return []
 
+        try:
+            return await self._runtime.execute(
+                inputs,
+                identity=f"{self._base_url}:{self._model}:{self._output_dimension}",
+                send=self._embed_once,
+            )
+        except EmbeddingTemporaryError as error:
+            raise MultimodalEmbeddingTemporaryError(
+                str(error),
+                reason_code=error.reason_code,
+                status_code=error.status_code,
+                retry_after=error.retry_after,
+            ) from error
+
+    async def _embed_once(
+        self, inputs: tuple[MultimodalEmbeddingInput, ...], remaining: float
+    ) -> list[list[float]]:
+        """Выполняет одну микропорцию; управляемые повторы находятся только в request runtime."""
         request_payload = self._request_payload(
             inputs,
         )
@@ -105,8 +135,8 @@ class HttpMultimodalEmbeddingProvider:
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(
-                    self._request_timeout_seconds,
-                    connect=(self._connect_timeout_seconds),
+                    min(self._request_timeout_seconds, remaining),
+                    connect=min(self._connect_timeout_seconds, remaining),
                 ),
             ) as client:
                 response = await client.post(
@@ -120,16 +150,15 @@ class HttpMultimodalEmbeddingProvider:
             httpx.RemoteProtocolError,
         ) as error:
             raise MultimodalEmbeddingTemporaryError(
-                (
-                    "Shared embedding service "
-                    "временно недоступен: "
-                    f"{type(error).__name__}: {error}"
-                ),
+                "Shared embedding временно недоступен.",
+                reason_code="provider_timeout"
+                if isinstance(error, httpx.TimeoutException)
+                else "transport_error",
             ) from error
 
         except httpx.HTTPError as error:
-            raise MultimodalEmbeddingTemporaryError(
-                (f"Не удалось обратиться к shared embedding service: {error}"),
+            raise MultimodalEmbeddingProviderError(
+                "Не удалось сформировать HTTP-запрос к shared embedding.",
             ) from error
 
         vectors = self._parse_embeddings(
@@ -351,23 +380,49 @@ class HttpMultimodalEmbeddingProvider:
     ) -> list[list[float]]:
         """Проверяет OpenAI-compatible embedding response."""
         if response.status_code in _RETRYABLE_HTTP_STATUSES:
+            context = current_embedding_execution.get()
+            if context is not None and response.status_code in {429, 503}:
+                context.metrics[f"http_{response.status_code}"] += 1
+            retry_after = None
+            raw_after = response.headers.get("Retry-After", "")
+            try:
+                retry_after = max(0, float(raw_after))
+            except ValueError:
+                with suppress(ValueError, TypeError, OverflowError):
+                    retry_after = max(
+                        0,
+                        (
+                            parsedate_to_datetime(raw_after) - datetime.now(UTC)
+                        ).total_seconds(),
+                    )
             raise MultimodalEmbeddingTemporaryError(
-                (
-                    "Shared embedding service "
-                    "временно не может выполнить запрос: "
-                    f"{response.status_code}: "
-                    f"{response.text[:1500]}"
-                ),
+                f"Shared embedding временно не может выполнить запрос: {response.status_code}.",
+                reason_code="provider_request_queue_full"
+                if "engine is currently busy" in response.text.lower()
+                else "provider_prefill_backlog_full"
+                if "prefill token backlog limit" in response.text.lower()
+                else "provider_overloaded",
+                status_code=response.status_code,
+                retry_after=retry_after,
             )
 
         if response.status_code >= 400:
+            too_large = response.status_code in {400, 413, 422} and any(
+                marker in response.text.casefold()
+                for marker in (
+                    "maximum context length",
+                    "max_model_len",
+                    "max-model-len",
+                    "too many tokens",
+                    "context length exceeded",
+                )
+            )
             raise MultimodalEmbeddingProviderError(
-                (
-                    "Shared embedding service "
-                    "отклонил запрос: "
-                    f"{response.status_code}: "
-                    f"{response.text[:1500]}"
-                ),
+                (f"Shared embedding service отклонил запрос: {response.status_code}."),
+                reason_code="embedding_input_too_large"
+                if too_large
+                else "embedding_request_rejected",
+                status_code=response.status_code,
             )
 
         try:
@@ -385,6 +440,12 @@ class HttpMultimodalEmbeddingProvider:
             raise MultimodalEmbeddingProviderError(
                 ("Shared embedding service вернул invalid payload."),
             )
+
+        context = current_embedding_execution.get()
+        if context is not None:
+            usage = payload.get("usage") or {}
+            if isinstance(usage, dict) and isinstance(usage.get("prompt_tokens"), int):
+                context.metrics["prompt_tokens"] += usage["prompt_tokens"]
 
         response_model = payload.get(
             "model",
