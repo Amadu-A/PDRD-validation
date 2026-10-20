@@ -37,6 +37,7 @@ from pdrd_analysis_service.domain.engineering_facts import (
     explicit_design_parameters,
     merge_text_engineering_facts,
 )
+from pdrd_analysis_service.domain.evidence_audit import audit_assertion
 
 from .test_analysis_use_cases import FakeVisionModel, finding, page_facts
 from .test_engineering_review import _fact
@@ -76,6 +77,172 @@ def test_assertion_survives_plan_binding_transport_and_final_prompt():
         experience_context_limit=200,
     )
     assert decoded.assertion_id in prompt and "engineering_assertion" in prompt
+
+
+@pytest.mark.parametrize("linked", [True, False])
+@pytest.mark.parametrize(
+    ("property_name", "comment"),
+    [
+        ("Назначение системы", "Назначение системы S1 различается"),
+        ("Диаметр", "Диаметр S1 различается"),
+        ("Длина", "Длина S1 различается"),
+        ("Толщина стенки", "Толщина стенки S1 различается"),
+        ("Расход воды", "Расход воды S1 различается"),
+        ("Напор", "Напор S1 различается"),
+        ("Абсолютная отметка", "Абсолютная отметка S1 различается"),
+    ],
+)
+def test_candidate_binding_preserves_each_recognized_property(
+    linked, property_name, comment
+):
+    """Каждый распознанный предмет сохраняет исходный факт со ссылкой на план и без неё."""
+    fact = _fact("192,4", "S1: исходная запись 192,4", property_name=property_name)
+    plan = engineering_plan(
+        replace(page_facts(), document_facts=(fact,)), "", page_number=10
+    )
+    candidate = {
+        "object_ref": "S1",
+        "comment": comment,
+        "claim_type": "contradiction",
+        "hypothesis_ids": [plan[0]["hypothesis_id"]] if linked else [],
+    }
+    origin = bind_candidate_assertion(plan, candidate, 10, ())
+    assertion = read_assertion((origin,))
+    assert assertion is not None
+    assert assertion.observations == (LocatedDocumentFact(10, 1, fact),)
+    assert assertion.verification == "unverified"
+
+
+@pytest.mark.parametrize("property_name", ["Длина", "Напор", "Диаметр"])
+def test_elevation_candidate_does_not_bind_other_properties(property_name):
+    """Даже явная ссылка на гипотезу не подменяет отметку другим параметром того же объекта."""
+    fact = _fact("192,4", "S1: исходная запись 192,4", property_name=property_name)
+    plan = engineering_plan(
+        replace(page_facts(), document_facts=(fact,)), "", page_number=10
+    )
+    assert (
+        bind_candidate_assertion(
+            plan,
+            {
+                "object_ref": "S1",
+                "comment": "Абсолютная отметка S1 различается",
+                "hypothesis_ids": [plan[0]["hypothesis_id"]],
+            },
+            10,
+            (),
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "difference",
+    ["object", "point", "condition", "unknown_point", "same_point"],
+)
+def test_bound_elevations_require_same_object_point_and_conditions(difference):
+    """Привязка не доказывает противоречие разных объектов, точек или условий."""
+    first = _fact(
+        "192,4",
+        "S1 точка У1 рабочий режим: абсолютная отметка 192,4 м",
+        property_name="Абсолютная отметка",
+        unit_raw="м",
+        scope_segment="точка У1",
+        scope_operating_mode="рабочий",
+    )
+    second = replace(
+        first,
+        value_raw="193,4",
+        evidence_text="S1 точка У1 рабочий режим: абсолютная отметка 193,4 м",
+    )
+    if difference == "object":
+        second = replace(
+            second,
+            identifier="S2",
+            evidence_text=second.evidence_text.replace("S1", "S2"),
+        )
+    elif difference == "point":
+        second = replace(
+            second,
+            scope_segment="точка У2",
+            evidence_text=second.evidence_text.replace("У1", "У2"),
+        )
+    elif difference == "condition":
+        second = replace(
+            second,
+            scope_operating_mode="аварийный",
+            evidence_text=second.evidence_text.replace("рабочий", "аварийный"),
+        )
+    elif difference == "unknown_point":
+        first, second = (
+            replace(
+                item,
+                scope_segment="участок У1—У2",
+                segment_start="У1",
+                segment_end="У2",
+                evidence_text=item.evidence_text.replace("точка У1", "участок У1—У2"),
+            )
+            for item in (first, second)
+        )
+    facts = replace(page_facts(), document_facts=(first, second))
+    plan = engineering_plan(facts, "", page_number=10)
+    assert len(plan) == 2
+    origin = bind_candidate_assertion(
+        plan,
+        {
+            "object_ref": "S1",
+            "comment": "Абсолютные отметки различаются",
+            "hypothesis_ids": [item["hypothesis_id"] for item in plan],
+            "claim_type": "contradiction",
+        },
+        10,
+        (),
+    )
+    if difference == "object":
+        assert origin is None
+        return
+    assertion = read_assertion((origin,))
+    assert assertion is not None and assertion.verification == "unverified"
+    assert tuple(item.fact for item in assertion.observations) == (first, second)
+    audit = audit_assertion(
+        assertion, page_texts={10: first.evidence_text + "\n" + second.evidence_text}
+    )
+    if difference == "same_point":
+        assert audit.disposition == "supported"
+    else:
+        assert audit.disposition in {"diagnostic", "question"}
+
+
+@pytest.mark.parametrize(
+    "property_name", ["Температура", "Температура стенки", "Длина"]
+)
+def test_new_candidate_property_requires_exact_binding_without_a_known_alias(
+    monkeypatch, property_name
+):
+    """Новый предмет классификатора не вызывает исключение и не ослабляет проверку свойства."""
+    monkeypatch.setattr(
+        "pdrd_analysis_service.application.engineering_plan.candidate_property",
+        lambda text: "Температура",
+    )
+    fact = _fact("20", "S1: исходная запись 20", property_name=property_name)
+    plan = engineering_plan(
+        replace(page_facts(), document_facts=(fact,)), "", page_number=10
+    )
+    origin = bind_candidate_assertion(
+        plan,
+        {
+            "object_ref": "S1",
+            "comment": "Температура S1 различается",
+            "hypothesis_ids": [plan[0]["hypothesis_id"]],
+        },
+        10,
+        (),
+    )
+    if property_name == "Температура":
+        assert read_assertion((origin,)).observations == (
+            LocatedDocumentFact(10, 1, fact),
+        )
+    else:
+        assert origin is None
 
 
 @pytest.mark.parametrize("change", ["property", "type", "condition", "evidence"])

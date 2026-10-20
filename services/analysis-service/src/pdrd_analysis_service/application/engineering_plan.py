@@ -166,6 +166,15 @@ def bind_candidate_assertion(
     """Связывает ответ с исходным предметом, не позволяя модели переписать факты плана."""
     text = f"{candidate.get('comment', '')} {candidate.get('evidence', '')}"
     prop = candidate_property(text)
+    property_roots = {
+        "Назначение системы": "назначени",
+        "Диаметр": "диаметр|типоразмер",
+        "Длина": "длин|протяж",
+        "Толщина стенки": "толщин",
+        "Расход воды": "расход",
+        "Напор": "напор",
+        "Абсолютная отметка": "отметк|высот",
+    }
     linked = set(candidate.get("hypothesis_ids") or ())
     object_ref = normalize_label(str(candidate.get("object_ref") or ""))
     observations = []
@@ -184,15 +193,14 @@ def bind_candidate_assertion(
             or normalize_label(item["property"]) != normalize_label(prop)
         ):
             continue
-        roots = {
-            "Назначение системы": "назначени",
-            "Диаметр": "диаметр|типоразмер",
-            "Длина": "длин|протяж",
-            "Толщина стенки": "толщин",
-            "Расход воды": "расход",
-            "Напор": "напор",
-        }
-        if prop and not re.search(roots[prop], normalize_label(item["property"])):
+        pattern = property_roots.get(prop)
+        actual_property = normalize_label(item["property"])
+        # Новый предмет без известного синонима требует точного совпадения свойства.
+        if prop and not (
+            re.search(pattern, actual_property)
+            if pattern is not None
+            else actual_property == normalize_label(prop)
+        ):
             continue
         roles = candidate_parameter_roles(str(candidate.get("comment", "")))
         if (
