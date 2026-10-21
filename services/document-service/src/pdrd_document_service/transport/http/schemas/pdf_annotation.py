@@ -155,6 +155,13 @@ class PdfReportFieldRequest(
     value: str = Field(
         min_length=1,
     )
+    href: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_href(self):
+        """Опасная схема ссылки отклоняется как ошибка входного контракта."""
+        PdfReportField(label=self.label, value=self.value, href=self.href)
+        return self
 
     def to_domain(
         self,
@@ -163,6 +170,7 @@ class PdfReportFieldRequest(
         return PdfReportField(
             label=self.label,
             value=self.value,
+            href=self.href,
         )
 
 

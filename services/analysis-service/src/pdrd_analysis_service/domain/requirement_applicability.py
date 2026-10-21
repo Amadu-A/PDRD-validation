@@ -31,6 +31,7 @@ class RequirementEvidence:
     page: int | str | None
     source_file: str = ""
     point_id: str = ""
+    atomic_requirement: dict | None = None
 
 
 def check_requirement(

@@ -37,6 +37,7 @@ class ReviewedPdfFinding:
     document_context_basis_sources: tuple[str, ...] = ()
     equipment_documentation_basis_sources: tuple[str, ...] = ()
     source_kinds: tuple[str, ...] = ()
+    normative_basis_sources: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

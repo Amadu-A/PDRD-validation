@@ -240,7 +240,7 @@ def test_unlocated_findings_use_full_callout_and_v8_cache() -> None:
 
     assert "default_factory=list" in compact_schema
 
-    assert "annotated-v8.pdf" in cache_literals
+    assert "annotated-v9.pdf" in cache_literals
 
     assert "_LOCATIONS_SCHEMA_VERSION=6" in _compact(
         cache,

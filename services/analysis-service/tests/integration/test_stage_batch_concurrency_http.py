@@ -4,6 +4,7 @@
 
 import asyncio
 import base64
+from dataclasses import asdict, replace
 from typing import Any
 from uuid import (
     UUID,
@@ -37,6 +38,128 @@ from pdrd_analysis_service.domain.analysis import (
 from pdrd_analysis_service.main import (
     create_app,
 )
+
+
+async def test_independent_atomic_check_keeps_all_31_pages_without_model_findings():
+    """Настоящий HTTP Check Norms сохраняет страницы и N-происхождение при нулевом ответе модели."""
+    from datetime import UTC, datetime
+
+    from pdrd_analysis_service.application.independent_normative import (
+        IndependentNormativeReview,
+    )
+    from pdrd_analysis_service.infrastructure.normative_requirements import (
+        HttpNormativeRequirementsReader,
+    )
+
+    from ..unit.test_analysis_use_cases import FakeVisionModel, page_facts
+    from ..unit.test_independent_normative import (
+        DOC,
+        GENERATION,
+        SECTION,
+        page,
+        requirement,
+    )
+
+    row = requirement()
+    row["normative_status"]["assessed_on"] = datetime.now(UTC).date().isoformat()
+    row["status_evidence"][0].update(
+        valid_from="2000-01-01", valid_until="2999-12-31", confirmed_on="2000-01-01"
+    )
+    calls = []
+
+    def knowledge(request):
+        """Сетевой адаптер читает настоящий контракт полного поколения."""
+        calls.append(request.url.path)
+        if request.url.path.endswith("/documents"):
+            return httpx.Response(
+                200, json=[{"document_id": DOC, "section_id": SECTION}]
+            )
+        return httpx.Response(
+            200,
+            json={
+                "document_id": DOC,
+                "generation_id": GENERATION,
+                "state": "ready",
+                "source_sha256": "a" * 64,
+                "extractor_version": "normative-native-v1",
+                "status_evidence": row["status_evidence"],
+                "count": 1,
+                "offset": 0,
+                "next_offset": None,
+                "requirements": [row],
+            },
+        )
+
+    model = FakeVisionModel(
+        [{"summary": "Проверено", "violations": []} for _ in range(31)]
+    )
+    app = _build_app(
+        model=model, progress_probe=RecordingProgressProbe(), concurrency=3
+    )
+    app.state.container = replace(
+        app.state.container,
+        independent_normative_review=IndependentNormativeReview(
+            HttpNormativeRequirementsReader(
+                "http://knowledge.test", transport=httpx.MockTransport(knowledge)
+            )
+        ),
+    )
+    initial = page()
+    facts = initial.facts
+    items = [
+        {
+            "page_number": number,
+            "extracted_text": initial.text if number == 13 else f"Лист {number}",
+            "page_facts": asdict(
+                replace(page_facts(), document_facts=facts if number == 13 else ())
+            ),
+            "normative_sources": [],
+            "image_base64": _image(),
+        }
+        for number in range(1, 32)
+    ]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://analysis.test"
+    ) as client:
+        response = await client.post(
+            "/internal/v1/stages/check-norms",
+            json={
+                "document_id": str(uuid4()),
+                "normative_corpus": {"section_id": SECTION, "document_ids": [DOC]},
+                "items": items,
+            },
+        )
+        assert response.status_code == 200, response.text
+        drafts = response.json()["items"][12]["result"]["findings"]
+        final = await client.post(
+            "/internal/v1/findings/finalize",
+            json={"findings": drafts, "experience_by_finding": {}},
+        )
+        assert final.status_code == 200, final.text
+        assert (
+            final.json()["findings"][0]["basis_sources"][0]["atomic_requirement"][
+                "requirement_id"
+            ]
+            == row["requirement_id"]
+        )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert [item["page_number"] for item in data["items"]] == list(range(1, 32))
+    assert model.call_count == 31
+    findings = data["items"][12]["result"]["findings"]
+    assert len(findings) == 1
+    assert (
+        findings[0]["basis_sources"][0]["atomic_requirement"]["requirement_id"]
+        == row["requirement_id"]
+    )
+    assert all(
+        not item["result"]["findings"]
+        for index, item in enumerate(data["items"])
+        if index != 12
+    )
+    assert (
+        len(calls) == 2
+    )  # Один корпус на документ, а не по одному запросу на каждый лист.
 
 
 class ConcurrentPageVisionModel:

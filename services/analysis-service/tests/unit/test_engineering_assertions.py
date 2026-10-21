@@ -56,6 +56,66 @@ def _assertion(**changes):
     return assertion_from_facts((LocatedDocumentFact(8, 1, fact),))
 
 
+def test_program_proof_identifier_does_not_split_same_system_purpose_claim():
+    """История программного доказательства сохраняется, но не создаёт отдельную претензию В2."""
+    original = _assertion()
+    opposite = replace(
+        original.observations[0],
+        page=13,
+        fact=replace(
+            original.observations[0].fact,
+            value_raw="водоотведение",
+            evidence_text="Система S1: водоотведение",
+        ),
+    )
+    assertion = replace(original, observations=(*original.observations, opposite))
+    program = replace(
+        assertion,
+        property_key="program:" + assertion.property_key,
+        conditions=(*assertion.conditions, "program-check:proof-snapshot"),
+        verification="deterministic",
+        verification_rule="engineering_program",
+    )
+    restored = read_assertion((program.as_origin(),))
+    assert same_assertion(assertion, restored)
+    assert program.as_origin()["conditions"][-1] == "program-check:proof-snapshot"
+    assert not same_assertion(
+        assertion, replace(restored, claim_type="missing_justification")
+    )
+
+
+@pytest.mark.parametrize("first,second", [("103.5", "108"), ("257", "260")])
+def test_network_total_length_is_extracted_without_using_diameter_or_segment(
+    first, second
+):
+    """Общая протяжённость сравнима между ТЧ и явным итогом, L отдельных участков остаётся отдельно."""
+    from pdrd_analysis_service.domain.engineering_facts import explicit_network_lengths
+    from pdrd_analysis_service.domain.physical_identity import comparison_identity
+
+    a = explicit_network_lengths(
+        f"Протяженность сети водоснабжения В7 диаметром Ду 100 мм — {first} м;"
+    )
+    b = explicit_network_lengths(f"Система В7, общая длина {second} м;")
+    assert len(a) == len(b) == 1
+    assert a[0].value_raw == first and b[0].value_raw == second
+    assert (
+        comparison_identity(
+            (LocatedDocumentFact(13, 1, a[0]), LocatedDocumentFact(27, 1, b[0]))
+        )
+        == "same_physical_object"
+    )
+    from pdrd_analysis_service.domain.document_context import discover_conflicts
+
+    groups = discover_conflicts(
+        (LocatedDocumentFact(13, 1, a[0]), LocatedDocumentFact(27, 1, b[0])),
+        max_candidates=20,
+        require_physical_identity=True,
+    )
+    assert len(groups) == 1 and groups[0].mismatch_type == "parameter_mismatch"
+    assert explicit_network_lengths("В7 Ø110x10 L=12 м; В7 Ø110x10 L=24 м;") == ()
+    assert explicit_network_lengths("Общая длина трубопровода Ду100 — 15 м;") == ()
+
+
 def test_assertion_survives_plan_binding_transport_and_final_prompt():
     """Этапы ссылаются на тот же объект и исходный факт вместо повторного толкования текста."""
     original = _assertion()
@@ -332,7 +392,14 @@ def test_dedup_keeps_all_pages_regions_sources_and_history():
         page=9,
         document_context_source_ids=(other_source.source_id,),
         document_context_basis_sources=(other_source,),
-        origin_assertions=(assertion.as_origin(), {"origin": "cross_page_validation"}),
+        origin_assertions=(
+            replace(
+                assertion,
+                property_key="program:" + assertion.property_key,
+                conditions=(*assertion.conditions, "program-check:retained-proof"),
+            ).as_origin(),
+            {"origin": "cross_page_validation"},
+        ),
         evidence_locations=({"page": 9, "text": "Вторая область"},),
     )
     independent = replace(
@@ -354,6 +421,10 @@ def test_dedup_keeps_all_pages_regions_sources_and_history():
         "discovery",
         "cross_page_validation",
     }
+    assert any(
+        "program-check:retained-proof" in row.get("conditions", [])
+        for row in merged.origin_assertions
+    )
 
 
 async def test_category_is_not_proof_and_missing_justification_is_not_confirmed():

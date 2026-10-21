@@ -22,6 +22,7 @@ from pdrd_analysis_service.application.equipment_pipeline import (
 from pdrd_analysis_service.application.ports.vision_model import (
     VisionModelError,
 )
+from pdrd_analysis_service.application.use_cases.document_context import DocumentPage
 from pdrd_analysis_service.core.container import (
     ApplicationContainer,
 )
@@ -152,6 +153,7 @@ def _normative_source_payload(
         section_id=source.section_id,
         category_id=source.category_id,
         source_sha256=source.source_sha256,
+        atomic_requirement=source.atomic_requirement,
         source_file=source.source_file,
         source_path=source.source_path,
         page=source.page,
@@ -578,6 +580,37 @@ async def check_norms_controlled(
         max_bytes=(container.settings.pipeline.max_image_bytes),
     )
 
+    independent = None
+    review = getattr(container, "independent_normative_review", None)
+    if review is not None and request.normative_corpus is not None:
+        if request.document_id is None:
+            raise HTTPException(422, "Независимая проверка требует ID задания.")
+
+        async def catalog_cancellation() -> None:
+            """Использует ту же проверку отмены, что и обычный Check Norms."""
+            if check_cancellation is not None:
+                await check_cancellation()
+
+        scope = request.normative_corpus
+        independent = await review.execute(
+            document_id=str(request.document_id),
+            section_id=str(scope.section_id),
+            document_ids=tuple(str(value) for value in scope.document_ids),
+            generation_ids={
+                str(key): str(value) for key, value in scope.generation_ids.items()
+            },
+            assessed_on=scope.assessed_on.isoformat() if scope.assessed_on else None,
+            pages=(
+                DocumentPage(
+                    request.page_number,
+                    request.extracted_text,
+                    "",
+                    request.page_facts.to_domain().document_facts,
+                ),
+            ),
+            check_cancellation=catalog_cancellation,
+        )
+
     try:
         (
             summary,
@@ -619,7 +652,7 @@ async def check_norms_controlled(
             ),
         ) from error
 
-    return CheckNormsResponse(
+    response = CheckNormsResponse(
         summary=summary,
         findings=[
             _finding_draft_payload(
@@ -629,6 +662,14 @@ async def check_norms_controlled(
         ],
         metrics=metrics.as_dict(),
     )
+    if independent is not None:
+        response.findings.extend(
+            _finding_draft_payload(finding) for finding in independent.findings
+        )
+        response.metrics["independent_normative"] = {
+            "requirement_plan": independent.diagnostics
+        }
+    return response
 
 
 @router.post(

@@ -365,3 +365,18 @@ def test_status_rejects_unverifiable_or_forged_evidence(changes):
     """Проверяемость не заменяется произвольным статусом из JSON."""
     with pytest.raises(ValueError):
         evidence(**changes)
+
+
+def test_dependencies_preserve_real_codes_and_numbered_targets_without_ordinary_words():
+    """Аудит настоящих СП выявил ложное «пунктов с» и потерю ссылки СП 48.13330."""
+    rows = extracted(
+        "6.1.17 Следует составлять акты по СП 48.13330 с учетом пункта 8.9, "
+        "таблицы А.1 и приложения Б. Указанные требования пунктов с условиями применения."
+    )
+    row = next(row for row in rows if row.clause == "6.1.17")
+    assert "СП 48.13330" in row.normative_dependencies
+    assert "пункта 8.9" in row.normative_dependencies
+    assert "таблицы А.1" in row.normative_dependencies
+    assert "приложения Б" in row.normative_dependencies
+    assert "пунктов с" not in row.normative_dependencies
+    assert row.text in row.source_text

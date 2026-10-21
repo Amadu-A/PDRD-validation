@@ -26,7 +26,7 @@ class LocalFilesystemAnalysisVisualizationCache:
 
     _LOCATIONS_FILE = "locations.json"
 
-    _ANNOTATED_PDF_FILE = "annotated-v8.pdf"
+    _ANNOTATED_PDF_FILE = "annotated-v9.pdf"
 
     _LOCATIONS_SCHEMA_VERSION = 6
 

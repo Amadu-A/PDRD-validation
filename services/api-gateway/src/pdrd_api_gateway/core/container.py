@@ -353,6 +353,7 @@ def build_container() -> ApplicationContainer:
     )
 
     get_analysis_annotated_pdf = GetAnalysisAnnotatedPdf(
+        public_origin=settings.identity_proxy.public_origin,
         get_analysis_job=(get_analysis_job),
         artifact_store=(artifact_store),
         get_analysis_visualization=(get_analysis_visualization),
@@ -412,6 +413,7 @@ def build_container() -> ApplicationContainer:
             ),
         )
         get_reviewed_pdf = GetReviewedPdf(
+            public_origin=settings.identity_proxy.public_origin,
             contexts=manage_review.contexts,
             access=manage_review.access,
             jobs=get_analysis_job,

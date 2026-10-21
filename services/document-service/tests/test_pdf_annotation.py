@@ -64,6 +64,38 @@ def _source_pdf() -> bytes:
     return content
 
 
+def test_report_contains_real_clickable_normative_uri_on_every_wrapped_line():
+    """Нормативное основание имеет native URI-аннотацию с физической страницей источника."""
+    uri = "https://pdrd.test/api/v1/normative/documents/00000000-0000-0000-0000-000000000001/content#page=17"
+    pdf = PyMuPdfAnnotationWriter().build(
+        content=_source_pdf(),
+        annotations=(),
+        report=PdfTextReport(
+            "Отчёт",
+            (),
+            "",
+            (
+                PdfReportFinding(
+                    "Замечание",
+                    (
+                        PdfReportField(
+                            "Основание [N]",
+                            "СП, редакция 2020, п. 8.10, физическая страница 17. " * 3,
+                            href=uri,
+                        ),
+                    ),
+                ),
+            ),
+            (),
+        ),
+    )
+    with fitz.open(stream=pdf, filetype="pdf") as document:
+        links = [link for page in document for link in page.get_links()]
+        assert links and all(link["uri"] == uri for link in links)
+    with pytest.raises(ValueError):
+        PdfReportField("Основание", "Норма", href="javascript:alert(1)")
+
+
 @pytest.mark.parametrize("page_number", [1, 2])
 def test_duplicate_geometry_has_identical_render_and_text_does_not_overlap_number(
     page_number,

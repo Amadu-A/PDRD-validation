@@ -294,7 +294,7 @@ def test_startup_separates_shared_compose_and_preserves_project_configuration(
 def test_stack_check_uses_configured_frontend_bind(
     tmp_path: Path, bind_ip: str, probe_host: str
 ) -> None:
-    """Все четыре маршрута frontend проверяются на выбранном адресе и порту."""
+    """HTML, API и критичные модули проверяются на выбранном адресе и порту."""
     result, urls = _run_stack_check(tmp_path, bind_ip, probe_host)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "STACK CHECK PASSED" in result.stdout
@@ -304,6 +304,18 @@ def test_stack_check_uses_configured_frontend_bind(
         f"{base}/api/v1/normative/sections",
         f"{base}/api/v1/auth/session",
         f"{base}/api/v1/admin/users",
+        *(
+            f"{base}/{asset}"
+            for asset in (
+                "js/app.js",
+                "js/features/auth/session.js",
+                "js/features/review/controller.js",
+                "js/features/analysis/visualization.js",
+                "js/features/analysis/visualization-selection.js",
+                "js/features/review/region-editor.js",
+                "css/blocks/review-resize.css",
+            )
+        ),
     }
 
 
@@ -318,7 +330,12 @@ def test_stack_check_keeps_real_frontend_failure(tmp_path: Path) -> None:
 
 
 def _run_stack_check(
-    tmp_path: Path, bind_ip: str, probe_host: str, *, available: bool = True
+    tmp_path: Path,
+    bind_ip: str,
+    probe_host: str,
+    *,
+    available: bool = True,
+    blocked_asset: str = "",
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Исполняет check-stack.sh с изолированными подменами Docker и curl."""
     scripts = tmp_path / "scripts"
@@ -332,6 +349,7 @@ def _run_stack_check(
             FRONTEND_PORT="9080",
             MOCK_FRONTEND_URL=f"http://{probe_host}:9080",
             MOCK_FRONTEND_AVAILABLE="1" if available else "0",
+            MOCK_BLOCKED_ASSET=blocked_asset,
         ),
         encoding="utf-8",
     )
@@ -350,6 +368,10 @@ def _run_stack_check(
         curl() {
             local url="${@: -1}"
             printf '%s\n' "$url" >> trace.log
+            if [[ -n "$MOCK_BLOCKED_ASSET" && "$url" == *"/$MOCK_BLOCKED_ASSET" ]]; then
+                printf '403'
+                return 0
+            fi
             if [[ "$url" == *":9080/"* ]]; then
                 if [[ "$MOCK_FRONTEND_AVAILABLE" != 1
                     || "$url" != "$MOCK_FRONTEND_URL/"* ]]; then
@@ -402,3 +424,23 @@ def test_startup_rejects_missing_or_short_equipment_key(
         if not key
         else "не менее 32" in result.stderr
     )
+
+
+@pytest.mark.parametrize(
+    "asset",
+    [
+        "js/features/review/controller.js",
+        "js/features/analysis/visualization.js",
+        "css/blocks/review-resize.css",
+    ],
+)
+def test_stack_rejects_403_asset_even_when_html_and_all_services_are_ready(
+    tmp_path, asset
+):
+    """Повтор серверной поломки больше не даёт ложный STACK CHECK PASSED."""
+    result, _ = _run_stack_check(
+        tmp_path, "127.0.0.1", "127.0.0.1", blocked_asset=asset
+    )
+    assert result.returncode == 1
+    assert f"Frontend asset {asset}: HTTP 403" in result.stdout
+    assert "STACK CHECK FAILED" in result.stdout

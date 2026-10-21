@@ -58,6 +58,11 @@ def export_manifest(review: ReviewSession, areas: tuple[AreaStatus, ...]) -> dic
                 "experience_tag": finding.experience_tag,
                 "text": finding.text,
                 "normative_basis": finding.normative_basis,
+                **(
+                    {"normative_basis_sources": list(finding.normative_basis_sources)}
+                    if finding.normative_basis_sources
+                    else {}
+                ),
                 "regions": [asdict(box) for box in regions],
                 "evidence_locations": [
                     {

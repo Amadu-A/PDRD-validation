@@ -19,6 +19,7 @@ from fastapi import (
     status,
 )
 
+from pdrd_analysis_service.application.use_cases.document_context import DocumentPage
 from pdrd_analysis_service.application.vision_execution import (
     AnalysisCancelledError,
     vision_execution,
@@ -30,6 +31,7 @@ from pdrd_analysis_service.transport.http.dependencies import (
     get_container,
 )
 from pdrd_analysis_service.transport.http.routes import (
+    _finding_draft_payload,
     check_norms_controlled,
     finalize_findings,
     understand_page_controlled,
@@ -475,6 +477,49 @@ async def check_norms_stage(
         maximum=container.settings.pipeline.max_stage_pages,
     )
 
+    independent = None
+    review = getattr(container, "independent_normative_review", None)
+    if review is not None and request.normative_corpus is not None:
+
+        async def check_catalog_cancellation() -> None:
+            """Отмена чтения корпуса не попадает в n8n как программная ошибка."""
+            if await _is_stage_cancelled(
+                container=container,
+                document_id=request.document_id,
+                stage=_CHECKING_STAGE,
+                current=0,
+                total=len(request.items),
+            ):
+                raise AnalysisCancelledError(
+                    "Нормативная проверка отменена при чтении корпуса."
+                )
+
+        scope = request.normative_corpus
+        try:
+            independent = await review.execute(
+                document_id=str(request.document_id),
+                section_id=str(scope.section_id),
+                document_ids=tuple(str(value) for value in scope.document_ids),
+                generation_ids={
+                    str(key): str(value) for key, value in scope.generation_ids.items()
+                },
+                assessed_on=scope.assessed_on.isoformat()
+                if scope.assessed_on
+                else None,
+                pages=tuple(
+                    DocumentPage(
+                        item.page_number,
+                        item.extracted_text,
+                        "",
+                        item.page_facts.to_domain().document_facts,
+                    )
+                    for item in request.items
+                ),
+                check_cancellation=check_catalog_cancellation,
+            )
+        except AnalysisCancelledError:
+            return CheckNormsStageResponse(items=[], cancelled=True)
+
     async def process(
         item: CheckNormsRequest,
     ) -> CheckNormsResponse:
@@ -513,6 +558,24 @@ async def check_norms_stage(
 
     if responses is None:
         return CheckNormsStageResponse(items=[], cancelled=True)
+
+    if independent is not None:
+        by_page = {
+            item.page_number: response
+            for item, response in zip(request.items, responses, strict=True)
+        }
+        for finding in independent.findings:
+            by_page[finding.page].findings.append(_finding_draft_payload(finding))
+        responses[0].metrics["independent_normative"] = {
+            "requirement_plan": independent.diagnostics
+        }
+    elif review is not None:
+        responses[0].metrics["independent_normative"] = {
+            "mode": "corpus_scope_missing",
+            "requirements": 0,
+            "source_complete": False,
+            "reason": "Опубликованный workflow не передал выбранный нормативный корпус.",
+        }
 
     result = [
         CheckNormsStageItemResponse(

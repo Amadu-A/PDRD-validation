@@ -8,6 +8,21 @@ export function preferredSourceArray(primary, fallback) {
   return Array.isArray(fallback) ? fallback : [];
 }
 
+/** Показывает сохранённый атомарный адрес и статус; READY не означает обязательность. */
+export function normativeRequirementDescription(source) {
+  const row = source?.atomic_requirement;
+  if (!row || typeof row !== "object") return "";
+  const clause = [row.clause, row.subclause].filter(Boolean).join(".");
+  const status = row.normative_status || {};
+  const evidence = Array.isArray(status.evidence_ids) ? status.evidence_ids.filter((id) => typeof id === "string") : [];
+  const edition = { current: "действующая", withdrawn: "отменена", disputed: "спорная" }[status.edition_status] || "не подтверждена";
+  const binding = { mandatory: "подтверждена", voluntary: "добровольное применение", disputed: "спорная" }[status.requirement_binding] || "не подтверждена";
+  return [row.document_code, row.edition && `редакция ${row.edition}`, clause && `п. ${clause}`,
+    row.requirement_id, row.generation_id && `поколение ${row.generation_id}`,
+    status.assessed_on && `на ${status.assessed_on}`, `редакция: ${edition}`, `обязательность: ${binding}`,
+    evidence.length && `свидетельства: ${evidence.join(", ")}`].filter(Boolean).join(" · ");
+}
+
 /** Происхождение берётся только из сохранённых массивов источников. */
 export function findingSourceKinds(finding) {
   const arrays = [

@@ -122,6 +122,9 @@ def finding_from_json(
         ),
         equipment_details=value.get("equipment_details"),
         source_kinds=tuple(value.get("source_kinds", [])),
+        normative_basis_sources=tuple(
+            dict(item) for item in value.get("normative_basis_sources", [])
+        ),
         display_regions=(
             tuple(Rectangle(**box) for box in value["display_regions"])
             if value.get("display_regions") is not None

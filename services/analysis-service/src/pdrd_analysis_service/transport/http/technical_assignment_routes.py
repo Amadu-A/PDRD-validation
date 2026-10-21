@@ -132,6 +132,7 @@ def _finding_payload(
                 section_id=source.section_id,
                 category_id=source.category_id,
                 source_sha256=source.source_sha256,
+                atomic_requirement=source.atomic_requirement,
                 source_file=source.source_file,
                 source_path=source.source_path,
                 page=source.page,

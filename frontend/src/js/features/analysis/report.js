@@ -8,7 +8,7 @@
  * на физической странице источника.
  */
 
-import { findingSourceDescription, preferredSourceArray, findingPageLabel, findingPages, focusDocumentEvidence, equipmentSnapshotUrl } from "./finding-provenance.js";
+import { findingSourceDescription, preferredSourceArray, findingPageLabel, findingPages, focusDocumentEvidence, equipmentSnapshotUrl, normativeRequirementDescription } from "./finding-provenance.js";
 import { mountFindingList, CATEGORY_LABELS, SEVERITY_LABELS, DECISION_LABELS } from "./finding-list.js";
 import {
   sourceModeLabel,
@@ -403,7 +403,7 @@ function createManagedCitation(
 export function createNormativeCitation(
   source,
 ) {
-  return createManagedCitation(
+  const citation = createManagedCitation(
     source,
     {
       fallbackName: "Нормативный источник",
@@ -412,6 +412,12 @@ export function createNormativeCitation(
       titlePrefix: "Открыть нормативный документ",
     },
   );
+  const details = normativeRequirementDescription(source);
+  if (details) {
+    citation.textContent += ` · ${details}`;
+    citation.title = [citation.title, source.atomic_requirement.source_text || source.text].filter(Boolean).join("\n");
+  }
+  return citation;
 }
 
 

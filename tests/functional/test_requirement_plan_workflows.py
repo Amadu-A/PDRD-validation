@@ -78,3 +78,44 @@ def test_zero_findings_do_not_erase_requirement_coverage(mode, name, with_ta):
     assert body["search"]["protected_query_count"] == 1
     assert body["search"]["queries"] == ["base", "additional"]
     assert body["user"]["queries"] == ["base"]
+
+
+@pytest.mark.parametrize("mode", ["pdf", "cad", "pdf-cad"])
+@pytest.mark.parametrize("encoded", [False, True])
+def test_normative_corpus_reaches_actual_check_norms_expression(mode, encoded):
+    """Исполняет публикуемое выражение с настоящей формой multipart-полей Gateway."""
+    workflow = json.loads(
+        (ROOT / f"n8n/workflows/analysis-v2-{mode}.json").read_text("utf-8")
+    )
+    expression = next(
+        node for node in workflow["nodes"] if node["name"] == "Check Norms"
+    )["parameters"]["body"]
+    script = """
+    const fs = require('node:fs'), vm = require('node:vm');
+    const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+    const ids = ['norm-1', 'norm-2'], generations = {'norm-1': 'gen-1'};
+    const body = {document_id: 'job-1', normative_section_id: 'section-1',
+      normative_document_ids: input.encoded ? JSON.stringify(ids) : ids,
+      normative_generation_ids: input.encoded ? JSON.stringify(generations) : generations};
+    const prepared = {page: {page_number: 1, text: 'source', image_base64: ''},
+      analysis_text: 'source', facts: {}, pages: []};
+    const context = {$json: {document_id: 'job-1', items: [{page_number: 1, page_facts: {}}]},
+      $: name => { const json = name.startsWith('POST ') ? {body} : prepared;
+        return {first: () => ({json}), item: {json}}; }};
+    process.stdout.write(vm.runInNewContext(input.expression.slice(3, -2), context, {timeout: 1000}));
+    """
+    result = subprocess.run(
+        ["node", "-e", script],
+        input=json.dumps({"expression": expression, "encoded": encoded}),
+        encoding="utf-8",
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    payload = json.loads(result.stdout)
+    assert payload["document_id"] == "job-1"
+    assert payload["normative_corpus"] == {
+        "section_id": "section-1",
+        "document_ids": ["norm-1", "norm-2"],
+        "generation_ids": {"norm-1": "gen-1"},
+    }

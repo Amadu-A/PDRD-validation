@@ -393,6 +393,7 @@ def requirement_evidence(*, normative=(), technical=(), user=()):
             source.page,
             source.source_file or "",
             source.point_id,
+            getattr(source, "atomic_requirement", None),
         )
         for kind, sources in (("N", normative), ("T", technical), ("U", user))
         for source in sources
@@ -1183,10 +1184,43 @@ def _wording(check):
             else values["document"]
         )
         if values["rule"] == "required_calculation":
+            missing = values.get("missing_parameters", [])
+            detail = " Уточнить: " + "; ".join(missing) + "." if missing else ""
             return (
                 f"Для {obj} источник «{address}» прямо требует расчётного обоснования: «{values['quote']}». "
-                "По переданным фактам этого объекта требуется уточнить связь принятого решения с расчётом.",
+                "По переданным фактам этого объекта требуется уточнить связь принятого решения с расчётом."
+                + detail,
                 "Указать расчёт и связь с принятым решением; отсутствие расчёта во всём проекте не установлено.",
+            )
+        if values["rule"] in {
+            "formula",
+            "required_component",
+            "table_row",
+            "conditional_bound",
+        }:
+            observed = "; ".join(
+                f"{item.fact.property_name}: {item.fact.value_raw} {item.fact.unit_raw}".strip()
+                for item in check.observations
+            )
+            details = ""
+            if values["rule"] == "formula":
+                details = (
+                    f" Формула: {values['expression']}; допустимый по исходным данным интервал: "
+                    f"{values['calculated_min']}…{values['calculated_max']}."
+                )
+            elif values.get("conditions"):
+                details = f" Проверенные условия: {values['conditions']}."
+            elif values.get("table_row"):
+                details = (
+                    " Выбранная строка таблицы: "
+                    + " | ".join(values["table_row"])
+                    + "."
+                )
+            return (
+                f"Для {obj} установлено: {observed}. Применимое требование «{address}»: «{values['quote']}»."
+                + details
+                + " Программная проверка установила несовместимость исходных данных с этим требованием.",
+                "Проверить указанные исходные данные, условия применения и привести принятое решение в соответствие.",
             )
         project = check.observations[0].fact
         return (

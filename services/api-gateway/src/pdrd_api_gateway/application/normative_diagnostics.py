@@ -55,6 +55,7 @@ def normative_diagnostics(result: dict, *, job_id: str) -> dict:
                     "retrieval_operations",
                     "finalization",
                     "cross_page_consistency",
+                    "independent_normative",
                 }:
                     collect(child)
         elif isinstance(value, list):

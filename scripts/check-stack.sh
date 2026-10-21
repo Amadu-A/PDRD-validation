@@ -368,6 +368,22 @@ check_http \
     "Frontend HTTP" \
     "${frontend_probe_url}/"
 
+# HTML 200 не доказывает загрузку графа ES-модулей и запуск кнопок входа/Review.
+for asset in \
+    js/app.js \
+    js/features/auth/session.js \
+    js/features/review/controller.js \
+    js/features/analysis/visualization.js \
+    js/features/analysis/visualization-selection.js \
+    js/features/review/region-editor.js \
+    css/blocks/review-resize.css; do
+    check_http_status "Frontend asset ${asset}" "${frontend_probe_url}/${asset}" "200"
+    if (( review_active )); then
+        check_http_status "Review asset ${asset}" \
+            "http://127.0.0.1:${REVIEW_FRONTEND_PORT:-8081}/${asset}" "200"
+    fi
+done
+
 check_http \
     "Frontend -> API Gateway proxy" \
     "${frontend_probe_url}/api/v1/normative/sections"

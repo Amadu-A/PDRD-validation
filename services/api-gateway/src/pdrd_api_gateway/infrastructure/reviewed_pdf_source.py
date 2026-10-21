@@ -94,6 +94,9 @@ class _Finding(_Contract):
     experience_tag: Literal["wise", "edited", "gold"]
     text: str = Field(min_length=1, max_length=10000)
     normative_basis: str = Field(max_length=2000)
+    normative_basis_sources: list[dict[str, Any]] = Field(
+        default_factory=list, max_length=1000
+    )
     regions: list[_Box] = Field(max_length=9600)
     callout_box: _Box | None
     evidence_locations: list[_EvidenceLocation] = Field(
@@ -181,6 +184,9 @@ class HttpReviewedPdfSource:
                     experience_tag=row.experience_tag,
                     text=row.text,
                     normative_basis=row.normative_basis,
+                    normative_basis_sources=tuple(
+                        dict(source) for source in row.normative_basis_sources
+                    ),
                     regions=tuple(box.to_port() for box in row.regions),
                     evidence_locations=tuple(
                         ReviewedPdfEvidenceLocation(

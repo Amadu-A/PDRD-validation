@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from pdrd_api_gateway.application.normative_pdf_sources import normative_pdf_fields
 from pdrd_api_gateway.application.ports.analysis_pdf_export import (
     AnalysisAnnotatedPdfDocument,
     AnalysisAnnotatedPdfRenderer,
@@ -128,6 +129,7 @@ class GetAnalysisAnnotatedPdf:
     renderer: AnalysisAnnotatedPdfRenderer
 
     visualization_cache: AnalysisVisualizationCache
+    public_origin: str = ""
 
     async def execute(
         self,
@@ -238,6 +240,7 @@ class GetAnalysisAnnotatedPdf:
             source_mode=(artifacts.submission.source_mode.value),
             pdf_file_name=(artifacts.submission.pdf_file_name),
             cad_file_name=(artifacts.submission.cad_file_name),
+            public_origin=self.public_origin,
         )
 
         try:
@@ -306,6 +309,7 @@ class GetAnalysisAnnotatedPdf:
         source_mode: str,
         pdf_file_name: str | None,
         cad_file_name: str | None,
+        public_origin: str = "",
     ) -> tuple[
         tuple[
             AnalysisPdfAnnotation,
@@ -376,6 +380,12 @@ class GetAnalysisAnnotatedPdf:
                 finding=finding,
                 located=located,
                 page_number=page_number,
+            )
+            fields = (
+                *fields,
+                *normative_pdf_fields(
+                    finding.get("basis_sources", []), public_origin=public_origin
+                ),
             )
 
             pages = sorted(

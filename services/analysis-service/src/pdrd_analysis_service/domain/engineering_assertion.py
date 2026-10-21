@@ -138,6 +138,13 @@ def read_assertion(origins: tuple[dict, ...]) -> EngineeringAssertion | None:
                     assertion,
                     property_key="relationship:system_purpose",
                     object_key=engineering_object_key(observations[0].fact),
+                    conditions=tuple(
+                        condition
+                        for condition in assertion.conditions
+                        if not condition.startswith("program-check:")
+                    )
+                    if assertion.claim_type == "contradiction"
+                    else assertion.conditions,
                 )
             if observations and len(assertion.conditions) == 7:
                 canonical = scope_key(observations[0].fact)

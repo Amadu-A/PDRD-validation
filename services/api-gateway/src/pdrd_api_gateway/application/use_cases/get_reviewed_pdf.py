@@ -29,7 +29,7 @@ from pdrd_api_gateway.application.use_cases.get_analysis_job import GetAnalysisJ
 from pdrd_api_gateway.application.use_cases.reviewed_pdf_payload import reviewed_payload
 from pdrd_api_gateway.core.observability import log_execution_time
 
-RENDERER_VERSION = "reviewed-v2"
+RENDERER_VERSION = "reviewed-v3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +43,7 @@ class GetReviewedPdf:
     artifacts: AnalysisArtifactStore
     renderer: AnalysisAnnotatedPdfRenderer
     cache: ReviewedPdfCache
+    public_origin: str = ""
 
     async def _original(self, manifest: ReviewedPdfManifest) -> bytes:
         """Не позволяет подменить документ или исходный PDF после открытия Review."""
@@ -94,12 +95,14 @@ class GetReviewedPdf:
             )
         original = await self._original(manifest)
         key = hashlib.sha256(
-            f"{RENDERER_VERSION}:{manifest.source_sha256}:{manifest.revision}:{manifest.digest}".encode()
+            f"{RENDERER_VERSION}:{self.public_origin}:{manifest.source_sha256}:{manifest.revision}:{manifest.digest}".encode()
         ).hexdigest()
         try:
             content = await self.cache.load(job_id=job_id, key=key)
             if content is None:
-                annotations, report = reviewed_payload(manifest)
+                annotations, report = reviewed_payload(
+                    manifest, public_origin=self.public_origin
+                )
                 content = await self.renderer.render(
                     pdf_content=original,
                     file_name=manifest.source_filename,

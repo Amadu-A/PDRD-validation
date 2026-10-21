@@ -3,6 +3,7 @@
 """HTTP-схемы сервиса анализа."""
 
 from typing import Any
+from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -28,6 +29,9 @@ from pdrd_analysis_service.domain.analysis import (
 from pdrd_analysis_service.domain.document_context import document_fact_from_mapping
 from pdrd_analysis_service.domain.visualization import (
     FindingLocalizationTarget,
+)
+from pdrd_analysis_service.transport.http.normative_corpus_schemas import (
+    NormativeCorpusScope,
 )
 
 
@@ -98,6 +102,7 @@ class NormativeSourcePayload(BaseModel):
     section_id: str | None = None
     category_id: str | None = None
     source_sha256: str | None = None
+    atomic_requirement: dict[str, Any] | None = None
 
     source_file: str | None = None
     source_path: str | None = None
@@ -124,6 +129,7 @@ class NormativeSourcePayload(BaseModel):
             section_id=self.section_id,
             category_id=self.category_id,
             source_sha256=self.source_sha256,
+            atomic_requirement=self.atomic_requirement,
         )
 
 
@@ -626,6 +632,8 @@ class CheckNormsRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
+    document_id: UUID | None = None
+    normative_corpus: NormativeCorpusScope | None = None
 
     page_number: int = Field(
         ge=1,

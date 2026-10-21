@@ -4,6 +4,7 @@
 
 from dataclasses import dataclass
 from typing import Literal, Protocol
+from urllib.parse import urlsplit
 
 from pdrd_document_service.domain.pdf import (
     PdfNormalizedBoundingBox,
@@ -33,6 +34,19 @@ class PdfReportField:
 
     label: str
     value: str
+    href: str | None = None
+
+    def __post_init__(self):
+        """PDF не должен исполнять произвольную схему ссылки из текста замечания."""
+        if self.href:
+            parsed = urlsplit(self.href)
+            if (
+                parsed.scheme not in {"https", "http"}
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+            ):
+                raise ValueError("Допустима только HTTP(S)-ссылка без учётных данных.")
 
 
 @dataclass(frozen=True, slots=True)

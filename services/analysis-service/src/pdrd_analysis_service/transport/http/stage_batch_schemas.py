@@ -10,6 +10,9 @@ from pydantic import (
     Field,
 )
 
+from pdrd_analysis_service.transport.http.normative_corpus_schemas import (
+    NormativeCorpusScope,
+)
 from pdrd_analysis_service.transport.http.schemas import (
     CheckNormsRequest,
     CheckNormsResponse,
@@ -154,6 +157,7 @@ class CheckNormsStageRequest(
     items: list[CheckNormsRequest] = Field(
         min_length=1,
     )
+    normative_corpus: NormativeCorpusScope | None = None
 
 
 class CheckNormsStageItemResponse(

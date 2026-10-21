@@ -5,6 +5,9 @@
 from dataclasses import dataclass
 
 from pdrd_analysis_service.application.equipment_vision import ExtractEquipmentVision
+from pdrd_analysis_service.application.independent_normative import (
+    IndependentNormativeReview,
+)
 from pdrd_analysis_service.application.limited_vision import LimitedVisionModel
 from pdrd_analysis_service.application.ports.analysis_progress import (
     AnalysisProgressProbe,
@@ -35,6 +38,9 @@ from pdrd_analysis_service.infrastructure.analysis_progress import (
     HttpAnalysisProgressProbe,
 )
 from pdrd_analysis_service.infrastructure.image_cropper import PilImageCropper
+from pdrd_analysis_service.infrastructure.normative_requirements import (
+    HttpNormativeRequirementsReader,
+)
 from pdrd_analysis_service.infrastructure.vllm import (
     VllmStructuredVisionModel,
 )
@@ -71,6 +77,7 @@ class ApplicationContainer:
 
     analysis_progress_probe: AnalysisProgressProbe | None = None
     extract_equipment_vision: ExtractEquipmentVision | None = None
+    independent_normative_review: IndependentNormativeReview | None = None
 
 
 def build_container() -> ApplicationContainer:
@@ -108,6 +115,16 @@ def build_container() -> ApplicationContainer:
 
     return ApplicationContainer(
         settings=settings,
+        independent_normative_review=(
+            IndependentNormativeReview(
+                HttpNormativeRequirementsReader(
+                    base_url=settings.normative_plan.knowledge_base_url,
+                    timeout_seconds=settings.normative_plan.catalog_timeout_seconds,
+                )
+            )
+            if settings.normative_plan.enabled
+            else None
+        ),
         extract_equipment_vision=ExtractEquipmentVision(vision_model),
         check_cross_page_consistency=(
             CheckCrossPageConsistency(

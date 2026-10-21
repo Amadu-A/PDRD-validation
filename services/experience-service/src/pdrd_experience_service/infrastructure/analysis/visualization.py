@@ -282,6 +282,11 @@ def completed_analysis_from_visualization(
                 if equipment_details
                 else None,
                 source_kinds=kinds,
+                normative_basis_sources=tuple(
+                    dict(source)
+                    for source in finding.get("basis_sources", [])
+                    if isinstance(source, dict)
+                ),
                 proposed_regions=(() if key in ambiguous else locations.get(key, ())),
             )
         )

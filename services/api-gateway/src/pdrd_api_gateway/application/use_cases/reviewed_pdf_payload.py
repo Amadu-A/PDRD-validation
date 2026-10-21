@@ -2,6 +2,7 @@
 
 """Чистое преобразование утверждённых замечаний в контракт Document Service."""
 
+from pdrd_api_gateway.application.normative_pdf_sources import normative_pdf_fields
 from pdrd_api_gateway.application.ports.analysis_pdf_export import (
     AnalysisPdfAnnotation,
     AnalysisPdfReport,
@@ -11,7 +12,7 @@ from pdrd_api_gateway.application.ports.analysis_pdf_export import (
 from pdrd_api_gateway.application.ports.reviewed_pdf import ReviewedPdfManifest
 
 
-def reviewed_payload(manifest: ReviewedPdfManifest):
+def reviewed_payload(manifest: ReviewedPdfManifest, *, public_origin: str = ""):
     """Сохраняет полный текст; не создаёт карточку для замечания без проверенной области."""
     annotations, findings = [], []
     for row in manifest.findings:
@@ -46,6 +47,9 @@ def reviewed_payload(manifest: ReviewedPdfManifest):
                 else ()
             ),
             AnalysisPdfReportField("Тег", row.experience_tag),
+            *normative_pdf_fields(
+                row.normative_basis_sources, public_origin=public_origin
+            ),
         )
         title = f"№{row.number} · {page_label}"
         findings.append(

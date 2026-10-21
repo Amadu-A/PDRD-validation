@@ -10,7 +10,7 @@ from datetime import date
 from urllib.parse import urlsplit
 from uuid import UUID, uuid5
 
-EXTRACTOR_VERSION = "normative-native-v1"
+EXTRACTOR_VERSION = "normative-native-v2"
 _NAMESPACE = UUID("668605a7-4a65-5b7f-8892-74ce88884b56")
 
 

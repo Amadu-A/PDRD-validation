@@ -605,3 +605,79 @@ async def test_one_cross_page_review_survives_d_cleanup_and_exports_two_annotati
             reason_category="false_positive",
         )
         assert rejected.status_code == 200 and rejected.json()["pending_count"] == 0
+
+
+async def test_atomic_normative_basis_survives_review_codec_reopen_and_clickable_pdf(
+    pdf_flow,
+):
+    """Настоящие HTTP/домен/JSONB codec/PDF сохраняют исходное N-основание и ссылку."""
+    from pdrd_experience_service.domain.review_export import export_manifest
+    from pdrd_experience_service.infrastructure.database.codec import (
+        snapshot_from_json,
+        snapshot_to_json,
+    )
+
+    f = pdf_flow
+    norm_id = str(uuid4())
+    source = {
+        "source_id": "N-requirement-42",
+        "document_id": norm_id,
+        "point_id": str(uuid4()),
+        "page": 7,
+        "source_file": "Учебная норма.pdf",
+        "text": "4.2 Дословное исходное требование.",
+        "atomic_requirement": {
+            "requirement_id": "N-requirement-42",
+            "generation_id": str(uuid4()),
+            "document_code": "Учебная норма",
+            "edition": "2025",
+            "clause": "4",
+            "subclause": "2",
+            "source_fragments": [
+                {"page": 7, "text": "4.2 Дословное исходное требование."}
+            ],
+            "normative_status": {
+                "assessed_on": "2026-10-20",
+                "edition_status": "unknown",
+                "requirement_binding": "unknown",
+                "evidence_ids": [],
+            },
+        },
+    }
+    original_load = f.artifacts.load_result
+
+    async def load_result(**kwargs):
+        """Обогащает сохранённую находку, не подменяя Review и PDF."""
+        result = await original_load(**kwargs)
+        result["findings"][0]["basis_sources"] = [source]
+        return result
+
+    f.artifacts.load_result = load_result
+    exporter = replace(f.exporter, public_origin="https://pdrd.test")
+    f.network.apps["gateway"] = gateway_app(
+        replace(f.gateway, get_reviewed_pdf=exporter)
+    )
+    async with client(f) as browser:
+        revision = await prepare(browser, f)
+        saved = await f.reviews.load(f.job_id)
+        restored = snapshot_from_json(snapshot_to_json(saved), saved.history)
+        f.reviews.sessions[f.job_id] = restored
+        assert restored.findings[0].normative_basis_sources == (source,)
+        reopened = await browser.post(f.endpoint + "/open")
+        assert reopened.status_code == 200, reopened.text
+        assert reopened.json()["findings"][0]["normative_basis_sources"] == [source]
+        manifest = export_manifest(restored, await f.areas.load_status(review=restored))
+        assert manifest["findings"][0]["normative_basis_sources"] == [source]
+        response = await pdf(browser, f, revision)
+        assert response.status_code == 200, (
+            response.text if response.status_code != 200 else ""
+        )
+        with fitz.open(stream=response.content, filetype="pdf") as document:
+            text = "\n".join(page.get_text() for page in document)
+            assert "N-requirement-42" in text and "редакция 2025" in text
+            assert "п. 4.2" in text and "Дословное исходное требование" in text
+            links = [link.get("uri") for page in document for link in page.get_links()]
+            assert (
+                f"https://pdrd.test/api/v1/normative/documents/{norm_id}/content#page=7"
+                in links
+            )

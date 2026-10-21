@@ -54,6 +54,7 @@ class AnalysisPdfReportField:
 
     label: str
     value: str
+    href: str | None = None
 
     def as_dict(
         self,
@@ -65,6 +66,7 @@ class AnalysisPdfReportField:
         return {
             "label": self.label,
             "value": self.value,
+            **({"href": self.href} if self.href else {}),
         }
 
 

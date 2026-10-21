@@ -140,6 +140,7 @@ class _PdfReportWriter:
         self._write(
             (f"{field.label}: {field.value}"),
             after=2.5,
+            href=field.href,
         )
 
     def _write(
@@ -149,6 +150,7 @@ class _PdfReportWriter:
         font_size: float = 9.5,
         line_height: float | None = None,
         after: float = 5.0,
+        href: str | None = None,
     ) -> None:
         """Печатает wrapped Unicode text с автоматическими page breaks."""
         if self._page is None:
@@ -197,6 +199,24 @@ class _PdfReportWriter:
                         0.12,
                     ),
                 )
+
+                if href:
+                    self._page.insert_link(
+                        {
+                            "kind": fitz.LINK_URI,
+                            "from": fitz.Rect(
+                                self._MARGIN,
+                                self._y - font_size,
+                                min(
+                                    self._PAGE_WIDTH - self._MARGIN,
+                                    self._MARGIN
+                                    + self._text_width(line, font_size=font_size),
+                                ),
+                                self._y + 2.0,
+                            ),
+                            "uri": href,
+                        }
+                    )
 
             self._y += resolved_line_height
 

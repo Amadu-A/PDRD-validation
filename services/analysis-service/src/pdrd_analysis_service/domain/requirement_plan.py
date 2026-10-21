@@ -14,6 +14,10 @@ from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from decimal import Decimal
 
+from pdrd_analysis_service.domain.atomic_normative_status import atomic_currency
+from pdrd_analysis_service.domain.compound_normative import (
+    evaluate_compound_requirement,
+)
 from pdrd_analysis_service.domain.design_decisions import stable_id
 from pdrd_analysis_service.domain.document_context import (
     LocatedDocumentFact,
@@ -81,6 +85,7 @@ class RequirementRecord:
     reason_code: str
     observations: tuple[LocatedDocumentFact, ...] = ()
     comparison: dict | None = None
+    source_reference: dict | None = None
 
     def as_dict(self) -> dict:
         """Сохраняет буквальную цитату, исходные IDs и ограничения независимо от findings."""
@@ -111,6 +116,8 @@ def _currency(source, sources, assessed_on: str) -> tuple[str, tuple[dict, ...]]
     Пример справочной записи: «Статус СП 100.13330.2025 на 2026-10-19: действует;
     требования обязательны». Само наличие года в имени файла ничего не подтверждает.
     """
+    if getattr(source, "atomic_requirement", None) is not None:
+        return atomic_currency(source, assessed_on)
     code = _document_code(source)
     if not code:
         return "unknown", ()
@@ -289,6 +296,7 @@ def build_requirement_plan(
     """Формирует проверки каждого переданного положения независимо от списка модельных замечаний."""
     records = []
     for source in sources:
+        atomic = getattr(source, "atomic_requirement", None)
         currency, currency_evidence = (
             _currency(source, sources, assessed_on)
             if source.kind == "N"
@@ -296,6 +304,138 @@ def build_requirement_plan(
         )
         document = _document_code(source) or source.source_file
         edition_match = re.search(r"(?:[.-])(\d{4})\b", document)
+        if atomic and (
+            atomic.get("extraction_status") not in {"extracted", "needs_review"}
+            or atomic.get("normative_dependencies")
+            or not set(atomic.get("limitations", []))
+            <= {
+                "structured_interpretation_required",
+                "compound_prescription_requires_review",
+            }
+            or (
+                atomic.get("extraction_status") != "extracted"
+                and atomic.get("verification_type")
+                not in {
+                    "conditional",
+                    "table",
+                    "formula",
+                    "system_composition",
+                    "classification",
+                    "calculation_required",
+                }
+            )
+        ):
+            # Неподдержанная интерпретация не требует повторного сканирования всех фактов.
+            # Сохраняем каждый атом и его полный источник, а не обрезаем корпус ради времени.
+            records.append(
+                RequirementRecord(
+                    requirement_id=stable_id(
+                        "req-", (source.source_id, "atomic_interpretation")
+                    ),
+                    source_kind=source.kind,
+                    source_ids=(source.source_id,),
+                    source_point_id=source.point_id,
+                    document=document,
+                    edition=atomic.get("edition", ""),
+                    clause=atomic.get("clause", ""),
+                    quote=atomic.get("source_text", source.text),
+                    obligation="normative_requirement",
+                    currency=currency,
+                    currency_evidence=currency_evidence,
+                    conditions="; ".join(atomic.get("applicability_conditions", [])),
+                    object_key="",
+                    property_key="",
+                    rule=atomic.get("verification_type", "unsupported"),
+                    required_data=tuple(
+                        dict.fromkeys(
+                            (
+                                *atomic.get("required_parameters", []),
+                                *atomic.get("limitations", []),
+                                *atomic.get("normative_dependencies", []),
+                            )
+                        )
+                    ),
+                    applicability="unknown",
+                    result="not_supported",
+                    reason_code="atomic_interpretation_requires_review",
+                    source_reference=dict(atomic),
+                )
+            )
+            continue
+        advanced = (
+            evaluate_compound_requirement(atomic, facts, page_texts) if atomic else None
+        )
+        if advanced is not None:
+            for part in advanced:
+                permitted = (
+                    atomic.get("extraction_status") in {"extracted", "needs_review"}
+                    and not atomic.get("normative_dependencies")
+                    and set(atomic.get("limitations", []))
+                    <= {
+                        "structured_interpretation_required",
+                        "compound_prescription_requires_review",
+                    }
+                )
+                result, reason = part.result, part.reason
+                if not permitted:
+                    result, reason = (
+                        "not_supported",
+                        "atomic_interpretation_requires_review",
+                    )
+                elif currency != "current_mandatory":
+                    result, reason = (
+                        "applicability_unknown",
+                        "normative_edition_or_binding_unverified",
+                    )
+                first = part.observations[0] if part.observations else None
+                reference = dict(atomic)
+                records.append(
+                    RequirementRecord(
+                        requirement_id=stable_id(
+                            "req-",
+                            (
+                                source.source_id,
+                                part.rule,
+                                engineering_object_key(first.fact) if first else "",
+                                scope_key(first.fact) if first else (),
+                            ),
+                        ),
+                        source_kind=source.kind,
+                        source_ids=(source.source_id,),
+                        source_point_id=source.point_id,
+                        document=document,
+                        edition=atomic.get("edition", ""),
+                        clause=atomic.get("clause", ""),
+                        quote=atomic.get("source_text", source.text),
+                        obligation="normative_requirement",
+                        currency=currency,
+                        currency_evidence=currency_evidence,
+                        conditions="; ".join(
+                            atomic.get("applicability_conditions", [])
+                        ),
+                        object_key=engineering_object_key(first.fact) if first else "",
+                        property_key=property_key(first.fact) if first else "",
+                        rule=part.rule,
+                        required_data=part.required_data,
+                        applicability="applicable"
+                        if result in {"satisfied", "violated"}
+                        else result
+                        if result in {"applicability_unknown", "not_applicable"}
+                        else "unknown",
+                        result=result,
+                        reason_code=reason,
+                        observations=part.observations,
+                        comparison={
+                            **(part.comparison or {}),
+                            "source_kind": "N",
+                            "source_page": source.page,
+                            "source_quote": source.text,
+                            "assessed_on": assessed_on,
+                        },
+                        source_reference=reference,
+                    )
+                )
+            continue
         for clause, quote in _clauses(source.text) or (("", ""),):
             obligation = (
                 "recommendation"
@@ -413,6 +553,43 @@ def build_requirement_plan(
                         "unsupported_requirement_rule",
                         observations,
                     )
+                    if atomic is not None:
+                        record = replace(
+                            record,
+                            source_reference={
+                                key: atomic.get(key)
+                                for key in (
+                                    "requirement_id",
+                                    "point_id",
+                                    "document_id",
+                                    "source_sha256",
+                                    "generation_id",
+                                    "edition",
+                                    "clause",
+                                    "page",
+                                    "source_text",
+                                    "source_fragments",
+                                    "applicability_conditions",
+                                    "exceptions",
+                                    "normative_dependencies",
+                                    "normative_status",
+                                    "status_evidence",
+                                )
+                            },
+                        )
+                        if atomic.get("extraction_status") != "extracted":
+                            records.append(
+                                replace(
+                                    record,
+                                    result="not_supported",
+                                    reason_code="atomic_interpretation_requires_review",
+                                    required_data=tuple(
+                                        atomic.get("required_parameters", [])
+                                    )
+                                    + tuple(atomic.get("limitations", [])),
+                                )
+                            )
+                            continue
                     if (
                         not source.source_id.startswith(source.kind)
                         or source.kind not in {"N", "T", "U"}
@@ -746,6 +923,11 @@ def requirement_checks(
                     "currency": record.currency,
                     "conditions": record.conditions,
                     "assessed_on": (record.comparison or {}).get("assessed_on", ""),
+                    **(
+                        {"source_reference": record.source_reference}
+                        if record.source_reference
+                        else {}
+                    ),
                 },
                 missing_data=record.required_data if status == "not_evaluable" else (),
                 source_ids=record.source_ids,

@@ -276,6 +276,8 @@ class NormativePlanSettings(BaseModel):
     """Отключаемый дополнительный маршрут; приоритеты не ограничивают нормативный scope."""
 
     enabled: bool = False
+    knowledge_base_url: str = "http://pdrd-knowledge-service:8401"
+    catalog_timeout_seconds: float = Field(default=30.0, ge=1, le=120)
     max_additional_queries: int = Field(default=4, ge=1, le=8)
     priority_documents_by_section: dict[str, list[str]] = Field(default_factory=dict)
 

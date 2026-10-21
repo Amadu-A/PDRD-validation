@@ -179,6 +179,7 @@ class OriginalFinding:
     equipment_documentation_basis_sources: tuple[dict[str, Any], ...] = ()
     equipment_details: dict[str, Any] | None = None
     source_kinds: tuple[str, ...] = ()
+    normative_basis_sources: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         """Проверяет первоначальные данные перед открытием ревью."""
@@ -229,6 +230,7 @@ class ReviewedFinding:
     equipment_documentation_basis_sources: tuple[dict[str, Any], ...] = ()
     equipment_details: dict[str, Any] | None = None
     source_kinds: tuple[str, ...] = ()
+    normative_basis_sources: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         """Проверяет разметку отклонения, допускает отсутствие причины у старых записей."""
@@ -368,6 +370,7 @@ class ReviewSession:
                 equipment_documentation_basis_sources=item.equipment_documentation_basis_sources,
                 equipment_details=item.equipment_details,
                 source_kinds=item.source_kinds,
+                normative_basis_sources=item.normative_basis_sources,
             )
             for item in originals
         )

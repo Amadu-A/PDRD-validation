@@ -347,6 +347,7 @@ review_frontend_container="$(
 )"
 if profile_enabled "review" || [[ -n "${review_frontend_container}" ]]; then
     docker compose --profile review up \
+        --build \
         -d \
         --no-deps \
         --force-recreate \

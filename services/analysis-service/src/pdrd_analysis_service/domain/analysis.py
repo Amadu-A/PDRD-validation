@@ -263,6 +263,7 @@ class NormativeSource:
     section_id: str | None = None
     category_id: str | None = None
     source_sha256: str | None = None
+    atomic_requirement: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)

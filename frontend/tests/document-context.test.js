@@ -3,8 +3,8 @@
 /** Межстраничные доказательства, компактные карточки и общие решения Review. */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findingSourceKinds, findingSourceDescription, findingPageLabel, focusDocumentEvidence } from "../src/js/features/analysis/finding-provenance.js";
-import { renderAnalysisReport } from "../src/js/features/analysis/report.js";
+import { findingSourceKinds, findingSourceDescription, findingPageLabel, focusDocumentEvidence, normativeRequirementDescription } from "../src/js/features/analysis/finding-provenance.js";
+import { renderAnalysisReport, createNormativeCitation } from "../src/js/features/analysis/report.js";
 import { createAutomaticReview } from "../src/js/features/review/automatic.js";
 import { registerVisualizationReview } from "../src/js/features/analysis/visualization-review.js";
 import { FakeElement } from "./helpers/fake-dom.js";
@@ -237,4 +237,22 @@ test("вторичная страница не заимствует primary bbox
   assert.match(cards[1].querySelector(".analysis-result__annotation-unlocated").textContent, /не определено/);
   cards[1].click();
   assert.ok(cards.every((card) => card.classList.contains("analysis-result__annotation--active")));
+});
+
+
+test("атомарная N-ссылка сохраняет адрес, пункт, редакцию и неподтверждённый статус", (t) => {
+  setup(t);
+  const source = { document_id: "00000000-0000-4000-8000-000000000003", source_file: "Норма.pdf", page: 7,
+    text: "Исходное требование", atomic_requirement: { requirement_id: "N-exact", generation_id: "generation-1",
+      document_code: "СП учебный", edition: "2025", clause: "4", subclause: "2", source_text: "Дословная норма",
+      normative_status: { assessed_on: "2026-10-20", edition_status: "unknown", requirement_binding: "unknown" } } };
+  const citation = createNormativeCitation(source);
+  assert.match(citation.href, /00000000-0000-4000-8000-000000000003\/content#page=7$/);
+  assert.match(citation.textContent, /п\. 4\.2/);
+  assert.match(citation.textContent, /редакция 2025/);
+  assert.match(citation.textContent, /N-exact/);
+  assert.match(citation.textContent, /обязательность: не подтверждена/);
+  assert.match(citation.title, /Дословная норма/);
+  assert.equal(normativeRequirementDescription({}), "");
+  assert.doesNotThrow(() => normativeRequirementDescription({atomic_requirement: {normative_status: {evidence_ids: "broken"}}}));
 });

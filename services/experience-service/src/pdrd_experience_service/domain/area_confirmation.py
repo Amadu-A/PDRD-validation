@@ -138,6 +138,8 @@ def content_signature(
         payload["document_context_basis_sources"] = [
             asdict(item) for item in finding.document_context_basis_sources
         ]
+    if finding.normative_basis_sources:
+        payload["normative_basis_sources"] = list(finding.normative_basis_sources)
 
     if finding.equipment_documentation_basis_sources:
         payload["equipment_documentation_basis_sources"] = [

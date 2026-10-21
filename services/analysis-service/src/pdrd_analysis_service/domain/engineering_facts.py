@@ -137,6 +137,38 @@ def explicit_pipe_choices(text: str) -> tuple[DocumentFact, ...]:
     return tuple(result)
 
 
+def explicit_network_lengths(text: str) -> tuple[DocumentFact, ...]:
+    """Читает общую протяжённость подписанной сети, не принимая длину участка L за итог."""
+    content = re.sub(r"\s+", " ", text)
+    patterns = (
+        rf"(?:протяж[её]нность|(?:общая|полная|суммарная)\s+длина)\s+(?:проектируем\w*\s+)?(?:сети|системы|трубопровода)\s+(?:(?:водоснабжения|водоотведения|канализации|теплоснабжения|электроснабжения)\s+)?(?P<tag>{_TAG})\b[^;]{{0,90}}?(?P<value>\d+(?:[.,]\d+)?)\s*м(?![\w³/])",
+        rf"(?:сеть|система|трубопровод)\s+(?P<tag>{_TAG})\b[^;]{{0,50}}?(?:общая|полная|суммарная)\s+(?:длина|протяж[её]нность)[^;]{{0,30}}?(?P<value>\d+(?:[.,]\d+)?)\s*м(?![\w³/])",
+    )
+    result = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, content, re.I):
+            if re.match(r"(?:ду|dn)\d", match["tag"], re.I):
+                continue
+            fact = document_fact_from_mapping(
+                {
+                    "kind": "parameter",
+                    "subject_type": "system",
+                    "subject_name": "Система " + match["tag"],
+                    "identifier": match["tag"].upper(),
+                    "property_type": "parameter",
+                    "property_name": "Длина",
+                    "value_raw": match["value"],
+                    "unit_raw": "м",
+                    "value_role": "network_total_length",
+                    "evidence_text": match[0],
+                    "extraction_method": "pdf_text",
+                }
+            )
+            if fact is not None:
+                result.append(fact)
+    return tuple(result)
+
+
 def merge_text_engineering_facts(
     facts: tuple[DocumentFact, ...], text: str, page: int
 ) -> tuple[DocumentFact, ...]:
@@ -151,6 +183,7 @@ def merge_text_engineering_facts(
             *explicit_design_parameters(text),
             *explicit_flow_rows(text, page),
             *explicit_pipe_choices(text),
+            *explicit_network_lengths(text),
             *explicit_protection_choices(text),
         )
     )
