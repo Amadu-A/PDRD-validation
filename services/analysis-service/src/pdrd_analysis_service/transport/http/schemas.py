@@ -27,6 +27,7 @@ from pdrd_analysis_service.domain.analysis import (
     saved_source_kinds,
 )
 from pdrd_analysis_service.domain.document_context import document_fact_from_mapping
+from pdrd_analysis_service.domain.project_context import ProjectContextSource
 from pdrd_analysis_service.domain.visualization import (
     FindingLocalizationTarget,
 )
@@ -626,6 +627,23 @@ class NormativeQueriesResponse(BaseModel):
     protected_query_count: int | None = None
 
 
+class ProjectContextCheckSourcePayload(BaseModel):
+    """Фрагмент ПЗ с собственной физической страницей для нормативной проверки."""
+
+    model_config = ConfigDict(extra="forbid")
+    source_id: str = Field(min_length=1)
+    page: int | None = Field(default=None, ge=1)
+    chunk_index: int | None = None
+    score: float = 0.0
+    text: str
+
+    def to_domain(self) -> ProjectContextSource:
+        """Передаёт ПЗ отдельно от native-текста анализируемой страницы."""
+        return ProjectContextSource(
+            self.source_id, self.score, self.page, self.chunk_index, self.text
+        )
+
+
 class CheckNormsRequest(BaseModel):
     """Запрос проверки N/T/U требований."""
 
@@ -658,6 +676,9 @@ class CheckNormsRequest(BaseModel):
     )
 
     document_context_sources: list[DocumentContextSourcePayload] = Field(
+        default_factory=list
+    )
+    project_context_sources: list[ProjectContextCheckSourcePayload] = Field(
         default_factory=list
     )
 

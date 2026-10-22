@@ -57,6 +57,7 @@ from pdrd_analysis_service.domain.analysis import (
     TechnicalAssignmentSource,
     UserPackageSource,
 )
+from pdrd_analysis_service.domain.project_context import ProjectContextSource
 
 logger = logging.getLogger(
     "uvicorn.error",
@@ -823,6 +824,7 @@ class CheckPageAgainstNorms:
         ] = (),
         document_context_sources: tuple[DocumentContextSource, ...] = (),
         check_cancellation: Callable[[], Awaitable[None]] | None = None,
+        project_context_sources: tuple[ProjectContextSource, ...] = (),
     ) -> tuple[
         str,
         tuple[
@@ -873,6 +875,7 @@ class CheckPageAgainstNorms:
             document_context_sources=document_context_sources,
             normative_text_limit=(self.normative_text_limit),
             normative_system_prompt=(normative_system_prompt),
+            project_context_sources=project_context_sources,
         )
         plan = engineering_plan(
             page_facts,

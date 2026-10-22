@@ -17,11 +17,33 @@ class VisionModelError(RuntimeError):
     """Ошибка structured VLM provider."""
 
     def __init__(
-        self, message: str, *, metrics: GenerationMetrics | None = None
+        self,
+        message: str,
+        *,
+        metrics: GenerationMetrics | None = None,
+        status_code: int | None = None,
+        error_code: str = "",
+        retry_after_seconds: float = 0,
     ) -> None:
         """Сохраняет известные затраты, не сохраняя исходный ответ провайдера."""
         super().__init__(message)
         self.metrics = metrics
+        self.status_code = status_code
+        self.error_code = error_code
+        self.retry_after_seconds = retry_after_seconds
+        self.retryable = status_code in {
+            408,
+            425,
+            429,
+            500,
+            502,
+            503,
+            504,
+        } and error_code not in {
+            "context_length_exceeded",
+            "invalid_request_error",
+            "invalid_request",
+        }
 
 
 class VisionModelOutputBudgetError(VisionModelError):

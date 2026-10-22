@@ -24,9 +24,25 @@ from pdrd_analysis_service.domain.analysis import (
     TechnicalAssignmentSource,
     UserPackageSource,
 )
+from pdrd_analysis_service.domain.project_context import ProjectContextSource
 
 _COMBINED_PDF_MARKER = "[PDF_TEXT]"
 _COMBINED_CAD_MARKER = "[CAD_MACHINE_CONTEXT]"
+
+
+def _compact_context(value):
+    """Убирает пустые атрибуты только из представления для модели, сохраняя 0 и False."""
+    if isinstance(value, dict):
+        result = {key: _compact_context(part) for key, part in value.items()}
+        return {
+            key: part
+            for key, part in result.items()
+            if part is not None and part != "" and part != [] and part != {}
+        }
+    if isinstance(value, (list, tuple)):
+        return [_compact_context(part) for part in value]
+    return value
+
 
 COMBINED_MODE_SEMANTICS = """
 --- PDF + CAD COMBINED MODE ---
@@ -770,6 +786,7 @@ def build_normative_check_prompt(
         ...,
     ] = (),
     document_context_sources: tuple[DocumentContextSource, ...] = (),
+    project_context_sources: tuple[ProjectContextSource, ...] = (),
 ) -> str:
     """Формирует промпт инженерной проверки N/T/U, добавляя переданный D-контекст."""
     facts_payload = {
@@ -861,7 +878,7 @@ def build_normative_check_prompt(
     ]
 
     facts_json = json.dumps(
-        facts_payload,
+        _compact_context(facts_payload),
         ensure_ascii=False,
         separators=(
             ",",
@@ -899,9 +916,10 @@ def build_normative_check_prompt(
     document_instruction = ""
     if document_context_sources:
         document_json = json.dumps(
-            [asdict(source) for source in document_context_sources],
+            _compact_context([asdict(source) for source in document_context_sources]),
             ensure_ascii=False,
             default=list,
+            separators=(",", ":"),
         )
         document_instruction = f"""DOCUMENT CONTEXT SOURCES:
 {document_json}
@@ -938,6 +956,19 @@ D-source — факт из этого же проверяемого PDF, а не
         extracted_text,
     )
 
+    hypotheses_json = json.dumps(
+        _compact_context(
+            engineering_plan_for_prompt(hypotheses, page_facts, page_number)
+        ),
+        ensure_ascii=False,
+        default=list,
+        separators=(",", ":"),
+    )
+    project_json = json.dumps(
+        _compact_context([asdict(source) for source in project_context_sources]),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
     return f"""
 {NORMATIVE_SUPER_SYSTEM_PROMPT}
 
@@ -947,10 +978,11 @@ D-source — факт из этого же проверяемого PDF, а не
 {chr(10).join(engineering_questions(page_facts, extracted_text))}
 
 ПРЕДМЕТНЫЕ ПРОВЕРОЧНЫЕ ГИПОТЕЗЫ (это вопросы, не готовые замечания):
-{json.dumps(engineering_plan_for_prompt(hypotheses, page_facts, page_number), ensure_ascii=False, default=list)}
+{hypotheses_json}
 assertion содержит единый предмет проверки и исходные наблюдения. Используй его объект,
 свойство, условия и доказательства на всём пути; не переопределяй систему заново.
 Ссылки fact_id раскрываются в PAGE FACTS.engineering_facts, related_source_ids — в D SOURCES.
+Пустые атрибуты опущены для компактности: они неизвестны, а не доказывают отсутствие элемента или условия в проекте.
 Одна претензия относится к одному объекту, свойству и типу; не смешивай разные вопросы в одном candidate.
 В object_ref перепиши точный тег объекта из плана; без тега используй его исходное имя.
 claim_type=contradiction: две несовместимые записи одного свойства в одинаковых условиях.
@@ -991,6 +1023,11 @@ PAGE FACTS:
 
 PAGE TEXT:
 {extracted_text[:5500]}
+
+PROJECT CONTEXT SOURCES (ПЗ):
+{project_json}
+ПЗ относится к страницам, указанным в её источниках, а не к PHYSICAL PDF PAGE INDEX.
+Используй её для понимания решений и условий. Это не норматив N и не native-текст проверяемой страницы.
 
 TECHNICAL ASSIGNMENT SOURCES:
 {technical_assignment_json}

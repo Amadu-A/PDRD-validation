@@ -9,6 +9,8 @@ import logging
 import re
 import time
 from dataclasses import replace
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -17,6 +19,7 @@ from pdrd_analysis_service.application.ports.vision_model import (
     VisionModelError,
     VisionModelOutputBudgetError,
 )
+from pdrd_analysis_service.application.vision_execution import current_vision_execution
 from pdrd_analysis_service.domain.analysis import (
     GenerationMetrics,
     GenerationResult,
@@ -116,11 +119,19 @@ class VllmStructuredVisionModel:
             )
 
             logger.info(
-                ("[VLM:%s] START provider=vllm attempt=%s max_tokens=%s image=%s"),
+                (
+                    "[VLM:%s] START provider=vllm attempt=%s max_tokens=%s image=%s prompt_chars=%s request_bytes=%s"
+                ),
                 stage,
                 attempt,
                 attempt_num_predict,
                 image_bytes is not None,
+                len(attempt_prompt),
+                len(
+                    json.dumps(
+                        request_payload, ensure_ascii=False, separators=(",", ":")
+                    ).encode("utf-8")
+                ),
             )
 
             started_at = time.perf_counter()
@@ -163,7 +174,25 @@ class VllmStructuredVisionModel:
 
             except httpx.HTTPStatusError as error:
                 failure_metrics = record_failure("http_status")
-                if self._can_retry_transport_error(
+                code, retry_after, request_id = self._provider_failure(error.response)
+                retryable = (
+                    error.response.status_code in _RETRYABLE_HTTP_STATUSES
+                    and code
+                    not in {
+                        "context_length_exceeded",
+                        "invalid_request_error",
+                        "invalid_request",
+                    }
+                )
+                logger.warning(
+                    "[VLM:%s] HTTP_ERROR status=%s code=%s request_id=%s retry_after=%.2f",
+                    stage,
+                    error.response.status_code,
+                    code or "unknown",
+                    request_id or "unknown",
+                    retry_after,
+                )
+                if retryable and self._can_retry_transport_error(
                     attempt=attempt,
                     status_code=(error.response.status_code),
                 ):
@@ -180,6 +209,7 @@ class VllmStructuredVisionModel:
 
                     await self._retry_delay(
                         attempt=attempt,
+                        retry_after_seconds=retry_after,
                     )
 
                     continue
@@ -189,8 +219,12 @@ class VllmStructuredVisionModel:
                         "shared-vlm вернул HTTP ошибку "
                         f"на этапе {stage}: "
                         f"{error.response.status_code}."
+                        + (f" Код провайдера: {code}." if code else "")
                     ),
                     metrics=failure_metrics,
+                    status_code=error.response.status_code,
+                    error_code=code,
+                    retry_after_seconds=retry_after,
                 ) from error
 
             except (
@@ -766,11 +800,52 @@ class VllmStructuredVisionModel:
         self,
         *,
         attempt: int,
+        retry_after_seconds: float = 0,
     ) -> None:
         """Даёт shared queue короткое bounded окно для освобождения."""
-        await asyncio.sleep(
-            (self._retry_backoff_seconds * attempt),
+        remaining = min(
+            60.0, max(self._retry_backoff_seconds * attempt, retry_after_seconds)
         )
+        while remaining > 0:
+            execution = current_vision_execution.get()
+            if execution is not None:
+                await execution.checkpoint()
+            interval = min(1.0, remaining)
+            await asyncio.sleep(interval)
+            remaining -= interval
+        execution = current_vision_execution.get()
+        if execution is not None:
+            await execution.checkpoint()
+
+    @staticmethod
+    def _provider_failure(response: httpx.Response) -> tuple[str, float, str]:
+        """Читает только безопасный код и служебные заголовки, не публикуя сообщение с документом."""
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
+        error = payload.get("error") if isinstance(payload, dict) else None
+        code = (
+            str(error.get("code") or error.get("type") or "")
+            if isinstance(error, dict)
+            else ""
+        )
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", code):
+            code = ""
+        request_id = response.headers.get("x-request-id", "")
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", request_id):
+            request_id = ""
+        raw = response.headers.get("Retry-After", "")
+        try:
+            retry_after = float(raw)
+        except ValueError:
+            try:
+                retry_after = (
+                    parsedate_to_datetime(raw) - datetime.now(UTC)
+                ).total_seconds()
+            except (ValueError, TypeError, OverflowError):
+                retry_after = 0
+        return code, max(0.0, min(60.0, retry_after)), request_id
 
     def _health_url(
         self,

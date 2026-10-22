@@ -635,6 +635,15 @@ async def check_norms_controlled(
             document_context_sources=tuple(
                 source.to_domain() for source in request.document_context_sources
             ),
+            **(
+                {
+                    "project_context_sources": tuple(
+                        source.to_domain() for source in request.project_context_sources
+                    )
+                }
+                if request.project_context_sources
+                else {}
+            ),
             image_bytes=image,
             normative_system_prompt=(request.normative_system_prompt),
             **(
@@ -646,10 +655,10 @@ async def check_norms_controlled(
 
     except VisionModelError as error:
         raise HTTPException(
-            status_code=(status.HTTP_503_SERVICE_UNAVAILABLE),
-            detail=str(
-                error,
-            ),
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+            if error.status_code is None or error.retryable
+            else status.HTTP_502_BAD_GATEWAY,
+            detail=str(error),
         ) from error
 
     response = CheckNormsResponse(

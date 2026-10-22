@@ -119,3 +119,39 @@ def test_normative_corpus_reaches_actual_check_norms_expression(mode, encoded):
         "document_ids": ["norm-1", "norm-2"],
         "generation_ids": {"norm-1": "gen-1"},
     }
+
+
+@pytest.mark.parametrize("mode", ["cad", "pdf-cad"])
+def test_single_sheet_context_keeps_pz_separate_from_native_text(mode):
+    """Те же фрагменты ПЗ доступны CAD и combined без присвоения им страницы чертежа."""
+    workflow = json.loads(
+        (ROOT / f"n8n/workflows/analysis-v2-{mode}.json").read_text("utf-8")
+    )
+    expression = next(
+        node for node in workflow["nodes"] if node["name"] == "Check Norms"
+    )["parameters"]["body"]
+    script = """
+    const fs = require('node:fs'), vm = require('node:vm');
+    const expression = JSON.parse(fs.readFileSync(0, 'utf8'));
+    const original = {page: {page_number: 1, text: 'NATIVE', image_base64: 'eA=='}, facts: {}};
+    const pz = {analysis_text: 'NATIVE MIXED PZ', project_context_texts: ['FULL PZ QUOTE'],
+      sources: [{source_id: 'PZ1', page: 16, score: 0.8, text_excerpt: 'SHORT'}]};
+    const context = {$json: {sources: []}, $: name => {
+      const json = name.startsWith('POST ') ? {body: {document_id: 'job'}}
+        : name === 'Augment Project Context' ? pz : original;
+      return {item: {json}, first: () => ({json})};
+    }};
+    process.stdout.write(vm.runInNewContext(expression.slice(3, -2), context));
+    """
+    result = subprocess.run(
+        ["node", "-e", script],
+        input=json.dumps(expression),
+        encoding="utf-8",
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    payload = json.loads(result.stdout)
+    assert payload["extracted_text"] == "NATIVE"
+    assert payload["project_context_sources"][0]["page"] == 16
+    assert payload["project_context_sources"][0]["text"] == "FULL PZ QUOTE"

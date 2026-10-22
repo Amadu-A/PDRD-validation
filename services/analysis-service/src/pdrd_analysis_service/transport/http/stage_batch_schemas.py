@@ -8,8 +8,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    model_validator,
 )
 
+from pdrd_analysis_service.transport.http.context_pool import restore_context_pool
 from pdrd_analysis_service.transport.http.normative_corpus_schemas import (
     NormativeCorpusScope,
 )
@@ -158,6 +160,12 @@ class CheckNormsStageRequest(
         min_length=1,
     )
     normative_corpus: NormativeCorpusScope | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def restore_context(cls, value):
+        """Возвращает исходные строки до строгой валидации страниц и источников."""
+        return restore_context_pool(value)
 
 
 class CheckNormsStageItemResponse(

@@ -9,6 +9,7 @@ from collections.abc import (
     Callable,
     Sequence,
 )
+from time import perf_counter
 from typing import Annotated
 from uuid import UUID
 
@@ -18,7 +19,9 @@ from fastapi import (
     HTTPException,
     status,
 )
+from pydantic import BaseModel
 
+from pdrd_analysis_service.application.ports.vision_model import VisionModelError
 from pdrd_analysis_service.application.use_cases.document_context import DocumentPage
 from pdrd_analysis_service.application.vision_execution import (
     AnalysisCancelledError,
@@ -197,6 +200,96 @@ async def _run_stage_items[ItemT, ResultT](
                 items[index],
             )
 
+    async def process_with_retry(item: ItemT, current: int) -> ResultT:
+        """Повторяет только временно недоступную страницу, освободив слот провайдера.
+
+        Успешные соседние страницы остаются в results. Неизвестная программная
+        ошибка, неверный контекст и исчерпанный бюджет не скрываются повтором.
+        """
+        settings = container.settings.pipeline
+        failures = []
+        waited_ms = 0.0
+        for attempt in range(settings.vlm_stage_transient_retries + 1):
+            try:
+                result = await process(item)
+                if (
+                    failures
+                    and isinstance(result, BaseModel)
+                    and isinstance(getattr(result, "metrics", None), dict)
+                ):
+                    result = result.model_copy(
+                        update={
+                            "metrics": {
+                                **result.metrics,
+                                "stage_retry": {
+                                    "attempts": attempt + 1,
+                                    "backoff_ms": waited_ms,
+                                    "failed_attempts": failures,
+                                },
+                            }
+                        }
+                    )
+                return result
+            except (HTTPException, VisionModelError) as error:
+                provider = (
+                    error if isinstance(error, VisionModelError) else error.__cause__
+                )
+                if (
+                    not isinstance(provider, VisionModelError)
+                    or not provider.retryable
+                    or attempt >= settings.vlm_stage_transient_retries
+                ):
+                    raise
+                delay = min(
+                    60.0,
+                    max(
+                        settings.vlm_stage_retry_delay_seconds * (attempt + 1),
+                        provider.retry_after_seconds,
+                    ),
+                )
+                failures.append(
+                    {
+                        "status": provider.status_code,
+                        "code": provider.error_code,
+                        "metrics": provider.metrics.as_dict()
+                        if provider.metrics
+                        else None,
+                    }
+                )
+                logger.warning(
+                    "vlm_stage_item_retry document_id=%s stage=%s current=%s total=%s attempt=%s status=%s delay=%.2f",
+                    document_id,
+                    stage,
+                    current,
+                    total,
+                    attempt + 1,
+                    provider.status_code,
+                    delay,
+                )
+                started_wait = perf_counter()
+                while True:
+                    if await _is_stage_cancelled(
+                        container=container,
+                        document_id=document_id,
+                        stage=stage,
+                        current=current,
+                        total=total,
+                    ):
+                        raise AnalysisCancelledError(
+                            "Анализ отменён во время ожидания провайдера."
+                        ) from error
+                    if stop_event.is_set():
+                        raise AnalysisCancelledError(
+                            "Этап остановлен после ошибки другой страницы."
+                        ) from error
+                    if delay <= 0:
+                        break
+                    interval = min(1.0, delay)
+                    await asyncio.sleep(interval)
+                    delay -= interval
+                waited_ms += round((perf_counter() - started_wait) * 1000, 2)
+        raise RuntimeError("Не выполнена ни одна попытка страницы.")
+
     async def worker() -> None:
         nonlocal first_error
         nonlocal cancelled_before
@@ -236,7 +329,7 @@ async def _run_stage_items[ItemT, ResultT](
                         total=total,
                     )
                 ):
-                    result = await process(item)
+                    result = await process_with_retry(item, current)
 
             except asyncio.CancelledError:
                 raise

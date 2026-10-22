@@ -10,6 +10,21 @@ const workflow = JSON.parse(fs.readFileSync(new URL("../../n8n/workflows/analysi
 const nodes = new Map(workflow.nodes.map((node) => [node.name, node]));
 const documentId = "00000000-0000-4000-8000-000000000001";
 
+/** Восстанавливает позиции транспортного словаря для сравнения исходного содержимого. */
+function restoreTexts(value) {
+  const output = JSON.parse(JSON.stringify(value));
+  for (const ref of value.context_refs ?? []) {
+    let target = output;
+    for (const key of ref.path.slice(0, -1)) target = target[key];
+    assert.equal(target[ref.path.at(-1)], null);
+    target[ref.path.at(-1)] = value.context_pool[ref.index];
+  }
+  delete output.context_encoding;
+  delete output.context_pool;
+  delete output.context_refs;
+  return output;
+}
+
 /** Разрешает только указанные узлы; тяжёлый исходный ответ недоступен коду Runner. */
 function harness(count, { largeImage = false, withRequirements = false } = {}) {
   const image = largeImage ? "A".repeat(2 * 1024 * 1024) : "cG5n";
@@ -80,6 +95,49 @@ test("200 страниц: изображения и геометрия не по
   assert.equal(stage.items.length, 200);
   assert.equal((JSON.stringify(stage).match(/"requirement_id"/g) ?? []).length, 1000);
   assert.ok(!JSON.stringify(stage.items).includes("image_base64"));
+});
+
+test("31 страница: N/T/U/D/ПЗ упакованы без потерь, ПЗ не подменяет native-текст", (t) => {
+  const scenario = harness(31);
+  const paragraph = "Исходная цитата с условиями, исключениями и параметрами насоса Н1. ".repeat(80);
+  scenario.saved.set("Technical Assignment First Pass", scenario.understood);
+  const augmentations = scenario.pages.map(() => ({ json: {
+    analysis_text: `Неверно смешанный текст ${paragraph}`,
+    project_context_texts: [paragraph], sources: [{source_id: "PZ1", page: 16, score: 0.8, text_excerpt: paragraph.slice(0, 500)}],
+  } }));
+  scenario.saved.set("Augment Project Context", augmentations);
+  const requirements = scenario.pages.map(() => ({ json: {
+    normative_sources: [{source_id: "N1", text: paragraph, atomic_requirement: {source_text: paragraph, source_fragments: [{page: 7, text: paragraph}]}}],
+    technical_assignment_sources: [{source_id: "T1", text: paragraph}], conflict_candidates: [],
+  } }));
+  scenario.saved.set("Normalize Requirement Search", requirements);
+  const document = scenario.pages.map(() => ({ json: {sources: [{source_id: "D1", page: 18, text: paragraph, evidence_text: paragraph}]} }));
+  scenario.saved.set("Expand Page Document Context", document);
+  const users = scenario.pages.map(() => ({json: {sources: [{source_id: "U1", text: paragraph}]}}));
+  const before = JSON.stringify({augmentations, requirements, document, users, understood: scenario.understood});
+  const packed = scenario.code("Gate Collect Norm Check Stage", users)[0].json;
+  assert.equal(packed.context_encoding, "text-pool-v1");
+  const restored = restoreTexts(packed);
+  assert.ok(Buffer.byteLength(JSON.stringify(packed)) < Buffer.byteLength(JSON.stringify(restored)) * 0.25);
+  t.diagnostic(JSON.stringify({ raw_bytes: Buffer.byteLength(JSON.stringify(restored)),
+    packed_bytes: Buffer.byteLength(JSON.stringify(packed)), physical_pages: 31 }));
+  restored.items.forEach((page, index) => {
+    assert.equal(page.extracted_text, scenario.pages[index].text);
+    assert.equal(page.project_context_sources[0].page, 16);
+    assert.equal(page.project_context_sources[0].text, paragraph);
+    assert.deepEqual(page.normative_sources, requirements[index].json.normative_sources);
+    assert.deepEqual(page.technical_assignment_sources, requirements[index].json.technical_assignment_sources);
+    assert.deepEqual(page.user_package_sources, users[index].json.sources);
+    assert.deepEqual(page.document_context_sources, document[index].json.sources);
+  });
+  const wire = scenario.expression(nodes.get("Check Norms").parameters.body, [{json: packed}]);
+  const decoded = restoreTexts(wire);
+  decoded.items.forEach((page, index) => {
+    assert.equal(page.image_base64, scenario.pages[index].image_base64);
+    assert.equal(page.project_context_sources[0].text, paragraph);
+    assert.deepEqual(page.normative_sources, restored.items[index].normative_sources);
+  });
+  assert.equal(JSON.stringify({augmentations, requirements, document, users, understood: scenario.understood}), before);
 });
 
 test("HTTP-этапы получают собственный растр каждой физической страницы", () => {
