@@ -963,6 +963,7 @@ class CheckPageAgainstNorms:
         )
 
         findings: list[FindingDraft,] = []
+        outcomes = [dict(record) for record in candidate_selection.candidate_outcomes]
 
         origin_groups = candidate_selection.origin_assertions_by_candidate or tuple(
             () for _ in candidate_selection.candidates
@@ -989,6 +990,11 @@ class CheckPageAgainstNorms:
                 # Стабильная идентичность проверенного факта не зависит от
                 # случайного порядка выдачи кандидатных замечаний моделью.
                 finding_id = duplicate_position_id(page_number, repeated_tag)
+            for record in outcomes:
+                if record.get("raw_index") in source_indexes:
+                    record["finding_id"] = finding_id
+                    if record["disposition"] == "retained":
+                        record["disposition"] = "saved"
 
             if (
                 len(
@@ -1319,20 +1325,28 @@ class CheckPageAgainstNorms:
             candidate_selection.represented_count,
             provenance_lossless,
         )
+        augmented = augment_page_findings(
+            report=program,
+            findings=tuple(findings),
+            page_number=page_number,
+            page_facts=page_facts,
+            extracted_text=extracted_text,
+            normative=normative_sources,
+            technical=technical_assignment_sources,
+            user=user_package_sources,
+        )
+        kept_ids = {finding.finding_id for finding in augmented}
+        for record in outcomes:
+            if record.get("finding_id") and record["finding_id"] not in kept_ids:
+                record.update(
+                    disposition="unassessed", reason="evidence_audit_not_satisfied"
+                )
+        metrics = replace(metrics, candidate_outcomes=tuple(outcomes))
         if self.requirement_plan_enabled:
             metrics = replace(metrics, requirement_plan=program.requirement_plan)
 
         return (
             summary,
-            augment_page_findings(
-                report=program,
-                findings=tuple(findings),
-                page_number=page_number,
-                page_facts=page_facts,
-                extracted_text=extracted_text,
-                normative=normative_sources,
-                technical=technical_assignment_sources,
-                user=user_package_sources,
-            ),
+            augmented,
             metrics,
         )

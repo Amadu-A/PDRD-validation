@@ -2,10 +2,55 @@
 
 """Unit tests high-recall atomization ТЗ."""
 
+import pytest
 from pdrd_knowledge_service.domain.technical_assignment_indexing import (
     extract_technical_assignment_requirements,
     infer_requirement_scopes,
 )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Предусмотреть АВР.",
+        "Установить УЗО.",
+        "Предусмотреть автоматический ввод резерва.",
+    ],
+)
+def test_short_explicit_requirement_is_not_length_filtered(text):
+    """Предписание и предмет важнее числа символов; цитата и порядок сохраняются."""
+    first = extract_technical_assignment_requirements(page_number=7, text=text)
+    assert len(first) == 1
+    assert first[0].source_text == text
+    assert first[0].page_number == 7 and first[0].ordinal == 1
+    assert first[0].strength == "explicit"
+    assert first == extract_technical_assignment_requirements(page_number=7, text=text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "АВР",
+        "УЗО",
+        "Предусмотреть.",
+        "Установить || 12.",
+        "1 || А | 2",
+        "Общие положения",
+    ],
+)
+def test_short_noise_or_heading_is_not_a_requirement(text):
+    """Одиночная аббревиатура, заголовок и OCR-мусор не создают предписания."""
+    assert extract_technical_assignment_requirements(page_number=7, text=text) == ()
+
+
+def test_short_table_requirement_retains_header_and_literal_row():
+    """Заголовок и предмет короткой строки остаются частью цитаты для T-first."""
+    text = "Электроснабжение\nАВР | Предусмотреть.\nУЗО | Установить."
+    requirements = extract_technical_assignment_requirements(page_number=3, text=text)
+    assert len(requirements) == 2
+    assert requirements[0].source_text == "Электроснабжение АВР | Предусмотреть."
+    assert requirements[1].source_text == "УЗО | Установить."
+    assert all(r.strength == "explicit" for r in requirements)
 
 
 def test_extracts_explicit_requirement_with_normative_reference() -> None:

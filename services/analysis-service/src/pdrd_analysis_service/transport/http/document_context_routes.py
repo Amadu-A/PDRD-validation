@@ -117,6 +117,7 @@ class CheckConsistencyResponse(BaseModel):
     findings: list[FindingDraftPayload]
     items: list[PageCheckPayload] = Field(default_factory=list)
     cancelled: bool = False
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
 
 
 def _options(container: ApplicationContainer) -> DocumentContextOptions:
@@ -197,6 +198,7 @@ async def check_cross_page_consistency(
             )
         )
 
+    diagnostics = {}
     try:
         with vision_execution(
             stage_execution(
@@ -216,6 +218,7 @@ async def check_cross_page_consistency(
                 cancel_check=cancelled,
                 document_id=str(request.document_id),
                 engineering_report=report,
+                diagnostics=diagnostics,
             )
     except (CrossPageCancelled, AnalysisCancelledError):
         return CheckConsistencyResponse(findings=[], items=[], cancelled=True)
@@ -224,10 +227,12 @@ async def check_cross_page_consistency(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(error),
         ) from error
-    return _checked_response(request, report, findings)
+    return _checked_response(request, report, findings, diagnostics=diagnostics)
 
 
-def _checked_response(request, report, findings, *, expose_findings=True):
+def _checked_response(
+    request, report, findings, *, expose_findings=True, diagnostics=None
+):
     """Сериализует проверенные локальные кандидаты; D=false не включает межстраничную модель."""
     findings = audit_engineering_candidates(findings, report)
     audited = audit_document_findings(
@@ -256,15 +261,30 @@ def _checked_response(request, report, findings, *, expose_findings=True):
                 )
             )
     return CheckConsistencyResponse(
+        diagnostics=diagnostics or {},
         items=[
             PageCheckPayload(
                 page_number=item.page_number,
                 result=item.result.model_copy(
                     update={
+                        "metrics": {
+                            **item.result.metrics,
+                            "cross_page_candidates": {
+                                "counts": (diagnostics or {}).get("counts", {}),
+                                "candidates": [
+                                    record
+                                    for record in (diagnostics or {}).get(
+                                        "candidates", []
+                                    )
+                                    if min(fact["page"] for fact in record["facts"])
+                                    == item.page_number
+                                ],
+                            },
+                        },
                         "findings": [
                             _finding_draft_payload(finding)
                             for finding in merged[item.page_number]
-                        ]
+                        ],
                     }
                 ),
             )

@@ -7,8 +7,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import Counter
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from pdrd_analysis_service.application.candidate_trace import trace_candidate
@@ -620,6 +621,7 @@ class CheckCrossPageConsistency:
         cancel_check: Callable[[], Awaitable[bool]] | None = None,
         document_id: str = "current-document",
         engineering_report: EngineeringReport | None = None,
+        diagnostics: dict | None = None,
     ) -> tuple[FindingDraft, ...]:
         """Сохраняет подтверждённые группы и конкретные подозрения с обеими сторонами evidence."""
         if cancel_check is not None and await cancel_check():
@@ -643,17 +645,66 @@ class CheckCrossPageConsistency:
             len(graph.connections),
             len(graph.unresolved_evidence_ids),
         )
-        groups = discover_conflicts(
+        discovered = discover_conflicts(
             facts,
-            max_candidates=self.options.max_cross_page_candidates,
             require_physical_identity=True,
         )
-        for index, group in enumerate(groups, 1):
+        groups = discovered[: max(0, self.options.max_cross_page_candidates)]
+        by_number = {page.page: page for page in pages}
+        records = [
+            {
+                "candidate_id": f"C{index}",
+                "subject": group.subject_key,
+                "property": group.property_key,
+                "mismatch_type": group.mismatch_type,
+                "facts": [
+                    {
+                        **asdict(item),
+                        "fact_id": item.fact_id,
+                        "evidence_regions": _evidence_region(item, by_number),
+                    }
+                    for item in group.facts
+                ],
+                "disposition": "unassessed" if index <= len(groups) else "deferred",
+                "reason": "missing_decision"
+                if index <= len(groups)
+                else "validation_budget_exhausted",
+            }
+            for index, group in enumerate(discovered, 1)
+        ]
+
+        def save_diagnostics():
+            """Возвращает полные записи отдельно от пользовательских замечаний."""
+            if diagnostics is not None:
+                counts = Counter(record["disposition"] for record in records)
+                diagnostics.update(
+                    {
+                        "candidates": records,
+                        "counts": {
+                            "discovered": len(discovered),
+                            "checked": len(groups),
+                            **{
+                                key: counts[key]
+                                for key in (
+                                    "deferred",
+                                    "refuted",
+                                    "saved",
+                                    "unassessed",
+                                )
+                            },
+                        },
+                    }
+                )
+
+        save_diagnostics()
+        for index, group in enumerate(discovered, 1):
             trace_candidate(
                 "cross_page_hypothesis",
                 f"C{index}",
-                decision="candidate",
-                reason=group.mismatch_type,
+                decision="candidate" if index <= len(groups) else "deferred",
+                reason=group.mismatch_type
+                if index <= len(groups)
+                else "validation_budget_exhausted",
                 facts=len(group.facts),
                 pages=len({fact.page for fact in group.facts}),
             )
@@ -667,6 +718,7 @@ class CheckCrossPageConsistency:
         decisions: dict[str, str] = {}
         reasons: dict[str, str] = {}
         reason_codes: dict[str, str] = {}
+        raw_decisions: dict[str, dict] = {}
         assertions = {
             f"C{index}": assertion_from_facts(group.facts, include_related=True)
             for index, group in enumerate(groups, 1)
@@ -763,28 +815,63 @@ class CheckCrossPageConsistency:
                 seed=700 + start,
                 stage="cross_page_consistency",
             )
-            for decision in generated.payload.get("decisions", []):
-                if isinstance(decision, dict):
-                    decisions[str(decision.get("candidate_id", ""))] = str(
-                        decision.get("status", "")
-                    )
-                    reasons[str(decision.get("candidate_id", ""))] = str(
-                        decision.get("reason", "")
-                    ).strip()
-                    code = str(decision.get("reason_code", ""))
-                    if code in REVIEW_REASON_CODES:
-                        reason_codes[str(decision.get("candidate_id", ""))] = code
+            raw = (
+                generated.payload.get("decisions")
+                if isinstance(generated.payload, dict)
+                else None
+            )
+            allowed = {item["candidate_id"] for item in candidates}
+            rows = (
+                [row for row in raw if isinstance(row, dict)]
+                if isinstance(raw, list)
+                else []
+            )
+            occurrences = Counter(str(row.get("candidate_id", "")) for row in rows)
+            for decision in rows:
+                key = str(decision.get("candidate_id", ""))
+                status = decision.get("status")
+                reason = decision.get("reason")
+                if (
+                    key not in allowed
+                    or occurrences[key] != 1
+                    or not isinstance(status, str)
+                    or status not in {"confirmed", "rejected", "needs_review"}
+                    or not isinstance(reason, str)
+                    or not reason.strip()
+                ):
+                    continue
+                decisions[key], reasons[key] = status, reason.strip()
+                raw_decisions[key] = dict(decision)
+                code = decision.get("reason_code")
+                if code in REVIEW_REASON_CODES:
+                    reason_codes[key] = code
 
-        by_number = {page.page: page for page in pages}
         findings: list[FindingDraft] = []
         for index, group in enumerate(groups, start=1):
             decision = decisions.get(f"C{index}")
+            record = records[index - 1]
+            if decision:
+                record.update(
+                    {
+                        "decision": raw_decisions.get(
+                            f"C{index}",
+                            {
+                                "status": decision,
+                                "reason": reasons.get(f"C{index}", ""),
+                            },
+                        ),
+                        "reason": reasons.get(f"C{index}", ""),
+                        "disposition": "refuted"
+                        if decision == "rejected"
+                        else "unassessed",
+                    }
+                )
             trace_candidate(
                 "cross_page_verification",
                 f"C{index}",
                 decision=decision
                 if decision in {"confirmed", "needs_review", "rejected"}
-                else "reject",
+                else "unassessed",
                 reason=reason_codes.get(f"C{index}", "model_decision")
                 if decision
                 else "missing_decision",
@@ -944,7 +1031,7 @@ class CheckCrossPageConsistency:
             finding.finding_id: finding
             for finding in (*findings, *deterministic_findings)
         }
-        return attach_decision_protocols(
+        result = attach_decision_protocols(
             audit_findings_evidence(
                 tuple(by_id.values()),
                 page_texts={page.page: page.text for page in pages},
@@ -953,6 +1040,15 @@ class CheckCrossPageConsistency:
             registry,
             checks=report.checks,
         )
+        kept_ids = {finding.finding_id for finding in result}
+        for index, record in enumerate(records[: len(groups)], 1):
+            finding_id = f"cross-page-{index:04d}"
+            if finding_id in kept_ids:
+                record.update({"disposition": "saved", "finding_id": finding_id})
+            elif record["disposition"] == "unassessed" and f"C{index}" in decisions:
+                record["reason"] = "evidence_audit_not_satisfied"
+        save_diagnostics()
+        return result
 
 
 def _same_requirement_claim(program, candidate):

@@ -109,6 +109,64 @@ async def no_cancel():
     """Штатная контрольная точка без отмены."""
 
 
+async def test_confirmed_visual_object_selects_same_norm_without_native_text():
+    """Предмет с происхождением и областью доступен N-first и на скане."""
+    original = page()
+    fact = replace(
+        original.facts[0],
+        subject_name="Пожарный гидрант ПГ7",
+        extraction_method="vlm",
+        source_pages=(13,),
+        visual_regions=(
+            {"x_min": 10, "y_min": 10, "x_max": 80, "y_max": 80, "confidence": 0.95},
+        ),
+    )
+    results = []
+    for text in [original.text, ""]:
+        result = await IndependentNormativeReview(Reader(requirement())).execute(
+            document_id="scan",
+            section_id=SECTION,
+            document_ids=(DOC,),
+            pages=(replace(original, text=text, facts=(fact,)),),
+            assessed_on=DAY,
+            check_cancellation=no_cancel,
+        )
+        results.append(result)
+    assert all(r.diagnostics["selection"][0]["selected"] for r in results)
+    assert not any(f.status == "confirmed" for f in results[1].findings)
+
+
+@pytest.mark.parametrize("kind", ["unlocalized", "wrong_page", "unrelated"])
+async def test_unbound_or_unrelated_fact_does_not_select_object_class(kind):
+    """Неподтверждённое извлечение и иной объект не включают нормы о гидранте."""
+    original = page()
+    changes = {"subject_name": "Пожарный гидрант ПГ7", "extraction_method": "vlm"}
+    if kind == "wrong_page":
+        changes.update(
+            source_pages=(99,),
+            visual_regions=({"x_min": 1, "y_min": 1, "x_max": 90, "y_max": 90},),
+        )
+    if kind == "unrelated":
+        changes.update(
+            subject_name="Насос P7",
+            identifier="P7",
+            evidence_text="Насос P7: 4 л/с.",
+            visual_regions=({"x_min": 1, "y_min": 1, "x_max": 90, "y_max": 90},),
+        )
+    result = await IndependentNormativeReview(Reader(requirement())).execute(
+        document_id="scan",
+        section_id=SECTION,
+        document_ids=(DOC,),
+        pages=(
+            replace(original, text="", facts=(replace(original.facts[0], **changes),)),
+        ),
+        assessed_on=DAY,
+        check_cancellation=no_cancel,
+    )
+    assert not result.diagnostics["selection"][0]["selected"]
+    assert not result.findings
+
+
 class Reader:
     """Подменяет только сетевой порт; расчёт, связывание и финальное доказательство настоящие."""
 

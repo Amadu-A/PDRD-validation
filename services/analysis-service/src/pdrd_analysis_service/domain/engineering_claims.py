@@ -136,8 +136,84 @@ def extract_quantities(text: str) -> tuple[Quantity, ...]:
     return tuple(quantities)
 
 
+def claim_fragments(text: str) -> tuple[str, ...]:
+    """Разделяет самостоятельные претензии, не разрезая числа, цитаты и пересчёт."""
+    # Союз отделяет другую претензию только при собственном предмете проверки.
+    boundary = (
+        r";\s*|(?<=[.!?])\s+(?=[А-ЯA-Z])|"
+        r",?\s+\b(?:но|однако|кроме того|также|при этом)\s+"
+        r"(?=(?:в\s+\w+\s+)?(?:обозначен|маркиров|модел|марк[аиу]|материал|комплект|позици|"
+        r"спецификац|назначен|ссылк|нумерац|производител|характеристик|мощност|давлен|"
+        r"напор|температур|диаметр|длин|толщин|напряжен|сечени|масса))"
+    )
+    # Текст цитат не участвует в поиске границ авторских утверждений.
+    protected = re.sub(r'«[^»]*»|"[^"]*"', lambda m: "_" * len(m[0]), text)
+    starts, result = 0, []
+    for match in re.finditer(boundary, protected, re.I):
+        result.append(text[starts : match.start()].strip())
+        starts = match.end()
+    result.append(text[starts:].strip())
+    return tuple(part for part in result if part)
+
+
+def filter_numeric_claims(text: str) -> tuple[str, tuple[dict, ...]]:
+    """Удаляет только опровергнутые самостоятельные утверждения, сохраняя их для аудита."""
+    kept, refuted = [], []
+    for part in claim_fragments(text):
+        reason = _false_numeric_claim(part)
+        if reason:
+            refuted.append(
+                {
+                    "text": part,
+                    "reason": reason,
+                    "normalized_quantities": [
+                        {
+                            "dimension": q.dimension,
+                            "value": str(q.value),
+                            "unit": q.unit,
+                            "tolerance": str(q.tolerance),
+                        }
+                        for q in extract_quantities(part)
+                    ],
+                }
+            )
+        else:
+            kept.append(part)
+    if refuted:
+        # «Исправить расчёт» — продолжение опровергнутого вывода, а не новая претензия.
+        kept = [
+            part
+            for part in kept
+            if re.search(
+                r"обозначен|маркиров|модел|марк[аиу]|материал|комплект|позици|спецификац|"
+                r"назначен|ссылк|нумерац|производител|характеристик|мощност|давлен|напор|"
+                r"температур|диаметр|длин|толщин|напряжен|сечени|масса",
+                part,
+                re.I,
+            )
+            and re.search(
+                r"не совпад|не соответств|расхожд|невер|ошиб|отсутств|не указан|различ|противореч",
+                part,
+                re.I,
+            )
+        ]
+    return ("; ".join(kept) if refuted else text), tuple(refuted)
+
+
 def false_numeric_claim(text: str) -> str | None:
     """Возвращает код доказуемо неверного утверждения либо оставляет его модели."""
+    return next(
+        (
+            reason
+            for part in claim_fragments(text)
+            if (reason := _false_numeric_claim(part))
+        ),
+        None,
+    )
+
+
+def _false_numeric_claim(text: str) -> str | None:
+    """Проверяет арифметику в пределах одной самостоятельной претензии."""
     # Защищаем цитату исходной ошибки, но проверяем вычисления автора вне цитаты.
     quantities = extract_quantities(text)
     pairs = list(pairwise(quantities))
@@ -219,6 +295,21 @@ def unsupported_engineering_claim(text: str) -> str | None:
     """Отсекает доказуемую арифметическую ошибку и несовместимые основания сравнения."""
     if reason := false_numeric_claim(text):
         return reason
+    quantities = extract_quantities(text)
+    if len(quantities) == 2 and not re.search(
+        r"ошиб|невер|отсутств|не указан|не обоснов|требует|не совпад|не соответств|расхожд|противореч",
+        text,
+        re.I,
+    ):
+        left, right = quantities
+        gap = text[left.end : right.start]
+        if (
+            left.dimension == right.dimension
+            and left.unit != right.unit
+            and abs(left.value - right.value) <= left.tolerance + right.tolerance
+            and (_EQUIVALENCE.search(gap) or gap.strip() == "(")
+        ):
+            return "equivalent_units"
     if len(re.findall(r"ОСР[-\s]*\d*[-\s]*[ABCАВС]", text, re.I)) > 1 and re.search(
         r"разн\w*\s+значени|противореч|един\w*\s+значени", text, re.I
     ):

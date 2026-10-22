@@ -23,6 +23,7 @@ from pdrd_analysis_service.domain.analysis import (
     NormativeSource,
 )
 from pdrd_analysis_service.domain.engineering_claims import (
+    filter_numeric_claims,
     unsupported_engineering_claim,
 )
 
@@ -231,6 +232,7 @@ class ViolationCandidateSelection:
     ] = ()
 
     origin_assertions_by_candidate: tuple[tuple[dict[str, Any], ...], ...] = ()
+    candidate_outcomes: tuple[dict[str, Any], ...] = ()
 
     @property
     def consolidated_count(
@@ -887,6 +889,7 @@ def select_violation_candidates(
     ] = {}
 
     rejected_reasons: list[str] = []
+    outcomes: list[dict[str, Any]] = []
     for raw_index, violation in enumerate(
         violations,
         start=1,
@@ -905,9 +908,27 @@ def select_violation_candidates(
         )
         trace_id = candidate_key(candidate, page=page_number)
         trace_candidate("discovery", trace_id, page=page_number, decision="generated")
+        comment, refuted = filter_numeric_claims(str(candidate.get("comment", "")))
+        if refuted and comment:
+            candidate["comment"] = comment
+            recommendation, rejected_recommendations = filter_numeric_claims(
+                str(candidate.get("recommendation_draft", ""))
+            )
+            if rejected_recommendations:
+                candidate["recommendation_draft"] = recommendation
         false_claim = unsupported_engineering_claim(str(candidate.get("comment", "")))
         if false_claim is not None:
             rejected_reasons.append(false_claim)
+            outcomes.append(
+                {
+                    "candidate_id": trace_id,
+                    "raw_index": raw_index,
+                    "disposition": "refuted",
+                    "reason": false_claim,
+                    "payload": dict(violation),
+                    "counterevidence": list(refuted),
+                }
+            )
             trace_candidate(
                 "verification",
                 trace_id,
@@ -961,6 +982,18 @@ def select_violation_candidates(
             )
 
         if existing_position is not None:
+            outcomes.append(
+                {
+                    "candidate_id": trace_id,
+                    "raw_index": raw_index,
+                    "disposition": "merged",
+                    "target_id": origins_by_candidate[existing_position][0][
+                        "candidate_id"
+                    ],
+                    "payload": dict(violation),
+                    "refuted_claims": list(refuted),
+                }
+            )
             trace_candidate(
                 "deduplication",
                 trace_id,
@@ -1008,6 +1041,15 @@ def select_violation_candidates(
 
         candidates.append(
             candidate,
+        )
+        outcomes.append(
+            {
+                "candidate_id": trace_id,
+                "raw_index": raw_index,
+                "disposition": "retained",
+                "payload": dict(violation),
+                "refuted_claims": list(refuted),
+            }
         )
         trace_candidate(
             "verification",
@@ -1057,6 +1099,7 @@ def select_violation_candidates(
         origin_assertions_by_candidate=tuple(
             tuple(origins) for origins in origins_by_candidate
         ),
+        candidate_outcomes=tuple(outcomes),
     )
 
 

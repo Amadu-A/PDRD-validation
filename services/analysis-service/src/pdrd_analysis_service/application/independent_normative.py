@@ -26,6 +26,8 @@ from pdrd_analysis_service.domain.document_context import (
     normalize_label,
 )
 from pdrd_analysis_service.domain.engineering_facts import merge_text_engineering_facts
+from pdrd_analysis_service.domain.evidence_audit import bind_evidence, literal_contains
+from pdrd_analysis_service.domain.physical_identity import valid_box
 from pdrd_analysis_service.domain.project_dependencies import (
     explicit_project_dependencies,
 )
@@ -76,6 +78,33 @@ class IndependentNormativeReview:
                 for index, fact in enumerate(merged, 1)
             )
         project = normalize_label("\n".join(texts.values()))
+        observed = []
+        for item in facts:
+            fact = item.fact
+            binding = bind_evidence(item, texts)
+            visual = (
+                binding.reason_code == "visual_evidence_not_independently_verified"
+                and fact.extraction_method not in {"pdf_text", "pdf_table", ""}
+                and any(valid_box(region) for region in fact.visual_regions)
+                and literal_contains(fact.evidence_text, fact.identifier)
+                and (not fact.source_pages or item.page in fact.source_pages)
+            )
+            if binding.status == "supported" or visual:
+                observed.append(
+                    (
+                        item.fact_id,
+                        normalize_label(
+                            " ".join(
+                                (
+                                    fact.subject_type,
+                                    fact.subject_name,
+                                    fact.object_kind,
+                                    fact.evidence_text,
+                                )
+                            )
+                        ),
+                    )
+                )
         for normative_id in sorted(set(document_ids)):
             await check_cancellation()
             try:
@@ -112,7 +141,10 @@ class IndependentNormativeReview:
                     "грунт",
                 )
                 family = next((word for word in families if word in subject), None)
-                relevant = family is None or family in project
+                anchors = [
+                    fact_id for fact_id, text in observed if family and family in text
+                ]
+                relevant = family is None or family in project or bool(anchors)
                 reason = (
                     "project_object_class_observed"
                     if family and relevant
@@ -127,6 +159,7 @@ class IndependentNormativeReview:
                         "generation_id": document.manifest["generation_id"],
                         "selected": relevant,
                         "reason": reason,
+                        "observed_fact_ids": anchors,
                     }
                 )
                 if not relevant:

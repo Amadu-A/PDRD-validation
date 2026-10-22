@@ -595,6 +595,17 @@ def _is_meaningful_requirement_fragment(
     value: str,
 ) -> bool:
     """Отбрасывает только явно пустой/неинформативный OCR noise."""
+    explicit = _REQUIREMENT_EXPLICIT_PATTERN.search(value)
+    if explicit:
+        # Короткое предписание требует предмета, а не произвольного числа символов.
+        subject = (value[: explicit.start()] + " " + value[explicit.end() :]).strip(
+            " .:;!-–—|"
+        )
+        words = re.findall(r"[A-Za-zА-Яа-яЁё]+", subject)
+        if any(re.fullmatch(r"[А-ЯЁA-Z]{2,}[0-9]*", word) for word in words) or any(
+            re.fullmatch(r"[А-ЯЁA-Z]?[а-яёa-z]{3,}", word) for word in words
+        ):
+            return True
     if (
         len(
             value,

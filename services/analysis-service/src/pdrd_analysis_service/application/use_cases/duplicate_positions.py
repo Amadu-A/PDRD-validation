@@ -249,6 +249,7 @@ def recover_duplicate_positions(
         generated_count=selection.generated_count + synthetic_count,
         rejected_reasons=selection.rejected_reasons,
         origin_assertions_by_candidate=tuple(origin_assertions),
+        candidate_outcomes=selection.candidate_outcomes,
     )
     logger.info(
         "deterministic_duplicate_positions page=%s tags=%s "

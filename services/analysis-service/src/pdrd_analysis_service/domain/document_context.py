@@ -256,10 +256,15 @@ def normalized_value(fact: DocumentFact) -> tuple[str, str] | None:
 def discover_conflicts(
     facts: tuple[LocatedDocumentFact, ...],
     *,
-    max_candidates: int,
+    max_candidates: int | None = None,
     require_physical_identity: bool = False,
 ) -> tuple[ConflictGroup, ...]:
-    """Ищет ограниченное число групп без попарного VLM-сравнения страниц."""
+    """Регистрирует все группы без попарного VLM-сравнения страниц.
+
+    max_candidates оставлен для совместимости вызовов. Бюджет ограничивает
+    проверку в application, а не регистрацию уже обнаруженных конфликтов.
+    """
+    facts = tuple(sorted(facts, key=lambda item: (item.page, item.index)))
     groups: dict[tuple[str, str, tuple[str, ...]], list[LocatedDocumentFact]] = {}
     for located in facts:
         fact = located.fact
@@ -340,12 +345,18 @@ def discover_conflicts(
                 mismatch_type=mismatch_type,
             )
         )
-        if len(conflicts) >= max_candidates:
-            break
-    remaining = max_candidates - len(conflicts)
-    if remaining > 0:
-        conflicts.extend(_relationship_conflicts(facts)[:remaining])
-    return tuple(conflicts)
+    conflicts.extend(_relationship_conflicts(facts))
+    return tuple(
+        sorted(
+            conflicts,
+            key=lambda group: (
+                group.subject_key,
+                group.property_key,
+                group.mismatch_type,
+                tuple((item.page, item.index) for item in group.facts),
+            ),
+        )
+    )
 
 
 def _printed_sheet_number(fact: DocumentFact) -> int | None:

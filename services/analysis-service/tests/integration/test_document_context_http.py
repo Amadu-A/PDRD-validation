@@ -89,6 +89,64 @@ class ForbiddenCrossCheck:
         raise AssertionError("D отключён")
 
 
+async def test_missing_decision_http_returns_full_diagnostics_and_preserves_page_metrics():
+    """Неоценённый конфликт доступен в HTTP и метриках страницы, без ложной карточки."""
+    from types import SimpleNamespace
+
+    class EmptyVision:
+        """Не возвращает решения по обнаруженному предмету."""
+
+        async def generate_json(self, **request):
+            """Одного исходного вызова достаточно; повтор не делается."""
+            return SimpleNamespace(payload={"decisions": []})
+
+    app = build_app()
+    app.state.container = replace(
+        app.state.container,
+        check_cross_page_consistency=CheckCrossPageConsistency(
+            EmptyVision(),
+            _options(app.state.container),
+        ),
+    )
+    pages = [
+        {
+            "page_number": number,
+            "extracted_text": f"Б-012 {value} °C",
+            "page_facts": {**facts_payload(), "document_facts": [fact_payload(value)]},
+        }
+        for number, value in [(7, "-37"), (10, "-35")]
+    ]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/v1/document-context/check-consistency",
+            json={
+                "document_id": str(uuid4()),
+                "pages": pages,
+                "page_checks": [
+                    {
+                        "page_number": 7,
+                        "result": {
+                            "summary": "ok",
+                            "findings": [],
+                            "metrics": {"original": 1},
+                        },
+                    }
+                ],
+            },
+        )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["findings"] == []
+    assert result["diagnostics"]["counts"]["unassessed"] == 1
+    record = result["diagnostics"]["candidates"][0]
+    assert len(record["facts"]) == 2
+    metrics = result["items"][0]["result"]["metrics"]
+    assert metrics["original"] == 1
+    assert metrics["cross_page_candidates"]["candidates"] == [record]
+
+
 @pytest.mark.parametrize("enabled", [False, True])
 async def test_understanding_stage_preserves_document_switch(enabled):
     """Пакетный HTTP-этап запрещает извлечение D при выключенном чекбоксе."""
