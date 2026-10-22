@@ -239,6 +239,38 @@ def physical_key(item):
 
 def comparison_identity(items):
     """Разделяет разные объекты, неподтверждённую связь и общий проверяемый отрезок."""
+    storage = tuple(
+        item
+        for item in items
+        if re.search(r"объем|volume", normalize_label(item.fact.property_name))
+        and re.search(
+            r"резервуар|емкост|tank",
+            normalize_label(
+                item.fact.subject_name
+                + " "
+                + item.fact.identifier
+                + " "
+                + item.fact.evidence_text
+            ),
+        )
+    )
+    if storage:
+        # Родовое имя и общий тег системы не идентифицируют отдельную ёмкость.
+        if any(
+            not re.search(r"\d", item.fact.identifier)
+            or normalize_label(item.fact.identifier)
+            == normalize_label(item.fact.scope_system)
+            or not re.search(
+                r"\b(?:резервуар|емкость|tank)\s*(?:№\s*)?"
+                + re.escape(normalize_label(item.fact.identifier))
+                + r"(?!\w)",
+                normalize_label(item.fact.evidence_text),
+            )
+            for item in storage
+        ):
+            return "individual_object_unidentified"
+        if len({normalize_label(item.fact.identifier) for item in storage}) > 1:
+            return "different_physical_objects"
     if not items or not any(geometric_property(item.fact) for item in items):
         return "not_required"
     kinds = {object_kind(item.fact) for item in items} - {""}

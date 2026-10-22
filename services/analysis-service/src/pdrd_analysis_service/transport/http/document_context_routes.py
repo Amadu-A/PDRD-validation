@@ -2,6 +2,7 @@
 
 """Закрытые HTTP-этапы D-контекста и межстраничной проверки."""
 
+from collections import Counter
 from dataclasses import asdict
 from typing import Annotated, Any
 from uuid import UUID
@@ -260,6 +261,33 @@ def _checked_response(
                     ),
                 )
             )
+    by_id = {
+        finding.finding_id: finding for values in merged.values() for finding in values
+    }
+    targets = {
+        origin["finding_id"]: finding.finding_id
+        for finding in by_id.values()
+        for origin in finding.origin_assertions
+        if origin.get("origin") == "merged_finding" and origin.get("finding_id")
+    }
+    for record in (diagnostics or {}).get("candidates", []):
+        finding_id = record.get("finding_id")
+        if finding_id in targets:
+            record.update(
+                disposition="merged", resulting_finding_id=targets[finding_id]
+            )
+        elif finding_id in by_id:
+            record["resulting_finding_id"] = finding_id
+    if diagnostics is not None:
+        counts = Counter(
+            record["disposition"] for record in diagnostics.get("candidates", [])
+        )
+        diagnostics.setdefault("counts", {}).update(
+            {
+                key: counts[key]
+                for key in ("saved", "merged", "refuted", "unassessed", "deferred")
+            }
+        )
     return CheckConsistencyResponse(
         diagnostics=diagnostics or {},
         items=[
@@ -271,6 +299,13 @@ def _checked_response(
                             **item.result.metrics,
                             "cross_page_candidates": {
                                 "counts": (diagnostics or {}).get("counts", {}),
+                                "discovery_exclusions": [
+                                    record
+                                    for record in (diagnostics or {}).get(
+                                        "discovery_exclusions", []
+                                    )
+                                    if record["page"] == item.page_number
+                                ],
                                 "candidates": [
                                     record
                                     for record in (diagnostics or {}).get(

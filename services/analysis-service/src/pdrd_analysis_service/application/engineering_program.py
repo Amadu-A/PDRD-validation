@@ -689,6 +689,27 @@ def audit_engineering_candidates(findings, report):
     """Проверяет структурный предмет арифметики, сохраняя неопределённость и контрдоказательства."""
     result = []
     for finding in findings:
+        continued = _continued_row_counterevidence(finding, report)
+        if continued:
+            result.append(
+                replace(
+                    finding,
+                    status="hypothesis",
+                    origin_assertions=(
+                        *finding.origin_assertions,
+                        {
+                            "origin": "engineering_evidence_audit",
+                            "stage": "document_table_audit",
+                            "status": "counterevidence",
+                            "disposition": "diagnostic",
+                            "reason_code": "claimed_missing_row_present_in_continuation",
+                            "original": asdict(finding),
+                            "observations": [asdict(item) for item in continued],
+                        },
+                    ),
+                )
+            )
+            continue
         if any(
             origin.get("origin") == "programmatic_engineering_check"
             for origin in finding.origin_assertions
@@ -941,6 +962,35 @@ def audit_engineering_candidates(findings, report):
                 ),
             )
         )
+    return tuple(result)
+
+
+def _continued_row_counterevidence(finding, report):
+    """Опровергает лишь явно названную отсутствующей строку проверенного продолжения."""
+    from pdrd_analysis_service.domain.evidence_audit import literal_contains
+
+    if not re.search(
+        r"отсутств|пропущ|не\s+(?:указан|привед[её]н)", finding.comment, re.I
+    ):
+        return ()
+    table = re.search(r"таблиц\w*\s*(\d+(?:\.\d+)*)", finding.comment, re.I)
+    if table is None:
+        return ()
+    result = []
+    for evidence in report.registry.evidence:
+        item = evidence.observation
+        fact = item.fact
+        if (
+            fact.continuation_marker == "pdf_columns_from_previous_page"
+            and re.search(
+                r"таблиц\w*\s*" + re.escape(table[1]) + r"(?![\d.])",
+                fact.table_title,
+                re.I,
+            )
+            and literal_contains(finding.comment, fact.row_label)
+            and program_evidence_eligible(evidence)
+        ):
+            result.append(item)
     return tuple(result)
 
 

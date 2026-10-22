@@ -8,6 +8,7 @@ import re
 from dataclasses import asdict, dataclass, replace
 from typing import Any
 
+from pdrd_analysis_service.application.candidate_fates import final_candidate_fates
 from pdrd_analysis_service.application.candidate_trace import trace_candidate
 from pdrd_analysis_service.application.engineering_program import (
     equipment_review_question,
@@ -54,7 +55,10 @@ from pdrd_analysis_service.domain.engineering_claims import (
     false_numeric_claim,
     unsupported_engineering_claim,
 )
-from pdrd_analysis_service.domain.evidence_audit import diagnostic_language
+from pdrd_analysis_service.domain.evidence_audit import (
+    deterministic_purpose_mismatch,
+    diagnostic_language,
+)
 
 _NORMATIVE_REFERENCE_PATTERN = re.compile(
     r"\b(?:ГОСТ|GOST|ПУЭ|PUE|СНиП|SNIP|СП)\b",
@@ -469,6 +473,20 @@ def _is_protected_factual_review(finding: FindingDraft) -> bool:
     if assertion is not None and assertion.claim_type == "contradiction":
         if (
             assertion.verification == "deterministic"
+            and assertion.verification_rule == "explicit_system_purpose"
+            and deterministic_purpose_mismatch(
+                assertion,
+                page_texts={
+                    int(page): text
+                    for origin in finding.origin_assertions
+                    if origin.get("origin") == "engineering_evidence_audit"
+                    for page, text in origin.get("page_texts", {}).items()
+                },
+            )
+        ):
+            return True
+        if (
+            assertion.verification == "deterministic"
             and assertion.verification_rule == "unit_equivalence"
             and all(
                 item.fact.extraction_method in {"pdf_text", "pdf_table"}
@@ -558,6 +576,7 @@ class FinalizeFindings:
             )
 
         candidate_count = len(findings)
+        original_candidates = findings
         pre_rejected = []
         accepted = []
         for finding in findings:
@@ -616,6 +635,9 @@ class FinalizeFindings:
                     "fallback_count": 0,
                     "deterministic_review_count": 0,
                     "candidate_count": candidate_count,
+                    "candidate_fates": final_candidate_fates(
+                        original_candidates, (), pre_rejected
+                    ),
                     "kept_count": 0,
                     "rejected_count": len(pre_rejected),
                     "rejected_findings": pre_rejected,
@@ -931,6 +953,19 @@ class FinalizeFindings:
                 "fallback_count": fallback_count,
                 "deterministic_review_count": len(protected),
                 "candidate_count": candidate_count,
+                "candidate_fates": final_candidate_fates(
+                    original_candidates, final_items, rejected_findings
+                ),
+                "normative_route": {
+                    "confirmed_input": sum(
+                        item.status == "confirmed" and bool(item.basis_sources)
+                        for item in original_candidates
+                    ),
+                    "confirmed_output": sum(
+                        item.status == "confirmed" and bool(item.basis_sources)
+                        for item in final_items
+                    ),
+                },
                 "merged_count": merged_count,
                 "kept_count": len(
                     final_items,

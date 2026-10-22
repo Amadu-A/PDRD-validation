@@ -90,9 +90,12 @@ def calculation_tables_by_page(pages, *, link_continuations=True):
     продолжения не объединяет разные таблицы; отсутствие заголовка не восстанавливается.
     """
     previous = {}
+    preceding = None
     result = {}
-    for page, words in pages:
+    for page, words in sorted(pages, key=lambda item: item[0]):
         facts = calculation_table_facts(words, page)
+        if link_continuations and preceding and preceding[0] == page - 1:
+            facts = (*_headless_continuation(words, page, preceding[1]), *facts)
         tables = {}
         for fact in facts:
             tables.setdefault(fact.table_id, []).append(fact)
@@ -118,7 +121,190 @@ def calculation_tables_by_page(pages, *, link_continuations=True):
             if key:
                 previous[key] = (page, table_id)
         result[page] = tuple(linked)
+        preceding = (page, tuple(linked))
     return result
+
+
+def _headless_continuation(raw_words, page, preceding):
+    """Читает верхние строки продолжения по прежним колонкам с исходным заголовком.
+
+    Требуются соседние листы, открытый нижний фрагмент, совпавшие колонки и
+    минимум два значения в строке. За новым заголовком продолжение не ищется.
+    Геометрия заголовка остаётся на прежнем листе; новые слова не создаются
+    в доказательствах. Наличие продолжения не доказывает полноту таблицы.
+    """
+    if not preceding:
+        return ()
+    last = max(
+        preceding,
+        key=lambda fact: max(
+            (
+                r["bbox"]["y_max"]
+                for r in fact.source_regions
+                if r.get("role") == "cell"
+            ),
+            default=0,
+        ),
+    )
+    members = [fact for fact in preceding if fact.table_id == last.table_id]
+    if any(fact.relation == "table_end" for fact in members):
+        return ()
+    headers = {
+        r["text"]: r
+        for fact in members
+        for r in fact.source_regions
+        if r.get("role") == "column_header"
+    }
+    columns = sorted(headers.values(), key=lambda r: r["bbox"]["x_min"])
+    cells = [
+        r for fact in members for r in fact.source_regions if r.get("role") == "cell"
+    ]
+    labels = [
+        r
+        for fact in members
+        for r in fact.source_regions
+        if r.get("role") == "row_header"
+    ]
+    if (
+        len(columns) < 2
+        or not labels
+        or not cells
+        or max(r["bbox"]["y_max"] for r in cells) < 800
+    ):
+        return ()
+    words = _words(raw_words)
+    height = columns[0]["bbox"]["y_max"] - columns[0]["bbox"]["y_min"]
+    first_column = columns[0]["bbox"]["x_min"]
+    candidates = [
+        word for word in words if _VALUE.fullmatch(word.text) and word.x >= first_column
+    ]
+    starts = []
+    for word in candidates:
+        row = [other for other in words if abs(other.y - word.y) < height * 0.7]
+        matched = sum(
+            any(
+                _VALUE.fullmatch(other.text)
+                and column["bbox"]["x_min"] - height
+                <= other.x
+                <= column["bbox"]["x_max"] + height
+                for other in row
+            )
+            for column in columns
+        )
+        if matched >= 2 and any(
+            other.x < first_column and re.search(r"[а-яa-z]", other.text, re.I)
+            for other in row
+        ):
+            starts.append(word.y)
+    if not starts:
+        return ()
+    start = min(starts)
+    if any(
+        word.y < start - height * 1.5
+        and labels[0]["bbox"]["x_min"] <= word.x <= columns[-1]["bbox"]["x_max"]
+        and re.search(r"[а-я]{3}", word.text, re.I)
+        for word in words
+    ):
+        return ()
+    # Повторённая шапка или новая таблица обрабатываются обычным извлечением.
+    if any(
+        word.y < start
+        and re.fullmatch(r"таблица|наименование|потребитель", word.text, re.I)
+        for word in words
+    ):
+        return ()
+    stop = min(
+        (
+            word.y
+            for word in words
+            if word.y > start
+            and (re.fullmatch(r"таблица|наименование|[а-я]\)", word.text, re.I))
+        ),
+        default=1000,
+    )
+    body = [
+        raw
+        for raw in raw_words
+        if start - height * 1.5
+        <= (raw["bbox"]["y_min"] + raw["bbox"]["y_max"]) / 2
+        < stop - height
+    ]
+    # Рабочая система координат даёт место прежней шапке даже у верхнего края.
+    # В доказательства возвращаются исключительно исходные координаты текущего PDF.
+    body = [
+        {
+            **raw,
+            "bbox": {
+                **raw["bbox"],
+                "y_min": 200 + raw["bbox"]["y_min"] * 0.7,
+                "y_max": 200 + raw["bbox"]["y_max"] * 0.7,
+            },
+        }
+        for raw in body
+    ]
+    height *= 0.7
+    header_y = 200 + start * 0.7 - height * 6
+    templates = [
+        {
+            "text": column["text"],
+            "bbox": {**column["bbox"], "y_min": header_y, "y_max": header_y + height},
+        }
+        for column in columns
+    ]
+    templates.append(
+        {
+            "text": "Наименование",
+            "bbox": {
+                "x_min": labels[0]["bbox"]["x_min"],
+                "x_max": first_column - height,
+                "y_min": header_y,
+                "y_max": header_y + height,
+            },
+        }
+    )
+    result = []
+    for fact in calculation_table_facts([*templates, *body], page):
+        if not fact.value_raw:
+            continue
+        original_header = headers.get(fact.column_label)
+        if original_header is None:
+            continue
+        row_id = f"{last.table_id}:p{page}:{fact.source_row_ids[0].rsplit(':', 1)[-1]}"
+        # При проверке source_fragments каждый фрагмент сверяется со своим листом.
+        fragments = (
+            {"page": page, "text": fact.row_label},
+            {"page": page, "text": fact.evidence_text},
+            {"page": original_header["page"], "text": original_header["text"]},
+        )
+        result.append(
+            replace(
+                fact,
+                table_id=last.table_id,
+                table_title=last.table_title,
+                evidence_text=" ".join(part["text"] for part in fragments),
+                source_pages=tuple(sorted({page, original_header["page"]})),
+                source_fragments=fragments,
+                source_row_ids=(row_id,),
+                source_item_id=row_id + ":" + fact.column_label,
+                source_regions=(
+                    *tuple(
+                        {
+                            **r,
+                            "bbox": {
+                                **r["bbox"],
+                                "y_min": (r["bbox"]["y_min"] - 200) / 0.7,
+                                "y_max": (r["bbox"]["y_max"] - 200) / 0.7,
+                            },
+                        }
+                        for r in fact.source_regions
+                        if r["role"] not in {"column_header", "table_header"}
+                    ),
+                    original_header,
+                ),
+                continuation_marker="pdf_columns_from_previous_page",
+            )
+        )
+    return tuple(result)
 
 
 def calculation_table_facts(raw_words, page: int):
@@ -162,6 +348,9 @@ def calculation_table_facts(raw_words, page: int):
             if word.y > header.y - height * 2
             and re.fullmatch(r"режим|водопотребления", word.text, re.I)
         ]
+        notes = [
+            word for word in near if re.fullmatch(r"примечани[ея]", word.text, re.I)
+        ]
         label_right = min(
             (
                 word.box[0]
@@ -183,6 +372,16 @@ def calculation_table_facts(raw_words, page: int):
             centres[-1] + (centres[-1] - centres[-2]) / 2,
         ]
         title_words = [word for word in near if word.y < header.y - height * 4]
+        captions = [
+            word
+            for word in near
+            if word.y < header.y and re.fullmatch(r"таблица|таблицы", word.text, re.I)
+        ]
+        if captions:
+            caption = max(captions, key=lambda word: word.y)
+            title_words = [
+                word for word in near if abs(word.y - caption.y) < height * 0.7
+            ]
         title = _text(title_words)
         table_id = (
             f"calc-p{page}-"
@@ -190,7 +389,7 @@ def calculation_table_facts(raw_words, page: int):
                 (title + str(tuple(round(x) for x in centres))).encode()
             ).hexdigest()[:12]
         )
-        body = [word for word in words if word.y > header.y + height * 2]
+        body = [word for word in words if word.y > header.y + height * 0.8]
         stop = min(
             (
                 word.y
@@ -234,7 +433,7 @@ def calculation_table_facts(raw_words, page: int):
             if heading not in headings:
                 headings.append(heading)
         for index, y in enumerate(rows):
-            top = (rows[index - 1] + y) / 2 if index else header.y + height * 1.5
+            top = (rows[index - 1] + y) / 2 if index else header.y + height * 0.6
             bottom = (
                 (rows[index + 1] + y) / 2 if index + 1 < len(rows) else y + height * 1.5
             )
@@ -246,7 +445,11 @@ def calculation_table_facts(raw_words, page: int):
             if after:
                 bottom = min(bottom, min(after) - height / 2)
             row_words = [word for word in body if top <= word.y < bottom]
-            prefix = [word for word in row_words if word.x < bounds[0]]
+            prefix = [
+                word
+                for word in row_words
+                if names[0].box[0] - height <= word.x < bounds[0]
+            ]
             total = bool(re.search(r"\bитого\b|\bвсего\b", _text(prefix), re.I))
             labels = (
                 prefix if total else [word for word in prefix if word.x < label_right]
@@ -260,6 +463,16 @@ def calculation_table_facts(raw_words, page: int):
                 else [word for word in prefix if mode_left <= word.x < bounds[0]]
             )
             mode_text = _text(modes)
+            if not mode_text and notes:
+                note_words = [word for word in row_words if word.x > bounds[-1]]
+                note_text = _text(note_words)
+                if re.search(
+                    r"при\s+наличии|авари|первичн|средне|максим|постоян|периодич|раз\s+в",
+                    note_text,
+                    re.I,
+                ):
+                    modes = note_words
+                    mode_text = note_text
             row_id = f"{table_id}:row-{index}"
             for column, (left, right) in enumerate(pairwise(bounds)):
                 cell = [word for word in row_words if left <= word.x < right]

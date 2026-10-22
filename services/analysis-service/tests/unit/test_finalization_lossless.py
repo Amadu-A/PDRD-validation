@@ -225,6 +225,11 @@ async def test_finalization_preserves_every_input_finding_when_model_omits_items
     assert finalized[2].comment == ("Исходное замечание 3.")
 
     assert metrics["fallback_count"] == 2
+    assert metrics["candidate_fates"]["counts"] == {"saved": 3}
+    assert all(
+        row["resulting_finding_id"] == row["finding_id"]
+        for row in metrics["candidate_fates"]["candidates"]
+    )
 
 
 async def test_finalization_preserves_order_for_multiple_batches() -> None:
@@ -296,6 +301,10 @@ async def test_finalization_rejects_only_explicit_candidate_with_reason() -> Non
     assert metrics["kept_count"] == 1
     assert metrics["rejected_count"] == 1
     assert metrics["fallback_count"] == 0
+    fates = metrics["candidate_fates"]["candidates"]
+    assert [row["disposition"] for row in fates] == ["saved", "refuted"]
+    assert fates[1]["candidate"]["comment"] == input_findings[1].comment
+    assert fates[1]["decision"]["reason"]
 
     assert metrics["rejected_findings"] == [
         {

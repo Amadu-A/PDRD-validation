@@ -57,6 +57,7 @@ from pdrd_analysis_service.domain.engineering_assertion import (
     same_assertion,
 )
 from pdrd_analysis_service.domain.engineering_claims import REVIEW_REASON_CODES
+from pdrd_analysis_service.domain.evidence_audit import deterministic_purpose_mismatch
 from pdrd_analysis_service.domain.physical_identity import (
     PdfLineIndex,
     bind_graphical_fact,
@@ -626,9 +627,9 @@ class CheckCrossPageConsistency:
         """Сохраняет подтверждённые группы и конкретные подозрения с обеими сторонами evidence."""
         if cancel_check is not None and await cancel_check():
             raise CrossPageCancelled
-        facts = _located(pages)
         report = engineering_report or document_engineering_report(pages, document_id)
         registry = report.registry
+        facts = tuple(item.observation for item in registry.evidence)
         if registry.document_id != document_id:
             raise ValueError("Программный протокол относится к другому документу.")
         graph = build_signal_graph(registry)
@@ -645,9 +646,11 @@ class CheckCrossPageConsistency:
             len(graph.connections),
             len(graph.unresolved_evidence_ids),
         )
+        discovery_exclusions = []
         discovered = discover_conflicts(
             facts,
             require_physical_identity=True,
+            diagnostics=discovery_exclusions,
         )
         groups = discovered[: max(0, self.options.max_cross_page_candidates)]
         by_number = {page.page: page for page in pages}
@@ -680,6 +683,7 @@ class CheckCrossPageConsistency:
                 diagnostics.update(
                     {
                         "candidates": records,
+                        "discovery_exclusions": discovery_exclusions,
                         "counts": {
                             "discovered": len(discovered),
                             "checked": len(groups),
@@ -723,7 +727,15 @@ class CheckCrossPageConsistency:
             f"C{index}": assertion_from_facts(group.facts, include_related=True)
             for index, group in enumerate(groups, 1)
         }
+        page_texts = {page.page: page.text for page in pages}
         for key, assertion in assertions.items():
+            if deterministic_purpose_mismatch(assertion, page_texts=page_texts):
+                decisions[key] = "confirmed"
+                reasons[key] = (
+                    "В исходных цитатах одной системы прямо указаны взаимоисключающие назначения."
+                )
+                reason_codes[key] = "explicit_system_purpose"
+                continue
             if (
                 assertion is not None
                 and deterministic_unit_mismatch(assertion)
@@ -904,12 +916,15 @@ class CheckCrossPageConsistency:
             first = selected[0]
             assertion = assertions[f"C{index}"]
             if assertion is not None:
-                deterministic = reason_codes.get(f"C{index}") == "false_arithmetic"
+                rule = reason_codes.get(f"C{index}")
+                deterministic = rule in {"false_arithmetic", "explicit_system_purpose"}
                 assertion = replace(
                     assertion,
                     verification="deterministic" if deterministic else "semantic",
                     verification_rule="unit_equivalence"
-                    if deterministic
+                    if rule == "false_arithmetic"
+                    else "explicit_system_purpose"
+                    if rule == "explicit_system_purpose"
                     else "cross_page_comparability",
                 )
             subject = first.fact.subject_name or first.fact.identifier
@@ -1044,7 +1059,21 @@ class CheckCrossPageConsistency:
         for index, record in enumerate(records[: len(groups)], 1):
             finding_id = f"cross-page-{index:04d}"
             if finding_id in kept_ids:
-                record.update({"disposition": "saved", "finding_id": finding_id})
+                finding = next(item for item in result if item.finding_id == finding_id)
+                audit = evidence_audit(finding) or {}
+                record.update(
+                    {
+                        "finding_id": finding_id,
+                        "disposition": "unassessed"
+                        if audit.get("disposition") == "diagnostic"
+                        else "saved",
+                        "reason_code": audit.get(
+                            "reason_code",
+                            reason_codes.get(f"C{index}", "model_decision"),
+                        ),
+                        "evidence_audit": audit,
+                    }
+                )
             elif record["disposition"] == "unassessed" and f"C{index}" in decisions:
                 record["reason"] = "evidence_audit_not_satisfied"
         save_diagnostics()

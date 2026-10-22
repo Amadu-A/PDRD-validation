@@ -3,6 +3,7 @@
 """Дословные инженерные отношения из текста без нормативных догадок и эталонных ответов."""
 
 import re
+from collections import Counter
 from dataclasses import replace
 
 from pdrd_analysis_service.domain.document_context import (
@@ -26,6 +27,46 @@ _DESIGN_PARAMETER = re.compile(
     r"(?P<value>\d+(?:[.,]\d+)?)\s*(?P<unit>м[³3]/(?:ч|сут)|л/с|м/с|м[³3]|мм|м)(?!\w)",
     re.I,
 )
+
+
+def counted_storage_components(text: str) -> tuple[dict, ...]:
+    """Читает количество и номинальный объём отдельных классов ёмкостей.
+
+    Состав не означает полезный запас и не создаёт вымышленных идентификаторов
+    резервуаров. Каждая запись сохраняет дословный фрагмент для проверки.
+    """
+    counts = {"один": 1, "одна": 1, "два": 2, "две": 2, "три": 3, "четыре": 4}
+    pattern = re.compile(
+        r"(?P<count>\d+|один|одна|два|две|три|четыре)\s+"
+        r"(?:резервуар\w*|емкост\w*)\s+объ[её]мом\s+(?P<volume>\d+(?:[.,]\d+)?)\s*м[³3](?!\w)",
+        re.I,
+    )
+    content = re.sub(r"\s+", " ", text)
+    components = tuple(
+        {
+            "count": counts[match["count"].casefold()]
+            if not match["count"].isdigit()
+            else int(match["count"]),
+            "volume_raw": match["volume"],
+            "unit": "м³",
+            "evidence_text": match[0],
+        }
+        for match in pattern.finditer(content)
+    )
+    if components:
+        return components
+    listed = re.search(
+        r"резервуар\w*[^.!?]{0,90}?объ[её]мом\s+(?P<values>\d+(?:[.,]\d+)?\s*м[³3](?:\s*(?:,|и)\s*\d+(?:[.,]\d+)?\s*м[³3])+)",
+        content,
+        re.I,
+    )
+    if listed is None:
+        return ()
+    volumes = re.findall(r"(\d+(?:[.,]\d+)?)\s*м[³3]", listed["values"])
+    return tuple(
+        {"count": count, "volume_raw": volume, "unit": "м³", "evidence_text": listed[0]}
+        for volume, count in Counter(volumes).items()
+    )
 
 
 def explicit_system_purposes(text: str) -> tuple[DocumentFact, ...]:
@@ -286,7 +327,6 @@ def explicit_flow_rows(text: str, page: int) -> tuple[DocumentFact, ...]:
             continue
         # Продолжение названия строки не меняет идентичность её числовых столбцов.
         subject = re.sub(r"\s+", " ", label).casefold()
-        subject = re.sub(r"\s+контур[а-я]*$", "", subject)
         table = f"p{page}-flow-row-{index}"
         for column, unit, prop in (
             ("hour", "м³/ч", "Часовой расход воды"),

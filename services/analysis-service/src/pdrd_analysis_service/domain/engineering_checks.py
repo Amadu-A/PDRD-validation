@@ -259,6 +259,10 @@ def _design_basis_questions(
         if not missing:
             continue
         observations = (item, *(other for other in related if other != item))
+        from pdrd_analysis_service.domain.engineering_facts import (
+            counted_storage_components,
+        )
+
         result.append(
             EngineeringCheck(
                 "design_basis_dependency",
@@ -272,6 +276,15 @@ def _design_basis_questions(
                     "dependency": dependency,
                     "checked_pages": sorted(page_texts),
                     "missing": list(missing),
+                    **(
+                        {
+                            "storage_composition": list(
+                                counted_storage_components(fact.evidence_text)
+                            )
+                        }
+                        if storage
+                        else {}
+                    ),
                 },
                 missing_data=missing,
             )

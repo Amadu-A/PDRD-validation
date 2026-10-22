@@ -206,6 +206,13 @@ async def test_independent_requirement_reaches_candidate_and_revalidates_without
         == 0
     )
     assert result.diagnostics["coverage"]["scope"] == "selected_atomic_generations"
+    assert result.diagnostics["corpus_received"] is True
+    assert result.diagnostics["corpus_state"] == "ready"
+    assert result.diagnostics["active_generation_ids"] == [GENERATION]
+    assert result.diagnostics["interpretation_counts"]["interpreted"] > 0
+    assert result.diagnostics["confirmed_candidates_to_finalization"] == sum(
+        f.status == "confirmed" for f in result.findings
+    )
     if count:
         finding = result.findings[0]
         assert finding.basis_sources[0].atomic_requirement == row

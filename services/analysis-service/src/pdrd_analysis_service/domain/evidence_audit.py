@@ -122,6 +122,17 @@ def bind_evidence(
             fact.column_label if native_table or native_flow else "",
         )
     )
+    if native_table:
+        # Условия не берутся из свободного поля: нужна исходная подпись режима
+        # на своей физической странице, как и у заголовка/ячейки продолжения.
+        anchors += " " + " ".join(
+            region.get("text", "")
+            for region in fact.source_regions
+            if region.get("role") == "operating_mode"
+            and literal_key(region.get("text", ""))
+            and literal_key(region["text"])
+            in literal_key(page_texts.get(region.get("page"), ""))
+        )
     object_bound = literal_contains(anchors, fact.identifier)
     if not object_bound and not (
         fact.visual_regions and literal_contains(text, fact.identifier)
@@ -196,7 +207,7 @@ def bind_evidence(
         (r"толщин", r"стен|[xх×*]\s*\d"),
         (r"диаметр", r"диаметр|\b(?:dn|ду)\s*\d|[ø⌀]|\bф\s*\d"),
         (r"длин|протяж", r"длин|протяж|\bl\s*="),
-        (r"расход", r"расход|л/с|м[3³]/ч"),
+        (r"расход", r"расход|л/с|м[3³]/(?:ч|сут)"),
         (r"напор", r"напор"),
         (r"назначени|system_purpose", r"водоснабж|водопровод|водоотвед|канализац"),
     )
@@ -255,25 +266,43 @@ def audit_assertion(
         and len({scope_key(item.fact) for item in facts}) > 1
     ):
         return result("incomplete", "diagnostic", "different_conditions")
-    roles = {
-        tuple(
-            re.findall(
-                r"гарантирован\w*|требуем\w*|средн\w*|максим\w*|миним\w*|водопотреб\w*|водоотвед\w*",
-                normalize_label(
-                    item.fact.property_name
-                    + " "
-                    + item.fact.column_label
-                    + " "
-                    + item.fact.row_label
-                    + " "
-                    + item.fact.table_title
-                ),
+    from pdrd_analysis_service.domain.physical_identity import comparison_identity
+
+    identity = comparison_identity(facts)
+    # Контрдоказательство различия элементов сильнее неполной привязки цитаты.
+    if assertion.claim_type == "contradiction" and identity in {
+        "different_object_kinds",
+        "different_value_roles",
+        "different_physical_objects",
+        "individual_object_unidentified",
+    }:
+        return result("counterevidence", "diagnostic", identity)
+    role_texts = [
+        normalize_label(
+            " ".join(
+                (
+                    item.fact.property_name,
+                    item.fact.column_label,
+                    item.fact.row_label,
+                    item.fact.table_title,
+                )
             )
         )
         for item in facts
-    }
-    if assertion.claim_type == "contradiction" and len(roles) > 1:
-        return result("incomplete", "diagnostic", "different_parameter_roles")
+    ]
+    role_unknown = False
+    for family in (
+        ("гарантирован", "требуем"),
+        ("средн", "максим", "миним"),
+        ("водопотреб", "водоотвед"),
+    ):
+        roles = [
+            frozenset(root for root in family if root in text) for text in role_texts
+        ]
+        known = {role for role in roles if role}
+        if assertion.claim_type == "contradiction" and len(known) > 1:
+            return result("incomplete", "diagnostic", "different_parameter_roles")
+        role_unknown |= bool(known) and any(not role for role in roles)
     if assertion.claim_type == "contradiction" and len(facts) >= 2:
         definitions = {normalized_value(item.fact) for item in facts}
         if None not in definitions:
@@ -362,20 +391,32 @@ def audit_assertion(
         return result("incomplete", "diagnostic", "specification_group_not_established")
     if any(item.fact.subject_type == "unclassified" for item in facts):
         return result("unidentified", "question", "object_type_not_established")
-    from pdrd_analysis_service.domain.physical_identity import comparison_identity
-
-    identity = comparison_identity(facts)
-    if identity in {
-        "different_object_kinds",
-        "different_value_roles",
-        "different_physical_objects",
-    }:
-        return result("counterevidence", "diagnostic", identity)
     if identity == "physical_identity_unresolved":
         return result("incomplete", "question", "same_physical_segment_not_established")
+    if role_unknown:
+        return result("incomplete", "question", "parameter_role_not_fully_established")
     return result(
         "supported", "supported", "same_object_property_conditions_with_distinct_values"
     )
+
+
+def deterministic_purpose_mismatch(assertion, *, page_texts):
+    """Доказывает только явно подписанные взаимоисключающие назначения одной системы.
+
+    Не выбирает правильное назначение по коду сети, не переносит условия и не
+    принимает непроверенные визуальные интерпретации вместо исходных цитат.
+    """
+    if (
+        assertion is None
+        or assertion.claim_type != "contradiction"
+        or assertion.property_key != "relationship:system_purpose"
+        or len({item.page for item in assertion.observations}) < 2
+    ):
+        return False
+    values = {normalized_value(item.fact) for item in assertion.observations}
+    if values != {("text", "water_supply"), ("text", "water_disposal")}:
+        return False
+    return audit_assertion(assertion, page_texts=page_texts).disposition == "supported"
 
 
 def diagnostic_language(text: str) -> bool:

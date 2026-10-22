@@ -662,12 +662,18 @@ async def check_norms_stage(
         responses[0].metrics["independent_normative"] = {
             "requirement_plan": independent.diagnostics
         }
-    elif review is not None:
+    else:
         responses[0].metrics["independent_normative"] = {
-            "mode": "corpus_scope_missing",
+            "mode": "corpus_scope_missing"
+            if request.normative_corpus is None
+            else "review_not_configured",
+            "corpus_received": request.normative_corpus is not None,
+            "corpus_state": "not_prepared",
             "requirements": 0,
             "source_complete": False,
-            "reason": "Опубликованный workflow не передал выбранный нормативный корпус.",
+            "reason": "Опубликованный workflow не передал выбранный нормативный корпус."
+            if request.normative_corpus is None
+            else "Независимая проверка корпуса не настроена в сервисе.",
         }
 
     result = [

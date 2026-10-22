@@ -103,10 +103,14 @@ _UNIT_FACTORS: dict[str, tuple[str, Decimal]] = {
     "m3/h": ("flow_m3h", Decimal("1")),
     "м3/ч": ("flow_m3h", Decimal("1")),
     "м³/ч": ("flow_m3h", Decimal("1")),
+    "м3/сут": ("flow_day", Decimal("1")),
+    "м³/сут": ("flow_day", Decimal("1")),
     "l/s": ("flow_m3h", Decimal("3.6")),
     "л/с": ("flow_m3h", Decimal("3.6")),
     "шт": ("count", Decimal("1")),
     "шт.": ("count", Decimal("1")),
+    "м3": ("volume_m3", Decimal("1")),
+    "м³": ("volume_m3", Decimal("1")),
 }
 
 _PROPERTY_ALIASES = {
@@ -114,6 +118,7 @@ _PROPERTY_ALIASES = {
     "casing_diameter": "Диаметр",
     "dry_pipe_diameter": "Диаметр",
     "pipe_length": "Длина",
+    "протяженность сети": "Длина",
     "casing_length": "Длина",
     "connection_elevation": "Абсолютная отметка",
     "system_type": "system_purpose",
@@ -137,6 +142,11 @@ def subject_key(fact: DocumentFact) -> str:
     object_type = normalize_label(fact.subject_type)
     if not identifier or not object_type:
         return ""
+    if property_key(fact).endswith(":system_purpose"):
+        object_type = "system"
+    elif object_type in {"system", "network", "engineering_system"}:
+        # Тип модели не создаёт новую сеть; границы участка проверяются отдельно.
+        object_type = "system"
     return f"{object_type}:{identifier}"
 
 
@@ -157,6 +167,14 @@ def property_key(fact: DocumentFact) -> str:
         return "relationship:system_purpose"
     name = normalize_label(fact.property_name)
     kind = normalize_label(fact.property_type or fact.kind)
+    if normalize_label(_PROPERTY_ALIASES.get(name, name)) == "длина" and kind in {
+        "parameter",
+        "pipe_length",
+        "network_total_length",
+        "length",
+        "casing_length",
+    }:
+        kind = "parameter"
     if not name or not kind:
         return ""
     if _PROPERTY_ALIASES.get(name) == "system_purpose":
@@ -258,6 +276,7 @@ def discover_conflicts(
     *,
     max_candidates: int | None = None,
     require_physical_identity: bool = False,
+    diagnostics: list[dict] | None = None,
 ) -> tuple[ConflictGroup, ...]:
     """Регистрирует все группы без попарного VLM-сравнения страниц.
 
@@ -291,6 +310,14 @@ def discover_conflicts(
             if geometric_property(fact):
                 physical = physical_key(located)
                 if physical is None:
+                    if diagnostics is not None:
+                        diagnostics.append(
+                            {
+                                "fact_id": located.fact_id,
+                                "page": located.page,
+                                "reason_code": "physical_identity_unresolved",
+                            }
+                        )
                     continue
         groups.setdefault(
             (subject, prop, (*scope_key(fact), repr(physical))), []

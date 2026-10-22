@@ -261,6 +261,7 @@ def _question(assertion, audit):
         ),
         "object_type_not_established": "Уточнить, описывают ли записи один вид объекта",
         "value_semantics_unidentified": "Уточнить определения приведённых показателей и условия их сопоставления",
+        "parameter_role_not_fully_established": "Уточнить назначение показателя и область учёта в обеих записях",
     }.get(
         audit.reason_code,
         "Уточнить, какое из приведённых значений принято для сопоставленных условий",

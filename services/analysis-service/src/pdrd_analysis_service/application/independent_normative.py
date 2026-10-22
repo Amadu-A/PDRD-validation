@@ -226,6 +226,41 @@ class IndependentNormativeReview:
             "unavailable_documents": unavailable,
             "selection": selection,
             "selection_counts": dict(Counter(row["reason"] for row in selection)),
+            "corpus_received": True,
+            "corpus_state": "unavailable"
+            if unavailable
+            else "ready"
+            if manifests
+            else "empty_selection",
+            "active_generation_ids": [row["generation_id"] for row in manifests],
+            "selected_atomic_statuses": dict(
+                Counter(
+                    source.atomic_requirement.get("extraction_status", "unknown")
+                    for source in sources
+                )
+            ),
+            "interpretation_counts": dict(
+                Counter(
+                    "not_supported"
+                    if row.get("reason_code")
+                    in {
+                        "atomic_interpretation_requires_review",
+                        "unsupported_requirement_rule",
+                    }
+                    else "interpreted"
+                    for row in (report.requirement_plan or {}).get("checks", [])
+                )
+            ),
+            "finding_statuses": dict(Counter(finding.status for finding in findings)),
+            "confirmed_candidates_to_finalization": sum(
+                finding.status == "confirmed" for finding in findings
+            ),
+            "proof_state": "edition_or_binding_unverified"
+            if not (report.requirement_plan or {})
+            .get("coverage", {})
+            .get("currency", {})
+            .get("current_mandatory", 0)
+            else "evaluated_with_limits",
             "new_vlm_calls": 0,
             "new_embedding_calls": 0,
         }
@@ -233,7 +268,7 @@ class IndependentNormativeReview:
             **diagnostics.get("coverage", {}),
             "scope": "selected_atomic_generations",
             "corpus_requirements": len(selection),
-            "source_complete": not unavailable,
+            "source_complete": bool(manifests) and not unavailable,
             "selected_requirements": len(sources),
         }
         return IndependentNormativeResult(
