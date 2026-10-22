@@ -13,6 +13,28 @@ from pdrd_knowledge_service.domain.normative_requirements import (
 class NormativeRequirementRepository(Protocol):
     """Методы выполняются в той же UOW, что блокировка нормативного документа."""
 
+    async def lock_admission(self) -> None:
+        """Сериализует ограниченную постановку заданий между процессами."""
+        ...
+
+    async def in_flight(self, exclude_generation_id: str | None = None) -> int:
+        """Считает отправленные и работающие задания, исключая ожидание свободного места."""
+        ...
+
+    async def latest_generation(
+        self, document_id: str, fingerprint: str | None = None
+    ) -> dict | None:
+        """Возвращает последнюю попытку, включая восстановленное поколение."""
+        ...
+
+    async def unpublished_generations(self, document_id: str) -> list[dict]:
+        """Возвращает незавершённые поколения для fencing устаревшего источника или журнала."""
+        ...
+
+    async def clear_unpublished(self, generation_id: str) -> None:
+        """Очищает только порции незавершённой попытки под блокировкой документа."""
+        ...
+
     async def get_generation(self, generation_id: str) -> dict | None:
         """Читает конкретное неизменяемое поколение и его lifecycle."""
         ...

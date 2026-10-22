@@ -103,6 +103,10 @@ class NormativeCategoryRepository(Protocol):
 class NormativeDocumentRepository(Protocol):
     """Контракт persistence операций над нормативными документами."""
 
+    async def list_all(self) -> list[NormativeDocument]:
+        """Возвращает сохранённый каталог без фильтрации по названиям разделов."""
+        ...
+
     async def add(
         self,
         document: NormativeDocument,
@@ -158,6 +162,12 @@ class NormativeDocumentRepository(Protocol):
 
 class NormativeOutboxRepository(Protocol):
     """Контракт persistence transactional outbox."""
+
+    async def has_pending_requirements(
+        self, document_id: UUID, generation_id: str
+    ) -> bool:
+        """Отличает неотправленное событие от потерянного после публикации задания."""
+        ...
 
     async def add(
         self,

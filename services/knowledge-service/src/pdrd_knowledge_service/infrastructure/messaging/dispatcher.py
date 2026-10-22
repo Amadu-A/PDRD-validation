@@ -13,6 +13,12 @@ from pdrd_knowledge_service.application.use_cases.dispatch_normative_outbox impo
 from pdrd_knowledge_service.application.use_cases.dispatch_technical_assignment_outbox import (
     DispatchTechnicalAssignmentOutbox,
 )
+from pdrd_knowledge_service.application.use_cases.normative_requirements import (
+    NormativeRequirementCatalog,
+)
+from pdrd_knowledge_service.application.use_cases.recover_normative_requirements import (
+    RecoverNormativeRequirements,
+)
 from pdrd_knowledge_service.application.use_cases.recover_stale_technical_assignments import (
     RecoverStaleTechnicalAssignments,
 )
@@ -91,10 +97,32 @@ async def run_dispatcher() -> None:
     )
 
     next_recovery_at = 0.0
+    atomic_recovery = RecoverNormativeRequirements(
+        NormativeRequirementCatalog(
+            normative_uow_factory, policy=settings.normative_requirements.policy()
+        )
+    )
+    next_atomic_recovery_at = 0.0
 
     try:
         while True:
             now = monotonic()
+
+            if now >= next_atomic_recovery_at:
+                atomic_report = await atomic_recovery.execute(
+                    limit=settings.normative_requirements.reconciliation_batch_size,
+                    only_pending=not settings.normative_requirements.reconciliation_enabled,
+                )
+                if atomic_report["selected"]:
+                    LOGGER.info(
+                        "normative_requirements_recovery selected=%s in_flight=%s",
+                        atomic_report["selected"],
+                        atomic_report["in_flight"],
+                    )
+                next_atomic_recovery_at = (
+                    now
+                    + settings.normative_requirements.reconciliation_interval_seconds
+                )
 
             if now >= next_recovery_at:
                 recovery_report = await recovery.execute(

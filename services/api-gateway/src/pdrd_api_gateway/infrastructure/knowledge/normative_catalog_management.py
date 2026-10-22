@@ -428,6 +428,12 @@ class HttpNormativeCatalogManager:
             "GET", f"/internal/v1/normative/documents/{document_id}/requirements/index"
         )
 
+    async def atomic_readiness(self, *, section_id: UUID) -> dict:
+        """Агрегирует атомарную готовность без N+1 браузерных запросов."""
+        return await self._requirements_json(
+            "GET", f"/internal/v1/normative/sections/{section_id}/atomic-readiness"
+        )
+
     async def list_requirements(self, *, document_id: UUID, query: dict) -> dict:
         """Передаёт проверенные параметры, не применяя top-K к нормативному каталогу."""
         return await self._requirements_json(

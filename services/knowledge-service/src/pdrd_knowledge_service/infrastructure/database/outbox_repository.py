@@ -23,6 +23,23 @@ class SqlAlchemyNormativeOutboxRepository:
         """Сохраняет transaction session."""
         self._session = session
 
+    async def has_pending_requirements(self, document_id, generation_id):
+        """Не создаёт ещё одно событие, пока прежнее ожидает подтверждённой публикации."""
+        return bool(
+            await self._session.scalar(
+                select(NormativeOutboxMessageModel.id)
+                .where(
+                    NormativeOutboxMessageModel.aggregate_id == document_id,
+                    NormativeOutboxMessageModel.event_type
+                    == NormativeOutboxMessage.REQUIREMENTS_REQUESTED_EVENT,
+                    NormativeOutboxMessageModel.published_at.is_(None),
+                    NormativeOutboxMessageModel.payload["generation_id"].as_string()
+                    == generation_id,
+                )
+                .limit(1)
+            )
+        )
+
     async def add(
         self,
         message: NormativeOutboxMessage,

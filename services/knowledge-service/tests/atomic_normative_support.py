@@ -14,6 +14,7 @@ from uuid import UUID
 from pdrd_knowledge_service.domain.normative_catalog import (
     IndexingStatus,
     NormativeDocument,
+    NormativeSection,
 )
 from pdrd_knowledge_service.domain.normative_indexing import NormativeTextPage
 
@@ -88,6 +89,17 @@ class State:
     fail_batch: int | None = None
     writes: int = 0
     deleting: bool = False
+    sections: dict = field(
+        default_factory=lambda: {
+            str(document().section_id): NormativeSection(
+                document().section_id,
+                "Тестовый раздел",
+                "Промпт",
+                document().created_at,
+                document().updated_at,
+            )
+        }
+    )
 
 
 class Repository:
@@ -104,6 +116,69 @@ class Repository:
     async def get_for_update(self, entity_id):
         """UOW удерживает общий async lock до закрытия транзакции."""
         return await self.get(entity_id)
+
+    async def update(self, document):
+        """Обновление документа участвует в том же snapshot, что generation и outbox."""
+        self.uow.data["documents"][str(document.document_id)] = document
+
+    async def list_all(self):
+        """Каталог документов не зависит от имён разделов."""
+        return list(self.uow.data["documents"].values())
+
+    async def lock_admission(self):
+        """Тестовый UOW уже держит общий транзакционный lock."""
+
+    async def in_flight(self, exclude_generation_id=None):
+        """Считает только допущенные queued/building поколения."""
+        return sum(
+            row["state"] in {"queued", "building"}
+            and not row.get("dispatch_pending")
+            and row["generation_id"] != exclude_generation_id
+            for row in self.uow.data["generations"].values()
+        )
+
+    async def latest_generation(self, document_id, fingerprint=None):
+        """Имитирует выбор последнего поколения конкретного документа."""
+        rows = [
+            row
+            for row in self.uow.data["generations"].values()
+            if row["document_id"] == document_id
+            and (
+                fingerprint is None
+                or row.get("fingerprint", row["generation_id"]) == fingerprint
+            )
+        ]
+        return (
+            copy.deepcopy(
+                max(rows, key=lambda row: (row["updated_at"], row["generation_id"]))
+            )
+            if rows
+            else None
+        )
+
+    async def clear_unpublished(self, generation_id):
+        """Повтор очищает только неопубликованную рабочую область."""
+        row = self.uow.data["generations"][generation_id]
+        assert not row["active"] and row["state"] != "ready"
+        self.uow.data["rows"].pop(generation_id, None)
+
+    async def unpublished_generations(self, document_id):
+        """Незавершённые попытки не сохраняют слот после изменения исходных оснований."""
+        return [
+            copy.deepcopy(row)
+            for row in self.uow.data["generations"].values()
+            if row["document_id"] == document_id
+            and row["state"] in {"queued", "building"}
+        ]
+
+    async def has_pending_requirements(self, document_id, generation_id):
+        """Неопубликованный outbox уже обеспечивает повтор доставки."""
+        return any(
+            item.aggregate_id == document_id
+            and item.payload.get("generation_id") == generation_id
+            and item.published_at is None
+            for item in self.uow.data["outbox"]
+        )
 
     async def get_generation(self, generation_id):
         """Возвращает копию строки поколения."""
@@ -131,7 +206,9 @@ class Repository:
         self.uow.state.writes += 1
         if self.uow.state.writes == self.uow.state.fail_batch:
             raise RuntimeError("batch failure")
-        rows = self.uow.data["rows"].setdefault(generation_id, {})
+        # Copy-on-write только затронутого поколения: immutable ready строки не копируются на каждый SELECT.
+        rows = copy.deepcopy(self.uow.data["rows"].get(generation_id, {}))
+        self.uow.data["rows"][generation_id] = rows
         for index, requirement in enumerate(requirements, offset):
             rows[requirement.requirement_id] = (
                 index,
@@ -176,6 +253,20 @@ class Repository:
         """Outbox входит в ту же транзакцию, что новое поколение."""
         self.uow.data["outbox"].append(message)
 
+    async def get_pending(self, *, limit):
+        """Dispatcher получает неопубликованные события в FIFO порядке."""
+        return [item for item in self.uow.data["outbox"] if item.published_at is None][
+            :limit
+        ]
+
+    async def update_message(self, message):
+        """Обновляет отдельный outbox message внутри snapshot."""
+        for index, item in enumerate(self.uow.data["outbox"]):
+            if item.message_id == message.message_id:
+                self.uow.data["outbox"][index] = message
+                return
+        raise LookupError("Сообщение не найдено.")
+
 
 class UnitOfWork:
     """Откат незавершённой операции не требует ручного удаления строк."""
@@ -183,18 +274,42 @@ class UnitOfWork:
     def __init__(self, state):
         """Создаёт ещё не открытую транзакцию."""
         self.state = state
-        self.documents = self.requirements = self.outbox = Repository(self)
-        self.sections = SimpleNamespace(get=self.section)
+        self.documents = self.requirements = Repository(self)
+        outbox = Repository(self)
+        self.outbox = SimpleNamespace(
+            add=outbox.add,
+            get_pending=outbox.get_pending,
+            update=outbox.update_message,
+            has_pending_requirements=outbox.has_pending_requirements,
+        )
+        self.sections = SimpleNamespace(get=self.section, list_all=self.list_sections)
 
     async def section(self, section_id):
         """Показывает tombstone раздела."""
-        return SimpleNamespace(deleting=self.state.deleting)
+        section = self.state.sections.get(str(section_id))
+        return (
+            SimpleNamespace(
+                deleting=self.state.deleting,
+                section_id=section.section_id,
+                name=section.name,
+            )
+            if section
+            else None
+        )
+
+    async def list_sections(self):
+        """Включает пустые разделы в административный отчёт."""
+        return [
+            await self.section(item.section_id) for item in self.state.sections.values()
+        ]
 
     async def __aenter__(self):
         """Сериализует транзакции и снимает snapshot."""
         await self.state.lock.acquire()
         self.data = {
-            name: copy.deepcopy(getattr(self.state, name))
+            name: dict(self.state.rows)
+            if name == "rows"
+            else copy.deepcopy(getattr(self.state, name))
             for name in ("documents", "generations", "rows", "proofs", "outbox")
         }
         return self
@@ -206,7 +321,11 @@ class UnitOfWork:
     async def commit(self):
         """Атомарно публикует изменения в общее состояние."""
         for name, value in self.data.items():
-            setattr(self.state, name, copy.deepcopy(value))
+            setattr(
+                self.state,
+                name,
+                dict(value) if name == "rows" else copy.deepcopy(value),
+            )
 
 
 class Storage:

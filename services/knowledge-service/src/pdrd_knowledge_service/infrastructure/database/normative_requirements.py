@@ -4,7 +4,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +29,63 @@ class SqlAlchemyNormativeRequirementRepository:
     def __init__(self, session: AsyncSession):
         """Использует session существующей UOW каталога."""
         self.session = session
+
+    async def lock_admission(self) -> None:
+        """Глобальная транзакционная блокировка не держится во время извлечения PDF."""
+        await self.session.execute(text("SELECT pg_advisory_xact_lock(7342670319821)"))
+
+    async def in_flight(self, exclude_generation_id=None) -> int:
+        """Ожидающие admission намерения не занимают worker-слоты."""
+        statement = (
+            select(func.count())
+            .select_from(Generation)
+            .where(
+                Generation.state.in_(("queued", "building")),
+                Generation.payload["dispatch_pending"].as_boolean().is_not(True),
+            )
+        )
+        if exclude_generation_id:
+            statement = statement.where(Generation.id != UUID(exclude_generation_id))
+        return int(await self.session.scalar(statement) or 0)
+
+    async def latest_generation(self, document_id, fingerprint=None):
+        """JSON-время обновления задаётся единым UTC-форматом application-слоем."""
+        statement = select(Generation).where(
+            Generation.document_id == UUID(document_id)
+        )
+        if fingerprint:
+            statement = statement.where(
+                or_(
+                    Generation.payload["fingerprint"].as_string() == fingerprint,
+                    Generation.id == UUID(fingerprint),
+                )
+            )
+        row = await self.session.scalar(
+            statement.order_by(
+                Generation.payload["updated_at"].as_string().desc(),
+                Generation.id.desc(),
+            ).limit(1)
+        )
+        return self._generation(row)
+
+    async def clear_unpublished(self, generation_id):
+        """Рабочий активный каталог не удаляется при повторе неудачной попытки."""
+        generation = await self.get_generation(generation_id)
+        if generation is None or generation["active"] or generation["state"] == "ready":
+            raise ValueError("Нельзя очищать опубликованное поколение.")
+        await self.session.execute(
+            delete(Requirement).where(Requirement.generation_id == UUID(generation_id))
+        )
+
+    async def unpublished_generations(self, document_id):
+        """Опубликованный каталог не участвует в отмене устаревших рабочих попыток."""
+        rows = await self.session.scalars(
+            select(Generation).where(
+                Generation.document_id == UUID(document_id),
+                Generation.state.in_(("queued", "building")),
+            )
+        )
+        return [self._generation(row) for row in rows]
 
     @staticmethod
     def _generation(row):

@@ -647,6 +647,36 @@ class DocumentContextSettings(BaseModel):
     normalization_version: int = Field(default=1, ge=1, le=100)
 
 
+class NormativeRequirementsSettings(BaseModel):
+    """Восстановление atomic index отдельно от готовности chunk search и правового статуса."""
+
+    reconciliation_enabled: bool = False
+    reconciliation_interval_seconds: int = Field(default=60, ge=1, le=86400)
+    reconciliation_batch_size: int = Field(default=2, ge=1, le=200)
+    max_in_flight: int = Field(default=2, ge=1, le=32)
+    max_attempts: int = Field(default=3, ge=1, le=20)
+    stale_seconds: int = Field(default=600, ge=1, le=86400)
+    retry_backoff_seconds: int = Field(default=60, ge=0, le=86400)
+    max_ocr_pages: int = Field(default=10, ge=0, le=200)
+
+    def policy(self):
+        """Application получает независимую от Pydantic политику очереди."""
+        from pdrd_knowledge_service.application.normative_requirement_policy import (
+            NormativeRequirementPolicy,
+        )
+
+        return NormativeRequirementPolicy(
+            **self.model_dump(
+                include={
+                    "max_in_flight",
+                    "max_attempts",
+                    "stale_seconds",
+                    "retry_backoff_seconds",
+                }
+            )
+        )
+
+
 class Settings(BaseSettings):
     """Настройки Knowledge Service."""
 
@@ -719,6 +749,10 @@ class Settings(BaseSettings):
 
     indexing: NormativeIndexingSettings = Field(
         default_factory=(NormativeIndexingSettings),
+    )
+
+    normative_requirements: NormativeRequirementsSettings = Field(
+        default_factory=NormativeRequirementsSettings
     )
 
     technical_assignment: TechnicalAssignmentSettings = Field(

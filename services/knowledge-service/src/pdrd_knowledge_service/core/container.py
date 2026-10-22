@@ -70,6 +70,9 @@ from pdrd_knowledge_service.application.use_cases.project_context import (
     ResolveProjectContextCache,
     SearchProjectContext,
 )
+from pdrd_knowledge_service.application.use_cases.recover_normative_requirements import (
+    RecoverNormativeRequirements,
+)
 from pdrd_knowledge_service.application.use_cases.technical_assignment_requirements import (
     ListTechnicalAssignmentRequirements,
 )
@@ -162,6 +165,15 @@ class ApplicationContainer:
 
     queue_normative_document: QueueNormativeDocument | None = None
     normative_requirements: NormativeRequirementCatalog | None = None
+
+    @property
+    def normative_requirement_recovery(self):
+        """Read-only сводка использует тот же каталог и политику, что команды индексации."""
+        return (
+            RecoverNormativeRequirements(self.normative_requirements)
+            if self.normative_requirements
+            else None
+        )
 
     register_technical_assignment: RegisterTechnicalAssignment | None = None
 
@@ -444,7 +456,8 @@ def build_container() -> ApplicationContainer:
 
     return ApplicationContainer(
         normative_requirements=NormativeRequirementCatalog(
-            normative_catalog_uow_factory
+            normative_catalog_uow_factory,
+            policy=settings.normative_requirements.policy(),
         ),
         settings=settings,
         search_normative=search_normative,

@@ -31,6 +31,9 @@ test = [
     "pytest-asyncio>=1.1,<2.0",
 ]
 
+[project.scripts]
+normative-requirements = "pdrd_knowledge_service.transport.cli.normative_requirements:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

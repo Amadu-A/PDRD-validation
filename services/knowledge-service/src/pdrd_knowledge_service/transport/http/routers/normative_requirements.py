@@ -21,6 +21,9 @@ from pdrd_knowledge_service.transport.http.schemas.normative_requirements import
 router = APIRouter(
     prefix="/internal/v1/normative/documents", tags=["normative-catalog"]
 )
+readiness_router = APIRouter(
+    prefix="/internal/v1/normative/sections", tags=["normative-catalog"]
+)
 Container = Annotated[ApplicationContainer, Depends(get_container)]
 
 
@@ -41,6 +44,17 @@ def _catalog(container):
     if container.normative_requirements is None:
         raise HTTPException(503, "Атомарный нормативный каталог не настроен.")
     return container.normative_requirements
+
+
+@readiness_router.get("/{section_id}/atomic-readiness")
+async def atomic_readiness(section_id: UUID, container: Container):
+    """Отдаёт лёгкую сводку без извлечения, постановки задач и чтения цитат в UI."""
+    _catalog(container)
+    return await _call(
+        container.normative_requirement_recovery.inspect(
+            section_id=section_id, verify=False
+        )
+    )
 
 
 @router.post("/{document_id}/requirements/index", status_code=202)

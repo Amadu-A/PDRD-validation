@@ -38,6 +38,9 @@ from pdrd_knowledge_service.infrastructure.office.libreoffice import (
 from pdrd_knowledge_service.infrastructure.pdf.pymupdf import (
     PyMuPdfNormativePdfExtractor,
 )
+from pdrd_knowledge_service.infrastructure.pdf.technical_assignment import (
+    PyMuPdfTechnicalAssignmentProcessor,
+)
 from pdrd_knowledge_service.infrastructure.storage.filesystem import (
     LocalFilesystemNormativeDocumentStorage,
 )
@@ -77,7 +80,9 @@ async def execute_normative_indexing(
     )
 
     use_case = IndexNormativeDocument(
-        atomic_requirements=NormativeRequirementCatalog(unit_of_work_factory),
+        atomic_requirements=NormativeRequirementCatalog(
+            unit_of_work_factory, policy=settings.normative_requirements.policy()
+        ),
         unit_of_work_factory=unit_of_work_factory,
         section_locks=PostgresCatalogSectionLocks(engine),
         storage=LocalFilesystemNormativeDocumentStorage(
@@ -127,8 +132,24 @@ async def execute_normative_requirements_indexing(
             storage=LocalFilesystemNormativeDocumentStorage(
                 root_path=settings.storage.root_path
             ),
-            pdf_extractor=PyMuPdfNormativePdfExtractor(),
+            pdf_extractor=PyMuPdfNormativePdfExtractor(
+                ocr_processor=PyMuPdfTechnicalAssignmentProcessor(
+                    ocr_executable=settings.technical_assignment.ocr_executable,
+                    ocr_language=settings.technical_assignment.ocr_language,
+                    ocr_timeout_seconds=min(
+                        settings.technical_assignment.ocr_timeout_seconds,
+                        settings.normative_requirements.stale_seconds
+                        / (2 * max(1, settings.normative_requirements.max_ocr_pages)),
+                    ),
+                ),
+                max_ocr_pages=settings.normative_requirements.max_ocr_pages,
+            ),
             section_locks=PostgresCatalogSectionLocks(engine),
+            policy=settings.normative_requirements.policy(),
+            office_converter=LibreOfficeNormativeOfficeToPdfConverter(
+                executable=settings.office_conversion.executable,
+                timeout_seconds=settings.office_conversion.timeout_seconds,
+            ),
         ).execute(document_id=document_id, generation_id=generation_id)
     finally:
         await engine.dispose()

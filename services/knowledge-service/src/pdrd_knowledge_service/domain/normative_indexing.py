@@ -23,6 +23,9 @@ class NormativeTextPage:
 
     text: str
 
+    extraction_method: str = "native_text"
+    extraction_error: str | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class NormativeChunk:

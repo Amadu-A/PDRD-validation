@@ -14,8 +14,8 @@ from uuid import UUID
 from pdrd_knowledge_service.application.normative_document_formats import (
     PDF_MIME_TYPE,
     is_word_mime_type,
-    preview_storage_key,
 )
+from pdrd_knowledge_service.application.normative_preview import save_preview
 from pdrd_knowledge_service.application.ports.document_storage import (
     NormativeDocumentStorage,
 )
@@ -135,6 +135,12 @@ class IndexNormativeDocument:
         )
 
         if not should_process:
+            if (
+                document.index_status is IndexingStatus.READY
+                and document.area.value == "normative"
+                and self.atomic_requirements is not None
+            ):
+                await self.atomic_requirements.queue(document_id=document_id)
             return document
 
         try:
@@ -223,12 +229,6 @@ class IndexNormativeDocument:
                 f"{document_id}: {type(error).__name__}: {error}",
             ) from error
 
-        # Ошибка постановки атомарного каталога не удаляет уже готовые текстовые чанки.
-        if (
-            self.atomic_requirements is not None
-            and ready_document.area.value == "normative"
-        ):
-            await self.atomic_requirements.queue(document_id=document_id)
         return ready_document
 
     async def _prepare_pdf_content(
@@ -258,18 +258,7 @@ class IndexNormativeDocument:
             original_name=document.original_name,
         )
 
-        preview_key = preview_storage_key(
-            document.storage_key,
-        )
-
-        await self.storage.delete(
-            storage_key=preview_key,
-        )
-
-        await self.storage.save(
-            storage_key=preview_key,
-            content=pdf_content,
-        )
+        await save_preview(self.storage, document, pdf_content)
 
         return pdf_content
 
@@ -362,7 +351,7 @@ class IndexNormativeDocument:
     ]:
         """Переводит документ из очереди в индексацию либо продолжает прерванную обработку."""
         async with self.unit_of_work_factory() as unit_of_work:
-            document = await unit_of_work.documents.get(
+            document = await unit_of_work.documents.get_for_update(
                 document_id,
             )
 
@@ -421,7 +410,7 @@ class IndexNormativeDocument:
     ) -> NormativeDocument:
         """Фиксирует успешную индексацию."""
         async with self.unit_of_work_factory() as unit_of_work:
-            document = await unit_of_work.documents.get(
+            document = await unit_of_work.documents.get_for_update(
                 document_id,
             )
 
@@ -447,7 +436,11 @@ class IndexNormativeDocument:
             await unit_of_work.documents.update(
                 ready_document,
             )
-
+            if (
+                self.atomic_requirements is not None
+                and ready_document.area.value == "normative"
+            ):
+                await self.atomic_requirements.stage(unit_of_work, ready_document)
             await unit_of_work.commit()
 
         return ready_document

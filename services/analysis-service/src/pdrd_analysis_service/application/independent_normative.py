@@ -124,7 +124,7 @@ class IndependentNormativeReview:
                     }
                 )
                 continue
-            manifests.append(document.manifest)
+            manifests.append({"document_id": normative_id, **document.manifest})
             for row in document.requirements:
                 # Отсутствие признака объекта не доказывает неприменимость общей нормы.
                 subject = normalize_label(row.get("object_type", ""))
@@ -268,8 +268,75 @@ class IndependentNormativeReview:
             **diagnostics.get("coverage", {}),
             "scope": "selected_atomic_generations",
             "corpus_requirements": len(selection),
-            "source_complete": bool(manifests) and not unavailable,
+            "source_complete": bool(manifests)
+            and bool(selection)
+            and not unavailable
+            and all(
+                (row.get("manifest") or {}).get("coverage") == "complete"
+                for row in manifests
+            ),
             "selected_requirements": len(sources),
+        }
+        diagnostics["normative_coverage"] = (
+            "complete" if diagnostics["coverage"]["source_complete"] else "incomplete"
+        )
+        if manifests and not diagnostics["coverage"]["source_complete"]:
+            diagnostics["corpus_state"] = "partial"
+        diagnostics["normative_atomic_check"] = (
+            "available" if diagnostics["coverage"]["source_complete"] else "unavailable"
+        )
+        diagnostics["coverage_limitations"] = [
+            {
+                "document_id": row["document_id"],
+                "reason": (row.get("manifest") or {}).get("coverage_reason")
+                or "source_coverage_unverified",
+                "missing_text_pages": (row.get("manifest") or {}).get(
+                    "source_text_empty_pages", []
+                ),
+            }
+            for row in manifests
+            if (row.get("manifest") or {}).get("coverage") != "complete"
+        ]
+        checks = (report.requirement_plan or {}).get("checks", [])
+
+        def source_ids(states):
+            """Одна норма может проверять несколько объектов; считаем исходные атомы один раз."""
+            return {
+                identifier
+                for check in checks
+                if check.get("result") in states
+                for identifier in check.get("source_ids", [])
+            }
+
+        supported = {
+            identifier
+            for check in checks
+            if check.get("result") != "not_supported"
+            and check.get("reason_code")
+            not in {
+                "atomic_interpretation_requires_review",
+                "unsupported_requirement_rule",
+            }
+            for identifier in check.get("source_ids", [])
+        }
+        selected_ids = {source.source_id for source in sources}
+        diagnostics["evaluation_counts"] = {
+            "requirements_total": len(selection),
+            "requirements_selected": len(sources),
+            "requirements_supported": len(supported & selected_ids),
+            "requirements_unsupported": len(selected_ids - supported),
+            "requirements_evaluated": len(
+                source_ids({"violated", "satisfied"}) & selected_ids
+            ),
+            "violations_confirmed": sum(
+                finding.status == "confirmed" for finding in findings
+            ),
+            "insufficient_evidence": len(
+                source_ids({"insufficient_data", "question"}) & selected_ids
+            ),
+            "applicability_unknown": len(
+                source_ids({"applicability_unknown"}) & selected_ids
+            ),
         }
         return IndependentNormativeResult(
             tuple(

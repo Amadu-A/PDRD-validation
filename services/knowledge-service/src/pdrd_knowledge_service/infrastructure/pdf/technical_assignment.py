@@ -310,6 +310,10 @@ class PyMuPdfTechnicalAssignmentProcessor:
             errors="replace",
         )
 
+    def recognize_image(self, image_bytes: bytes) -> str:
+        """Переиспользует существующий CPU OCR для одной явно выбранной страницы нормативного PDF."""
+        return self._normalize_text(self._extract_ocr_text(image_bytes))
+
     @staticmethod
     def _normalize_text(
         value: str,

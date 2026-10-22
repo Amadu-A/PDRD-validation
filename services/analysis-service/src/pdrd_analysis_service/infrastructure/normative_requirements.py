@@ -2,6 +2,7 @@
 
 """Полная пагинация Knowledge с контролем scope, версии, полноты и отмены."""
 
+import hashlib
 import json
 import re
 from collections.abc import Awaitable, Callable
@@ -35,6 +36,7 @@ class HttpNormativeRequirementsReader:
     ) -> AtomicNormativeDocument:
         """Не возвращает частичный корпус как полный при обрыве или смене поколения."""
         rows, seen = [], set()
+        digest = hashlib.sha256()
         offset, manifest = 0, None
         try:
             async with httpx.AsyncClient(
@@ -107,8 +109,15 @@ class HttpNormativeRequirementsReader:
                             "extractor_version",
                             "count",
                             "status_evidence",
+                            "manifest",
                         )
                     }
+                    if data.get("manifest") is not None and not isinstance(
+                        data["manifest"], dict
+                    ):
+                        raise NormativeRequirementsUnavailable(
+                            "invalid_atomic_source_manifest"
+                        )
                     if (manifest is not None and identity != manifest) or (
                         generation_id and data.get("generation_id") != generation_id
                     ):
@@ -172,6 +181,17 @@ class HttpNormativeRequirementsReader:
                                 "ambiguous_atomic_requirement"
                             )
                         seen.add(row["requirement_id"])
+                        raw = {
+                            key: value
+                            for key, value in row.items()
+                            if key != "normative_status"
+                        }
+                        digest.update(
+                            json.dumps(raw, ensure_ascii=False, sort_keys=True).encode(
+                                "utf-8"
+                            )
+                        )
+                        digest.update(b"\n")
                         rows.append(
                             {
                                 **row,
@@ -196,6 +216,14 @@ class HttpNormativeRequirementsReader:
                 if len(rows) != manifest["count"]:
                     raise NormativeRequirementsUnavailable(
                         "atomic_requirement_count_mismatch"
+                    )
+                source_manifest = manifest.get("manifest") or {}
+                if (
+                    source_manifest.get("requirements_digest")
+                    and digest.hexdigest() != source_manifest["requirements_digest"]
+                ):
+                    raise NormativeRequirementsUnavailable(
+                        "atomic_requirements_digest_mismatch"
                     )
                 return AtomicNormativeDocument(
                     tuple(rows), {**manifest, "assessed_on": assessed_on}

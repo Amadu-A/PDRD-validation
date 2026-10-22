@@ -64,6 +64,14 @@ class LocalFilesystemNormativeDocumentStorage:
             storage_key,
         )
 
+    async def replace_derived(self, *, storage_key: str, content: bytes) -> None:
+        """Разрешает атомарную замену только воспроизводимых Word preview и sidecar."""
+        if not storage_key.endswith((".preview.pdf", ".preview.pdf.source.json")):
+            raise NormativeDocumentStorageError(
+                "Замена оригинального документа запрещена."
+            )
+        await asyncio.to_thread(self._save_sync, storage_key, content, True)
+
     async def delete_section(self, *, section_id: UUID) -> None:
         """Идемпотентно очищает проверенную папку UUID, включая потерянные previews."""
         await asyncio.to_thread(self._delete_section_sync, section_id)
@@ -89,6 +97,7 @@ class LocalFilesystemNormativeDocumentStorage:
         self,
         storage_key: str,
         content: bytes,
+        replace_derived: bool = False,
     ) -> None:
         """Сохраняет байты через временный файл с атомарной заменой."""
         path = self._resolve_path(
@@ -105,7 +114,7 @@ class LocalFilesystemNormativeDocumentStorage:
                 exist_ok=True,
             )
 
-            if path.exists():
+            if path.exists() and not replace_derived:
                 raise NormativeDocumentStorageError(
                     f"Storage key уже существует: {storage_key}.",
                 )

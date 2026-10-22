@@ -21,6 +21,10 @@ class NormativeCatalogFacade:
 
     manager: NormativeCatalogManager
 
+    async def atomic_readiness(self, *, section_id: UUID) -> dict:
+        """Не запускает индексацию при чтении сводки."""
+        return await self.manager.atomic_readiness(section_id=section_id)
+
     async def requirement_index_state(self, *, document_id: UUID) -> dict:
         """Показывает активное поколение отдельно от ожидаемого или неудачного."""
         return await self.manager.requirement_index_state(document_id=document_id)

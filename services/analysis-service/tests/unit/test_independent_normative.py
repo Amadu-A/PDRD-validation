@@ -179,8 +179,36 @@ class Reader:
         self.calls += 1
         await kwargs["check_cancellation"]()
         return AtomicNormativeDocument(
-            (self.row,), {"generation_id": GENERATION, "count": 1}
+            (self.row,),
+            {
+                "generation_id": GENERATION,
+                "count": 1,
+                "manifest": {"coverage": "complete"},
+            },
         )
+
+
+async def test_unknown_action_is_not_counted_as_supported_when_no_project_object_is_applicable():
+    """unsupported_requirement_rule остаётся неподдержанным независимо от результата applicability."""
+    row = requirement()
+    row.update(
+        text="Для пожарных гидрантов необходимо обеспечить визуальный контроль.",
+        source_text="4.1 Для пожарных гидрантов необходимо обеспечить визуальный контроль.",
+        verification_type="action",
+    )
+    result = await IndependentNormativeReview(Reader(row)).execute(
+        document_id="control",
+        section_id=SECTION,
+        document_ids=(DOC,),
+        pages=(page(),),
+        assessed_on=DAY,
+        check_cancellation=no_cancel,
+    )
+    assert (
+        result.diagnostics["checks"][0]["reason_code"] == "unsupported_requirement_rule"
+    )
+    assert result.diagnostics["evaluation_counts"]["requirements_supported"] == 0
+    assert result.diagnostics["evaluation_counts"]["requirements_unsupported"] == 1
 
 
 @pytest.mark.parametrize("value,count", [("4", 1), ("5", 0), ("7", 0)])

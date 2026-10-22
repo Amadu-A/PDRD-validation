@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from pdrd_api_gateway.application.normative_coverage import normative_coverage
 from pdrd_api_gateway.application.ports.artifacts import (
     AnalysisArtifactStore,
 )
@@ -81,6 +82,10 @@ class GetAnalysisResult:
             raise AnalysisResultUnavailableError(
                 "Analysis job имеет статус completed, но result.json отсутствует.",
             )
+
+        coverage = normative_coverage(result)
+        if coverage is not None:
+            result = {**result, **coverage}
 
         if getattr(job, "source_artifacts_deleted_at", None) is not None:
             return {

@@ -33,6 +33,9 @@ from pdrd_knowledge_service.transport.http.routers.normative_documents import (
     router as normative_documents_router,
 )
 from pdrd_knowledge_service.transport.http.routers.normative_requirements import (
+    readiness_router as normative_atomic_readiness_router,
+)
+from pdrd_knowledge_service.transport.http.routers.normative_requirements import (
     router as normative_requirements_router,
 )
 from pdrd_knowledge_service.transport.http.routers.normative_sections import (
@@ -87,6 +90,7 @@ def create_app(
     application.include_router(document_context_router)
     application.include_router(equipment_facts_router)
     application.include_router(normative_requirements_router)
+    application.include_router(normative_atomic_readiness_router)
 
     application.include_router(
         normative_sections_router,

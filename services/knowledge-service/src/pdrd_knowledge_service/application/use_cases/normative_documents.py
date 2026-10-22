@@ -29,6 +29,7 @@ from pdrd_knowledge_service.application.normative_document_formats import (
     is_word_mime_type,
     preview_storage_key,
 )
+from pdrd_knowledge_service.application.normative_preview import preview_provenance_key
 from pdrd_knowledge_service.application.ports.document_storage import (
     NormativeDocumentStorage,
     NormativeDocumentStorageError,
@@ -767,6 +768,9 @@ class DeleteNormativeDocument:
                 storage_key=preview_storage_key(
                     document.storage_key,
                 ),
+            )
+            await self.storage.delete(
+                storage_key=preview_provenance_key(document.storage_key)
             )
 
         async with self.unit_of_work_factory() as unit_of_work:

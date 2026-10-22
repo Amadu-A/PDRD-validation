@@ -164,6 +164,10 @@ class FakeCategoryRepository:
 class FakeDocumentRepository:
     """Fake documents."""
 
+    async def get_for_update(self, document_id):
+        """В этом последовательном тесте совпадает с чтением документа."""
+        return await self.get(document_id)
+
     def __init__(
         self,
         state: FakeState,
@@ -261,6 +265,10 @@ class FakeUnitOfWork:
 
 class FakeStorage:
     """In-memory storage."""
+
+    async def replace_derived(self, *, storage_key, content):
+        """Замена preview не меняет байты оригинала."""
+        self.files[storage_key] = content
 
     def __init__(
         self,

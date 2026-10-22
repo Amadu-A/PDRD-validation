@@ -29,6 +29,11 @@ router = APIRouter(
     tags=["normative-catalog"],
     dependencies=[Depends(enforce_normative_section_access)],
 )
+readiness_router = APIRouter(
+    prefix="/api/v1/normative/sections",
+    tags=["normative-catalog"],
+    dependencies=[Depends(enforce_normative_section_access)],
+)
 Container = Annotated[ApplicationContainer, Depends(get_container)]
 
 
@@ -38,6 +43,14 @@ async def _call(awaitable):
         return await awaitable
     except NormativeCatalogManagementError as error:
         raise _translate_error(error) from error
+
+
+@readiness_router.get("/{section_id}/atomic-readiness")
+async def atomic_readiness(section_id: UUID, container: Container):
+    """Сохраняет существующую проверку доступа к назначенному разделу."""
+    return await _call(
+        _require_facade(container).atomic_readiness(section_id=section_id)
+    )
 
 
 @router.get("/{document_id}/requirements")

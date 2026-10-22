@@ -6,6 +6,8 @@ import hashlib
 import json
 from collections import Counter
 
+from pdrd_api_gateway.application.normative_coverage import normative_coverage
+
 
 def normative_diagnostics(result: dict, *, job_id: str) -> dict:
     """Сводит реальные проверки и операции по ID; отсутствие телеметрии не считает нулевой нагрузкой."""
@@ -152,6 +154,7 @@ def normative_diagnostics(result: dict, *, job_id: str) -> dict:
             }
         )
     return {
+        "atomic_coverage": normative_coverage(result),
         "job_id": job_id,
         "stage": "normative_analysis",
         "pages": len(pages),

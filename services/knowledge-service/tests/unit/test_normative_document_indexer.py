@@ -54,11 +54,9 @@ READY_TIME = BASE_TIME + timedelta(
 )
 
 
-@pytest.mark.parametrize(
-    "scenario", ["normal", "queue_failure", "user_package", "already_ready"]
-)
+@pytest.mark.parametrize("scenario", ["normal", "user_package", "already_ready"])
 async def test_atomic_queue_follows_successful_new_normative_index_only(scenario):
-    """Новый атомарный путь не удаляет готовые чанки и не переиндексирует личные/старые документы."""
+    """READY повтор восстанавливает atomic intent без повторной векторизации; личный пакет изолирован."""
     source = make_document(
         status=IndexingStatus.READY
         if scenario == "already_ready"
@@ -71,15 +69,18 @@ async def test_atomic_queue_follows_successful_new_normative_index_only(scenario
     state, vectors, calls = FakeState(source), FakeVectorStore(), []
 
     class Queue:
-        """Ставит атомарную задачу только после существующего успешного chunk-indexing."""
+        """Проверяет транзакционную передачу нового READY и восстановление прежнего READY."""
+
+        async def stage(self, uow, document):
+            """Намерение входит в транзакцию маркировки READY."""
+            assert document.index_status is IndexingStatus.READY
+            calls.append(document.document_id)
 
         async def queue(self, *, document_id):
             """Имитирует отказ публикации без разрушения уже готовых векторов."""
             assert state.document.index_status is IndexingStatus.READY
-            assert len(vectors.records) == 2
+            assert scenario == "already_ready" and not vectors.records
             calls.append(document_id)
-            if scenario == "queue_failure":
-                raise RuntimeError("atomic queue failure")
 
     times = iter((INDEXING_TIME, READY_TIME))
     use_case = replace(
@@ -93,15 +94,11 @@ async def test_atomic_queue_follows_successful_new_normative_index_only(scenario
         ),
         atomic_requirements=Queue(),
     )
-    if scenario == "queue_failure":
-        with pytest.raises(RuntimeError, match="atomic queue failure"):
-            await use_case.execute(document_id=DOCUMENT_ID)
-    else:
-        await use_case.execute(document_id=DOCUMENT_ID)
+    await use_case.execute(document_id=DOCUMENT_ID)
     assert state.document.index_status is IndexingStatus.READY
     if scenario != "already_ready":
         assert len(vectors.records) == 2 and len(vectors.delete_calls) == 1
-    assert calls == ([DOCUMENT_ID] if scenario in {"normal", "queue_failure"} else [])
+    assert calls == ([DOCUMENT_ID] if scenario in {"normal", "already_ready"} else [])
 
 
 SECTION_ID = UUID(
@@ -124,6 +121,10 @@ class FakeState:
 
 class FakeDocumentRepository:
     """Имитирует репозиторий документов."""
+
+    async def get_for_update(self, document_id):
+        """В последовательном тесте блокировка не отличается от чтения."""
+        return await self.get(document_id)
 
     def __init__(
         self,

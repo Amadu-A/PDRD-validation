@@ -83,6 +83,14 @@ export function listSections() {
   );
 }
 
+export async function atomicReadiness(sectionId) {
+  const report = await requestJson(`/sections/${encodeURIComponent(sectionId)}/atomic-readiness`);
+  if (!report || !Array.isArray(report.documents) || !Array.isArray(report.sections)) {
+    throw new Error("Сервис вернул некорректную сводку готовности N-first.");
+  }
+  return report;
+}
+
 
 export function getSection(
   sectionId,

@@ -671,6 +671,8 @@ async def check_norms_stage(
             "corpus_state": "not_prepared",
             "requirements": 0,
             "source_complete": False,
+            "normative_coverage": "incomplete",
+            "normative_atomic_check": "unavailable",
             "reason": "Опубликованный workflow не передал выбранный нормативный корпус."
             if request.normative_corpus is None
             else "Независимая проверка корпуса не настроена в сервисе.",

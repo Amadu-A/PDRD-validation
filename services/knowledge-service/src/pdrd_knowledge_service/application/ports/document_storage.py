@@ -19,6 +19,10 @@ class NormativeDocumentStorageNotFoundError(
 class NormativeDocumentStorage(Protocol):
     """Контракт физического хранения нормативных документов."""
 
+    async def replace_derived(self, *, storage_key: str, content: bytes) -> None:
+        """Атомарно заменяет только производный preview или его provenance, сохраняя оригинал."""
+        ...
+
     async def save(
         self,
         *,

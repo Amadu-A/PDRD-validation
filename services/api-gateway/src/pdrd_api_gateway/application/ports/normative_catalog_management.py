@@ -136,6 +136,10 @@ class NormativeDocumentContent:
 class NormativeCatalogManager(Protocol):
     """Контракт полного управления нормативным каталогом."""
 
+    async def atomic_readiness(self, *, section_id: UUID) -> dict:
+        """Разделяет готовность поиска, атомарных требований и подтверждение статуса."""
+        ...
+
     async def requirement_index_state(self, *, document_id: UUID) -> dict:
         """Читает состояние построения, не начиная переиндексацию."""
         ...

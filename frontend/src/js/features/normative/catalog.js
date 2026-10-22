@@ -15,6 +15,7 @@ import {
 } from "../../dom.js";
 
 import {
+  atomicReadiness,
   createCategory,
   createSection,
   deleteCategory,
@@ -30,6 +31,8 @@ import {
   updateSection,
   uploadDocument,
 } from "./api.js";
+
+import { documentReadinessText, sectionReadinessText } from "./readiness.js";
 
 import { retainSectionSelection } from "./section-selection.js";
 
@@ -236,6 +239,8 @@ export function createNormativeCatalog(
     categories: [],
 
     documents: [],
+    atomicReadiness: null,
+    atomicGeneration: 0,
 
     selectedBySection: new Map(),
 
@@ -759,6 +764,13 @@ export function createNormativeCatalog(
       meta,
     );
 
+    const atomic = state.atomicReadiness?.documents?.find((item) => item.document_id === documentItem.document_id);
+    const readiness = document.createElement("p");
+    readiness.className = "normative-sidebar__description";
+    readiness.textContent = documentReadinessText(atomic);
+    if (atomic?.reason) readiness.title = atomic.reason;
+    content.append(readiness);
+
 
     const actions = document.createElement(
       "div",
@@ -1279,6 +1291,12 @@ export function createNormativeCatalog(
     }
 
 
+    const readiness = document.createElement("p");
+    readiness.className = "normative-sidebar__description";
+    readiness.dataset.normativeAtomicReadiness = "";
+    readiness.textContent = sectionReadinessText(state.atomicReadiness);
+    tree.append(readiness);
+
     const rootHeader = document.createElement(
       "div",
     );
@@ -1414,6 +1432,7 @@ export function createNormativeCatalog(
       state.documents.some(
         isIndexing,
       )
+      || state.atomicReadiness?.documents?.some((item) => ["queued", "building"].includes(item.atomic_state))
     );
 
     if (!requiresPolling) {
@@ -1448,6 +1467,7 @@ export function createNormativeCatalog(
       state.categories = [];
 
       state.documents = [];
+      state.atomicReadiness = null;
 
       pruneSelection();
 
@@ -1457,6 +1477,20 @@ export function createNormativeCatalog(
     }
 
     const generation = state.generation;
+    const atomicGeneration = ++state.atomicGeneration;
+    const sectionId = state.sectionId;
+    let baseReady = false;
+    let readiness = null;
+    // Дополнительная сводка не задерживает основной каталог и доступность формы.
+    atomicReadiness(sectionId)
+      .catch((error) => ({ error: error.message }))
+      .then((result) => {
+        readiness = result;
+        if (!baseReady || generation !== state.generation || atomicGeneration !== state.atomicGeneration) return;
+        state.atomicReadiness = result;
+        renderTree();
+        schedulePolling();
+      });
     const [
       categories,
       documents,
@@ -1476,6 +1510,8 @@ export function createNormativeCatalog(
     state.categories = categories;
 
     state.documents = documents;
+    baseReady = true;
+    state.atomicReadiness = readiness;
 
     selectNewReadyDocumentsByDefault();
 

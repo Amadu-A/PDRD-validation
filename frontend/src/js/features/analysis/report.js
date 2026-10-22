@@ -20,6 +20,7 @@ import {
 } from "./visualization.js";
 import { openTechnicalAssignmentCitation } from "../technical_assignment/citation.js";
 import { appendEquipmentReport } from "./equipment-report.js";
+import { normativeCoverageText } from "./normative-coverage.js";
 
 
 function createElement(
@@ -1199,6 +1200,8 @@ function appendOverview(
   section.append(
     list,
   );
+
+  appendTextBlock(section, "Охват нормативной проверки", normativeCoverageText(payload));
 
   if (payload.summary) {
     appendTextBlock(

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import (
     dataclass,
     field,
+    replace,
 )
 from datetime import (
     UTC,
@@ -501,13 +502,16 @@ async def test_queued_document_cannot_be_moved() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ready_document_delete_removes_all_managed_state() -> None:
+@pytest.mark.parametrize("word", [False, True])
+async def test_ready_document_delete_removes_all_managed_state(word) -> None:
     """DELETE удаляет Qdrant, physical file и PostgreSQL metadata."""
     state = FakeState()
 
     document = make_document(
         status=IndexingStatus.READY,
     )
+    if word:
+        document = replace(document, mime_type="application/msword")
 
     state.documents[DOCUMENT_ID] = document
 
@@ -542,6 +546,14 @@ async def test_ready_document_delete_removes_all_managed_state() -> None:
 
     assert storage.deleted == [
         document.storage_key,
+        *(
+            [
+                document.storage_key + ".preview.pdf",
+                document.storage_key + ".preview.pdf.source.json",
+            ]
+            if word
+            else []
+        ),
     ]
 
 

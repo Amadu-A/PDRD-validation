@@ -283,6 +283,12 @@ async def test_explicit_retry_recovers_stale_queued_delivery_without_implicit_re
         "state"
     ] == "queued"
     assert len(state.outbox) == 1
+    # Неопубликованное сообщение уже будет повторено dispatcher; дубликат не нужен.
+    assert (await catalog(state).queue(document_id=DOCUMENT_ID))[
+        "generation_id"
+    ] == queued["generation_id"]
+    assert len(state.outbox) == 1
+    state.outbox[0].mark_published(published_at=datetime.now(UTC))
     retried = await catalog(state).queue(document_id=DOCUMENT_ID)
     assert (
         retried["generation_id"] == queued["generation_id"] and len(state.outbox) == 2
