@@ -23,6 +23,10 @@ from pdrd_knowledge_service.domain.normative_outbox import (
 )
 
 
+class CatalogConnectionLostError(RuntimeError):
+    """Соединение с каталогом потеряно; повтор требует новой UOW и сверки commit."""
+
+
 class NormativeSectionRepository(Protocol):
     """Контракт persistence операций над разделами нормативов."""
 

@@ -38,6 +38,7 @@ def build_async_engine(
             settings,
         ),
         pool_pre_ping=True,
+        hide_parameters=True,
         pool_size=settings.pool_size,
         max_overflow=settings.max_overflow,
         pool_timeout=settings.pool_timeout_seconds,

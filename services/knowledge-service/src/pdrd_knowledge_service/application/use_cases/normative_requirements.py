@@ -4,6 +4,8 @@
 
 import asyncio
 import hashlib
+import logging
+import time
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from itertools import islice
@@ -18,6 +20,14 @@ from pdrd_knowledge_service.application.normative_generation_integrity import (
     validate_generation,
 )
 from pdrd_knowledge_service.application.normative_preview import verified_preview
+from pdrd_knowledge_service.application.normative_requirement_batches import (
+    MAX_ATOM_BYTES,
+    MAX_BATCH_BYTES,
+    WRITE_ATTEMPTS,
+    WRITE_BACKOFF_SECONDS,
+    NormativeBatchWriteFailedError,
+    bounded_requirement_batches,
+)
 from pdrd_knowledge_service.application.normative_requirement_policy import (
     NormativeRequirementPolicy,
 )
@@ -29,6 +39,7 @@ from pdrd_knowledge_service.application.ports.office_conversion import (
     NormativeOfficeToPdfConverter,
 )
 from pdrd_knowledge_service.application.ports.persistence import (
+    CatalogConnectionLostError,
     NormativeCatalogUnitOfWorkFactory,
 )
 from pdrd_knowledge_service.application.ports.section_locks import (
@@ -55,6 +66,8 @@ from pdrd_knowledge_service.domain.normative_requirements import (
     requirement_status,
     stable_requirement_id,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class NormativeRequirementsConflictError(RuntimeError):
@@ -147,7 +160,12 @@ class NormativeRequirementCatalog:
 
     @log_execution_time(operation="normative_requirements.queue")
     async def queue(
-        self, *, document_id: UUID, respect_backoff=False, max_in_flight=None
+        self,
+        *,
+        document_id: UUID,
+        respect_backoff=False,
+        max_in_flight=None,
+        restart_exhausted=False,
     ) -> dict:
         """Не затрагивает chunk index и не запускает скрытую переиндексацию при чтении."""
         async with self.unit_of_work_factory() as uow:
@@ -157,11 +175,20 @@ class NormativeRequirementCatalog:
                 document,
                 respect_backoff=respect_backoff,
                 max_in_flight=max_in_flight,
+                restart_exhausted=restart_exhausted,
             )
             await uow.commit()
             return generation
 
-    async def stage(self, uow, document, *, respect_backoff=False, max_in_flight=None):
+    async def stage(
+        self,
+        uow,
+        document,
+        *,
+        respect_backoff=False,
+        max_in_flight=None,
+        restart_exhausted=False,
+    ):
         """Сохраняет намерение в той же транзакции, что READY; commit принадлежит вызывающему коду."""
         if document.index_status is not IndexingStatus.READY:
             raise NormativeRequirementsConflictError(
@@ -186,6 +213,31 @@ class NormativeRequirementCatalog:
                     }
                 )
         generation_id = existing["generation_id"] if existing else fingerprint
+        restart = {}
+        if restart_exhausted:
+            if (
+                not existing
+                or existing["state"] != "failed"
+                or existing["active"]
+                or max(
+                    existing.get("attempt_count", 0), existing.get("dispatch_count", 0)
+                )
+                < self.policy.max_attempts
+            ):
+                raise NormativeRequirementsConflictError(
+                    "Административный повтор разрешён только исчерпанному failed-поколению."
+                )
+            restart = {
+                "previous_generation_id": generation_id,
+                "previous_attempt_count": existing.get("attempt_count", 0),
+                "previous_dispatch_count": existing.get("dispatch_count", 0),
+                "administrative_restart_at": now.isoformat(),
+                "administrative_restart_reason": "explicit_exhausted_generation_retry",
+            }
+            generation_id = stable_requirement_id(
+                fingerprint, "admin-retry", str(uuid4())
+            )
+            existing = None
         if existing and existing["state"] == "ready":
             try:
                 await validate_generation(uow.requirements, existing)
@@ -256,6 +308,7 @@ class NormativeRequirementCatalog:
         )
         generation = {
             **(existing or {}),
+            **restart,
             "generation_id": generation_id,
             "fingerprint": fingerprint,
             "document_id": str(document.document_id),
@@ -430,7 +483,7 @@ class BuildNormativeRequirements:
     section_locks: CatalogSectionLocks = field(
         default_factory=InMemoryCatalogSectionLocks
     )
-    batch_size: int = 100
+    batch_size: int = 20
     office_converter: NormativeOfficeToPdfConverter | None = None
     policy: NormativeRequirementPolicy = field(
         default_factory=NormativeRequirementPolicy
@@ -562,6 +615,9 @@ class BuildNormativeRequirements:
                 "pdf_sha256": hashlib.sha256(content).hexdigest(),
                 "vlm_calls": 0,
                 "embedding_calls": 0,
+                "write_batch_size": self.batch_size,
+                "max_atom_json_bytes": MAX_ATOM_BYTES,
+                "max_batch_json_bytes": MAX_BATCH_BYTES,
             }
             async with self.unit_of_work_factory() as uow:
                 _, current = await self._owned_generation(
@@ -602,29 +658,27 @@ class BuildNormativeRequirements:
                     else item
                     for item in batch
                 )
-                async with self.unit_of_work_factory() as uow:
-                    _, current = await self._owned_generation(
-                        uow, document_id, generation_id, attempt_id
+                for portion, payload_bytes in bounded_requirement_batches(batch):
+                    generation = await self._persist_batch(
+                        document_id,
+                        generation_id,
+                        attempt_id,
+                        count,
+                        portion,
+                        payload_bytes,
                     )
-                    await uow.requirements.write_batch(generation_id, count, batch)
-                    count += len(batch)
-                    generation = {
-                        **current,
-                        "count": count,
-                        "updated_at": datetime.now(UTC).isoformat(),
-                    }
-                    await uow.requirements.save_generation(generation)
-                    await uow.commit()
-                for item in batch:
-                    update_digest(digest, item.as_dict())
-                    supported += int(native_rule_supported(item))
-                    unsupported += int(interpretation_blocked(item))
-                    for key in (
-                        "type:" + item.verification_type,
-                        "modality:" + item.modality,
-                        "extraction:" + item.extraction_status,
-                    ):
-                        statistics[key] = statistics.get(key, 0) + 1
+                    # Счётчик и digest меняются только после commit или его сверки в новой UOW.
+                    count += len(portion)
+                    for item in portion:
+                        update_digest(digest, item.as_dict())
+                        supported += int(native_rule_supported(item))
+                        unsupported += int(interpretation_blocked(item))
+                        for key in (
+                            "type:" + item.verification_type,
+                            "modality:" + item.modality,
+                            "extraction:" + item.extraction_status,
+                        ):
+                            statistics[key] = statistics.get(key, 0) + 1
             async with self.unit_of_work_factory() as uow:
                 _, current = await self._owned_generation(
                     uow, document_id, generation_id, attempt_id
@@ -664,32 +718,109 @@ class BuildNormativeRequirements:
                 await uow.commit()
             return generation
         except Exception as error:
-            async with self.unit_of_work_factory() as uow:
-                await uow.documents.get_for_update(document_id)
-                current = await uow.requirements.get_generation(generation_id)
-                if (
-                    current
-                    and current["attempt_id"] == attempt_id
-                    and current["state"] == "building"
-                ):
-                    await uow.requirements.save_generation(
-                        {
-                            **current,
-                            "state": "failed",
-                            "error_code": type(error).__name__,
-                            "error_message": str(error)[:2000],
-                            "retryable": not isinstance(
-                                error, (ValueError, NormativeRequirementsConflictError)
-                            ),
-                            "retry_at": (
-                                datetime.now(UTC)
-                                + timedelta(
-                                    seconds=self.policy.retry_backoff_seconds
-                                    * current.get("attempt_count", 1)
-                                )
-                            ).isoformat(),
-                            "updated_at": datetime.now(UTC).isoformat(),
-                        }
-                    )
-                    await uow.commit()
+            try:
+                await self._record_failure(
+                    document_id, generation_id, attempt_id, error
+                )
+            except CatalogConnectionLostError:
+                logger.warning(
+                    "normative_failure_record_unavailable generation=%s error_type=%s",
+                    generation_id,
+                    type(error).__name__,
+                )
             raise
+
+    async def _record_failure(self, document_id, generation_id, attempt_id, error):
+        """Сохраняет отказ отдельной транзакцией; сбой сервера не маскирует исходную ошибку."""
+        async with self.unit_of_work_factory() as uow:
+            await uow.documents.get_for_update(document_id)
+            current = await uow.requirements.get_generation(generation_id)
+            if (
+                current
+                and current["attempt_id"] == attempt_id
+                and current["state"] == "building"
+            ):
+                await uow.requirements.save_generation(
+                    {
+                        **current,
+                        "state": "failed",
+                        "error_code": type(error).__name__,
+                        "error_message": str(error)[:2000],
+                        "retryable": not isinstance(
+                            error, (ValueError, NormativeRequirementsConflictError)
+                        ),
+                        "retry_at": (
+                            datetime.now(UTC)
+                            + timedelta(
+                                seconds=self.policy.retry_backoff_seconds
+                                * current.get("attempt_count", 1)
+                            )
+                        ).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
+                    }
+                )
+                await uow.commit()
+
+    async def _persist_batch(
+        self, document_id, generation_id, attempt_id, offset, batch, payload_bytes
+    ):
+        """Повторяет только неподтверждённую транзакцию; неоднозначный commit сначала сверяет."""
+        for attempt in range(1, WRITE_ATTEMPTS + 1):
+            started = time.perf_counter()
+            try:
+                async with self.unit_of_work_factory() as uow:
+                    _, current = await self._owned_generation(
+                        uow, document_id, generation_id, attempt_id
+                    )
+                    if current["count"] == offset + len(batch):
+                        actual = await uow.requirements.list_requirements(
+                            generation_id, offset, len(batch)
+                        )
+                        if content_digest(actual) != content_digest(
+                            [item.as_dict() for item in batch]
+                        ):
+                            raise NormativeGenerationIntegrityError(
+                                "Не подтверждено содержимое порции после обрыва commit."
+                            )
+                        return current
+                    if current["count"] != offset:
+                        raise NormativeGenerationIntegrityError(
+                            "Счётчик порции не соответствует подтверждённому offset."
+                        )
+                    await uow.requirements.write_batch(generation_id, offset, batch)
+                    generation = {
+                        **current,
+                        "count": offset + len(batch),
+                        "updated_at": datetime.now(UTC).isoformat(),
+                    }
+                    await uow.requirements.save_generation(generation)
+                    await uow.commit()
+                logger.info(
+                    "normative_batch_committed generation=%s offset=%s rows=%s "
+                    "json_bytes=%s attempt=%s duration_ms=%.2f",
+                    generation_id,
+                    offset,
+                    len(batch),
+                    payload_bytes,
+                    attempt,
+                    (time.perf_counter() - started) * 1000,
+                )
+                return generation
+            except CatalogConnectionLostError as error:
+                logger.warning(
+                    "normative_batch_connection_lost generation=%s offset=%s rows=%s "
+                    "json_bytes=%s attempt=%s limit=%s",
+                    generation_id,
+                    offset,
+                    len(batch),
+                    payload_bytes,
+                    attempt,
+                    WRITE_ATTEMPTS,
+                )
+                if attempt == WRITE_ATTEMPTS:
+                    raise NormativeBatchWriteFailedError(
+                        f"normative_batch_write_exhausted: generation={generation_id}; offset={offset}; "
+                        f"rows={len(batch)}; json_bytes={payload_bytes}; attempts={attempt}. "
+                        "Нужна диагностика PostgreSQL/worker до повторного запуска."
+                    ) from error
+                await asyncio.sleep(WRITE_BACKOFF_SECONDS * 2 ** (attempt - 1))

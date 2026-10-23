@@ -67,6 +67,11 @@ class RecoverNormativeRequirements:
                     manifest = {}
                 state = generation["state"] if generation else "not_indexed"
                 reason, integrity, actual = None, "not_checked", 0
+                verified_digest = None
+                if generation:
+                    actual = await uow.requirements.count_requirements(
+                        generation["generation_id"]
+                    )
                 if (
                     document.index_status is not IndexingStatus.READY
                     or section.deleting
@@ -77,12 +82,12 @@ class RecoverNormativeRequirements:
                         else "chunk_index_not_ready"
                     )
                 elif generation and state == "ready":
-                    actual = await uow.requirements.count_requirements(
-                        generation["generation_id"]
-                    )
                     if verify:
                         try:
-                            await validate_generation(uow.requirements, generation)
+                            validated = await validate_generation(
+                                uow.requirements, generation
+                            )
+                            verified_digest = validated["requirements_digest"]
                             integrity = "verified"
                         except NormativeGenerationIntegrityError as error:
                             integrity, reason, state = "corrupt", str(error), "corrupt"
@@ -163,6 +168,8 @@ class RecoverNormativeRequirements:
                         "extractor_version": self.catalog.extractor_version,
                         "requirements": generation.get("count", 0) if generation else 0,
                         "actual_requirements": actual,
+                        "requirements_digest": manifest.get("requirements_digest"),
+                        "verified_requirements_digest": verified_digest,
                         "integrity": integrity,
                         "source_coverage": manifest.get("coverage", "unavailable"),
                         "native_text_pages": manifest.get("native_text_pages", 0),

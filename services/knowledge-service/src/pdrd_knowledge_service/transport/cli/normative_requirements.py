@@ -41,8 +41,18 @@ def parser():
     command.add_argument("--status", action="store_true")
     command.add_argument("--only-missing", action="store_true")
     command.add_argument("--retry-failed", action="store_true")
+    command.add_argument(
+        "--restart-exhausted",
+        action="store_true",
+        help="Создать новое поколение для одного исчерпанного failed; историю не сбрасывать.",
+    )
     command.add_argument("--max-in-flight", type=int, default=2)
-    command.add_argument("--batch-size", type=int, default=2)
+    command.add_argument(
+        "--batch-size",
+        type=int,
+        default=2,
+        help="Число документов за итерацию очереди; не SQL batch worker.",
+    )
     command.add_argument("--wait", action=argparse.BooleanOptionalAction, default=True)
     command.add_argument("--timeout-seconds", type=float, default=7200)
     command.add_argument("--poll-seconds", type=float, default=5)
@@ -73,13 +83,36 @@ async def run(args, recovery):
     ):
         raise ValueError("Неверные интервалы или размер batch.")
     scope = {"section_id": args.section_id, "document_id": args.document_id}
+    if args.restart_exhausted and (args.document_id is None or args.only_missing):
+        raise ValueError(
+            "--restart-exhausted требует один --document-id без --only-missing."
+        )
     started = monotonic()
     first = True
+    restart = None
+    if args.restart_exhausted and not (args.dry_run or args.status):
+        generation = await recovery.catalog.queue(
+            document_id=args.document_id,
+            restart_exhausted=True,
+            max_in_flight=args.max_in_flight,
+        )
+        restart = {
+            key: generation[key]
+            for key in (
+                "generation_id",
+                "previous_generation_id",
+                "previous_attempt_count",
+                "previous_dispatch_count",
+                "administrative_restart_at",
+            )
+        }
     while True:
         report = await recovery.inspect(
             **scope, verify=first or args.dry_run or args.status
         )
         first = False
+        if restart is not None:
+            report["administrative_restart"] = restart
         report["mode"] = (
             "dry_run" if args.dry_run else "status" if args.status else "backfill"
         )

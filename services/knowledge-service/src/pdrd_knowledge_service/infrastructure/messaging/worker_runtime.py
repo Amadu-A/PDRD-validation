@@ -129,6 +129,7 @@ async def execute_normative_requirements_indexing(
     try:
         return await BuildNormativeRequirements(
             unit_of_work_factory=factory,
+            batch_size=settings.normative_requirements.batch_size,
             storage=LocalFilesystemNormativeDocumentStorage(
                 root_path=settings.storage.root_path
             ),

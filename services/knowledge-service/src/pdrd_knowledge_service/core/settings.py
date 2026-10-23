@@ -653,6 +653,7 @@ class NormativeRequirementsSettings(BaseModel):
     reconciliation_enabled: bool = False
     reconciliation_interval_seconds: int = Field(default=60, ge=1, le=86400)
     reconciliation_batch_size: int = Field(default=2, ge=1, le=200)
+    batch_size: int = Field(default=20, ge=1, le=200)
     max_in_flight: int = Field(default=2, ge=1, le=32)
     max_attempts: int = Field(default=3, ge=1, le=20)
     stale_seconds: int = Field(default=600, ge=1, le=86400)

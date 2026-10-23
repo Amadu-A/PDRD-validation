@@ -8,6 +8,9 @@ from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pdrd_knowledge_service.application.normative_generation_integrity import (
+    NormativeGenerationIntegrityError,
+)
 from pdrd_knowledge_service.domain.normative_requirements import (
     NormativeRequirement,
     NormativeStatusEvidence,
@@ -167,14 +170,21 @@ class SqlAlchemyNormativeRequirementRepository:
         self, generation_id: str, offset: int, limit: int
     ) -> list[dict]:
         """Пагинация закрепляется за поколением, не смешивая редакции между запросами."""
-        rows = await self.session.scalars(
-            select(Requirement.payload)
+        rows = await self.session.execute(
+            select(Requirement.ordinal, Requirement.payload)
             .where(Requirement.generation_id == UUID(generation_id))
             .order_by(Requirement.ordinal)
             .offset(offset)
             .limit(limit)
         )
-        return list(rows)
+        result = []
+        for expected, row in enumerate(rows, offset):
+            if row.ordinal != expected:
+                raise NormativeGenerationIntegrityError(
+                    "Последовательность ordinal атомарного поколения повреждена."
+                )
+            result.append(row.payload)
+        return result
 
     async def count_requirements(self, generation_id: str) -> int:
         """Проверяет число записанных атомов перед публикацией."""
