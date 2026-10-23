@@ -57,7 +57,11 @@ from pdrd_analysis_service.domain.engineering_assertion import (
     same_assertion,
 )
 from pdrd_analysis_service.domain.engineering_claims import REVIEW_REASON_CODES
-from pdrd_analysis_service.domain.evidence_audit import deterministic_purpose_mismatch
+from pdrd_analysis_service.domain.evidence_audit import (
+    audit_assertion,
+    deterministic_purpose_mismatch,
+    deterministic_table_discrepancy,
+)
 from pdrd_analysis_service.domain.physical_identity import (
     PdfLineIndex,
     bind_graphical_fact,
@@ -729,6 +733,18 @@ class CheckCrossPageConsistency:
         }
         page_texts = {page.page: page.text for page in pages}
         for key, assertion in assertions.items():
+            if deterministic_table_discrepancy(assertion, page_texts=page_texts):
+                audit = audit_assertion(assertion, page_texts=page_texts)
+                decisions[key] = (
+                    "confirmed" if audit.disposition == "supported" else "needs_review"
+                )
+                reasons[key] = (
+                    "Проверены ячейки одного потребителя, единица и одинаковый расчётный режим."
+                    if audit.disposition == "supported"
+                    else "Обе ячейки прочитаны; требуется уточнить назначение показателя и область учёта."
+                )
+                reason_codes[key] = "explicit_table_discrepancy"
+                continue
             if deterministic_purpose_mismatch(assertion, page_texts=page_texts):
                 decisions[key] = "confirmed"
                 reasons[key] = (
@@ -917,7 +933,11 @@ class CheckCrossPageConsistency:
             assertion = assertions[f"C{index}"]
             if assertion is not None:
                 rule = reason_codes.get(f"C{index}")
-                deterministic = rule in {"false_arithmetic", "explicit_system_purpose"}
+                deterministic = rule in {
+                    "false_arithmetic",
+                    "explicit_system_purpose",
+                    "explicit_table_discrepancy",
+                }
                 assertion = replace(
                     assertion,
                     verification="deterministic" if deterministic else "semantic",
@@ -925,6 +945,8 @@ class CheckCrossPageConsistency:
                     if rule == "false_arithmetic"
                     else "explicit_system_purpose"
                     if rule == "explicit_system_purpose"
+                    else "explicit_table_discrepancy"
+                    if rule == "explicit_table_discrepancy"
                     else "cross_page_comparability",
                 )
             subject = first.fact.subject_name or first.fact.identifier

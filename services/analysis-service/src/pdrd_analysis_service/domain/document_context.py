@@ -205,7 +205,9 @@ def scope_key(fact: DocumentFact) -> tuple[str, ...]:
         seismic_map[1].casefold().translate(str.maketrans("авс", "abc"))
         if seismic_map
         else "",
-        normalize_label(fact.row_label) if fact.table_id else "",
+        normalize_label(fact.row_label)
+        if fact.table_id and not property_key(fact).endswith(":system_purpose")
+        else "",
     )
 
 

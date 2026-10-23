@@ -50,11 +50,16 @@ class VisionModelOutputBudgetError(VisionModelError):
     """Полный ответ не поместился; повтор требует изменения размера задания."""
 
     def __init__(
-        self, message: str, *, metrics: GenerationMetrics | None = None
+        self,
+        message: str,
+        *,
+        metrics: GenerationMetrics | None = None,
+        completed_fields: dict[str, Any] | None = None,
     ) -> None:
         """Сохраняет метрики исчерпанной попытки без публикации обрезанного JSON."""
         super().__init__(message)
         self.metrics = metrics
+        self.completed_fields = completed_fields or {}
 
 
 class StructuredVisionModel(Protocol):

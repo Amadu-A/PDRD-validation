@@ -33,6 +33,8 @@ import {
 } from "./api.js";
 
 import { documentReadinessText, sectionReadinessText } from "./readiness.js";
+import { isAdmin } from "../auth/access.js";
+import { currentSession, subscribeSession } from "../auth/session.js";
 
 import { retainSectionSelection } from "./section-selection.js";
 
@@ -173,8 +175,11 @@ export function createNormativeCatalog(
   root,
   {
     onSectionChange = async () => {},
+    getSession = currentSession,
+    subscribe = subscribeSession,
   } = {},
 ) {
+  let diagnosticsVisible = isAdmin(getSession());
   const sectionSelect = requireElementWithin(
     root,
     "[data-normative-section-select]",
@@ -736,7 +741,7 @@ export function createNormativeCatalog(
     );
 
 
-    if (documentItem.index_error) {
+    if (documentItem.index_error && diagnosticsVisible) {
       const errorText = document.createElement(
         "span",
       );
@@ -764,12 +769,14 @@ export function createNormativeCatalog(
       meta,
     );
 
-    const atomic = state.atomicReadiness?.documents?.find((item) => item.document_id === documentItem.document_id);
-    const readiness = document.createElement("p");
-    readiness.className = "normative-sidebar__description";
-    readiness.textContent = documentReadinessText(atomic);
-    if (atomic?.reason) readiness.title = atomic.reason;
-    content.append(readiness);
+    if (diagnosticsVisible) {
+      const atomic = state.atomicReadiness?.documents?.find((item) => item.document_id === documentItem.document_id);
+      const readiness = document.createElement("p");
+      readiness.className = "normative-sidebar__description";
+      readiness.textContent = documentReadinessText(atomic);
+      if (atomic?.reason) readiness.title = atomic.reason;
+      content.append(readiness);
+    }
 
 
     const actions = document.createElement(
@@ -1291,11 +1298,13 @@ export function createNormativeCatalog(
     }
 
 
-    const readiness = document.createElement("p");
-    readiness.className = "normative-sidebar__description";
-    readiness.dataset.normativeAtomicReadiness = "";
-    readiness.textContent = sectionReadinessText(state.atomicReadiness);
-    tree.append(readiness);
+    if (diagnosticsVisible) {
+      const readiness = document.createElement("p");
+      readiness.className = "normative-sidebar__description";
+      readiness.dataset.normativeAtomicReadiness = "";
+      readiness.textContent = sectionReadinessText(state.atomicReadiness);
+      tree.append(readiness);
+    }
 
     const rootHeader = document.createElement(
       "div",
@@ -1482,7 +1491,7 @@ export function createNormativeCatalog(
     let baseReady = false;
     let readiness = null;
     // Дополнительная сводка не задерживает основной каталог и доступность формы.
-    atomicReadiness(sectionId)
+    if (diagnosticsVisible) atomicReadiness(sectionId)
       .catch((error) => ({ error: error.message }))
       .then((result) => {
         readiness = result;
@@ -1511,7 +1520,7 @@ export function createNormativeCatalog(
 
     state.documents = documents;
     baseReady = true;
-    state.atomicReadiness = readiness;
+    state.atomicReadiness = diagnosticsVisible && atomicGeneration === state.atomicGeneration ? readiness : null;
 
     selectNewReadyDocumentsByDefault();
 
@@ -2114,9 +2123,20 @@ export function createNormativeCatalog(
   }
 
 
+  const unsubscribe = subscribe(() => {
+    const visible = isAdmin(getSession());
+    if (visible === diagnosticsVisible) return;
+    diagnosticsVisible = visible;
+    state.atomicReadiness = null;
+    state.atomicGeneration += 1;
+    renderTree();
+    if (visible && state.sectionId) void refreshSectionData().catch(() => {});
+  });
+
   return {
     getSelection,
     reload: reloadSections,
     start,
+    dispose() { unsubscribe(); window.clearTimeout(state.pollTimer); },
   };
 }

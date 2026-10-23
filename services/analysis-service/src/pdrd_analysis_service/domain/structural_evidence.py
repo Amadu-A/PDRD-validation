@@ -10,6 +10,21 @@ def structural_counterevidence(
 ) -> str | None:
     """Не выводит отсутствие из неполного списка фактов и различает уровни шифра."""
     text = " ".join(page_texts.values())
+    if re.search(r"(?:номер|обозначени)\w*\s+том|содержани\w*\s+том", comment, re.I):
+        volumes = set(re.findall(r"\bтом[а]?\s+(\d+(?:\.\d+)+)", text, re.I))
+        claimed = set(re.findall(r"(?<![\w.])\d+(?:\.\d+){2,}(?![\w.])", comment))
+        if len(volumes) == 1 and len(claimed) > 1 and volumes <= claimed:
+            return "document_code_is_not_volume_number"
+    if re.search(
+        r"(?:физическ\w*|pdf)[^.!?]{0,35}(?:страниц|номер)|номер[^.!?]{0,35}страниц\w*\s+pdf",
+        comment + " " + evidence,
+        re.I,
+    ) and re.search(
+        r"(?:номер\w*\s+лист|лист\s*\d|основн\w*\s+надпис)",
+        comment + " " + evidence,
+        re.I,
+    ):
+        return "pdf_page_is_not_printed_sheet_number"
     codes = set(re.findall(r"\bИОС\s*\d+(?:\.\d+)*", comment + " " + evidence, re.I))
     codes = {re.sub(r"\s+", "", code).casefold() for code in codes}
     if len(codes) == 2 and re.search(

@@ -80,3 +80,36 @@ test("клавиатура сохраняет изменение, чужой у�
   handle.dispatch("pointerup", { ...pointer, clientX: 700 });
   assert.equal(commits, 1);
 });
+
+
+test("чужая отмена не прерывает resize, смена размера окна откатывает незавершённый жест", (t) => {
+  const previous = { document: globalThis.document, window: globalThis.window };
+  t.after(() => Object.assign(globalThis, previous));
+  const viewport = new FakeElement();
+  globalThis.document = { createElement: (tag) => new FakeElement(tag) };
+  globalThis.window = viewport;
+  const node = new FakeElement(); const page = new FakeElement(); let shown = BOX; let saved = BOX; let commits = 0;
+  const resize = attachBoxResize({ node, page, label: "Область",
+    bounds: () => ({ width: 1000, height: 1000 }), getBox: () => ({ ...saved }),
+    preview: (box) => { shown = box; }, commit: (box) => { saved = box; commits += 1; } });
+  const handle = node.children.find((child) => child.dataset.resizeDirection === "e");
+  const point = { button: 0, pointerId: 7, clientX: 500, clientY: 400, preventDefault() {}, stopPropagation() {} };
+  handle.dispatch("pointerdown", point);
+  handle.dispatch("pointercancel", { pointerId: 8 });
+  handle.dispatch("lostpointercapture", { pointerId: 8 });
+  handle.dispatch("pointerup", { ...point, clientX: 600 });
+  assert.equal(saved.x_max, 600); assert.equal(commits, 1);
+  for (const event of ["resize", "blur"]) {
+    handle.dispatch("pointerdown", point);
+    handle.dispatch("pointermove", { ...point, clientX: 700 });
+    assert.equal(shown.x_max, 800);
+    viewport.dispatch(event);
+    assert.equal(shown.x_max, 600); assert.equal(handle.hasPointerCapture(7), false);
+    handle.dispatch("pointerup", { ...point, clientX: 700 });
+    assert.equal(commits, 1);
+  }
+  handle.dispatch("keydown", { key: "ArrowRight", preventDefault() {}, stopPropagation() {} });
+  assert.equal(saved.x_max, 605); assert.equal(commits, 2);
+  resize.dispose();
+  for (const event of ["resize", "blur"]) assert.equal(viewport.listeners.get(event).length, 0);
+});

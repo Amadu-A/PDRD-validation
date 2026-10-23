@@ -139,6 +139,46 @@ class UnderstandPage:
         )
         diagnostics["result"] = "incomplete" if limited_reason else "completed"
         diagnostics["limited_reason"] = limited_reason
+        raw_rows = sum(
+            len(group.get("rows", []))
+            for group in facts.visual_specification_rows
+            if isinstance(group.get("rows"), list)
+        )
+        accepted_rows = len(
+            {
+                fact.source_item_id
+                for fact in facts.document_facts
+                if fact.extraction_method == "vlm_specification_row"
+            }
+        )
+        if use_equipment_web_search and not use_document_context:
+            accepted_rows = len(
+                {
+                    item.get("specification_item_id")
+                    for item in facts.equipment_identities
+                    if item.get("extraction_method") == "vlm_specification_row"
+                }
+            )
+        diagnostics.update(
+            visual_rows=raw_rows,
+            visual_rows_accepted=accepted_rows,
+            visual_rows_unresolved=max(0, raw_rows - accepted_rows),
+        )
+        if raw_rows > accepted_rows:
+            diagnostics["result"] = "incomplete"
+            diagnostics["limited_reason"] = (
+                limited_reason or "specification_rows_unbound"
+            )
+        if (
+            (use_document_context or use_equipment_web_search)
+            and not facts.equipment_specification
+            and "спецификац" in facts.page_type.casefold()
+            and raw_rows == 0
+        ):
+            diagnostics["result"] = "incomplete"
+            diagnostics["limited_reason"] = (
+                limited_reason or "specification_rows_not_extracted"
+            )
         return facts, measurements.result(diagnostics)
 
     @staticmethod
@@ -312,7 +352,14 @@ class UnderstandPage:
 
             if result.metrics is not None and result.metrics.done_reason == "length":
                 raise VisionModelOutputBudgetError(
-                    "Ответ Understanding достиг предела вывода.", metrics=result.metrics
+                    "Ответ Understanding достиг предела вывода.",
+                    metrics=result.metrics,
+                    completed_fields={
+                        key: value
+                        for key, value in result.payload.items()
+                        if key in {"specification_rows", "specification_notes"}
+                        and isinstance(value, list)
+                    },
                 )
             payload, metrics = result.payload, result.metrics
             core = limited_understanding_payload(heuristic_page_type)
@@ -321,7 +368,10 @@ class UnderstandPage:
             elif any(name not in payload or payload[name] is None for name in core):
                 limited_reason = "partial_page_facts"
         except VisionModelOutputBudgetError as error:
-            payload = limited_understanding_payload(heuristic_page_type)
+            payload = {
+                **limited_understanding_payload(heuristic_page_type),
+                **error.completed_fields,
+            }
             metrics = error.metrics
             limited_reason = "output_budget"
 
@@ -381,6 +431,49 @@ class UnderstandPage:
                 if (fact := document_fact_from_mapping(raw)) is not None
             ),
         )
+
+        if (use_document_context or use_equipment_web_search) and not tabular:
+            from pdrd_analysis_service.domain.visual_specification import (
+                visual_equipment_records,
+                visual_note_facts,
+                visual_specification_facts,
+            )
+
+            visual_facts = visual_specification_facts(
+                payload.get("specification_rows"), page_number
+            )
+            facts = replace(
+                facts,
+                visual_specification_notes=tuple(
+                    note
+                    for note in (payload.get("specification_notes") or [])
+                    if isinstance(note, dict)
+                ),
+                visual_specification_rows=tuple(
+                    row
+                    for row in (payload.get("specification_rows") or [])
+                    if isinstance(row, dict)
+                ),
+                document_facts=(
+                    *facts.document_facts,
+                    *(visual_facts if use_document_context else ()),
+                    *(
+                        visual_note_facts(
+                            payload.get("specification_notes"), page_number
+                        )
+                        if use_document_context
+                        else ()
+                    ),
+                ),
+                equipment_identities=(
+                    *facts.equipment_identities,
+                    *(
+                        visual_equipment_records(visual_facts)
+                        if use_equipment_web_search
+                        else ()
+                    ),
+                ),
+            )
 
         if specification is not None:
             specification["refinement_metrics"] = refinement_metrics

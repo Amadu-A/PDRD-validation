@@ -14,7 +14,7 @@ from pdrd_analysis_service.domain.document_context import document_fact_from_map
 
 @pytest.mark.parametrize("d,eq", [(0, 0), (12, 0), (0, 40), (12, 40)])
 def test_compact_schema_keeps_every_field_limit_and_independent_feature(d, eq):
-    """Только required у записей D/EQ изменяется; базовые поля и графические цели прежние."""
+    """Базовые поля и лимиты прежние; строки спецификации добавляются к контракту D."""
     baseline = build_page_facts_schema(d, eq, 2)
     prompt, schema = build_understanding_contract(
         page_number=20,
@@ -24,7 +24,9 @@ def test_compact_schema_keeps_every_field_limit_and_independent_feature(d, eq):
         max_equipment=eq,
         max_graphical_targets=2,
     )
-    assert schema["required"] == baseline["required"]
+    assert schema["required"] == baseline["required"] + (
+        ["specification_rows"] if d else []
+    )
     for name, original in baseline["properties"].items():
         current = schema["properties"][name]
         if name in {"document_facts", "equipment_identities"}:

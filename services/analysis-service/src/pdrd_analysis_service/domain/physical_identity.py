@@ -100,6 +100,8 @@ def pdf_label_facts(text_words, *, page, page_text):
 
 def geometric_property(fact):
     """Отделяет размеры и отметки от системных расходов и назначения."""
+    if fact.value_role in {"supply_length", "supply_quantity"}:
+        return False
     if fact.subject_type in {
         "document_reference",
         "document_topic",
@@ -127,6 +129,19 @@ def object_kind(fact):
     ):
         if re.search(pattern, text):
             return kind
+    pipeline_kinds = {
+        kind
+        for pattern, kind in (
+            (
+                r"кольцев\w*\s+(?:сет|магистрал)|магистральн\w*\s+трубопровод",
+                "ring_main",
+            ),
+            (r"\bввод\w*\b|service_entry", "service_entry"),
+        )
+        if re.search(pattern, text)
+    }
+    if len(pipeline_kinds) == 1:
+        return next(iter(pipeline_kinds))
     return normalize_label(fact.object_kind)
 
 

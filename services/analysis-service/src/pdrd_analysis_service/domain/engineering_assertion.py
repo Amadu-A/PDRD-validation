@@ -146,6 +146,13 @@ def read_assertion(origins: tuple[dict, ...]) -> EngineeringAssertion | None:
                     if assertion.claim_type == "contradiction"
                     else assertion.conditions,
                 )
+                canonical = scope_key(observations[0].fact)
+                if (
+                    len(assertion.conditions) == 7
+                    and assertion.conditions[:6] == canonical[:6]
+                    and all(scope_key(item.fact) == canonical for item in observations)
+                ):
+                    assertion = replace(assertion, conditions=canonical)
             if observations and len(assertion.conditions) == 7:
                 canonical = scope_key(observations[0].fact)
                 if assertion.conditions[1:] == canonical[1:] and assertion.conditions[
@@ -302,7 +309,7 @@ def candidate_property(text: str) -> str:
     """Распознаёт лишь явный предмет для старого кандидата без ссылки на план."""
     for pattern, prop in (
         (r"толщин\w*\s+стен", "Толщина стенки"),
-        (r"диаметр|типоразмер|\b(?:ду|dn)\s*\d", "Диаметр"),
+        (r"диаметр|типоразмер|\b(?:ду|dn)\s*\d|[Øø⌀]\s*\d", "Диаметр"),
         (r"длин|протяж", "Длина"),
         (r"водоотвед|назначени\w*\s+систем", "Назначение системы"),
         (r"напор", "Напор"),

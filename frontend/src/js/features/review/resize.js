@@ -103,8 +103,11 @@ export function attachBoxResize({
       move(event);
       finish();
     });
-    listen(handle, "pointercancel", () => finish(true));
-    listen(handle, "lostpointercapture", () => finish(true));
+    const cancelPointer = (event) => {
+      if (drag?.pointerId === event.pointerId) finish(true);
+    };
+    listen(handle, "pointercancel", cancelPointer);
+    listen(handle, "lostpointercapture", cancelPointer);
     listen(handle, "keydown", (event) => {
       const delta = {
         ArrowLeft: { x: -5, y: 0 }, ArrowRight: { x: 5, y: 0 },
@@ -126,6 +129,12 @@ export function attachBoxResize({
       finish(true);
     }
   });
+
+  // После изменения масштаба/размера снимок bounds уже неверен. Потеря окна
+  // не должна оставлять незавершённый жест, блокирующий следующие изменения.
+  if (globalThis.window?.addEventListener && globalThis.window?.removeEventListener) {
+    for (const event of ["resize", "blur"]) listen(window, event, () => finish(true));
+  }
 
   return {
     cancel: () => finish(true),

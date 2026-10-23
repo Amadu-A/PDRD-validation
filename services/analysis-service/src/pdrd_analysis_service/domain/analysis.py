@@ -130,6 +130,8 @@ class PageFacts:
     document_facts: tuple[DocumentFact, ...] = ()
     equipment_identities: tuple[dict[str, Any], ...] = ()
     equipment_specification: dict[str, Any] | None = None
+    visual_specification_rows: tuple[dict[str, Any], ...] = ()
+    visual_specification_notes: tuple[dict[str, Any], ...] = ()
     graphical_targets: tuple[dict[str, Any], ...] = ()
 
 

@@ -879,7 +879,7 @@ class PyMuPdfAnnotationWriter:
             fill_color=palette.fill,
             border_width=0,
             opacity=0.90,
-            rotate=page.rotation if annotation.callout_box is not None else 0,
+            rotate=page.rotation,
             richtext=True,
             style=pinned_card_style(font_size),
         )
@@ -934,7 +934,7 @@ class PyMuPdfAnnotationWriter:
             border_width=0,
             align=1,
             opacity=0.98,
-            rotate=page.rotation if annotation.callout_box is not None else 0,
+            rotate=page.rotation,
         )
 
         badge.set_info(

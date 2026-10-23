@@ -259,10 +259,10 @@ async def test_undone_rejection_is_not_in_final_catalog(catalog_flow):
         assert (await listed(browser, tag="wise"))["total"] == 2
 
 
-async def test_rejected_gold_is_saved_in_catalog_without_automatic_training(
+async def test_rejected_gold_stays_in_review_without_catalog_or_training(
     catalog_flow,
 ):
-    """Окончательный отказ ручного замечания также входит в согласованный каталог."""
+    """Отмена Gold без причины остаётся в Review и не попадает в Experience."""
     f = catalog_flow
     async with client(f) as browser:
         await browser.post(f.endpoint + "/open")
@@ -284,13 +284,15 @@ async def test_rejected_gold_is_saved_in_catalog_without_automatic_training(
                 "action": "decide",
                 "finding_id": manual_id,
                 "decision": "rejected",
-                "reason_category": "false_positive",
             },
             {"action": "approve"},
         ):
             result = await command(browser, f, revision, **body)
             assert result.status_code == 200, result.text
             revision = result.json()["revision"]
-        gold = (await listed(browser, tag="gold"))["items"][0]
-        assert gold["decision"] == "rejected" and gold["crops"]
-        assert gold["source_current"] and not gold["training_eligible"]
+        assert (await listed(browser, tag="gold"))["total"] == 0
+        assert (await listed(browser, tag="wise"))["total"] == 2
+        review = (await browser.get(f.endpoint)).json()
+        gold = next(row for row in review["findings"] if row["finding_id"] == manual_id)
+        assert gold["decision"] == "rejected"
+        assert gold["reason_category"] is None and gold["comment"] == ""

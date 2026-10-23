@@ -118,7 +118,7 @@ export function createReviewState() {
 
     const entry = requireEntry(findingId);
 
-    const explanation = decision === REVIEW_DECISIONS.REJECTED
+    const explanation = decision === REVIEW_DECISIONS.REJECTED && entry.origin !== REVIEW_ORIGINS.MANUAL
       ? rejectionFeedback(feedback.reasonCategory, feedback.comment ?? "")
       : { reasonCategory: null, comment: "" };
     if (entry.decision !== decision || entry.reasonCategory !== explanation.reasonCategory
@@ -189,7 +189,7 @@ export function createReviewState() {
       throw new Error("Недопустимое решение пользователя.");
     }
     const entry = requireEntry(findingId);
-    const explanation = decision === REVIEW_DECISIONS.REJECTED
+    const explanation = decision === REVIEW_DECISIONS.REJECTED && entry.origin !== REVIEW_ORIGINS.MANUAL
       ? rejectionFeedback(feedback.reasonCategory, feedback.comment ?? "", { legacy: true })
       : { reasonCategory: null, comment: "" };
     if (entry.decision !== decision || entry.reasonCategory !== explanation.reasonCategory || entry.comment !== explanation.comment) {

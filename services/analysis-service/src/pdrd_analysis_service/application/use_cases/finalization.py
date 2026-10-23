@@ -57,6 +57,7 @@ from pdrd_analysis_service.domain.engineering_claims import (
 )
 from pdrd_analysis_service.domain.evidence_audit import (
     deterministic_purpose_mismatch,
+    deterministic_table_discrepancy,
     diagnostic_language,
 )
 
@@ -471,6 +472,20 @@ def _is_protected_factual_review(finding: FindingDraft) -> bool:
         return True
     assertion = read_assertion(finding.origin_assertions)
     if assertion is not None and assertion.claim_type == "contradiction":
+        if (
+            assertion.verification == "deterministic"
+            and assertion.verification_rule == "explicit_table_discrepancy"
+            and deterministic_table_discrepancy(
+                assertion,
+                page_texts={
+                    int(page): text
+                    for origin in finding.origin_assertions
+                    if origin.get("origin") == "engineering_evidence_audit"
+                    for page, text in origin.get("page_texts", {}).items()
+                },
+            )
+        ):
+            return True
         if (
             assertion.verification == "deterministic"
             and assertion.verification_rule == "explicit_system_purpose"

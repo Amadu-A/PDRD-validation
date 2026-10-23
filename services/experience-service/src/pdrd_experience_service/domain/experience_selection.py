@@ -153,7 +153,7 @@ def select_experience_candidates(
 
     Для отказа VLM crop относится к неизменной исходной области, а правки
     инженера сохраняются отдельно. Принятие подтверждает текущую область.
-    Флаг каталога включает также текстовые решения и отклонённые Gold.
+    Флаг каталога включает текстовые решения VLM. Отменённые Gold не являются опытом.
     """
     session.accepted_for_pdf()
 
@@ -185,7 +185,7 @@ def select_experience_candidates(
             continue
 
         if finding.origin is Origin.MANUAL:
-            if finding.decision is not Decision.ACCEPTED and not for_catalog:
+            if finding.decision is not Decision.ACCEPTED:
                 continue
 
             if (

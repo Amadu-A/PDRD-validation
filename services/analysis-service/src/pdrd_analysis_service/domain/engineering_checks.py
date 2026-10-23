@@ -168,6 +168,126 @@ def evaluate_decisions(
         results.extend(_table_sums(tuple(members)))
     if registry.document_context_enabled:
         results.extend(_design_basis_questions(grounded, page_texts))
+        results.extend(_supply_length_questions(registry, grounded))
+    return tuple(results)
+
+
+def _supply_length_questions(registry, grounded):
+    """Увязывает протяжённость и количество трубы вопросом о границах и запасе.
+
+    Графическая строка остаётся визуальным чтением. Она не становится доказанным
+    общим участком и не используется для автоматического вывода о недостатке.
+    """
+
+    def question_system(fact, value):
+        """Сближает B/В только в вопросе о водопроводе, сохраняя исходное чтение."""
+        tag = normalize_label(value)
+        if re.fullmatch(r"b\d+(?:-\d+)?", tag) and re.search(
+            r"водопровод|водоснабжен", fact.evidence_text, re.I
+        ):
+            return "в" + tag[1:]
+        return tag
+
+    groups = defaultdict(list)
+    for evidence in registry.evidence:
+        item = evidence.observation
+        fact = item.fact
+        if fact.value_role == "network_total_length" and item in grounded:
+            groups[question_system(fact, fact.identifier)].append(item)
+        elif (
+            fact.value_role == "supply_length"
+            and fact.extraction_method == "vlm_specification_row"
+        ):
+            from pdrd_analysis_service.domain.visual_specification import (
+                visual_specification_facts,
+            )
+
+            rows = [
+                region["row"]
+                for region in fact.source_regions
+                if region.get("role") == "specification_row"
+                and isinstance(region.get("row"), dict)
+            ]
+            source_groups = [
+                {
+                    "system": row["system"],
+                    "header": row["system_header"],
+                    "bbox": [
+                        row["header_bbox"][key]
+                        for key in ("x_min", "y_min", "x_max", "y_max")
+                    ],
+                    "rows": [row["columns"]],
+                }
+                for row in rows
+                if isinstance(row.get("columns"), dict)
+            ]
+            if fact in visual_specification_facts(source_groups, item.page):
+                groups[question_system(fact, fact.scope_system)].append(item)
+    results = []
+    for system, observations in groups.items():
+        lengths = [
+            item
+            for item in observations
+            if item.fact.value_role == "network_total_length"
+        ]
+        supplied = [
+            item for item in observations if item.fact.value_role == "supply_length"
+        ]
+        if not lengths or not supplied:
+            continue
+        if any(
+            item.fact.unit_raw != "м"
+            or not re.fullmatch(r"\d+(?:[.,]\d+)?", item.fact.value_raw)
+            for item in observations
+        ):
+            continue
+        if (
+            len(
+                {
+                    Decimal(item.fact.value_raw.replace(",", "."))
+                    for item in observations
+                }
+            )
+            < 2
+        ):
+            continue
+        results.append(
+            EngineeringCheck(
+                "network_supply_scope",
+                "needs_review",
+                "system:" + system,
+                "network_and_supply_length",
+                tuple(observations),
+                "supply_scope_and_allowance_unverified",
+                {
+                    "network": [
+                        f"стр. {item.page}: {item.fact.value_raw} м" for item in lengths
+                    ],
+                    "supply": [
+                        f"стр. {item.page}: {item.fact.value_raw} м"
+                        for item in supplied
+                    ],
+                },
+                missing_data=(
+                    "supply_allowance",
+                    "network_boundaries",
+                    "specification_row_to_segments",
+                )
+                + (
+                    ("system_tag_reading",)
+                    if len(
+                        {
+                            normalize_label(
+                                item.fact.scope_system or item.fact.identifier
+                            )
+                            for item in observations
+                        }
+                    )
+                    > 1
+                    else ()
+                ),
+            )
+        )
     return tuple(results)
 
 

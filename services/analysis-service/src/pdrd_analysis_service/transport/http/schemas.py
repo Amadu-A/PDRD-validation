@@ -55,6 +55,8 @@ class PageFactsPayload(BaseModel):
     document_facts: list[dict[str, Any]] = Field(default_factory=list)
     equipment_identities: list[dict[str, Any]] | None = None
     equipment_specification: dict[str, Any] | None = None
+    visual_specification_rows: list[dict[str, Any]] = Field(default_factory=list)
+    visual_specification_notes: list[dict[str, Any]] = Field(default_factory=list)
     graphical_targets: list[dict[str, Any]] = Field(default_factory=list)
 
     def to_domain(
@@ -79,6 +81,8 @@ class PageFactsPayload(BaseModel):
             ),
             equipment_identities=tuple(self.equipment_identities or ()),
             equipment_specification=self.equipment_specification,
+            visual_specification_rows=tuple(self.visual_specification_rows),
+            visual_specification_notes=tuple(self.visual_specification_notes),
             graphical_targets=tuple(self.graphical_targets),
             document_facts=tuple(
                 fact

@@ -218,7 +218,11 @@ for (const grouped of [false, true]) {
     form.children.find((child) => child.tagName === "TEXTAREA").value = "Исправленное Gold";
     form.dispatch("submit", { preventDefault() {} }); await settle();
     assert.equal(f.server().findings.find((row) => row.origin === "manual").text, "Исправленное Gold");
-    action(gold, "reject").click(); submitRejection(f.root, "other", "Удалено пользователем"); await settle();
+    action(gold, "reject").click(); await settle();
+    const rejectedGold = f.server().findings.find((row) => row.origin === "manual");
+    assert.equal(rejectedGold.reason_category, null);
+    assert.equal(rejectedGold.comment, "");
+    assert.equal(f.root.querySelector(".review-rejection-editor")?.open ?? false, false);
     assert.equal(gold.classList.contains("is-hidden"), true);
     assert.equal(f.server().findings.find((row) => row.origin === "manual").decision, "rejected");
     for (const row of f.adapter.records) { action(row.item, "accept").click(); await settle(); }

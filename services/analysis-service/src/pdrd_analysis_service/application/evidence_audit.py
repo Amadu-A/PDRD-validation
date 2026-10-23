@@ -40,7 +40,7 @@ def _bind_legacy_context(finding):
         for origin in finding.origin_assertions
         if origin.get("origin") == "vlm" and origin.get("claim_type")
     }
-    prop = candidate_property(finding.comment + " " + finding.evidence)
+    prop = candidate_property(finding.comment) or candidate_property(finding.evidence)
     if (
         types == {"documentation"}
         and prop == "Назначение системы"
@@ -162,7 +162,71 @@ def audit_findings_evidence(
     result = []
     for finding in findings:
         finding = _bind_legacy_context(finding)
+        if (
+            read_assertion(finding.origin_assertions) is None
+            and candidate_property(finding.comment) == "Назначение системы"
+        ):
+            from pdrd_analysis_service.domain.engineering_facts import (
+                explicit_system_purposes,
+            )
+
+            pages = {
+                finding.page,
+                *(source.page for source in finding.document_context_basis_sources),
+            }
+            facts = tuple(
+                LocatedDocumentFact(page, index, fact)
+                for page in sorted(pages)
+                for index, fact in enumerate(
+                    explicit_system_purposes(page_texts.get(page, "")), 1
+                )
+                if literal_contains(
+                    finding.object_ref + " " + finding.comment, fact.identifier
+                )
+            )
+            assertion = assertion_from_facts(facts, include_related=True)
+            if assertion is not None:
+                finding = replace(
+                    finding,
+                    origin_assertions=(
+                        *finding.origin_assertions,
+                        assertion.as_origin(),
+                    ),
+                )
         assertion = read_assertion(finding.origin_assertions)
+        if assertion is not None and assertion.claim_type == "contradiction":
+            selected_ids = {
+                source.fact_id
+                for source in finding.document_context_basis_sources
+                if source.fact_id
+            }
+            related = tuple(
+                item
+                for item in located_facts
+                if item.fact_id in selected_ids
+                and property_key(item.fact) == assertion.property_key
+                and any(
+                    item.fact.identifier == old.fact.identifier
+                    for old in assertion.observations
+                )
+                and item not in assertion.observations
+            )
+            if related:
+                assertion = replace(
+                    assertion, observations=(*assertion.observations, *related)
+                )
+                finding = replace(
+                    finding,
+                    origin_assertions=(
+                        assertion.as_origin(),
+                        *(
+                            {**origin, "origin": "engineering_assertion_history"}
+                            if origin.get("origin") == "engineering_assertion"
+                            else origin
+                            for origin in finding.origin_assertions
+                        ),
+                    ),
+                )
         if assertion is not None and lookup:
             observations = tuple(
                 replace(
@@ -402,6 +466,22 @@ def _audit_finding(finding, *, page_texts, stage):
         re.I,
     ):
         counterevidence = "project_wide_calculation_absence_not_established"
+    if assertion is None and not counterevidence:
+        typed_comparison = any(
+            origin.get("origin") == "vlm"
+            and origin.get("claim_type") == "contradiction"
+            for origin in finding.origin_assertions
+        )
+        comparison = re.search(
+            r"различ|расхожд|несоответств|противореч|не\s+соответств|не\s+совпад",
+            finding.comment,
+            re.I,
+        )
+        property_claim = candidate_property(finding.comment) or re.search(
+            r"номер\w*\s+(?:лист|том)|обозначени\w*\s+том", finding.comment, re.I
+        )
+        if property_claim and (typed_comparison or comparison):
+            counterevidence = "comparison_subject_not_established"
     if counterevidence:
         return replace(
             finding,
@@ -411,7 +491,9 @@ def _audit_finding(finding, *, page_texts, stage):
                 {
                     "origin": AUDIT_ORIGIN,
                     "stage": stage,
-                    "status": "counterevidence",
+                    "status": "incomplete"
+                    if counterevidence == "comparison_subject_not_established"
+                    else "counterevidence",
                     "disposition": "diagnostic",
                     "reason_code": counterevidence,
                     "original": {

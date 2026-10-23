@@ -658,17 +658,18 @@ class ReviewSession:
         ):
             raise ReviewError("A human decision must be accepted or rejected.")
 
+        record = self._item(finding_id)
+        if record.origin is Origin.MANUAL and decision is Decision.REJECTED:
+            reason_category, comment = None, ""
         try:
             reason_category, comment = validate_feedback(
                 rejected=decision is Decision.REJECTED,
                 reason_category=reason_category,
                 comment=comment,
-                require_reason=True,
+                require_reason=record.origin is Origin.VLM,
             )
         except ValueError as error:
             raise ReviewError(str(error)) from error
-        record = self._item(finding_id)
-
         if (record.decision, record.reason_category, record.comment) == (
             decision,
             reason_category,

@@ -165,7 +165,9 @@ def bind_candidate_assertion(
 ) -> dict | None:
     """Связывает ответ с исходным предметом, не позволяя модели переписать факты плана."""
     text = f"{candidate.get('comment', '')} {candidate.get('evidence', '')}"
-    prop = candidate_property(text)
+    prop = candidate_property(str(candidate.get("comment", ""))) or candidate_property(
+        text
+    )
     property_roots = {
         "Назначение системы": "назначени",
         "Диаметр": "диаметр|типоразмер",

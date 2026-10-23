@@ -404,3 +404,41 @@ def test_writer_adds_full_page_callout_when_bbox_is_unavailable() -> None:
 
     finally:
         document.close()
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_automatic_card_appearance_is_horizontal_on_rotated_sheet(rotation):
+    """Автоматическая карточка и номер компенсируют поворот физического листа."""
+    with fitz.open() as original:
+        page = original.new_page(width=842, height=595)
+        page.set_rotation(rotation)
+        source = original.tobytes()
+    annotation = PdfFindingAnnotation(
+        1,
+        "auto-rotation",
+        1,
+        "CHECK THIS PIPE",
+        "Полное замечание",
+        (PdfNormalizedBoundingBox(100, 100, 200, 200),),
+    )
+    result = PyMuPdfAnnotationWriter().build(
+        content=source,
+        annotations=(annotation,),
+        report=PdfTextReport("Отчёт", (), "", (), ()),
+    )
+    with fitz.open(stream=result, filetype="pdf") as document:
+        page = document[0]
+        notes = [a for a in page.annots() if a.type[1] == "FreeText"]
+        assert len(notes) == 2
+        for note in notes:
+            assert note.rotation == rotation if rotation else note.rotation in {-1, 0}
+            lines = [
+                line
+                for block in note.get_text("dict")["blocks"]
+                for line in block.get("lines", [])
+            ]
+            assert lines
+            for line in lines:
+                # get_text читает локальный appearance аннотации; поворот листа
+                # компенсируется её Rotate, а не повторным умножением этой линии.
+                assert line["dir"] == pytest.approx((1, 0), abs=0.001)

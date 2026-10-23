@@ -266,6 +266,19 @@ def audit_assertion(
         and len({scope_key(item.fact) for item in facts}) > 1
     ):
         return result("incomplete", "diagnostic", "different_conditions")
+    from pdrd_analysis_service.domain.comparison_semantics import (
+        compatible_diameter_interval,
+        diameter_definition,
+    )
+
+    if assertion.claim_type == "contradiction":
+        definitions = {diameter_definition(item.fact) for item in facts} - {""}
+        if len(definitions) > 1:
+            return result(
+                "counterevidence", "diagnostic", "different_parameter_definitions"
+            )
+        if compatible_diameter_interval(tuple(item.fact for item in facts)):
+            return result("counterevidence", "diagnostic", "compatible_parameter_range")
     from pdrd_analysis_service.domain.physical_identity import comparison_identity
 
     identity = comparison_identity(facts)
@@ -417,6 +430,44 @@ def deterministic_purpose_mismatch(assertion, *, page_texts):
     if values != {("text", "water_supply"), ("text", "water_disposal")}:
         return False
     return audit_assertion(assertion, page_texts=page_texts).disposition == "supported"
+
+
+def deterministic_table_discrepancy(assertion, *, page_texts):
+    """Проверяет расхождение одной колонки потребителя при явно одинаковом режиме.
+
+    Это проверка записей документа, а не выбор правильного расхода и не нормативный
+    вывод. Заголовок, строка, единица, режим и каждая ячейка проверяются повторно.
+    Неполная семантика показателя разрешает лишь воспроизводимый вопрос инженеру.
+    """
+    if assertion is None or assertion.claim_type != "contradiction":
+        return False
+    facts = assertion.observations
+    if len({item.page for item in facts}) < 2 or not all(
+        item.fact.subject_type == "flow_consumer"
+        and item.fact.extraction_method == "pdf_table"
+        and item.fact.column_binding == "pdf_geometry"
+        and item.fact.scope_operating_mode
+        and item.fact.table_id
+        and item.fact.row_label
+        and item.fact.source_row_ids
+        and {region.get("role") for region in item.fact.source_regions}
+        >= {"column_header", "row_header", "cell", "operating_mode"}
+        for item in facts
+    ):
+        return False
+    values = {normalized_value(item.fact) for item in facts}
+    return (
+        None not in values
+        and len(values) > 1
+        and len({value[0] for value in values}) == 1
+        and any(
+            len(group.facts) == len(facts)
+            and all(item in group.facts for item in facts)
+            for group in discover_conflicts(facts)
+        )
+        and audit_assertion(assertion, page_texts=page_texts).disposition
+        in {"supported", "question"}
+    )
 
 
 def diagnostic_language(text: str) -> bool:

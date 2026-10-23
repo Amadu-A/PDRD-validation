@@ -593,11 +593,11 @@ test("красный крест скрывает Gold, сохраняя rejected
   const before = controller.getManualSnapshot()[0];
   const textCard = findings.children.find((node) => node.dataset.manualFindingId);
   control(textCard, "reject").click();
-  submitRejection(root, "wrong_normative_basis", "Применён неверный норматив");
+  assert.equal(root.querySelector(".review-rejection-editor")?.open ?? false, false);
   const rejected = controller.getManualSnapshot()[0];
   assert.equal(rejected.decision, "rejected");
-  assert.equal(rejected.reason_category, "wrong_normative_basis");
-  assert.equal(rejected.comment, "Применён неверный норматив");
+  assert.equal(rejected.reason_category, null);
+  assert.equal(rejected.comment, "");
   assert.equal(rejected.experience_tag, "gold");
   assert.equal(rejected.text, before.text);
   assert.deepEqual(rejected.issue_box, before.issue_box);

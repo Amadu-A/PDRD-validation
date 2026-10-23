@@ -169,6 +169,22 @@ async def test_authorization_checks_cookie_role_and_origin() -> None:
 
 
 @pytest.mark.asyncio
+async def test_atomic_readiness_requires_admin_even_for_direct_request() -> None:
+    """Скрытая диагностика не выдаётся гостю или проектировщику через прямой URL."""
+    path = "/api/v1/normative/sections/id/atomic-readiness"
+    assert required_permission("GET", path) == ("admin.access",)
+    for permissions, cookie, expected in (
+        ([], "", 401),
+        (["normative.read"], "pdrd_session=opaque", 403),
+        (["admin.access"], "pdrd_session=opaque", None),
+    ):
+        result = await enforce_identity_authorization(
+            request("GET", path, cookie=cookie), authorizer(permissions)
+        )
+        assert (result.status_code if result is not None else None) == expected
+
+
+@pytest.mark.asyncio
 async def test_review_action_is_read_from_json_before_role_check() -> None:
     """Проектировщик может добавить Gold, но не утвердить тот же Review."""
     subject = authorizer(["review.gold.create"])

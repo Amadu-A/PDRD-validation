@@ -184,10 +184,8 @@ export function createReviewController({
 
     onRemove(note) {
       if (persistent) {
-        // Undo добавления остаётся аудируемым отклонением сохранённой Gold-записи.
-        const entry = state.decide(note.findingId, REVIEW_DECISIONS.REJECTED, {
-          reasonCategory: "other", comment: "Пользователь отменил создание ручного замечания.",
-        });
+        // Отмена остаётся в истории Review, но не является отрицательным опытом VLM.
+        const entry = state.decide(note.findingId, REVIEW_DECISIONS.REJECTED);
         refresh(note.findingId);
         return entry;
       }
@@ -328,7 +326,8 @@ export function createReviewController({
     if (changed.revision === previous.revision) return;
     refresh(findingId);
     manual.recordAction(pageNumber, "решение по замечанию", () => {
-      if (previous.decision === REVIEW_DECISIONS.REJECTED && !previous.reasonCategory) {
+      if (previous.origin !== REVIEW_ORIGINS.MANUAL
+        && previous.decision === REVIEW_DECISIONS.REJECTED && !previous.reasonCategory) {
         activeRejection = { findingId, pageNumber };
         rejectionEditor.open(previous);
         return;
@@ -349,6 +348,10 @@ export function createReviewController({
 
       onReject() {
         if (locked || !canDecide) return;
+        if (state.get(findingId).origin === REVIEW_ORIGINS.MANUAL) {
+          decide(findingId, REVIEW_DECISIONS.REJECTED, pageNumber);
+          return;
+        }
         activeRejection = { findingId, pageNumber };
         rejectionEditor.open(state.get(findingId));
       },

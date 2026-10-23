@@ -34,7 +34,7 @@ from pdrd_experience_service.infrastructure.database.codec import (
 )
 
 from .test_catalog import example
-from .test_review_domain import NOW, opened
+from .test_review_domain import NOW, decide, manual, opened
 
 
 def reject(session, reason="false_positive", comment="", expected=None):
@@ -139,6 +139,36 @@ def test_accepted_command_cannot_carry_rejection_feedback():
             at=NOW,
             expected_revision=0,
         )
+
+
+@pytest.mark.parametrize("for_catalog", [False, True])
+def test_rejected_gold_requires_no_reason_and_is_not_experience(for_catalog):
+    """Отмена Gold сохраняет аудит Review, но не создаёт отрицательный опыт."""
+    session = manual(opened())
+    manual_id = session.findings[-1].finding_id
+    session = session.decide(
+        finding_id=manual_id,
+        decision=Decision.REJECTED,
+        reason_category="false_positive",
+        comment="Старый клиент ещё отправляет причину",
+        actor="engineer:1",
+        at=NOW,
+        expected_revision=session.revision,
+    )
+    assert session.findings[-1].reason_category is None
+    assert session.findings[-1].comment == ""
+    assert session.history[-1].after.decision is Decision.REJECTED
+    for finding_id in ("vlm:1", "vlm:2"):
+        session = decide(session, finding_id, Decision.ACCEPTED)
+    session = session.approve(
+        actor="engineer:1", at=NOW, expected_revision=session.revision
+    )
+    assert all(
+        candidate.finding_id != manual_id
+        for candidate in select_experience_candidates(
+            session=session, confirmed_areas=(), for_catalog=for_catalog
+        )
+    )
 
 
 def test_legacy_review_and_catalog_keep_absent_reason():

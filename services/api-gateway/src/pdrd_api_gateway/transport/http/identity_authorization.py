@@ -43,6 +43,8 @@ def required_permission(
         return ("equipment_sources.manage",)
 
     if segments[2] == "normative":
+        if segments[-1] == "atomic-readiness":
+            return ("admin.access",)
         if "technical-assignments" in segments:
             return None
         if "user-packages" in segments:

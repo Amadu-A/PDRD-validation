@@ -46,6 +46,43 @@ _SCHEMA_NAME_PATTERN = re.compile(
 )
 
 
+def completed_specification_fields(content: str) -> dict:
+    """Читает лишь целиком завершённые поля верхнего объекта без ремонта JSON.
+
+    Незавершённая строка, массив или объект не дополняется. Результат остаётся
+    неполным чтением; строки далее проходят обычную предметную валидацию.
+    """
+    decoder, result, seen = json.JSONDecoder(), {}, set()
+    text = content.lstrip()
+    if not text.startswith("{"):
+        return {}
+    offset = 1
+    while offset < len(text):
+        offset += len(text[offset:]) - len(text[offset:].lstrip())
+        try:
+            key, end = decoder.raw_decode(text, offset)
+            if not isinstance(key, str) or key in seen:
+                return {}
+            seen.add(key)
+            offset = end + len(text[end:]) - len(text[end:].lstrip())
+            if offset >= len(text) or text[offset] != ":":
+                break
+            offset += 1
+            offset += len(text[offset:]) - len(text[offset:].lstrip())
+            value, end = decoder.raw_decode(text, offset)
+        except json.JSONDecodeError:
+            break
+        if key in {"specification_rows", "specification_notes"} and isinstance(
+            value, list
+        ):
+            result[key] = value
+        offset = end + len(text[end:]) - len(text[end:].lstrip())
+        if offset >= len(text) or text[offset] != ",":
+            break
+        offset += 1
+    return result
+
+
 class VllmStructuredVisionModel:
     """Structured VLM client для shared resident vLLM."""
 
@@ -426,6 +463,12 @@ class VllmStructuredVisionModel:
                                 "budget запрещён."
                             ),
                             metrics=self._combined_metrics(attempt_metrics),
+                            completed_fields=completed_specification_fields(
+                                last_content
+                            )
+                            if stage.startswith("page_understanding:")
+                            and "specification_rows" in schema.get("properties", {})
+                            else None,
                         ) from error
 
                     logger.warning(

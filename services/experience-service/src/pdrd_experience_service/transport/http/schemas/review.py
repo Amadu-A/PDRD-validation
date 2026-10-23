@@ -55,8 +55,12 @@ class DecideCommand(FindingCommand):
 
     @model_validator(mode="after")
     def require_rejection_feedback(self) -> "DecideCommand":
-        """Новые отказы требуют причины; принятие не допускает разметку отказа."""
-        if self.decision == "rejected" and self.reason_category is None:
+        """Отказ VLM требует причины; источник Gold повторно проверяет домен."""
+        if (
+            self.decision == "rejected"
+            and self.reason_category is None
+            and not self.finding_id.startswith("manual:")
+        ):
             raise ValueError("Выберите причину отклонения замечания.")
         if self.decision == "accepted" and (
             self.reason_category is not None or self.comment.strip()
