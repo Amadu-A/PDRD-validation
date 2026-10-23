@@ -14,7 +14,14 @@ from pdrd_analysis_service.application.engineering_program import (
     audit_engineering_candidates,
     program_findings,
 )
+from pdrd_analysis_service.application.ports.normative_protocol import (
+    NormativeProtocolUnavailable,
+)
 from pdrd_analysis_service.application.ports.vision_model import VisionModelError
+from pdrd_analysis_service.application.stage_transport import (
+    STAGE_RESPONSE_BYTES,
+    archive_stage_items,
+)
 from pdrd_analysis_service.application.use_cases.document_context import (
     CrossPageCancelled,
     DocumentContextOptions,
@@ -30,6 +37,10 @@ from pdrd_analysis_service.application.vision_execution import (
 )
 from pdrd_analysis_service.core.container import ApplicationContainer
 from pdrd_analysis_service.transport.http.dependencies import get_container
+from pdrd_analysis_service.transport.http.normative_corpus_schemas import (
+    NormativeCorpusScope,
+)
+from pdrd_analysis_service.transport.http.response_budget import response_bytes
 from pdrd_analysis_service.transport.http.routes import _finding_draft_payload
 from pdrd_analysis_service.transport.http.schemas import (
     CheckNormsResponse,
@@ -107,6 +118,7 @@ class CheckConsistencyRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     document_id: UUID
+    normative_corpus: NormativeCorpusScope | None = None
     page_checks: list[PageCheckPayload] = Field(default_factory=list, max_length=200)
     enabled: bool = True
     pages: list[DocumentPagePayload] = Field(min_length=1, max_length=200)
@@ -118,6 +130,7 @@ class CheckConsistencyResponse(BaseModel):
     findings: list[FindingDraftPayload]
     items: list[PageCheckPayload] = Field(default_factory=list)
     cancelled: bool = False
+    results_reference: dict | None = None
     diagnostics: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -182,8 +195,12 @@ async def check_cross_page_consistency(
         report = document_engineering_report(
             pages, str(request.document_id), enabled=False
         )
-        return _checked_response(
-            request, report, program_findings(report), expose_findings=False
+        return await _bounded_consistency_response(
+            request,
+            container,
+            _checked_response(
+                request, report, program_findings(report), expose_findings=False
+            ),
         )
     probe = container.analysis_progress_probe
 
@@ -228,7 +245,50 @@ async def check_cross_page_consistency(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(error),
         ) from error
-    return _checked_response(request, report, findings, diagnostics=diagnostics)
+    return await _bounded_consistency_response(
+        request,
+        container,
+        _checked_response(request, report, findings, diagnostics=diagnostics),
+    )
+
+
+async def _bounded_consistency_response(request, container, response):
+    """Не переносит переполнение из Check Norms в следующий HTTP-узел документа."""
+    if await response_bytes(response) <= STAGE_RESPONSE_BYTES:
+        return response
+
+    async def check_cancellation():
+        """Проверяет сохранённую отмену перед публикацией каждой части результата."""
+        probe = container.analysis_progress_probe
+        if probe is not None and await probe.is_cancelled(
+            document_id=request.document_id,
+            stage="checking_cross_page_consistency",
+            current=1,
+            total=1,
+        ):
+            raise AnalysisCancelledError(
+                "Межстраничная проверка отменена перед публикацией."
+            )
+
+    try:
+        ref = await archive_stage_items(
+            items=[item.model_dump(mode="json") for item in response.items],
+            document_id=request.document_id,
+            scope=request.normative_corpus,
+            writer=container.normative_protocol_writer,
+            check_cancellation=check_cancellation,
+            metadata={
+                "findings": [
+                    finding.model_dump(mode="json") for finding in response.findings
+                ],
+                "diagnostics": response.diagnostics,
+            },
+        )
+    except AnalysisCancelledError:
+        return CheckConsistencyResponse(findings=[], items=[], cancelled=True)
+    except NormativeProtocolUnavailable as error:
+        raise HTTPException(503, str(error)) from error
+    return CheckConsistencyResponse(findings=[], items=[], results_reference=ref)
 
 
 def _checked_response(

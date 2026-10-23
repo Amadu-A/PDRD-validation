@@ -765,7 +765,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ document_id: $json.document_id, items: $json.items.map((item) => ({ page_number: item.page_number, request: { findings: item.request.findings, experience_by_finding: item.request.experience_by_finding, normative_candidates: item.request.normative_candidates, normative_candidates_by_finding: item.request.normative_candidates_by_finding } })) }) }}",
+        "body": "={{ JSON.stringify({ document_id: $json.document_id, normative_corpus: (() => { const b = $('POST /analysis/v2/pdf').first().json.body; return {section_id: b.normative_section_id, document_ids: typeof b.normative_document_ids === 'string' ? JSON.parse(b.normative_document_ids) : b.normative_document_ids, generation_ids: typeof b.normative_generation_ids === 'string' ? JSON.parse(b.normative_generation_ids || '{}') : (b.normative_generation_ids || {})}; })(), items: $json.items.map((item) => ({ page_number: item.page_number, request: { findings: item.request.findings, experience_by_finding: item.request.experience_by_finding, normative_candidates: item.request.normative_candidates, normative_candidates_by_finding: item.request.normative_candidates_by_finding } })) }) }}",
         "options": {
           "timeout": 3300000
         }
@@ -1780,7 +1780,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({\n  enabled: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context),\n  document_id: $('POST /analysis/v2/pdf').first().json.body.document_id,\n  page_checks: $('Check Norms').first().json.items ?? [],\n  pages: $('Understand Page').all().map((item) => ({\n    page_number: item.json.page_number,\n    extracted_text: item.json.expanded.page.text,\n    page_facts: item.json.facts,\n    text_words: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.json.page_number))?.text_words ?? [],\n    graphic_lines: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.json.page_number))?.graphic_lines ?? [],\n  })),\n}) }}",
+        "body": "={{ JSON.stringify({\n  normative_corpus: (() => { const b = $('POST /analysis/v2/pdf').first().json.body; return {section_id: b.normative_section_id, document_ids: typeof b.normative_document_ids === 'string' ? JSON.parse(b.normative_document_ids) : b.normative_document_ids, generation_ids: typeof b.normative_generation_ids === 'string' ? JSON.parse(b.normative_generation_ids || '{}') : (b.normative_generation_ids || {})}; })(),\n  enabled: ['true', true].includes($('POST /analysis/v2/pdf').first().json.body?.use_document_context),\n  document_id: $('POST /analysis/v2/pdf').first().json.body.document_id,\n  page_checks: $('Resolve Norm Check Response').first().json.items ?? [],\n  pages: $('Understand Page').all().map((item) => ({\n    page_number: item.json.page_number,\n    extracted_text: item.json.expanded.page.text,\n    page_facts: item.json.facts,\n    text_words: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.json.page_number))?.text_words ?? [],\n    graphic_lines: ($('Document Extract PDF').first().json.pages ?? []).find((page) => Number(page.page_number) === Number(item.json.page_number))?.graphic_lines ?? [],\n  })),\n}) }}",
         "options": {
           "timeout": 3300000
         }
@@ -1798,7 +1798,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const entries = Array.isArray($json.items) ? $json.items : [];\nconst expected = $('Check Norms').first().json.items ?? [];\nif (entries.length !== expected.length) {\n  throw new Error('Межстраничное объединение потеряло страницы.');\n}\nconst seen = new Set();\nentries.forEach((entry, index) => {\n  if (Number(entry.page_number) !== Number(expected[index].page_number)) {\n    throw new Error('Межстраничное объединение нарушило порядок страниц.');\n  }\n  for (const finding of entry.result?.findings ?? []) {\n    if (!finding.finding_id || seen.has(finding.finding_id)) {\n      throw new Error('Межстраничное объединение потеряло уникальность замечания.');\n    }\n    seen.add(finding.finding_id);\n  }\n});\nreturn [{ json: { items: entries } }];"
+        "jsCode": "const entries = Array.isArray($json.items) ? $json.items : [];\nconst expected = $('Resolve Norm Check Response').first().json.items ?? [];\nif (entries.length !== expected.length) {\n  throw new Error('Межстраничное объединение потеряло страницы.');\n}\nconst seen = new Set();\nentries.forEach((entry, index) => {\n  if (Number(entry.page_number) !== Number(expected[index].page_number)) {\n    throw new Error('Межстраничное объединение нарушило порядок страниц.');\n  }\n  for (const finding of entry.result?.findings ?? []) {\n    if (!finding.finding_id || seen.has(finding.finding_id)) {\n      throw new Error('Межстраничное объединение потеряло уникальность замечания.');\n    }\n    seen.add(finding.finding_id);\n  }\n});\nreturn [{ json: { items: entries } }];"
       },
       "id": "000506dc-378c-4767-a17e-f0d098b3b4af",
       "name": "Merge Cross-Page Checks",
@@ -2641,6 +2641,267 @@
         2420,
         890
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a419d32c-e454-4866-b314-a3b76df29a14",
+              "leftValue": "={{ String(Boolean($json.results_reference)) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "61653417-6572-49e7-9b12-d798131684a7",
+      "name": "Stored Norm Check Results",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        7000,
+        2200
+      ]
+    },
+    {
+      "id": "e0b94f13-d1fe-4f02-9275-33dba84e8420",
+      "name": "Read Stored Norm Check Results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7250,
+        2200
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-artifacts/' + encodeURIComponent($json.results_reference.document_id) + '/normative-protocols/' + $json.results_reference.protocol_id + '/stage-stream' }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "offset",
+                    "value": "={{ $pageCount === 0 ? 0 : $response.body.next_offset }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.next_offset === null }}",
+              "limitPagesFetched": false,
+              "requestInterval": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "2a3cda14-30e8-4461-8a92-49c19c8e71d8",
+      "name": "Resolve Norm Check Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7500,
+        2200
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Восстановление только результатов страниц. Полный нормативный протокол остаётся в Gateway.\nconst source = $('Check Norms').first().json;\nconst ref = source.results_reference;\nif (!ref) return [{json: source}];\nconst documentId = String($('POST /analysis/v2/pdf').first().json.body.document_id);\nif (ref.document_id !== documentId || ref.encoding !== 'stage-records-v1'\n    || !/^[0-9a-f]{64}$/.test(ref.protocol_id) || source.items?.length) {\n  throw new Error('Некорректная ссылка результатов стадии.');\n}\nconst batches = $input.all().flatMap((item) => Array.isArray(item.json) ? item.json : [item.json]);\nconst pages = new Map();\nlet metadata = {};\nlet offset = 0, pending = Buffer.alloc(0), records = 0;\nfor (let index = 0; index < batches.length; index++) {\n  const batch = batches[index];\n  const bytes = Buffer.from(batch.base64, 'base64');\n  const end = offset + bytes.length;\n  if (batch.protocol_id !== ref.protocol_id || batch.offset !== offset || !bytes.length\n      || batch.total_bytes !== ref.stage_stream.bytes\n      || (batch.next_offset !== null && batch.next_offset !== end)\n      || (batch.next_offset === null && end !== batch.total_bytes)\n      || (index === batches.length - 1) !== (batch.next_offset === null)) {\n    throw new Error('Нарушена полнота потока результатов стадии.');\n  }\n  pending = Buffer.concat([pending, bytes]);\n  let newline;\n  while ((newline = pending.indexOf(10)) !== -1) {\n    const row = JSON.parse(pending.subarray(0, newline).toString('utf8'));\n    pending = pending.subarray(newline + 1);\n    records++;\n    if (row.type === 'metadata') {\n      metadata = row.value;\n    } else if (row.type === 'page') {\n      if (pages.has(row.page_number)) throw new Error('Повтор физической страницы.');\n      pages.set(row.page_number, {page_number: row.page_number, result: row.result});\n    } else if (row.type === 'finding' && pages.has(row.page_number)) {\n      pages.get(row.page_number).result.findings.push(row.finding);\n    } else throw new Error('Неизвестная запись результатов стадии.');\n  }\n  offset = end;\n}\nif (pending.length || records !== ref.counts.stage_records || pages.size !== ref.pages) {\n  throw new Error('Потеря страниц или findings в потоке стадии.');\n}\nreturn [{json: {...metadata, items: [...pages.values()], cancelled: false}}];\n"
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "38c2a1ce-999f-4171-b332-218e32fd0b60",
+              "leftValue": "={{ String(Boolean($json.results_reference)) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f659f1b3-cc64-4c7a-a859-7f881316116f",
+      "name": "Stored Finalization Results",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        7000,
+        2500
+      ]
+    },
+    {
+      "id": "00d48020-c87a-4260-a2c0-0650ac02d944",
+      "name": "Read Stored Finalization Results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7250,
+        2500
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-artifacts/' + encodeURIComponent($json.results_reference.document_id) + '/normative-protocols/' + $json.results_reference.protocol_id + '/stage-stream' }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "offset",
+                    "value": "={{ $pageCount === 0 ? 0 : $response.body.next_offset }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.next_offset === null }}",
+              "limitPagesFetched": false,
+              "requestInterval": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "ed8c0b99-2feb-48ac-9b14-95e0f119eaec",
+      "name": "Resolve Finalization Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7500,
+        2500
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Восстановление только результатов страниц. Полный нормативный протокол остаётся в Gateway.\nconst source = $('Finalize Findings').first().json;\nconst ref = source.results_reference;\nif (!ref) return [{json: source}];\nconst documentId = String($('POST /analysis/v2/pdf').first().json.body.document_id);\nif (ref.document_id !== documentId || ref.encoding !== 'stage-records-v1'\n    || !/^[0-9a-f]{64}$/.test(ref.protocol_id) || source.items?.length) {\n  throw new Error('Некорректная ссылка результатов стадии.');\n}\nconst batches = $input.all().flatMap((item) => Array.isArray(item.json) ? item.json : [item.json]);\nconst pages = new Map();\nlet metadata = {};\nlet offset = 0, pending = Buffer.alloc(0), records = 0;\nfor (let index = 0; index < batches.length; index++) {\n  const batch = batches[index];\n  const bytes = Buffer.from(batch.base64, 'base64');\n  const end = offset + bytes.length;\n  if (batch.protocol_id !== ref.protocol_id || batch.offset !== offset || !bytes.length\n      || batch.total_bytes !== ref.stage_stream.bytes\n      || (batch.next_offset !== null && batch.next_offset !== end)\n      || (batch.next_offset === null && end !== batch.total_bytes)\n      || (index === batches.length - 1) !== (batch.next_offset === null)) {\n    throw new Error('Нарушена полнота потока результатов стадии.');\n  }\n  pending = Buffer.concat([pending, bytes]);\n  let newline;\n  while ((newline = pending.indexOf(10)) !== -1) {\n    const row = JSON.parse(pending.subarray(0, newline).toString('utf8'));\n    pending = pending.subarray(newline + 1);\n    records++;\n    if (row.type === 'metadata') {\n      metadata = row.value;\n    } else if (row.type === 'page') {\n      if (pages.has(row.page_number)) throw new Error('Повтор физической страницы.');\n      pages.set(row.page_number, {page_number: row.page_number, result: row.result});\n    } else if (row.type === 'finding' && pages.has(row.page_number)) {\n      pages.get(row.page_number).result.findings.push(row.finding);\n    } else throw new Error('Неизвестная запись результатов стадии.');\n  }\n  offset = end;\n}\nif (pending.length || records !== ref.counts.stage_records || pages.size !== ref.pages) {\n  throw new Error('Потеря страниц или findings в потоке стадии.');\n}\nreturn [{json: {...metadata, items: [...pages.values()], cancelled: false}}];\n"
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a419d32c-e454-4866-b314-a3b76df29a14",
+              "leftValue": "={{ String(Boolean($json.results_reference)) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "243f7b3e-4a46-4075-a502-b1b9531be5be",
+      "name": "Stored Cross-Page Results",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        7000,
+        2800
+      ]
+    },
+    {
+      "id": "b32f5a17-4a9b-4e2b-a702-f5ef0eadb65d",
+      "name": "Read Stored Cross-Page Results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7250,
+        2800
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'http://api-gateway:8000/internal/v1/analysis-artifacts/' + encodeURIComponent($json.results_reference.document_id) + '/normative-protocols/' + $json.results_reference.protocol_id + '/stage-stream' }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "offset",
+                    "value": "={{ $pageCount === 0 ? 0 : $response.body.next_offset }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.next_offset === null }}",
+              "limitPagesFetched": false,
+              "requestInterval": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "765d7fd3-190b-4192-aafa-a63fe1680ad6",
+      "name": "Resolve Cross-Page Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7500,
+        2800
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Восстановление только результатов страниц. Полный нормативный протокол остаётся в Gateway.\nconst source = $('Check Cross-Page Consistency').first().json;\nconst ref = source.results_reference;\nif (!ref) return [{json: source}];\nconst documentId = String($('POST /analysis/v2/pdf').first().json.body.document_id);\nif (ref.document_id !== documentId || ref.encoding !== 'stage-records-v1'\n    || !/^[0-9a-f]{64}$/.test(ref.protocol_id) || source.items?.length) {\n  throw new Error('Некорректная ссылка результатов стадии.');\n}\nconst batches = $input.all().flatMap((item) => Array.isArray(item.json) ? item.json : [item.json]);\nconst pages = new Map();\nlet metadata = {};\nlet offset = 0, pending = Buffer.alloc(0), records = 0;\nfor (let index = 0; index < batches.length; index++) {\n  const batch = batches[index];\n  const bytes = Buffer.from(batch.base64, 'base64');\n  const end = offset + bytes.length;\n  if (batch.protocol_id !== ref.protocol_id || batch.offset !== offset || !bytes.length\n      || batch.total_bytes !== ref.stage_stream.bytes\n      || (batch.next_offset !== null && batch.next_offset !== end)\n      || (batch.next_offset === null && end !== batch.total_bytes)\n      || (index === batches.length - 1) !== (batch.next_offset === null)) {\n    throw new Error('Нарушена полнота потока результатов стадии.');\n  }\n  pending = Buffer.concat([pending, bytes]);\n  let newline;\n  while ((newline = pending.indexOf(10)) !== -1) {\n    const row = JSON.parse(pending.subarray(0, newline).toString('utf8'));\n    pending = pending.subarray(newline + 1);\n    records++;\n    if (row.type === 'metadata') {\n      metadata = row.value;\n    } else if (row.type === 'page') {\n      if (pages.has(row.page_number)) throw new Error('Повтор физической страницы.');\n      pages.set(row.page_number, {page_number: row.page_number, result: row.result});\n    } else if (row.type === 'finding' && pages.has(row.page_number)) {\n      pages.get(row.page_number).result.findings.push(row.finding);\n    } else throw new Error('Неизвестная запись результатов стадии.');\n  }\n  offset = end;\n}\nif (pending.length || records !== ref.counts.stage_records || pages.size !== ref.pages) {\n  throw new Error('Потеря страниц или findings в потоке стадии.');\n}\nreturn [{json: {...metadata, items: [...pages.values()], cancelled: false}}];\n"
+      }
     }
   ],
   "pinData": {},
@@ -3858,7 +4119,7 @@
       "main": [
         [
           {
-            "node": "Use Cross-Page Consistency",
+            "node": "Stored Norm Check Results",
             "type": "main",
             "index": 0
           }
@@ -3876,12 +4137,7 @@
       "main": [
         [
           {
-            "node": "Progress Build Result",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Gate Build Result",
+            "node": "Stored Finalization Results",
             "type": "main",
             "index": 0
           }
@@ -3899,7 +4155,7 @@
       "main": [
         [
           {
-            "node": "Merge Cross-Page Checks",
+            "node": "Stored Cross-Page Results",
             "type": "main",
             "index": 0
           }
@@ -4074,6 +4330,131 @@
         [
           {
             "node": "Build Cancelled Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stored Norm Check Results": {
+      "main": [
+        [
+          {
+            "node": "Read Stored Norm Check Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resolve Norm Check Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Stored Norm Check Results": {
+      "main": [
+        [
+          {
+            "node": "Resolve Norm Check Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Norm Check Response": {
+      "main": [
+        [
+          {
+            "node": "Use Cross-Page Consistency",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stored Finalization Results": {
+      "main": [
+        [
+          {
+            "node": "Read Stored Finalization Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resolve Finalization Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Stored Finalization Results": {
+      "main": [
+        [
+          {
+            "node": "Resolve Finalization Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Finalization Response": {
+      "main": [
+        [
+          {
+            "node": "Progress Build Result",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gate Build Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stored Cross-Page Results": {
+      "main": [
+        [
+          {
+            "node": "Read Stored Cross-Page Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resolve Cross-Page Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Stored Cross-Page Results": {
+      "main": [
+        [
+          {
+            "node": "Resolve Cross-Page Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Cross-Page Response": {
+      "main": [
+        [
+          {
+            "node": "Merge Cross-Page Checks",
             "type": "main",
             "index": 0
           }

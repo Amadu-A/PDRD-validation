@@ -99,3 +99,21 @@ def test_compact_diagnostics_uses_existing_analysis_owner_acl():
         job_id,
         False,
     )
+
+
+def test_unavailable_persistent_protocol_does_not_become_zero_checks():
+    """Компактная ссылка без восстановления явно отличается от настоящего пустого плана."""
+    result = {
+        "metrics": {
+            "independent_normative": {
+                "requirement_plan": {
+                    "check_count": 10412,
+                    "protocol": {"protocol_id": "test"},
+                }
+            }
+        }
+    }
+    diagnostic = normative_diagnostics(result, job_id="job")
+    assert diagnostic["requirements"] is None
+    assert diagnostic["normative_candidates"] is None
+    assert diagnostic["requirement_plan_state"] == "protocol_unavailable"

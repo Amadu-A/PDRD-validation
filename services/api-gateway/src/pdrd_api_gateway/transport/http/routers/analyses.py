@@ -29,6 +29,10 @@ from pdrd_api_gateway.application.ports.normative_catalog import (
 from pdrd_api_gateway.application.ports.normative_catalog_management import (
     NormativeCatalogUnavailableError,
 )
+from pdrd_api_gateway.application.ports.normative_protocol import (
+    NormativeProtocolError,
+    NormativeProtocolNotFound,
+)
 from pdrd_api_gateway.application.ports.pdf_selection import (
     InvalidPdfSelectionError,
     PdfSelectionUnavailableError,
@@ -682,6 +686,14 @@ async def get_normative_diagnostics(
 ) -> dict:
     """Возвращает короткую сводку сохранённого результата с теми же правами владельца задания."""
     result = await get_analysis_result(job_id, container)
+    if container.normative_protocol is not None:
+        try:
+            result = await container.normative_protocol.hydrate_metrics(job_id, result)
+        except (NormativeProtocolError, NormativeProtocolNotFound) as error:
+            raise HTTPException(
+                503,
+                "Полный нормативный протокол недоступен; счётчики не подменены нулём.",
+            ) from error
     return normative_diagnostics(result, job_id=str(job_id))
 
 

@@ -12,6 +12,9 @@ from pdrd_analysis_service.application.limited_vision import LimitedVisionModel
 from pdrd_analysis_service.application.ports.analysis_progress import (
     AnalysisProgressProbe,
 )
+from pdrd_analysis_service.application.ports.normative_protocol import (
+    NormativeProtocolWriter,
+)
 from pdrd_analysis_service.application.use_cases import (
     AugmentProjectContext,
     BuildNormativeQueries,
@@ -38,6 +41,9 @@ from pdrd_analysis_service.infrastructure.analysis_progress import (
     HttpAnalysisProgressProbe,
 )
 from pdrd_analysis_service.infrastructure.image_cropper import PilImageCropper
+from pdrd_analysis_service.infrastructure.normative_protocol import (
+    HttpNormativeProtocolWriter,
+)
 from pdrd_analysis_service.infrastructure.normative_requirements import (
     HttpNormativeRequirementsReader,
 )
@@ -78,6 +84,7 @@ class ApplicationContainer:
     analysis_progress_probe: AnalysisProgressProbe | None = None
     extract_equipment_vision: ExtractEquipmentVision | None = None
     independent_normative_review: IndependentNormativeReview | None = None
+    normative_protocol_writer: NormativeProtocolWriter | None = None
 
 
 def build_container() -> ApplicationContainer:
@@ -115,6 +122,9 @@ def build_container() -> ApplicationContainer:
 
     return ApplicationContainer(
         settings=settings,
+        normative_protocol_writer=HttpNormativeProtocolWriter(
+            settings.progress.base_url
+        ),
         independent_normative_review=(
             IndependentNormativeReview(
                 HttpNormativeRequirementsReader(

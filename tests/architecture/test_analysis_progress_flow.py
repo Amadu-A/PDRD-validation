@@ -453,6 +453,8 @@ def test_workflows_publish_progress_through_cancellation_gate() -> None:
                 source_name = f"Continue {source_name} Response"
             elif f"Continue {source_name} Retrieval Response" in nodes:
                 source_name = f"Continue {source_name} Retrieval Response"
+            if source_name == "Continue Finalize Findings Response":
+                source_name = "Resolve Finalization Response"
             progress_node = nodes[progress_name]
             continue_node = nodes[continue_name]
             gate_node = nodes[gate_name]

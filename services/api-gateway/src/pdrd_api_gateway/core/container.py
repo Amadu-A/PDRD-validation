@@ -13,6 +13,7 @@ from pathlib import Path
 from pdrd_api_gateway.application.finding_anchor_matcher import (
     FindingAnchorMatcher,
 )
+from pdrd_api_gateway.application.normative_protocol import ManageNormativeProtocol
 from pdrd_api_gateway.application.ports.artifacts import (
     AnalysisArtifactStore,
 )
@@ -129,6 +130,9 @@ from pdrd_api_gateway.infrastructure.reviewed_pdf_source import HttpReviewedPdfS
 from pdrd_api_gateway.infrastructure.storage.filesystem import (
     LocalFilesystemAnalysisArtifactStore,
 )
+from pdrd_api_gateway.infrastructure.storage.normative_protocol import (
+    LocalNormativeProtocolStore,
+)
 from pdrd_api_gateway.infrastructure.storage.reviewed_pdf_cache import (
     LocalReviewedPdfCache,
 )
@@ -179,6 +183,7 @@ class ApplicationContainer:
     submit_analysis: SubmitAnalysis | None = None
 
     artifact_store: AnalysisArtifactStore | None = None
+    normative_protocol: ManageNormativeProtocol | None = None
 
     normative_catalog: NormativeCatalogFacade | None = None
 
@@ -453,6 +458,9 @@ def build_container() -> ApplicationContainer:
         submit_analysis=(submit_analysis),
         artifact_store=(artifact_store),
         normative_catalog=(normative_catalog),
+        normative_protocol=ManageNormativeProtocol(
+            unit_of_work_factory, LocalNormativeProtocolStore(artifact_root)
+        ),
         user_package_catalog=(user_package_catalog),
         technical_assignment_content_reader=(technical_assignment_content_reader),
         technical_assignment_index_coordinator=(technical_assignment_index_coordinator),

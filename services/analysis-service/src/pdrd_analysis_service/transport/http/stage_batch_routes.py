@@ -21,7 +21,18 @@ from fastapi import (
 )
 from pydantic import BaseModel
 
+from pdrd_analysis_service.application.normative_protocol import (
+    compact_page_metrics,
+    publish_independent,
+)
+from pdrd_analysis_service.application.ports.normative_protocol import (
+    NormativeProtocolUnavailable,
+)
 from pdrd_analysis_service.application.ports.vision_model import VisionModelError
+from pdrd_analysis_service.application.stage_transport import (
+    STAGE_RESPONSE_BYTES,
+    archive_stage_items,
+)
 from pdrd_analysis_service.application.use_cases.document_context import DocumentPage
 from pdrd_analysis_service.application.vision_execution import (
     AnalysisCancelledError,
@@ -33,6 +44,7 @@ from pdrd_analysis_service.core.container import (
 from pdrd_analysis_service.transport.http.dependencies import (
     get_container,
 )
+from pdrd_analysis_service.transport.http.response_budget import response_bytes
 from pdrd_analysis_service.transport.http.routes import (
     _finding_draft_payload,
     check_norms_controlled,
@@ -571,6 +583,7 @@ async def check_norms_stage(
     )
 
     independent = None
+    catalog_current = 0
     review = getattr(container, "independent_normative_review", None)
     if review is not None and request.normative_corpus is not None:
 
@@ -580,7 +593,7 @@ async def check_norms_stage(
                 container=container,
                 document_id=request.document_id,
                 stage=_CHECKING_STAGE,
-                current=0,
+                current=catalog_current,
                 total=len(request.items),
             ):
                 raise AnalysisCancelledError(
@@ -653,15 +666,33 @@ async def check_norms_stage(
         return CheckNormsStageResponse(items=[], cancelled=True)
 
     if independent is not None:
+        catalog_current = len(request.items)
         by_page = {
             item.page_number: response
             for item, response in zip(request.items, responses, strict=True)
         }
         for finding in independent.findings:
             by_page[finding.page].findings.append(_finding_draft_payload(finding))
-        responses[0].metrics["independent_normative"] = {
-            "requirement_plan": independent.diagnostics
-        }
+        try:
+            projected = await publish_independent(
+                writer=container.normative_protocol_writer,
+                result=independent,
+                document_id=request.document_id,
+                scope=request.normative_corpus,
+                page_metrics=tuple(
+                    {"page_number": item.page_number, "metrics": response.metrics}
+                    for item, response in zip(request.items, responses, strict=True)
+                ),
+                check_cancellation=check_catalog_cancellation,
+            )
+        except AnalysisCancelledError:
+            return CheckNormsStageResponse(items=[], cancelled=True)
+        except NormativeProtocolUnavailable as error:
+            raise HTTPException(503, str(error)) from error
+        reference = projected["requirement_plan"]["protocol"]
+        for response in responses:
+            compact_page_metrics(response.metrics, reference)
+        responses[0].metrics["independent_normative"] = projected
     else:
         responses[0].metrics["independent_normative"] = {
             "mode": "corpus_scope_missing"
@@ -700,9 +731,44 @@ async def check_norms_stage(
         container.settings.pipeline.vlm_stage_concurrency,
     )
 
-    return CheckNormsStageResponse(
-        items=result,
+    response = CheckNormsStageResponse(items=result)
+    payload_bytes = await response_bytes(response)
+    logger.info(
+        "check_norms_transport document_id=%s pages=%s bytes_or_lower_bound=%s protocol_id=%s",
+        request.document_id,
+        len(result),
+        payload_bytes,
+        reference["protocol_id"] if independent else "none",
     )
+    if payload_bytes > STAGE_RESPONSE_BYTES:
+
+        async def check_result_cancellation():
+            """Отмена проверяется и при выгрузке обязательных findings."""
+            if await _is_stage_cancelled(
+                container=container,
+                document_id=request.document_id,
+                stage=_CHECKING_STAGE,
+                current=len(result),
+                total=len(result),
+            ):
+                raise AnalysisCancelledError(
+                    "Анализ отменён перед публикацией результатов."
+                )
+
+        try:
+            ref = await archive_stage_items(
+                items=[item.model_dump(mode="json") for item in result],
+                document_id=request.document_id,
+                scope=request.normative_corpus,
+                writer=container.normative_protocol_writer,
+                check_cancellation=check_result_cancellation,
+            )
+        except AnalysisCancelledError:
+            return CheckNormsStageResponse(items=[], cancelled=True)
+        except NormativeProtocolUnavailable as error:
+            raise HTTPException(503, str(error)) from error
+        response = CheckNormsStageResponse(items=[], results_reference=ref)
+    return response
 
 
 @router.post(
@@ -767,6 +833,33 @@ async def finalize_stage(
         container.settings.pipeline.vlm_stage_concurrency,
     )
 
-    return FinalizeStageResponse(
-        items=result,
-    )
+    response = FinalizeStageResponse(items=result)
+    if await response_bytes(response) > STAGE_RESPONSE_BYTES:
+
+        async def check_final_result_cancellation():
+            """Не публикует большой результат отменённой финализации."""
+            if await _is_stage_cancelled(
+                container=container,
+                document_id=request.document_id,
+                stage=_FINALIZATION_STAGE,
+                current=len(result),
+                total=len(result),
+            ):
+                raise AnalysisCancelledError(
+                    "Финализация отменена перед публикацией результатов."
+                )
+
+        try:
+            reference = await archive_stage_items(
+                items=[item.model_dump(mode="json") for item in result],
+                document_id=request.document_id,
+                scope=request.normative_corpus,
+                writer=container.normative_protocol_writer,
+                check_cancellation=check_final_result_cancellation,
+            )
+        except AnalysisCancelledError:
+            return FinalizeStageResponse(items=[], cancelled=True)
+        except NormativeProtocolUnavailable as error:
+            raise HTTPException(503, str(error)) from error
+        response = FinalizeStageResponse(items=[], results_reference=reference)
+    return response

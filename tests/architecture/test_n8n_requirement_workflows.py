@@ -163,6 +163,13 @@ def _functional_successor(
 
         if not (
             successor.startswith("Gate ")
+            or successor.startswith(("Stored ", "Read Stored "))
+            or successor
+            in {
+                "Resolve Norm Check Response",
+                "Resolve Cross-Page Response",
+                "Resolve Finalization Response",
+            }
             or (successor.startswith("Continue ") and successor.endswith(" Response"))
         ):
             return successor

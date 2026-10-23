@@ -97,7 +97,7 @@ function scenario(flag, { cancelledStage = null, swappedPages = false } = {}) {
   const request = code("Gate Collect Norm Check Stage", packages)[0].json;
   const checks = [{ json: { items: request.items.map((page) => ({ page_number: page.page_number, result: { findings: [{ finding_id: `p${page.page_number}-f1`, comment: "N/T/U" }] } })) } }];
   saved.set("Check Norms", checks);
-  const output = run("Use Cross-Page Consistency", checks, "Merge Finding Candidates");
+  const output = run("Continue Check Norms Response", checks, "Merge Finding Candidates");
   return { calls, request, output, cancelled: output === "Build Cancelled Result" };
 }
 

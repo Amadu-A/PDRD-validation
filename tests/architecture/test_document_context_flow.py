@@ -68,14 +68,18 @@ def test_cross_page_stage_is_once_per_document_and_before_finalization() -> None
     assert "$('Understand Page').all()" in check["parameters"]["body"]
     assert _next(workflow, "Check Norms") == ["Continue Check Norms Response"]
     assert _next(workflow, "Continue Check Norms Response") == [
+        "Stored Norm Check Results"
+    ]
+    assert _next(workflow, "Resolve Norm Check Response") == [
         "Use Cross-Page Consistency"
     ]
     assert _next(workflow, "Check Cross-Page Consistency") == [
         "Continue Check Cross-Page Consistency Response"
     ]
     assert _next(workflow, "Continue Check Cross-Page Consistency Response") == [
-        "Merge Cross-Page Checks"
+        "Stored Cross-Page Results"
     ]
+    assert _next(workflow, "Resolve Cross-Page Response") == ["Merge Cross-Page Checks"]
     assert _next(workflow, "Merge Cross-Page Checks") == [
         "Gate Expand Norm Check Stage"
     ]

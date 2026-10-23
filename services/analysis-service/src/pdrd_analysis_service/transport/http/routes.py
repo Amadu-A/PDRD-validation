@@ -19,10 +19,24 @@ from pydantic import BaseModel, Field
 from pdrd_analysis_service.application.equipment_pipeline import (
     compare_equipment_stage,
 )
+from pdrd_analysis_service.application.normative_protocol import (
+    compact_page_metrics,
+    publish_independent,
+)
+from pdrd_analysis_service.application.ports.normative_protocol import (
+    NormativeProtocolUnavailable,
+)
 from pdrd_analysis_service.application.ports.vision_model import (
     VisionModelError,
 )
+from pdrd_analysis_service.application.stage_transport import (
+    STAGE_RESPONSE_BYTES,
+    archive_stage_items,
+)
 from pdrd_analysis_service.application.use_cases.document_context import DocumentPage
+from pdrd_analysis_service.application.vision_execution import (
+    current_vision_execution,
+)
 from pdrd_analysis_service.core.container import (
     ApplicationContainer,
 )
@@ -43,6 +57,7 @@ from pdrd_analysis_service.domain.equipment_specification import (
 from pdrd_analysis_service.transport.http.dependencies import (
     get_container,
 )
+from pdrd_analysis_service.transport.http.response_budget import response_bytes
 from pdrd_analysis_service.transport.http.schemas import (
     CheckNormsRequest,
     CheckNormsResponse,
@@ -567,7 +582,36 @@ async def check_norms(
     ],
 ) -> CheckNormsResponse:
     """Проверяет лист по N/T/U sources."""
-    return await check_norms_controlled(request=request, container=container)
+    response = await check_norms_controlled(request=request, container=container)
+    return await _bounded_single_response(
+        response, request, container, request.page_number
+    )
+
+
+async def _bounded_single_response(response, request, container, page):
+    """Сохраняет тот же бюджет одиночных CAD-операций и больших страниц финализации."""
+    if await response_bytes(response) <= STAGE_RESPONSE_BYTES:
+        return response
+
+    async def check_cancellation():
+        """Использует существующий контекст отмены страницы без новых GPU-вызовов."""
+        context = current_vision_execution.get()
+        if context is not None:
+            await context.checkpoint()
+
+    try:
+        ref = await archive_stage_items(
+            items=[{"page_number": page, "result": response.model_dump(mode="json")}],
+            document_id=request.document_id,
+            scope=request.normative_corpus,
+            writer=container.normative_protocol_writer,
+            check_cancellation=check_cancellation,
+        )
+    except NormativeProtocolUnavailable as error:
+        raise HTTPException(503, str(error)) from error
+    return type(response)(
+        summary=response.summary, findings=[], metrics={}, results_reference=ref
+    )
 
 
 async def check_norms_controlled(
@@ -677,9 +721,23 @@ async def check_norms_controlled(
         response.findings.extend(
             _finding_draft_payload(finding) for finding in independent.findings
         )
-        response.metrics["independent_normative"] = {
-            "requirement_plan": independent.diagnostics
-        }
+        try:
+            projected = await publish_independent(
+                writer=container.normative_protocol_writer,
+                result=independent,
+                document_id=request.document_id,
+                scope=request.normative_corpus,
+                page_metrics=(
+                    {"page_number": request.page_number, "metrics": response.metrics},
+                ),
+                check_cancellation=catalog_cancellation,
+            )
+        except NormativeProtocolUnavailable as error:
+            raise HTTPException(503, str(error)) from error
+        compact_page_metrics(
+            response.metrics, projected["requirement_plan"]["protocol"]
+        )
+        response.metrics["independent_normative"] = projected
     return response
 
 
@@ -779,7 +837,7 @@ async def finalize_findings(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
         ) from error
 
-    return FinalizeResponse(
+    response = FinalizeResponse(
         summary=summary,
         findings=[
             _final_finding_payload(
@@ -795,6 +853,14 @@ async def finalize_findings(
         ],
         metrics=metrics,
     )
+    if request.document_id is not None:
+        return await _bounded_single_response(
+            response,
+            request,
+            container,
+            request.findings[0].page if request.findings else 1,
+        )
+    return response
 
 
 @router.post("/internal/v1/stages/compare-equipment")

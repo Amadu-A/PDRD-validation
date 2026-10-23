@@ -209,6 +209,9 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
 
     assert _successors(workflow, "Check Norms") == ["Continue Check Norms Response"]
     assert _successors(workflow, "Continue Check Norms Response") == [
+        "Stored Norm Check Results"
+    ]
+    assert _successors(workflow, "Resolve Norm Check Response") == [
         "Use Cross-Page Consistency"
     ]
     assert _successors(workflow, "Continue Cross-Page Consistency") == [
@@ -218,6 +221,9 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
         "Continue Check Cross-Page Consistency Response"
     ]
     assert _successors(workflow, "Continue Check Cross-Page Consistency Response") == [
+        "Stored Cross-Page Results"
+    ]
+    assert _successors(workflow, "Resolve Cross-Page Response") == [
         "Merge Cross-Page Checks"
     ]
     assert _successors(workflow, "Merge Cross-Page Checks") == [
@@ -251,7 +257,7 @@ def test_pdf_stage_batch_topology_is_ordered() -> None:
     ) == ["Continue Finalize Findings Response"]
     assert _successors(
         workflow,
-        "Continue Finalize Findings Response",
+        "Resolve Finalization Response",
     ) == [
         "Progress Build Result",
         "Gate Build Result",

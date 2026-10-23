@@ -59,6 +59,7 @@ async def test_independent_atomic_check_keeps_all_31_pages_without_model_finding
         page,
         requirement,
     )
+    from ..unit.test_normative_transport_budget import RecordingProtocolWriter
 
     row = requirement()
     row["normative_status"]["assessed_on"] = datetime.now(UTC).date().isoformat()
@@ -103,6 +104,7 @@ async def test_independent_atomic_check_keeps_all_31_pages_without_model_finding
                 "http://knowledge.test", transport=httpx.MockTransport(knowledge)
             )
         ),
+        normative_protocol_writer=RecordingProtocolWriter(),
     )
     initial = page()
     facts = initial.facts

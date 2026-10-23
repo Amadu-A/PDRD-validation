@@ -27,6 +27,7 @@ from pdrd_analysis_service.domain.document_context import (
 )
 from pdrd_analysis_service.domain.engineering_facts import merge_text_engineering_facts
 from pdrd_analysis_service.domain.evidence_audit import bind_evidence, literal_contains
+from pdrd_analysis_service.domain.normative_protocol import transport_summary
 from pdrd_analysis_service.domain.physical_identity import valid_box
 from pdrd_analysis_service.domain.project_dependencies import (
     explicit_project_dependencies,
@@ -39,6 +40,12 @@ class IndependentNormativeResult:
 
     findings: tuple
     diagnostics: dict
+    sources: tuple[dict, ...] = ()
+
+    @property
+    def summary(self) -> dict:
+        """Публикует счётчики отдельно от полного протокола доказательств."""
+        return transport_summary(self.diagnostics)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +67,7 @@ class IndependentNormativeReview:
     ) -> IndependentNormativeResult:
         """Список предварительных findings намеренно не входит во входной контракт."""
         day = assessed_on or datetime.now(UTC).date().isoformat()
-        sources, manifests, unavailable, selection = [], [], [], []
+        sources, manifests, unavailable, selection, atomic_sources = [], [], [], [], []
         facts, texts = [], {}
         for page in pages:
             number, text = page.page, page.text
@@ -126,6 +133,7 @@ class IndependentNormativeReview:
                 continue
             manifests.append({"document_id": normative_id, **document.manifest})
             for row in document.requirements:
+                atomic_sources.append(row)
                 # Отсутствие признака объекта не доказывает неприменимость общей нормы.
                 subject = normalize_label(row.get("object_type", ""))
                 families = (
@@ -344,4 +352,5 @@ class IndependentNormativeReview:
                 for finding in findings
             ),
             diagnostics,
+            tuple(atomic_sources),
         )

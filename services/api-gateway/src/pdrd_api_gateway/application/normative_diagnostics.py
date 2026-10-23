@@ -23,6 +23,7 @@ def normative_diagnostics(result: dict, *, job_id: str) -> dict:
     legacy = {}
     rejections = Counter()
     plans = []
+    references, restored = set(), set()
 
     def collect(value):
         """Читает только узлы метрик, не копируя содержимое проекта в сводку."""
@@ -33,14 +34,21 @@ def normative_diagnostics(result: dict, *, job_id: str) -> dict:
             plan = value.get("requirement_plan")
             if isinstance(plan, dict):
                 plans.append(plan)
+                if plan.get("protocol"):
+                    references.add(plan["protocol"]["protocol_id"])
+                if value.get("protocol_id") and isinstance(plan.get("checks"), list):
+                    restored.add(value["protocol_id"])
                 for record in plan.get("checks", []):
                     if isinstance(record, dict) and record.get("requirement_id"):
                         # Одна норма на разных страницах может проверять разные значения.
-                        evidence_key = hashlib.sha256(
-                            json.dumps(
-                                record.get("observations"), sort_keys=True
-                            ).encode()
-                        ).hexdigest()
+                        evidence_key = (
+                            record.get("observation_digest")
+                            or hashlib.sha256(
+                                json.dumps(
+                                    record.get("observations"), sort_keys=True
+                                ).encode()
+                            ).hexdigest()
+                        )
                         records[(record["requirement_id"], evidence_key)] = record
                 for record in plan.get("legacy_records", []):
                     if isinstance(record, dict) and record.get("check_id"):
@@ -58,6 +66,7 @@ def normative_diagnostics(result: dict, *, job_id: str) -> dict:
                     "finalization",
                     "cross_page_consistency",
                     "independent_normative",
+                    "protocol_diagnostics",
                 }:
                     collect(child)
         elif isinstance(value, list):
@@ -65,6 +74,7 @@ def normative_diagnostics(result: dict, *, job_id: str) -> dict:
                 collect(child)
 
     collect(result)
+    unresolved = bool(references - restored)
     counts = Counter()
     batches = Counter()
     failures = Counter()
@@ -169,12 +179,17 @@ def normative_diagnostics(result: dict, *, job_id: str) -> dict:
         else None,
         "embedding_stages": {key: dict(value) for key, value in stages.items()},
         "source_counts": source_counts,
-        "requirements": len(records),
-        "unique_requirements": len(
-            {record["requirement_id"] for record in records.values()}
-        ),
+        "requirements": None if unresolved else len(records),
+        "unique_requirements": None
+        if unresolved
+        else len({record["requirement_id"] for record in records.values()}),
         "requirement_plan_available": bool(plans),
-        "requirement_plan": fields,
+        "requirement_plan_state": "protocol_unavailable"
+        if unresolved
+        else "available"
+        if plans
+        else "not_recorded",
+        "requirement_plan": None if unresolved else fields,
         "legacy_checks": {
             "count": len(legacy),
             "reason_codes": dict(
@@ -182,13 +197,16 @@ def normative_diagnostics(result: dict, *, job_id: str) -> dict:
             ),
         },
         "finalization_rejection_reasons": dict(rejections),
-        "normative_candidates": {
+        "normative_candidates": None
+        if unresolved
+        else {
             "created": len(created_n),
             "retained": len(retained_n),
             "not_retained": len(created_n - retained_n),
         },
         "limitations": [
-            "Охват относится к найденным фрагментам, а не ко всему нормативному корпусу.",
+            "Охват независимого N-first относится к выбранным атомарным поколениям; "
+            "page-local охват — к найденным фрагментам.",
             "Отсутствующие метрики старого прогона не восстановлены предположениями.",
         ],
     }

@@ -697,6 +697,7 @@ class CheckNormsResponse(BaseModel):
     """Ответ requirement check."""
 
     summary: str
+    results_reference: dict | None = None
 
     findings: list[FindingDraftPayload,]
 
@@ -810,6 +811,8 @@ class FinalizeRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
+    document_id: UUID | None = None
+    normative_corpus: NormativeCorpusScope | None = None
 
     findings: list[FindingDraftPayload,]
 
@@ -876,6 +879,7 @@ class FinalizeResponse(BaseModel):
     """Ответ финализации findings."""
 
     summary: str
+    results_reference: dict | None = None
 
     findings: list[FinalFindingPayload,]
 

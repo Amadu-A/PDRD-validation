@@ -22,7 +22,7 @@ const context = {$itemIndex: 0, $json: {finalization: {findings: [], metrics: {}
   $: name => {
     const json = name.startsWith('POST ')
       ? {body: {normative_section_id: 'section-1', technical_assignment_id: input.withTA ? 'ta-1' : null}}
-      : ['Check Norms', 'Gate Expand Norm Check Stage'].includes(name)
+      : ['Check Norms', 'Resolve Norm Check Response', 'Gate Expand Norm Check Stage'].includes(name)
       ? {findings: [], metrics: {requirement_plan: plan}} : prepared;
     return {all: () => [{json}], first: () => ({json}), item: {json}};
   }};

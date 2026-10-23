@@ -187,6 +187,7 @@ class CheckNormsStageResponse(
 
     items: list[CheckNormsStageItemResponse]
     cancelled: bool = False
+    results_reference: dict | None = None
 
 
 class FinalizeStageItemRequest(
@@ -215,6 +216,7 @@ class FinalizeStageRequest(
     )
 
     document_id: UUID
+    normative_corpus: NormativeCorpusScope | None = None
 
     items: list[FinalizeStageItemRequest] = Field(
         min_length=1,
@@ -240,3 +242,4 @@ class FinalizeStageResponse(
 
     items: list[FinalizeStageItemResponse]
     cancelled: bool = False
+    results_reference: dict | None = None

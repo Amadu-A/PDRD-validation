@@ -6,6 +6,7 @@ from functools import partial
 from pathlib import Path
 from uuid import UUID
 
+from pdrd_api_gateway.application.normative_protocol import ManageNormativeProtocol
 from pdrd_api_gateway.application.use_cases.execute_analysis_job import (
     ExecuteAnalysisJob,
 )
@@ -34,6 +35,9 @@ from pdrd_api_gateway.infrastructure.orchestration.project_context import (
 )
 from pdrd_api_gateway.infrastructure.storage.filesystem import (
     LocalFilesystemAnalysisArtifactStore,
+)
+from pdrd_api_gateway.infrastructure.storage.normative_protocol import (
+    LocalNormativeProtocolStore,
 )
 
 
@@ -84,6 +88,10 @@ async def execute_analysis_job(
     )
 
     use_case = ExecuteAnalysisJob(
+        normative_protocol=ManageNormativeProtocol(
+            unit_of_work_factory,
+            LocalNormativeProtocolStore(Path(settings.storage.root_path)),
+        ),
         unit_of_work_factory=unit_of_work_factory,
         artifact_store=artifact_store,
         orchestrator=orchestrator,

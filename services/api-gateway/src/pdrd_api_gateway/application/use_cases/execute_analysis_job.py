@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from pdrd_api_gateway.application.normative_protocol import ManageNormativeProtocol
 from pdrd_api_gateway.application.ports.artifacts import (
     AnalysisArtifactStore,
 )
@@ -90,6 +91,7 @@ class ExecuteAnalysisJob:
     document_context_lifecycle: DocumentContextLifecycle | None = None
 
     technical_assignment_coordinator: TechnicalAssignmentIndexCoordinator | None = None
+    normative_protocol: ManageNormativeProtocol | None = None
 
     async def execute(
         self, *, job_id: UUID, allow_retry: bool, redelivered: bool
@@ -279,6 +281,10 @@ class ExecuteAnalysisJob:
         )
 
         if existing_result is not None:
+            if self.normative_protocol is not None:
+                await self.normative_protocol.validate_result(
+                    job_id, document_id, existing_result
+                )
             await self._ensure_not_cancelled(
                 job_id=job_id,
             )
@@ -306,6 +312,8 @@ class ExecuteAnalysisJob:
         result = await self.orchestrator.execute(
             artifacts=artifacts,
         )
+        if self.normative_protocol is not None:
+            await self.normative_protocol.validate_result(job_id, document_id, result)
 
         await self._ensure_not_cancelled(
             job_id=job_id,

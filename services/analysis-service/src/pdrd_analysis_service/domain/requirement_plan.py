@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, fields, replace
 from decimal import Decimal
 
 from pdrd_analysis_service.domain.atomic_normative_status import atomic_currency
@@ -89,7 +89,11 @@ class RequirementRecord:
 
     def as_dict(self) -> dict:
         """Сохраняет буквальную цитату, исходные IDs и ограничения независимо от findings."""
-        return asdict(self)
+        # Источник уже неизменяем в пределах прохода. Рекурсивный asdict копировал
+        # его вместе с общими status evidence для каждого результата проверки.
+        result = {part.name: getattr(self, part.name) for part in fields(self)}
+        result["observations"] = tuple(asdict(item) for item in self.observations)
+        return result
 
 
 def _clauses(text: str) -> tuple[tuple[str, str], ...]:
