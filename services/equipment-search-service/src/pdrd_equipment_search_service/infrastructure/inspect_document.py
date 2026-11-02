@@ -15,6 +15,8 @@ from pdrd_equipment_search_service.domain.equipment import (
     DocumentInspection,
     DownloadedDocument,
     EquipmentIdentity,
+    SearchHit,
+    SourceStatus,
 )
 
 
@@ -211,6 +213,47 @@ class DocumentServiceInspector:
             verified = len(candidates) == 1
             manufacturer = next(iter(candidates)) if verified else ""
         if not verified:
+            # Известный точный сайт производителя тоже является доказательством
+            # происхождения. Чужая явная подпись изготовителя имеет приоритет.
+            reader = getattr(self.catalog, "source_for", None)
+            source = (
+                await reader(
+                    identity.manufacturer, SearchHit(document.final_url).hostname
+                )
+                if reader is not None and identity.manufacturer
+                else None
+            )
+            labels = re.findall(
+                r"(?:изготовитель|производитель|manufacturer|manufactured by)\s*[:—-]\s*([^\n|;]{1,120})",
+                page_text,
+                re.I,
+            )
+            conflicting_label = (
+                any(
+                    not any(
+                        _contains_identifier(label, alias) for alias in aliases if alias
+                    )
+                    for label in labels
+                )
+                if identity.manufacturer
+                else True
+            )
+            verified = bool(
+                source is not None
+                and source.status is SourceStatus.TRUSTED
+                and source.matches(
+                    identity.manufacturer, SearchHit(document.final_url).hostname
+                )
+                and not conflicting_label
+                and (
+                    not observed
+                    or (
+                        len(labelled or observed) == 1
+                        and bool((labelled or observed) & own)
+                    )
+                )
+            )
+        if not verified:
             return DocumentInspection(
                 False,
                 reason="Производитель не подтверждён текстом документа.",
@@ -281,4 +324,5 @@ class DocumentServiceInspector:
             publication_date=publication_date,
             pages=pages,
             manufacturer=manufacturer,
+            vision_pages=vision_pages,
         )

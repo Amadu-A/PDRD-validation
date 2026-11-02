@@ -128,7 +128,7 @@ experience_sources                  = E
 
 **Frontend** — статические страницы и Nginx; браузер обращается только к API Gateway. `review-frontend` — дополнительный интерфейс на loopback `127.0.0.1:8081`, без собственной БД. Основной интерфейс доступен через корпоративный HTTPS-прокси. Прямого браузерного доступа к внутренним API, n8n, PostgreSQL и Qdrant нет.
 
-**Shared infrastructure** имеет самостоятельный жизненный цикл в сети `ai-shared`: `shared-vlm`, `shared-embedding`, RabbitMQ и n8n. Проект не поднимает второй GPU runtime. Каталог `services/multimodal-embedding-service` сохранён как прежняя реализация для совместимости и тестов; в текущем Compose он не запускается. Вызовы идут в общий OpenAI-совместимый embedding endpoint.
+**Shared infrastructure** имеет самостоятельный жизненный цикл в сети `ai-shared`: `shared-vlm`, `shared-embedding`, RabbitMQ, n8n и SearXNG (профиль shared `ai-search`). PDRD потребляет `http://searxng:8080`, не создаёт свою копию и не хранит `SEARXNG_SECRET`. Проект не поднимает второй GPU runtime. Каталог `services/multimodal-embedding-service` сохранён как прежняя реализация для совместимости и тестов; в текущем Compose он не запускается. Вызовы идут в общий OpenAI-совместимый embedding endpoint.
 
 **Инфраструктура проекта:** PostgreSQL с независимыми схемами `public`/`knowledge`/`users`/`auth`/`experience`/`equipment_search`, Qdrant и постоянные тома файлов. Сервисы не читают чужие схемы SQL напрямую; межсервисные UUID являются логическими ссылками, без внешних ключей между схемами.
 
@@ -925,7 +925,7 @@ Runtime не хранит прикладных таблиц проекта; Qdra
 ```mermaid
 flowchart TD
     GW["Gateway: запуск, статус, отмена, resume, SSE и документы EQ"] --> EQ["Equipment Search Service"]
-    EQ --> SEARCH["SearXNG: поиск кандидатов"]
+    EQ --> SEARCH["Shared SearXNG: ai-search / ai-shared; поиск кандидатов"]
     EQ --> DOC["Document Service: извлечение"]
     EQ --> KNOW["Knowledge: извлечённые факты оборудования"]
     EQ --> AS["Analysis: ограниченная проверка документов"]
@@ -935,6 +935,8 @@ flowchart TD
 ```
 
 Задание поиска и его ревизии сохраняются отдельно от анализа. Возобновление использует уже обработанные модели, бюджет и журнал событий. Полученные EQ-факты не становятся N-доказательствами. Gateway предоставляет `/api/v1/analyses/{job_id}/equipment-search`, `/report`, `/events`, `/cancel`, `/resume` и `/equipment-documents/{source_id}`; принятые обновления Review применяются отдельной командой. 404 у SSE и сбой скачивания PDF проверяются как разные HTTP-операции.
+
+Equipment Search остаётся прикладным сервисом PDRD: его таблицы, файлы, очередь и миграции не переносятся в shared. `/health/ready` проверяет доступность общего SearXNG без внешнего поискового запроса. Найденный документ проходит извлечение и сравнение; пустые характеристики дают `incomplete`. Разрешение неподтверждённых источников действует только для задания, сохраняет пометку источника и вопросы инженеру. Инструкция перехода с прежней локальной копии: [shared-equipment-search.md](docs/shared-equipment-search.md).
 
 ## 7. Qdrant — stable aliases и physical collections
 

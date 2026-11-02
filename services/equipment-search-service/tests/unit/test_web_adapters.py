@@ -10,6 +10,33 @@ from pdrd_equipment_search_service.infrastructure import safe_download
 from pdrd_equipment_search_service.infrastructure.searxng import SearxngSearch
 
 
+async def test_shared_search_readiness_does_not_query_external_engines():
+    """Readiness подтверждает Docker DNS/HTTP и не тратит внешние поисковые запросы."""
+    paths = []
+
+    def handler(request):
+        """Возвращает только стартовую страницу общего сервиса."""
+        paths.append(request.url.path)
+        return httpx.Response(200, text="SearXNG")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assert await SearxngSearch(client, "http://searxng:8080").is_ready()
+    assert paths == ["/"]
+
+
+async def test_failed_search_engines_are_not_reported_as_missing_documents():
+    """Пустая выдача при отказе движков не равна успешному поиску без результатов."""
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200, json={"results": [], "unresponsive_engines": [["bing", "timeout"]]}
+            )
+        )
+    ) as client:
+        with pytest.raises(ValueError, match="недоступны"):
+            await SearxngSearch(client, "http://searxng:8080").search("DRC-100B", 5)
+
+
 @pytest.mark.asyncio
 async def test_searxng_parses_only_valid_unique_urls() -> None:
     """Snippet не используется; повторные и внутренние ссылки исключаются."""

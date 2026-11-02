@@ -378,6 +378,7 @@ class PostgresJobRepository:
                     jsonb_build_object('job_id', job_id, 'revision', revision, 'status', status,
                         'results', results, 'identities', identities, 'warning', warning,
                         'policy', policy, 'resume_count', resume_count,
+                        'allow_unverified', allow_unverified,
                         'background', COALESCE((policy->>'background')::boolean, false)), :now
                 FROM equipment_search.equipment_jobs WHERE job_id = :id
                     AND status IN ('completed', 'incomplete', 'cancelled')
@@ -387,11 +388,14 @@ class PostgresJobRepository:
             )
 
     async def version(self, job_id: UUID, revision: int) -> dict | None:
-        """Читает неизменяемую завершённую редакцию, доступную после продолжения."""
+        """Читает редакцию вместе с неизменяемым разрешением самого задания, включая старые payload."""
         async with self.engine.connect() as connection:
             return await connection.scalar(
                 text(
-                    "SELECT payload FROM equipment_search.job_versions WHERE job_id = :id AND revision = :revision"
+                    "SELECT v.payload || jsonb_build_object('allow_unverified', j.allow_unverified) "
+                    "FROM equipment_search.job_versions v "
+                    "JOIN equipment_search.equipment_jobs j ON j.job_id = v.job_id "
+                    "WHERE v.job_id = :id AND v.revision = :revision"
                 ),
                 {"id": job_id, "revision": revision},
             )
@@ -430,6 +434,7 @@ class PostgresJobRepository:
                     jsonb_build_object('job_id', job_id, 'revision', revision, 'status', status,
                         'results', results, 'identities', identities, 'warning', warning,
                         'policy', policy, 'resume_count', resume_count,
+                        'allow_unverified', allow_unverified,
                         'background', COALESCE((policy->>'background')::boolean, false)), :now
                 FROM equipment_search.equipment_jobs WHERE status = 'cancelled'
                 ON CONFLICT (job_id, revision) DO NOTHING

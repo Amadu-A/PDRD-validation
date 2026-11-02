@@ -10,10 +10,48 @@ import pytest
 from pdrd_equipment_search_service.domain.equipment import (
     DownloadedDocument,
     EquipmentIdentity,
+    SourceDomain,
+    SourceStatus,
 )
 from pdrd_equipment_search_service.infrastructure.inspect_document import (
     DocumentServiceInspector,
 )
+
+
+@pytest.mark.parametrize(
+    ("status", "text", "expected"),
+    [
+        (SourceStatus.TRUSTED, "РИП-12. Технические характеристики", True),
+        (SourceStatus.PENDING, "РИП-12. Технические характеристики", False),
+        (SourceStatus.TRUSTED, "РИП-12. Производитель: Чужой завод", False),
+        (SourceStatus.TRUSTED, "РИП-24. Технические характеристики", False),
+    ],
+)
+async def test_registered_host_confirms_origin_without_overriding_wrong_identity(
+    status, text, expected
+):
+    """Официальный точный домен подтверждает происхождение, но не чужую модель/подпись."""
+    catalog = SimpleNamespace(
+        manufacturer_aliases=AsyncMock(return_value=("Болид", "bolid")),
+        manufacturer_profiles=AsyncMock(return_value=()),
+        source_for=AsyncMock(return_value=SourceDomain("Болид", "bolid.ru", status)),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200, json={"pages": [{"page": 1, "text": text}]}
+            )
+        )
+    ) as client:
+        result = await DocumentServiceInspector(
+            client, "http://document", catalog=catalog
+        ).inspect(
+            EquipmentIdentity("Болид", "РИП-12"),
+            DownloadedDocument(
+                b"%PDF", "https://bolid.ru/manual.pdf", "application/pdf"
+            ),
+        )
+    assert result.applicable is expected
 
 
 async def inspect(identity, pages, profiles=None):

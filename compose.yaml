@@ -1,7 +1,7 @@
 # compose.yaml
 # Проектный Docker-стек PDRD и серверный Review на основном frontend.
 #
-# Shared: RabbitMQ, n8n, shared-vlm, shared-embedding.
+# Shared: RabbitMQ, n8n, shared-vlm, shared-embedding, SearXNG.
 # Project-specific: PostgreSQL, Qdrant и application services.
 
 name: ${COMPOSE_PROJECT_NAME:-pdrd-validation-ai}
@@ -120,18 +120,6 @@ services:
     networks:
       - app-net
 
-  searxng:
-    image: ${PDRD_SEARXNG_IMAGE:-searxng/searxng@sha256:cc026dbee25b864d7f9731957cd5ef36ba2e2d61abd2996d57f1b863483e7409}
-    restart: unless-stopped
-    environment:
-      SEARXNG_SECRET: ${PDRD_EQUIPMENT_INTERNAL_KEY:?PDRD_EQUIPMENT_INTERNAL_KEY must be set in .env}
-      SEARXNG_BIND_ADDRESS: 0.0.0.0
-      SEARXNG_PORT: 8080
-    volumes:
-      - ./ops/searxng/settings.yml:/etc/searxng/settings.yml:ro
-    logging: *default-logging
-    networks: [app-net]
-
   equipment-search-migrate:
     build:
       context: ./services/equipment-search-service
@@ -145,6 +133,7 @@ services:
       EQUIPMENT_SEARCH_SERVICE_DATABASE__USER: ${PDRD_POSTGRES_USER:-pdrd}
       EQUIPMENT_SEARCH_SERVICE_DATABASE__PASSWORD: ${PDRD_POSTGRES_PASSWORD:?PDRD_POSTGRES_PASSWORD must be set in .env}
       EQUIPMENT_SEARCH_SERVICE_INTERNAL_KEY: ${PDRD_EQUIPMENT_INTERNAL_KEY:?PDRD_EQUIPMENT_INTERNAL_KEY must be set in .env}
+      EQUIPMENT_SEARCH_SERVICE_SEARXNG_URL: ${EQUIPMENT_SEARCH_SERVICE_SEARXNG_URL:-http://searxng:8080}
     command: ["python", "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"]
     depends_on:
       postgres:
@@ -166,8 +155,6 @@ services:
         condition: service_completed_successfully
       document-service:
         condition: service_healthy
-      searxng:
-        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8601/health/ready', timeout=5)"]
       interval: 10s
@@ -175,7 +162,7 @@ services:
       retries: 10
       start_period: 10s
     logging: *default-logging
-    networks: [app-net]
+    networks: [app-net, ai-shared]
 
   equipment-search-service-tests:
     build:

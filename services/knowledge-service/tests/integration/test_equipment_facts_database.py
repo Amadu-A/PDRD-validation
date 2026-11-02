@@ -74,3 +74,50 @@ async def test_visual_eq_cache_round_trip_and_snapshot_identity() -> None:
                 {"source_id": source_id},
             )
         await engine.dispose()
+
+
+async def test_empty_text_attempt_does_not_poison_postgresql_cache():
+    """Пустой текстовый проход не блокирует последующие доказательства того же snapshot."""
+    settings = Settings(_env_file=None)
+    if (
+        settings.database.host != "knowledge-test-postgres"
+        or settings.database.name != "pdrd_knowledge_test"
+    ):
+        pytest.skip("Нужна изолированная Knowledge PostgreSQL.")
+    engine = build_async_engine(settings.database)
+    cache = PostgresEquipmentFactIndex(engine)
+    index = EquipmentFactIndex(cache)
+    source_id = "EQ-" + uuid4().hex
+    args = {
+        "source_id": source_id,
+        "sha256": "a" * 64,
+        "manufacturer": "ACME",
+        "model": "PS-24",
+        "variant": "",
+        "pages": [],
+    }
+    try:
+        empty = await index.extract_or_get(**args)
+        assert not empty["facts"] and await cache.get(source_id) is None
+        raw = (
+            {
+                "page": 1,
+                "property_name": "Output voltage",
+                "value_raw": "20...30",
+                "unit_raw": "V",
+                "snippet": "PS-24 Output voltage 20...30 V",
+            },
+        )
+        first = await index.extract_or_get(**args, vision_facts=raw)
+        warm = await index.extract_or_get(**args)
+        assert first["facts"] == warm["facts"] and warm["cache_hit"]
+        assert warm["document_sha256"] == "a" * 64
+    finally:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "DELETE FROM knowledge.equipment_fact_sets WHERE document_source_id = :source_id"
+                ),
+                {"source_id": source_id},
+            )
+        await engine.dispose()

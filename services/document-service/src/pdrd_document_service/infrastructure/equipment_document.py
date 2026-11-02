@@ -2,6 +2,7 @@
 
 """Детерминированное извлечение текста PDF и неактивного HTML."""
 
+import re
 from contextlib import suppress
 from html.parser import HTMLParser
 
@@ -21,6 +22,7 @@ class _TextOnlyHtmlParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self.hidden_depth = 0
+        self.row_cells = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         """Пропускает script, style, iframe и вложенное содержимое."""
@@ -37,15 +39,37 @@ class _TextOnlyHtmlParser(HTMLParser):
             "h2",
             "h3",
             "section",
+            "dt",
+            "dd",
+            "h4",
+            "h5",
+            "h6",
         }:
             self.parts.append("\n")
+            if tag == "tr":
+                self.row_cells = 0
         elif not self.hidden_depth and tag in {"td", "th"}:
-            self.parts.append(" | ")
+            if self.row_cells:
+                self.parts.append(" | ")
+            self.row_cells += 1
 
     def handle_endtag(self, tag: str) -> None:
         """Завершает игнорирование активного элемента."""
         if tag in {"script", "style", "iframe", "noscript", "svg"}:
             self.hidden_depth = max(0, self.hidden_depth - 1)
+        elif not self.hidden_depth and tag in {
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "p",
+            "tr",
+            "dt",
+            "dd",
+        }:
+            self.parts.append("\n")
 
     def handle_data(self, data: str) -> None:
         """Добавляет только текст видимой части документа."""
@@ -102,7 +126,22 @@ class PyMuPdfEquipmentDocumentReader:
         """Возвращает страницы PDF либо очищенный текст технического HTML."""
         if media_type == "text/html":
             parser = _TextOnlyHtmlParser()
-            parser.feed(content.decode("utf-8", errors="replace"))
+            charset = re.search(
+                rb"charset\s*=\s*[\"']?([a-zA-Z0-9_-]+)", content[:4096], re.I
+            )
+            encoding = (
+                charset.group(1).decode("ascii").casefold() if charset else "utf-8-sig"
+            )
+            if encoding not in {
+                "utf-8",
+                "utf8",
+                "utf-8-sig",
+                "windows-1251",
+                "cp1251",
+                "koi8-r",
+            }:
+                encoding = "utf-8-sig"
+            parser.feed(content.decode(encoding, errors="replace"))
             lines = (
                 " ".join(line.split()) for line in "".join(parser.parts).splitlines()
             )

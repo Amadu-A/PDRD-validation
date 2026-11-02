@@ -48,6 +48,10 @@ class Catalog:
             if source.status is SourceStatus.TRUSTED
         )
 
+    async def manufacturer_aliases(self, manufacturer: str):
+        """Возвращает подтверждённое имя без новых предположений."""
+        return (manufacturer,)
+
     async def register_pending(
         self, manufacturer: str, hostname: str, example_url: str, model: str
     ):

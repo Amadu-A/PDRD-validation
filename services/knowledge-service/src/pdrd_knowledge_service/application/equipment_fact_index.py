@@ -111,6 +111,15 @@ class EquipmentFactIndex:
             "status": "ready" if facts and not visual_only else "needs_review",
             "facts": facts,
         }
+        if not facts:
+            # Пустой результат не является immutable-набором доказательств:
+            # следующий адресный проход того же SHA должен иметь шанс его получить.
+            return {
+                **result,
+                "cache_hit": False,
+                "retrieval_status": retrieval_status,
+                "retrieved_pages": ranked_pages,
+            }
         await self.cache.save(result)
         persisted = await self.cache.get(source_id)
         if persisted is None:

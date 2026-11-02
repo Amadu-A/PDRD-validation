@@ -7,6 +7,9 @@ from dataclasses import dataclass, replace
 from hashlib import sha256
 from urllib.parse import urlsplit
 
+from pdrd_equipment_search_service.application.document_facts import (
+    extract_document_facts,
+)
 from pdrd_equipment_search_service.application.ports import (
     DocumentDownloader,
     DocumentInspector,
@@ -97,21 +100,27 @@ class ResolveEquipment:
         )
         await _check_stop(should_stop)
         local = await self.catalog.find_document(identity)
-        if local is not None and await self._local_allowed(
-            replace(identity, manufacturer=local.manufacturer),
-            local.final_url,
-            allow_unverified,
-        ):
-            try:
-                local_source = (
-                    await self.catalog.source_for(
-                        identity.manufacturer, SearchHit(local.final_url).hostname
-                    )
-                    if identity.manufacturer
-                    else None
-                )
-            except Exception:
-                local_source = None
+        local_source = (
+            await self._local_source(
+                replace(identity, manufacturer=local.manufacturer),
+                local.final_url,
+                allow_unverified,
+            )
+            if local is not None
+            else None
+        )
+        if local is not None and local_source is not None:
+            effective_local = replace(identity, manufacturer=local.manufacturer)
+            # Решение источника относится к новому заданию; исторические байты и
+            # trust_status сохранённого snapshot не переписываются.
+            local = replace(
+                local,
+                trust_status=(
+                    "trusted"
+                    if local_source.status is SourceStatus.TRUSTED
+                    else "unverified_user_override"
+                ),
+            )
             manufacturer_site = _manufacturer_site(
                 identity, local.final_url, local_source
             )
@@ -125,18 +134,29 @@ class ResolveEquipment:
             try:
                 pages = await self.catalog.document_pages(local.source_id)
                 visual = await self.catalog.document_vision_facts(local.source_id)
-                fact_status, facts = await self.fact_index.extract_or_get(
-                    replace(identity, manufacturer=local.manufacturer),
-                    local,
-                    pages,
-                    vision_facts=visual,
+                fact_status, facts, reason = await extract_document_facts(
+                    catalog=self.catalog,
+                    index=self.fact_index,
+                    vision=self.vision_inspector,
+                    identity=effective_local,
+                    snapshot=local,
+                    pages=pages,
+                    visual=visual,
+                    budget=vision_budget,
+                    should_stop=should_stop,
+                    inspector=self.inspector,
                 )
                 return ResolveResult(
                     identity,
-                    "local",
+                    "local" if facts else "incomplete",
                     document=local,
                     facts=facts,
                     facts_status=fact_status,
+                    reason_code=reason,
+                    warning=""
+                    if facts
+                    else "Характеристики сохранённого документа не извлечены.",
+                    retryable=not bool(facts),
                     manufacturer_site=manufacturer_site,
                 )
             except Exception:
@@ -300,21 +320,24 @@ class ResolveEquipment:
             retryable=True,
         )
 
-    async def _local_allowed(
+    async def _local_source(
         self,
         identity: EquipmentIdentity,
         final_url: str,
         allow_unverified: bool,
-    ) -> bool:
-        """Повторно проверяет текущее доверие к сохранённому источнику."""
+    ) -> SourceDomain | None:
+        """Один раз читает актуальное разрешение сохранённого источника."""
         host = SearchHit(final_url).hostname
         source = await self.catalog.source_for(identity.manufacturer, host)
         if source is None or not source.enabled:
-            return False
+            return None
         if source.status is SourceStatus.BLOCKED:
-            return False
-        return source.matches(identity.manufacturer, host) and (
-            source.status is SourceStatus.TRUSTED or allow_unverified
+            return None
+        return (
+            source
+            if source.matches(identity.manufacturer, host)
+            and (source.status is SourceStatus.TRUSTED or allow_unverified)
+            else None
         )
 
     def _queries(
@@ -583,11 +606,19 @@ class ResolveEquipment:
                 if self.fact_index is not None:
                     await _check_stop(should_stop)
                     try:
-                        fact_status, facts = await self.fact_index.extract_or_get(
-                            effective,
-                            snapshot,
-                            inspection.pages,
-                            vision_facts=inspection.vision_facts,
+                        fact_status, facts, fact_reason = await extract_document_facts(
+                            catalog=self.catalog,
+                            index=self.fact_index,
+                            vision=self.vision_inspector,
+                            identity=effective,
+                            snapshot=snapshot,
+                            pages=inspection.pages,
+                            visual=inspection.vision_facts,
+                            budget=vision_budget,
+                            should_stop=should_stop,
+                            document=document,
+                            inspection=inspection,
+                            inspector=self.inspector,
                         )
                     except Exception:
                         return (
@@ -611,11 +642,18 @@ class ResolveEquipment:
                 return (
                     ResolveResult(
                         identity,
-                        "found",
+                        "found" if self.fact_index is None or facts else "incomplete",
                         document=snapshot,
                         searched_urls=len(tried),
                         facts=facts,
                         facts_status=fact_status,
+                        warning=""
+                        if self.fact_index is None or facts
+                        else "Документ сохранён, но характеристики не извлечены.",
+                        reason_code=""
+                        if self.fact_index is None or facts
+                        else fact_reason,
+                        retryable=self.fact_index is not None and not bool(facts),
                         attempts=tuple(attempts),
                         resolved_manufacturer=effective.manufacturer,
                         manufacturer_site=_manufacturer_site(

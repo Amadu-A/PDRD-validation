@@ -113,7 +113,7 @@ class TargetedVisionInspector:
                 and isinstance(facts, list)
                 and all(isinstance(fact, dict) for fact in facts)
             ):
-                return replace(
+                inspection = replace(
                     inspection,
                     applicable=True,
                     requires_vision=False,
@@ -125,4 +125,6 @@ class TargetedVisionInspector:
                         if isinstance(fact, dict)
                     ),
                 )
+                if inspection.vision_facts:
+                    return inspection
         return inspection

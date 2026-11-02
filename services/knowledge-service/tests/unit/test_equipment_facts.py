@@ -40,7 +40,7 @@ def test_ambiguous_multimodel_text_has_no_fact() -> None:
         source_id="EQ-2",
         model="DRC-100B",
         variant="",
-        pages=[{"page": 1, "text": "DRC-100B\nOutput voltage 24 V DC"}],
+        pages=[{"page": 1, "text": "DRC-100B DRC-100A\nOutput voltage 24 V DC"}],
     )
     assert facts == []
 

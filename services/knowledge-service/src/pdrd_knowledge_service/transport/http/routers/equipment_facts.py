@@ -18,7 +18,7 @@ class EquipmentPageInput(BaseModel):
     """Ограниченный текст одной страницы документа производителя."""
 
     page: int = Field(ge=1)
-    text: str = Field(max_length=20_000)
+    text: str = Field(max_length=200_000)
 
 
 class EquipmentVisionFactInput(BaseModel):

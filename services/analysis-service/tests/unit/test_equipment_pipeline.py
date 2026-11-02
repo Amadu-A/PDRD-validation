@@ -6,6 +6,26 @@ from pdrd_analysis_service.application.equipment_pipeline import compare_equipme
 from pdrd_analysis_service.transport.http.schemas import FindingDraftPayload
 
 
+def test_job_override_compares_values_without_granting_global_trust():
+    """Разрешение пользователя включает расчёт, но сохраняет источник и вопрос инженеру."""
+    search = _search()
+    search["allow_unverified"] = True
+    search["results"][0]["document"]["trust_status"] = "unverified_user_override"
+    mismatch = compare_equipment_stage(_pages(), search)
+    assert mismatch["comparisons"][0]["status"] == "mismatch_candidate"
+    assert mismatch["candidates_by_page"]["2"][0]["status"] == "needs_review"
+    assert (
+        mismatch["models"][0]["document"]["trust_status"] == "unverified_user_override"
+    )
+    assert mismatch["models"][0]["reason_code"] == "source_unverified"
+    search["results"][0]["facts"][0]["value_raw"] = "21...35"
+    matched = compare_equipment_stage(_pages(), search)
+    assert matched["comparisons"][0]["status"] == "matched"
+    assert matched["candidates_by_page"] == {}
+    search["allow_unverified"] = False
+    assert compare_equipment_stage(_pages(), search)["comparisons"] == []
+
+
 def _pages() -> list[dict]:
     """Возвращает проектное значение с доказательством на листе."""
     return [

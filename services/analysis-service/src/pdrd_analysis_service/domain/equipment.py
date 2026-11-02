@@ -264,15 +264,31 @@ _PROPERTY_ALIASES = {
     ),
     "protection_degree": ("protection degree", "степень защиты"),
     "requires_earthing": ("requires earthing", "требуется заземление"),
-    "input_voltage": ("input voltage", "входное напряжение", "напряжение входа"),
+    "input_voltage": (
+        "input voltage",
+        "входное напряжение",
+        "напряжение входа",
+        "напряжение питания",
+        "напряжение электропитания",
+    ),
     "output_voltage": ("output voltage", "выходное напряжение", "напряжение выхода"),
     "rated_voltage": ("rated voltage", "номинальное напряжение"),
-    "input_current": ("input current", "входной ток"),
+    "input_current": (
+        "input current",
+        "входной ток",
+        "ток потребления",
+        "потребляемый ток",
+    ),
     "output_current": ("output current", "выходной ток"),
     "rated_current": ("rated current", "номинальный ток"),
     "power": ("power", "мощность"),
     "frequency": ("frequency", "частота"),
-    "ambient_temperature": ("ambient temperature", "температура окружающей среды"),
+    "ambient_temperature": (
+        "ambient temperature",
+        "температура окружающей среды",
+        "рабочая температура",
+        "температурный диапазон",
+    ),
 }
 _UNIT_SCALE = {
     "мм": ("length", Decimal(1)),
@@ -300,6 +316,7 @@ _UNIT_SCALE = {
     "кгц": ("frequency", Decimal(1000)),
     "°c": ("temperature", Decimal(1)),
     "°с": ("temperature", Decimal(1)),
+    "℃": ("temperature", Decimal(1)),
 }
 _NUMBER = r"[+-]?\d+(?:[.,]\d+)?"
 
@@ -342,6 +359,8 @@ def _quantity(value: str, unit: str) -> tuple[str, Decimal, Decimal] | None:
     if unit_info is None:
         return None
     clean = value.strip().replace("−", "-")
+    clean = re.sub(r"^от\s+", "", clean, flags=re.I)
+    clean = re.sub(r"\s*(?:до|~)\s*", "...", clean, flags=re.I)
     clean = re.sub(r"(?<=\d)-(?=\d)", "...", clean)
     if not re.fullmatch(
         rf"{_NUMBER}(?:\s*(?:\.{{2,}}|–|—|\s-\s|to)\s*{_NUMBER})?", clean, re.I

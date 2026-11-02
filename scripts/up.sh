@@ -379,7 +379,6 @@ while true; do
             analysis-service
             equipment-search-service
             equipment-search-migrate
-            searxng
         )
 
         if profile_enabled "review"; then

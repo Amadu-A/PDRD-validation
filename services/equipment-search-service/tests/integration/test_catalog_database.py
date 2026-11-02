@@ -343,6 +343,18 @@ async def test_job_service_start_and_replay_use_real_jsonb(
         saved_version = await repository.version(job_id, finished["revision"])
         assert saved_version["status"] == "incomplete"
         assert saved_version["results"] == finished["results"]
+        assert saved_version["allow_unverified"] is allow_unverified
+        # Старые версии не содержали этот ключ: разрешение восстанавливается
+        # только из неизменяемой серверной команды, без новой записи в историю.
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "UPDATE equipment_search.job_versions SET payload = payload - 'allow_unverified' "
+                    "WHERE job_id = :id AND revision = :revision"
+                ),
+                {"id": job_id, "revision": finished["revision"]},
+            )
+        assert await repository.version(job_id, finished["revision"]) == saved_version
         events = await repository.events_after(job_id, 0)
         assert events[-1]["event_type"] == "incomplete"
         resolver.execute.assert_awaited_once()

@@ -119,9 +119,10 @@ def create_app(
         await repository.is_ready()
         await repository.recover_interrupted()
         catalog = PostgresEquipmentCatalog(engine, config.storage_root)
+        search = SearxngSearch(client, config.searxng_url)
         resolver = ResolveEquipment(
             catalog=catalog,
-            search=SearxngSearch(client, config.searxng_url),
+            search=search,
             downloader=SafeDocumentDownloader(max_bytes=config.max_download_bytes),
             inspector=DocumentServiceInspector(
                 client, config.document_service_url, catalog=catalog
@@ -161,6 +162,7 @@ def create_app(
         app.state.jobs = jobs
         app.state.sources = PostgresSourceManager(engine)
         app.state.catalog = catalog
+        app.state.web_search = search
         await jobs.start_queue()
         try:
             yield
@@ -200,7 +202,7 @@ def create_app(
 
     @app.get("/health/ready")
     async def ready(request: Request) -> dict[str, str]:
-        """Проверяет доступность PostgreSQL и конфигурации."""
+        """Различает готовность хранилища и доступность общего SearXNG."""
         if service is not None:
             return {"status": "ready"}
         if not config.internal_key.get_secret_value():
@@ -211,6 +213,13 @@ def create_app(
                 raise RuntimeError("Хранилище не готово.")
         except Exception as error:
             raise HTTPException(503, "Хранилище оборудования недоступно.") from error
+        try:
+            await request.app.state.web_search.is_ready()
+        except (httpx.HTTPError, ValueError) as error:
+            raise HTTPException(
+                503,
+                "Общий SearXNG недоступен: проверьте профиль ai-search и сеть ai-shared.",
+            ) from error
         return {"status": "ready"}
 
     def sources(request: Request) -> PostgresSourceManager:

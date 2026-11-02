@@ -41,6 +41,12 @@ def model_report(item: InventoryItem, result: dict, comparisons: list[dict]) -> 
             "revision_ambiguous",
             "Несколько редакций документа; применимость требует проверки.",
         )
+    elif document.get("trust_status") == "unverified_user_override" and comparisons:
+        status, code, reason = (
+            "incomplete",
+            "source_unverified",
+            "Характеристики сопоставлены по разрешённому в этом задании источнику; достоверность требует проверки.",
+        )
     elif document.get("source_id") and not comparisons:
         if not any(
             parameter.get("evidence_status") != "needs_review"

@@ -77,5 +77,5 @@ async def test_concurrent_cache_insert_cannot_substitute_snapshot() -> None:
             manufacturer="MEAN WELL",
             model="DRC-100B",
             variant="",
-            pages=[],
+            pages=[{"page": 1, "text": "DRC-100B Output voltage 24 V DC"}],
         )

@@ -13,7 +13,7 @@ from pdrd_knowledge_service.application.equipment_discrete_values import (
 )
 
 SCHEMA_VERSION = 1
-EXTRACTOR_VERSION = 8
+EXTRACTOR_VERSION = 9
 
 _PROPERTY_LABELS = {
     "sensor_type": ("sensor type", "тип датчика", "тип термопреобразователя"),
@@ -34,25 +34,55 @@ _PROPERTY_LABELS = {
         "trip curve",
         "характеристика расцепления",
     ),
-    "protection_degree": ("protection degree", "степень защиты"),
+    "protection_degree": (
+        "protection degree",
+        "степень защиты",
+        "степень защиты, обеспечиваемая оболочкой",
+    ),
     "requires_earthing": ("requires earthing", "требуется заземление"),
-    "input_voltage": ("input voltage", "входное напряжение", "напряжение входа"),
+    "input_voltage": (
+        "input voltage",
+        "входное напряжение",
+        "напряжение входа",
+        "напряжение питания",
+        "напряжение электропитания",
+    ),
     "output_voltage": ("output voltage", "выходное напряжение", "напряжение выхода"),
     "rated_voltage": ("rated voltage", "номинальное напряжение"),
-    "input_current": ("input current", "входной ток"),
+    "input_current": (
+        "input current",
+        "входной ток",
+        "ток потребления",
+        "потребляемый ток",
+    ),
     "output_current": ("output current", "выходной ток"),
     "rated_current": ("rated current", "номинальный ток"),
     "power": ("power", "мощность"),
     "frequency": ("frequency", "частота"),
-    "ambient_temperature": ("ambient temperature", "температура окружающей среды"),
+    "ambient_temperature": (
+        "ambient temperature",
+        "температура окружающей среды",
+        "рабочая температура",
+        "температурный диапазон",
+    ),
 }
-_UNIT = r"(?:mV|kV|V|mA|A|kW|W|kHz|Hz|°C|мм|mm|мВ|кВ|В|мА|А|кВт|Вт|кГц|Гц|°С|%)"
+_UNIT = r"(?:mV|kV|V|mA|A|kW|W|kHz|Hz|°C|℃|мм|mm|мВ|кВ|В|мА|А|кВт|Вт|кГц|Гц|°С|%)"
 _NUMBER = r"[+-]?\d+(?:[.,]\d+)?"
 _VALUE = re.compile(
-    rf"(?P<value>{_NUMBER}(?:\s*(?:\.{{2,}}|–|—|-|to)\s*{_NUMBER})?)"
+    rf"(?P<value>(?:от\s+)?{_NUMBER}(?:\s*(?:\.{{2,}}|–|—|-|~|to|до)\s*{_NUMBER})?)"
     rf"\s*(?P<unit>{_UNIT})(?![\w-])",
     re.IGNORECASE,
 )
+
+
+def _numeric_text(text: str) -> str:
+    """Разворачивает диапазон с одинаковыми единицами у обоих пределов, сохраняя исходную цитату отдельно."""
+    return re.sub(
+        rf"({_NUMBER})\s*({_UNIT})\s*(до|~|to|–|—)\s*({_NUMBER})\s*\2(?![\w-])",
+        r"\1 \3 \4 \2",
+        text,
+        flags=re.I,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,7 +163,8 @@ def _single_model_heading(line: str, model: str, variant: str) -> bool:
     return (
         re.fullmatch(
             rf"(?:model|модель)\s*[:№#-]?\s*{marker}"
-            rf"|(?:parameter|параметр)\s*\|\s*{marker}",
+            rf"|(?:parameter|параметр)\s*\|\s*{marker}"
+            rf"|(?:[^\d|]{{1,80}}\s+)?{marker}",
             line.strip(),
             re.IGNORECASE,
         )
@@ -145,25 +176,77 @@ def _scoped_lines(
     text: str,
     model: str,
     variant: str,
-) -> list[tuple[str, str, str]]:
+) -> list[tuple[str, str, str, str, str]]:
     """Привязывает соседние строки таблицы только к явному заголовку одной модели."""
-    result: list[tuple[str, str, str]] = []
+    result: list[tuple[str, str, str, str, str]] = []
     heading = ""
     remaining = 0
     column_index = -1
     column_count = 0
+    label_column = 0
+    channel = ""
+    output_section = False
     target = " ".join(part for part in (model.strip(), variant.strip()) if part)
-    for raw in text.splitlines():
-        line = " ".join(raw.split()).strip(" |")[:500]
+    raw_lines = text.splitlines()
+    pending = ""
+    pending_property = ""
+    for line_index, raw in enumerate(raw_lines):
+        line = " ".join(raw.split())[:8000]
+        joined_value = False
         if not line:
             continue
+        if pending:
+            if (
+                re.fullmatch(
+                    rf"{_VALUE.pattern}(?:\s+(?:AC|DC|AC/DC))?",
+                    _numeric_text(line),
+                    re.I,
+                )
+                or parse_discrete_value(pending_property, line) is not None
+            ):
+                line = pending + " " + line
+                joined_value = True
+            pending = ""
+        label_property = next(
+            (
+                kind
+                for kind, labels in _PROPERTY_LABELS.items()
+                if any(label in line.casefold() for label in labels)
+            ),
+            "",
+        )
+        if (
+            remaining
+            and label_property
+            and not _VALUE.search(_numeric_text(line))
+            and len(line) <= 200
+        ):
+            # Готовые дискретные значения уже стоят после метки и не ждут новой строки.
+            label_end = max(
+                (
+                    line.casefold().find(label) + len(label)
+                    for label in _PROPERTY_LABELS[label_property]
+                    if label in line.casefold()
+                ),
+                default=0,
+            )
+            if parse_discrete_value(label_property, line[label_end:]) is not None:
+                pass
+            else:
+                pending_property = label_property
+                pending = line
+                continue
         cells = [cell.strip() for cell in line.split("|")]
-        if len(cells) >= 3 and cells[0].casefold() in {
-            "parameter",
-            "параметр",
-            "model",
-            "модель",
-        }:
+        if len(cells) >= 3 and (
+            cells[0].casefold()
+            in {
+                "parameter",
+                "параметр",
+                "model",
+                "модель",
+            }
+            or re.search(r"\bmodel\b", cells[0], re.I)
+        ):
             matches = [
                 index
                 for index, cell in enumerate(cells[1:], start=1)
@@ -172,42 +255,115 @@ def _scoped_lines(
             heading = line if len(matches) == 1 else ""
             column_index = matches[0] if len(matches) == 1 else -1
             column_count = len(cells)
-            remaining = 12 if heading else 0
+            model_columns = [
+                i
+                for i, cell in enumerate(cells[1:], 1)
+                if len(cell) < 80
+                and re.search(r"\d", cell)
+                and re.search(r"[a-zа-я]", cell, re.I)
+            ]
+            label_column = max(0, min(model_columns, default=1) - 1)
+            channel, output_section = "", False
+            remaining = 80 if heading else 0
             continue
         if _single_model_heading(line, model, variant):
+            # Плоский PDF-текст перечисляет заголовки соседних колонок подряд.
+            # Последняя маркировка не делает первое числовое значение её строкой.
+            neighbors = (
+                raw_lines[max(0, line_index - 2) : line_index]
+                + raw_lines[line_index + 1 : line_index + 3]
+            )
+            ambiguous_bare = line.casefold() == target.casefold() and any(
+                re.fullmatch(r"(?=[\w.-]*\d)[^\W\d_][\w.-]{2,}", other.strip())
+                and not _contains_exact(other, model)
+                for other in neighbors
+            )
+            if ambiguous_bare:
+                heading, remaining, column_index = "", 0, -1
+                continue
             heading = line
-            remaining = 12
+            remaining = 80
             column_index = -1
+            channel, output_section = "", False
             continue
         if re.match(
             r"^(?:(?:model|модель)\s*[:№#-]|(?:parameter|параметр)\s*\|)",
             line,
             re.I,
-        ) or (remaining and re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{3,}", line)):
+        ) or (
+            remaining
+            and (
+                re.fullmatch(r"(?=[\w.-]*\d)[^\W\d_][\w.-]{2,}", line)
+                or (
+                    "-" in model
+                    and line.casefold().startswith(model.casefold().split("-")[0] + "-")
+                    and re.fullmatch(r"[\w.-]+", line)
+                    and not _contains_exact(line, model)
+                )
+            )
+        ):
             heading = ""
             remaining = 0
             column_index = -1
+            channel, output_section = "", False
+        if (
+            remaining
+            and column_index > 0
+            and len(cells) == column_count
+            and cells[label_column].casefold() == "output number"
+        ):
+            channel = cells[column_index]
+            output_section = True
+            continue
+        property_label = cells[label_column] if len(cells) == column_count else cells[0]
+        if any(
+            cell.casefold() in {"input", "protection", "environment", "safety"}
+            for cell in cells[:label_column]
+        ):
+            output_section, channel = False, ""
+        # Роль задана явным заголовком OUTPUT NUMBER, а не величиной напряжения.
+        output_labels = {
+            "dc voltage": "Output voltage DC",
+            "rated current": "Output current",
+            "current range": "Output current",
+            "rated power": "Power",
+            "voltage adj. range": "Output voltage",
+        }
+        modes = {
+            "dc voltage": "nominal",
+            "rated current": "rated",
+            "current range": "range",
+            "rated power": "rated",
+            "voltage adj. range": "adjustment",
+        }
+        mode = modes.get(property_label.casefold(), "") if output_section else ""
+        if output_section:
+            property_label = output_labels.get(
+                property_label.casefold(), property_label
+            )
         if (
             remaining
             and column_index > 0
             and len(cells) == column_count
             and any(
-                label in cells[0].casefold()
+                label in property_label.casefold()
                 for labels in _PROPERTY_LABELS.values()
                 for label in labels
             )
         ):
-            scoped = f"{target} | {cells[0]} | {cells[column_index]}"
-            result.append((scoped, "exact_model_column", heading))
+            scoped = f"{target} | {property_label} | {cells[column_index]}"
+            result.append((scoped, "exact_model_column", heading, channel, mode))
         elif _contains_exact(line, model) and (
             not variant or _contains_exact(line, variant)
         ):
             applicability = (
-                "ambiguous_model_line"
+                "single_model_block"
+                if joined_value
+                else "ambiguous_model_line"
                 if _ambiguous_model_line(line, model)
                 else "exact_model_line"
             )
-            result.append((line, applicability, ""))
+            result.append((line, applicability, "", "", ""))
         elif (
             remaining
             and heading
@@ -218,7 +374,7 @@ def _scoped_lines(
                 for label in labels
             )
         ):
-            result.append((line, "single_model_block", heading))
+            result.append((line, "single_model_block", heading, "", ""))
         if remaining:
             remaining -= 1
     return result
@@ -237,8 +393,10 @@ def extract_equipment_facts(
     extracted: list[dict[str, Any]] = []
     for page in pages[:40]:
         number = int(page.get("page", 0))
-        text = str(page.get("text") or "")[:20_000]
-        for line, applicability, heading in _scoped_lines(text, model, variant):
+        text = str(page.get("text") or "")[:200_000]
+        for line, applicability, heading, channel, mode in _scoped_lines(
+            text, model, variant
+        ):
             for property_type, labels in _PROPERTY_LABELS.items():
                 label_match = next(
                     (
@@ -258,17 +416,15 @@ def extract_equipment_facts(
                     value_type, normalized, value = discrete
                     unit = ""
                 else:
-                    matches = list(_VALUE.finditer(line[label_match.end() :]))
+                    matches = list(
+                        _VALUE.finditer(_numeric_text(line[label_match.end() :]))
+                    )
                     if len(matches) != 1:
                         continue
                     match = matches[0]
                     value = match.group("value")
                     unit = match.group("unit")
-                    normalized_range = re.sub(
-                        r"(?<=\d)-(?=\d)",
-                        "...",
-                        value,
-                    )
+                    normalized_range = re.sub(r"(?<=\d)-(?=\d)", "...", value)
                     numbers = [
                         Decimal(part.replace(",", "."))
                         for part in re.findall(_NUMBER, normalized_range)
@@ -289,9 +445,9 @@ def extract_equipment_facts(
                     "AC/DC"
                     if re.search(r"\bAC/DC\b", line, re.I)
                     else "DC"
-                    if re.search(r"\bDC\b", line, re.I)
+                    if re.search(r"\bDC\b|постоянн\w*\s+ток", line, re.I)
                     else "AC"
-                    if re.search(r"\bAC\b", line, re.I)
+                    if re.search(r"\bAC\b|переменн\w*\s+ток", line, re.I)
                     else ""
                 )
                 role = (
@@ -313,10 +469,10 @@ def extract_equipment_facts(
                     role=role,
                     current_type=current_type,
                     phase=_phase(line),
-                    mode="",
+                    mode=mode,
                     condition=line if _conditional(line) else "",
                     variant=variant,
-                    configuration="",
+                    configuration=channel,
                     document_source_id=source_id,
                     page=number,
                     table_title=heading,

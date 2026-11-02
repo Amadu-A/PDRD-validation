@@ -16,7 +16,7 @@ require_separate_shared_namespace() {
     local service
     local container_ids
 
-    for service in rabbitmq n8n-db n8n; do
+    for service in rabbitmq n8n-db n8n searxng; do
         if ! container_ids="$(
             docker ps --all --quiet \
                 --filter "label=com.docker.compose.project=${project_name}" \

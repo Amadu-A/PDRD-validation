@@ -39,6 +39,8 @@ def test_other_variant_and_unverified_manual_do_not_confirm_failure():
     assert compare_equipment_stage(_pages(), search)["candidates_by_page"] == {}
     search = _search()
     search["results"][0]["document"]["trust_status"] = "unverified_user_override"
+    assert compare_equipment_stage(_pages(), search)["candidates_by_page"] == {}
+    search["allow_unverified"] = True
     raw = compare_equipment_stage(_pages(), search)["candidates_by_page"]["2"][0]
     assert raw["status"] == "needs_review"
     assert not verified_equipment_check(

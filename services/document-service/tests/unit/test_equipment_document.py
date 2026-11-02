@@ -58,3 +58,16 @@ def test_unsupported_or_oversized_document_is_rejected() -> None:
         use_case.execute(b"too long", "text/html")
     with pytest.raises(ValueError):
         use_case.execute(b"abc", "application/zip")
+
+
+def test_html_charset_and_table_columns_are_preserved():
+    """Кириллический сайт windows-1251 не превращается в нечитаемые символы."""
+    content = (
+        '<meta charset="windows-1251"><h1>Датчик-Ш</h1>'
+        "<table><tr><th>Параметр</th><th>Датчик-Ш</th></tr>"
+        "<tr><td>Напряжение питания</td><td>8...30 В</td></tr></table>"
+    ).encode("cp1251")
+    result = PyMuPdfEquipmentDocumentReader().extract(content, "text/html", 40)
+    assert "Параметр | Датчик-Ш" in result.pages[0].text
+    assert "Напряжение питания | 8...30 В" in result.pages[0].text
+    assert "\ufffd" not in result.pages[0].text

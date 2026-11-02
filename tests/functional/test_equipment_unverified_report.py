@@ -135,7 +135,8 @@ async def test_pending_source_requires_job_permission_then_creates_evidenced_mis
     assert allowed.document.trust_status == "unverified_user_override"
     assert source.status is SourceStatus.PENDING and allowed.manufacturer_site is None
     result = compare_equipment_stage(
-        project(), {"status": "completed", "results": [asdict(allowed)]}
+        project(),
+        {"status": "completed", "allow_unverified": True, "results": [asdict(allowed)]},
     )
     finding = result["candidates_by_page"]["1"][0]
     assert finding["equipment_details"]["manufacturer_value"] == "30"

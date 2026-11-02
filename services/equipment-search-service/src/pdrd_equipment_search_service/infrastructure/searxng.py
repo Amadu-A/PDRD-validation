@@ -1,6 +1,6 @@
 # services/equipment-search-service/src/pdrd_equipment_search_service/infrastructure/searxng.py
 
-"""Адаптер локального JSON API SearXNG."""
+"""Адаптер общего JSON API SearXNG, которым владеет shared-infrastructure."""
 
 from dataclasses import dataclass
 
@@ -11,11 +11,19 @@ from pdrd_equipment_search_service.domain.equipment import SearchHit
 
 @dataclass(slots=True)
 class SearxngSearch:
-    """Выполняет только ограниченные нейтральные запросы к локальному сервису."""
+    """Выполняет ограниченные нейтральные запросы к логическому shared endpoint."""
 
     client: httpx.AsyncClient
     base_url: str
     timeout_seconds: float = 8.0
+
+    async def is_ready(self) -> bool:
+        """Проверяет сетевую доступность shared без внешнего поискового запроса."""
+        response = await self.client.get(
+            self.base_url.rstrip("/") + "/", timeout=min(self.timeout_seconds, 3.0)
+        )
+        response.raise_for_status()
+        return True
 
     async def search(self, query: str, limit: int) -> tuple[SearchHit, ...]:
         """Возвращает ссылки без использования snippet как доказательства."""
@@ -33,6 +41,8 @@ class SearxngSearch:
         rows = payload.get("results", [])
         if not isinstance(rows, list):
             raise ValueError("SearXNG вернул некорректный список результатов.")
+        if not rows and payload.get("unresponsive_engines"):
+            raise ValueError("Поисковые движки общего SearXNG недоступны.")
         found: list[SearchHit] = []
         seen: set[str] = set()
         for row in rows:

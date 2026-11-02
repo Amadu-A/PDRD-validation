@@ -199,6 +199,22 @@ def compare_equipment_stage(
             warnings.append(
                 f"Источник {item.manufacturer} {item.model} требует проверки достоверности."
             )
+        allowed_document = document.get("trust_status") == "trusted" or (
+            search.get("allow_unverified") is True
+            and document.get("trust_status") == "unverified_user_override"
+            and len(str(document.get("sha256") or "")) == 64
+            and str(document.get("final_url") or "").startswith(("https://", "http://"))
+        )
+        if not allowed_document:
+            row.update(
+                status="incomplete",
+                reason_code="source_unverified",
+                reason="Источник не разрешён для этого задания; характеристики не использованы.",
+            )
+            continue
+        complete_provenance = len(str(document.get("sha256") or "")) == 64 and str(
+            document.get("final_url") or ""
+        ).startswith(("https://", "http://"))
         if document.get("revision_ambiguous"):
             warnings.append(
                 f"Для {item.manufacturer} {item.model} сохранено несколько ревизий: "
@@ -219,7 +235,7 @@ def compare_equipment_stage(
                 snippet=str(fact.get("snippet") or ""),
                 confidence=(
                     0.0
-                    if document.get("revision_ambiguous") or not trusted_document
+                    if document.get("revision_ambiguous") or not complete_provenance
                     else float(fact.get("confidence") or 0)
                 ),
                 applicability=str(fact.get("applicability") or ""),
@@ -227,6 +243,10 @@ def compare_equipment_stage(
                 condition=str(fact.get("condition") or ""),
                 configuration=str(fact.get("configuration") or ""),
                 value_type=str(fact.get("value_type") or "number"),
+                document_revision=str(document.get("revision") or ""),
+                table_title=str(fact.get("table_title") or ""),
+                row_label=str(fact.get("row_label") or ""),
+                column_label=str(fact.get("column_label") or ""),
             )
             for fact in raw_facts
             if isinstance(fact, dict)
@@ -260,6 +280,15 @@ def compare_equipment_stage(
             comparisons.append(asdict(comparison))
             if comparison.status not in {"mismatch_candidate", "needs_review"}:
                 continue
+            if not trusted_document:
+                comparison = replace(
+                    comparison,
+                    status="needs_review",
+                    explanation=(
+                        "Сравнение выполнено по разрешённому в этом задании источнику; "
+                        "достоверность документа требует проверки инженером."
+                    ),
+                )
             confirmed = comparison.status == "mismatch_candidate"
             basis = {
                 "source_id": comparison.source_id,

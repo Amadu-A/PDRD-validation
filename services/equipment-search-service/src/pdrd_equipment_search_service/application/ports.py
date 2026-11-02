@@ -58,6 +58,11 @@ class EquipmentCatalog(Protocol):
     async def document_vision_facts(self, source_id: str) -> tuple[dict[str, Any], ...]:
         """Читает визуальную транскрипцию неизменённого snapshot."""
 
+    async def load_document(
+        self, source_id: str
+    ) -> tuple[DocumentSnapshot, bytes, str]:
+        """Читает исходные байты с повторной проверкой SHA для адресного извлечения."""
+
     async def save_document(
         self,
         identity: EquipmentIdentity,
@@ -84,7 +89,7 @@ class EquipmentFactIndex(Protocol):
 
 
 class WebSearch(Protocol):
-    """Ищет ссылки через локальный SearXNG."""
+    """Ищет ссылки через общий SearXNG в сети ai-shared."""
 
     async def search(self, query: str, limit: int) -> tuple[SearchHit, ...]:
         """Возвращает ограниченный список ссылок."""
