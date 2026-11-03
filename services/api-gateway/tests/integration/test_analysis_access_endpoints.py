@@ -141,6 +141,12 @@ def test_middleware_binds_guest_owner_and_department(
             headers={"X-PDRD-Analysis-Access": token},
         )
         missing_token = client.get(f"/api/v1/analyses/{guest.id}/result")
+        denied_eq_exports = [
+            client.get(
+                f"/api/v1/analyses/{guest.id}/equipment-search/{suffix}?revision=1"
+            )
+            for suffix in ("report.pdf", "documents.zip")
+        ]
         client.cookies.set("pdrd_session", "invalid")
         invalid_cookie = client.get(
             f"/api/v1/analyses/{guest.id}/result",
@@ -171,6 +177,7 @@ def test_middleware_binds_guest_owner_and_department(
     assert guest_result.status_code == 200
     assert guest_result.headers["cache-control"] == "no-store"
     assert missing_token.status_code == 404
+    assert all(response.status_code == 404 for response in denied_eq_exports)
     assert invalid_cookie.status_code == 401
     assert foreign_review.status_code == 404
     assert owner_result.status_code == 200

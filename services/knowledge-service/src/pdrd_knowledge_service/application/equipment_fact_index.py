@@ -51,6 +51,7 @@ class EquipmentFactIndex:
         pages: list[dict[str, Any]],
         vision_facts: tuple[dict[str, Any], ...] = (),
         should_stop: Callable[[], Awaitable[bool]] | None = None,
+        reference_mode: bool = False,
     ) -> dict[str, Any]:
         """Извлекает один раз для текущей пары версий схемы и алгоритма."""
         cached = await self.cache.get(source_id)
@@ -91,6 +92,7 @@ class EquipmentFactIndex:
             model=model,
             variant=variant,
             pages=ordered_pages,
+            reference_mode=reference_mode,
         )
         visual_only = not facts and bool(vision_facts)
         if visual_only:

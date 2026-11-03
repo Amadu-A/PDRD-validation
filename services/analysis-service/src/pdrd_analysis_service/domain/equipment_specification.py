@@ -7,6 +7,11 @@ import re
 from copy import deepcopy
 from typing import Any
 
+from pdrd_analysis_service.domain.specification_strategy import (
+    specification_parameters,
+    specification_strategy,
+)
+
 
 class SpecificationContractError(ValueError):
     """Нарушение полноты или геометрии переданной спецификации."""
@@ -155,6 +160,7 @@ def table_equipment_records(
     """Создаёт EQ-идентичности из отдельных столбцов, сохраняя позиции одной модели отдельно."""
     result = []
     for item in specification["items"]:
+        strategy = specification_strategy(item)
         model, manufacturer = item.get("model", ""), item.get("manufacturer", "")
         model_confirmed = (
             bool(model)
@@ -170,7 +176,10 @@ def table_equipment_records(
         result.append(
             {
                 "manufacturer": manufacturer if maker_confirmed else "",
-                "model": model,
+                "model": strategy["search_model"],
+                "item_type": strategy["item_type"],
+                "search_name": strategy["search_name"],
+                "search_reference": strategy["search_reference"],
                 "variant": item.get("variant", ""),
                 "article": item.get("article", ""),
                 "variant_kind": "execution" if item.get("variant") else "none",
@@ -178,15 +187,18 @@ def table_equipment_records(
                 "object_ref": item.get("position") or item["item_id"],
                 "evidence_text": item["Caption"],
                 "manufacturer_evidence_text": manufacturer,
-                "confidence": 1.0 if model_confirmed else 0.0,
+                "confidence": 1.0 if strategy["search_confirmed"] else 0.0,
                 "status": "resolved"
                 if maker_confirmed and model_confirmed
                 else "needs_review",
-                "model_status": "confirmed" if model_confirmed else "needs_review",
+                "model_status": "confirmed"
+                if strategy["search_confirmed"]
+                else "needs_review",
                 "manufacturer_status": "explicit" if maker_confirmed else "unknown",
                 "entity_kind": "equipment",
                 "visual_regions": regions,
-                "parameters": item.get("parameters", []),
+                "parameters": item.get("parameters")
+                or specification_parameters(item.get("name", "")),
                 "extraction_method": "pdf_table",
                 "specification_item_id": item["item_id"],
                 "source_pages": item["source_pages"],

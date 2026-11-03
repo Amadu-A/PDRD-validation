@@ -4,6 +4,7 @@
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -46,6 +47,13 @@ def _snapshot(row) -> DocumentSnapshot:
             if getattr(row, "fetched_at", None) is not None
             else ""
         ),
+        applicability=(getattr(row, "assessment", None) or {}).get(
+            "applicability", "exact_match"
+        ),
+        document_type=(getattr(row, "assessment", None) or {}).get(
+            "document_type", "technical_document"
+        ),
+        reference=(getattr(row, "assessment", None) or {}).get("reference", ""),
     )
 
 
@@ -55,6 +63,29 @@ class PostgresEquipmentCatalog:
 
     engine: AsyncEngine
     storage_root: Path
+
+    async def cache_candidate_download(self, document: DownloadedDocument) -> None:
+        """Сохраняет bytes кандидата по SHA без выдачи применимости или прав источнику."""
+        self._write_content(document)
+
+    async def load_candidate_download(
+        self, digest: str, media_type: str, url: str
+    ) -> DownloadedDocument | None:
+        """Повторно читает только серверный content-addressed blob с проверкой digest."""
+        if not re.fullmatch(r"[0-9a-f]{64}", digest) or media_type not in {
+            "application/pdf",
+            "text/html",
+        }:
+            return None
+        suffix = ".pdf" if media_type == "application/pdf" else ".html"
+        path = self.storage_root / digest[:2] / f"{digest}{suffix}"
+        try:
+            content = path.read_bytes()
+        except FileNotFoundError:
+            return None
+        if sha256(content).hexdigest() != digest:
+            raise ValueError("Контрольная сумма сохранённого кандидата EQ не совпала.")
+        return DownloadedDocument(content, url, media_type)
 
     async def _canonical_key(self, manufacturer: str) -> str:
         """Разрешает официальное имя по alias без угадывания модели."""
@@ -87,7 +118,7 @@ class PostgresEquipmentCatalog:
                         SELECT d.source_id, d.manufacturer, d.model, d.variant, d.article,
                                d.source_url, d.final_url, d.sha256,
                                d.storage_reference, d.revision, d.trust_status,
-                               d.publication_date, d.fetched_at,
+                               d.publication_date, d.fetched_at, d.assessment,
                                EXISTS (
                                    SELECT 1 FROM equipment_search.documents AS prior
                                    WHERE prior.manufacturer_key = d.manufacturer_key
@@ -113,7 +144,7 @@ class PostgresEquipmentCatalog:
                         "variant_key": identity.key[2],
                         "legacy_model_key": normalized_token(identity.model),
                         "legacy_variant_key": normalized_token(identity.variant)
-                        if not identity.article
+                        if not identity.article and not identity.reference
                         else identity.key[2],
                     },
                 )
@@ -250,8 +281,9 @@ class PostgresEquipmentCatalog:
         normalized = await self._canonical_key(manufacturer)
         source_id = uuid4()
         async with self.engine.begin() as connection:
-            await connection.execute(
-                text("""
+            if manufacturer:
+                await connection.execute(
+                    text("""
                     INSERT INTO equipment_search.manufacturers
                     (id, name, normalized_name, aliases, enabled,
                      registration_source, created_at)
@@ -259,13 +291,13 @@ class PostgresEquipmentCatalog:
                             CAST('[]' AS JSONB), true, 'web_search', :now)
                     ON CONFLICT (normalized_name) DO NOTHING
                 """),
-                {
-                    "id": uuid4(),
-                    "name": manufacturer,
-                    "normalized_name": normalized,
-                    "now": datetime.now(UTC),
-                },
-            )
+                    {
+                        "id": uuid4(),
+                        "name": manufacturer,
+                        "normalized_name": normalized,
+                        "now": datetime.now(UTC),
+                    },
+                )
             row = (
                 await connection.execute(
                     text("""
@@ -382,13 +414,14 @@ class PostgresEquipmentCatalog:
                      model_key, model, variant_key, variant, source_url,
                      final_url, sha256, media_type, storage_reference,
                      revision, publication_date, trust_status, fetched_at,
-                     extracted_pages, vision_facts, article)
+                     extracted_pages, vision_facts, article, assessment)
                     VALUES (:id, :source_id, :source_domain_id, :manufacturer_key, :manufacturer,
                             :model_key, :model, :variant_key, :variant,
                             :source_url, :final_url, :sha256, :media_type,
                             :storage_reference, :revision, :publication_date,
                             :trust_status, :fetched_at,
-                            CAST(:extracted_pages AS JSONB), CAST(:vision_facts AS JSONB), :article)
+                            CAST(:extracted_pages AS JSONB), CAST(:vision_facts AS JSONB),
+                            :article, CAST(:assessment AS JSONB))
                     ON CONFLICT (manufacturer_key, model_key, variant_key, sha256)
                     DO NOTHING
                 """),
@@ -416,6 +449,17 @@ class PostgresEquipmentCatalog:
                     "vision_facts": json.dumps(
                         inspection.vision_facts, ensure_ascii=False
                     ),
+                    "assessment": json.dumps(
+                        {
+                            "applicability": inspection.applicability,
+                            "document_type": inspection.document_type,
+                            "manufacturer_evidence": inspection.manufacturer_evidence,
+                            "manufacturer_evidence_page": inspection.manufacturer_evidence_page,
+                            "item_type": identity.item_type,
+                            "reference": identity.reference,
+                        },
+                        ensure_ascii=False,
+                    ),
                 },
             )
             row = (
@@ -424,7 +468,7 @@ class PostgresEquipmentCatalog:
                         SELECT d.source_id, d.manufacturer, d.model, d.variant, d.article,
                                d.source_url, d.final_url, d.sha256,
                                d.storage_reference, d.revision, d.trust_status,
-                               d.publication_date, d.fetched_at,
+                               d.publication_date, d.fetched_at, d.assessment,
                                EXISTS (
                                    SELECT 1 FROM equipment_search.documents AS prior
                                    WHERE prior.manufacturer_key = d.manufacturer_key
@@ -460,7 +504,7 @@ class PostgresEquipmentCatalog:
                         SELECT source_id, manufacturer, model, variant, article,
                                source_url, final_url, sha256, storage_reference,
                                revision, trust_status, media_type,
-                               publication_date, fetched_at
+                               publication_date, fetched_at, assessment
                         FROM equipment_search.documents
                         WHERE source_id = :source_id
                     """),

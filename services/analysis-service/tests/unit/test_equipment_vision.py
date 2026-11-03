@@ -26,6 +26,32 @@ class FakeVision:
         return SimpleNamespace(payload=self.payload)
 
 
+@pytest.mark.parametrize("label", ["Изготовитель: Завод приборов", "Логотип продавца"])
+async def test_unknown_manufacturer_requires_an_explicit_document_label(label):
+    """Производитель из адресного VLM требует подписи, а не догадки по сайту."""
+    vision = FakeVision(
+        {
+            "manufacturer": "Завод приборов",
+            "manufacturer_evidence": label,
+            "model": "ВСКМ 90-20",
+            "variant": "",
+            "article": "",
+            "confidence": 0.95,
+            "facts": [],
+        }
+    )
+    result = await ExtractEquipmentVision(vision).execute(
+        manufacturer="",
+        model="ВСКМ 90-20",
+        variant="",
+        properties=(),
+        page=1,
+        image_bytes=b"PNG",
+    )
+    assert result["identified"] is label.startswith("Изготовитель:")
+    assert "manufacturer_evidence" in vision.request["schema"]["required"]
+
+
 @pytest.mark.asyncio
 async def test_exact_model_on_one_page_produces_review_facts() -> None:
     """Точная маркировка сохраняет страницу, а лимит фактов остаётся малым."""

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pdrd_api_gateway.core.settings import Settings
@@ -71,3 +72,44 @@ def test_public_import_cannot_supply_findings_or_bypass_review_channel(monkeypat
     assert managed.await_args.kwargs["operation"] == "equipment_update"
     assert managed.await_args.kwargs["command"]["findings"] == proposal["findings"]
     assert required_permission("POST", endpoint) == ("review.findings.decide",)
+
+
+@pytest.mark.parametrize(
+    "suffix,media",
+    [("report.pdf", "application/pdf"), ("documents.zip", "application/zip")],
+)
+def test_export_pins_server_revision_and_does_not_accept_report_body(
+    monkeypatch, suffix, media
+):
+    """Браузер выбирает версию; содержание и документы берутся только из серверного отчёта."""
+    job_id = uuid4()
+    reader = SimpleNamespace(
+        execute=AsyncMock(return_value=SimpleNamespace(document_id=uuid4()))
+    )
+    settings = Settings(_env_file=None)
+    container = SimpleNamespace(settings=settings, get_analysis_job=reader)
+    proposal = {
+        "job_id": str(job_id),
+        "revision": 7,
+        "search": {"status": "completed"},
+        "report": {"models": []},
+    }
+    builder = SimpleNamespace(execute=AsyncMock(return_value=proposal))
+    export = AsyncMock(return_value=b"fixture")
+    monkeypatch.setattr(
+        equipment_search, "build_equipment_update", lambda container: builder
+    )
+    monkeypatch.setattr(equipment_search.ExportEquipmentBundle, "execute", export)
+    app = FastAPI()
+    app.include_router(equipment_search.router)
+    app.dependency_overrides[get_container] = lambda: container
+    endpoint = f"/api/v1/analyses/{job_id}/equipment-search/{suffix}"
+    with TestClient(app) as client:
+        assert client.get(endpoint).status_code == 422
+        response = client.get(endpoint + "?revision=7")
+    assert response.status_code == 200 and response.headers["content-type"].startswith(
+        media
+    )
+    assert "r7." in response.headers["content-disposition"]
+    builder.execute.assert_awaited_once_with(job_id=job_id, revision=7)
+    assert export.await_args.args[0] is proposal

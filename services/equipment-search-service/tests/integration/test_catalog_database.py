@@ -329,6 +329,9 @@ async def test_job_service_start_and_replay_use_real_jsonb(
                 "model_status": "confirmed",
                 "variant_kind": "execution",
                 "article": "",
+                "item_type": "serial_equipment",
+                "name": "",
+                "reference": "",
             }
         ]
         assert created["identities"] == expected

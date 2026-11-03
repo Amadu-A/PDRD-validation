@@ -13,9 +13,22 @@ from pdrd_knowledge_service.application.equipment_discrete_values import (
 )
 
 SCHEMA_VERSION = 1
-EXTRACTOR_VERSION = 9
+EXTRACTOR_VERSION = 10
 
 _PROPERTY_LABELS = {
+    "outer_diameter": ("наружный диаметр", "outer diameter"),
+    "nominal_diameter": ("номинальный диаметр", "условный диаметр", "nominal diameter"),
+    "rated_pressure": ("номинальное давление", "rated pressure"),
+    "working_pressure": ("рабочее давление", "working pressure"),
+    "rated_flow_rate": ("номинальный расход", "rated flow rate"),
+    "max_flow_rate": ("максимальный расход", "maximum flow rate"),
+    "useful_volume": ("полезный объём", "полезный объем", "useful volume"),
+    "diameter": ("наружный диаметр", "номинальный диаметр", "диаметр", "diameter"),
+    "wall_thickness": ("толщина стенки", "wall thickness"),
+    "pressure": ("рабочее давление", "номинальное давление", "pressure"),
+    "flow_rate": ("номинальный расход", "расход воды", "flow rate"),
+    "volume": ("объём", "объем", "volume"),
+    "load_capacity": ("испытательная нагрузка", "нагрузка", "load capacity"),
     "sensor_type": ("sensor type", "тип датчика", "тип термопреобразователя"),
     "rtd_wires": ("rtd wires", "число проводов датчика"),
     "measurement_error": ("measurement error", "погрешность измерения"),
@@ -66,7 +79,10 @@ _PROPERTY_LABELS = {
         "температурный диапазон",
     ),
 }
-_UNIT = r"(?:mV|kV|V|mA|A|kW|W|kHz|Hz|°C|℃|мм|mm|мВ|кВ|В|мА|А|кВт|Вт|кГц|Гц|°С|%)"
+_UNIT = (
+    r"(?:м³/ч|м3/ч|л/с|м³|м3|MPa|МПа|kPa|кПа|bar|бар|kN|кН|м|m|"
+    r"mV|kV|V|mA|A|kW|W|kHz|Hz|°C|℃|мм|mm|мВ|кВ|В|мА|А|кВт|Вт|кГц|Гц|°С|%)"
+)
 _NUMBER = r"[+-]?\d+(?:[.,]\d+)?"
 _VALUE = re.compile(
     rf"(?P<value>(?:от\s+)?{_NUMBER}(?:\s*(?:\.{{2,}}|–|—|-|~|to|до)\s*{_NUMBER})?)"
@@ -386,6 +402,7 @@ def extract_equipment_facts(
     model: str,
     variant: str,
     pages: list[dict[str, Any]],
+    reference_mode: bool = False,
 ) -> list[dict[str, Any]]:
     """Принимает лишь строки, где модель и характеристика подтверждены вместе."""
     if not source_id or not model:
@@ -394,9 +411,15 @@ def extract_equipment_facts(
     for page in pages[:40]:
         number = int(page.get("page", 0))
         text = str(page.get("text") or "")[:200_000]
-        for line, applicability, heading, channel, mode in _scoped_lines(
-            text, model, variant
-        ):
+        scoped = (
+            [
+                (line[:8000], "technical_reference", "", "", "")
+                for line in text.splitlines()[:2000]
+            ]
+            if reference_mode
+            else _scoped_lines(text, model, variant)
+        )
+        for line, applicability, heading, channel, mode in scoped:
             for property_type, labels in _PROPERTY_LABELS.items():
                 label_match = next(
                     (
@@ -408,6 +431,17 @@ def extract_equipment_facts(
                     None,
                 )
                 if label_match is None:
+                    continue
+                covering = [
+                    (kind, found.end() - found.start())
+                    for kind, names in _PROPERTY_LABELS.items()
+                    for name in names
+                    if (found := re.search(re.escape(name), line, re.I)) is not None
+                    and found.start() <= label_match.start()
+                    and found.end() >= label_match.end()
+                ]
+                preferred = max(covering, key=lambda pair: pair[1])[0]
+                if preferred != property_type:
                     continue
                 discrete = parse_discrete_value(
                     property_type, line[label_match.end() :]
@@ -480,7 +514,9 @@ def extract_equipment_facts(
                     column_label=model if heading else "",
                     snippet=line,
                     confidence=(
-                        0.7
+                        0.6
+                        if reference_mode
+                        else 0.7
                         if _conditional(line) or applicability == "ambiguous_model_line"
                         else 0.9
                         if applicability in {"exact_model_line", "exact_model_column"}

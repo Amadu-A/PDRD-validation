@@ -66,6 +66,12 @@ class IdentityInput(BaseModel):
     model_status: str = "confirmed"
     variant_kind: str = "execution"
     article: str = Field(default="", max_length=200)
+    item_type: str = Field(
+        default="serial_equipment",
+        pattern="^(serial_equipment|standard_product|material|prefabricated_structure|designed_structure|unidentified)$",
+    )
+    name: str = Field(default="", max_length=200)
+    reference: str = Field(default="", max_length=100)
 
 
 class ResumeRequest(BaseModel):
@@ -141,6 +147,8 @@ def create_app(
                 total_queries=config.max_queries,
                 vision_calls=config.max_vision_calls,
                 urls_per_query=config.max_urls_per_query,
+                discovery_depth=config.discovery_depth,
+                links_per_page=config.links_per_page,
             ),
         )
         jobs = SearchJobService(
@@ -158,6 +166,8 @@ def create_app(
             batch_size=config.batch_size,
             adaptive_vision_ceiling=config.adaptive_vision_ceiling,
             max_resume_runs=config.max_resume_runs,
+            pages_per_model=config.pages_per_model,
+            extractions_per_model=config.extractions_per_model,
         )
         app.state.jobs = jobs
         app.state.sources = PostgresSourceManager(engine)

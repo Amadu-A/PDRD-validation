@@ -76,6 +76,8 @@ async def extract_document_facts(
             return status, facts, ""
     if document.media_type != "application/pdf":
         return status, (), ReasonCode.FACTS_UNAVAILABLE
+    if snapshot.applicability == "technical_reference":
+        return status, (), ReasonCode.FACTS_UNAVAILABLE
     if vision is None:
         return status, (), ReasonCode.FACTS_UNAVAILABLE
     if budget.remaining <= 0:
@@ -94,7 +96,15 @@ async def extract_document_facts(
     target = replace(
         original,
         manufacturer_aliases=aliases,
-        vision_pages=candidates or original.vision_pages,
+        vision_pages=tuple(
+            dict.fromkeys(
+                (
+                    *(page for page in original.vision_pages if page in candidates),
+                    *original.vision_pages,
+                    *candidates,
+                )
+            )
+        ),
     )
     await checkpoint()
     verified = await vision.inspect(

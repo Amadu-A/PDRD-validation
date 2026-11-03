@@ -49,6 +49,9 @@ class EquipmentIdentity:
     model_status: str = "confirmed"
     variant_kind: str = "execution"
     article: str = ""
+    item_type: str = "serial_equipment"
+    name: str = ""
+    reference: str = ""
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -57,7 +60,8 @@ class EquipmentIdentity:
             normalized_token(self.manufacturer),
             equipment_token(self.model),
             equipment_token(self.variant)
-            + ("/артикул" + equipment_token(self.article) if self.article else ""),
+            + ("/артикул" + equipment_token(self.article) if self.article else "")
+            + ("/стандарт" + equipment_token(self.reference) if self.reference else ""),
         )
 
     @property
@@ -108,6 +112,8 @@ class SearchHit:
     @property
     def hostname(self) -> str:
         """Возвращает hostname только HTTP(S)-ссылки без учётных данных."""
+        if len(self.url) > 2048:
+            return ""
         try:
             parsed = urlsplit(self.url)
             hostname = parsed.hostname
@@ -154,6 +160,10 @@ class DocumentInspection:
     manufacturer: str = ""
     manufacturer_aliases: tuple[str, ...] = ()
     vision_pages: tuple[int, ...] = ()
+    applicability: str = "exact_match"
+    document_type: str = "technical_document"
+    manufacturer_evidence: str = ""
+    manufacturer_evidence_page: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +184,9 @@ class DocumentSnapshot:
     publication_date: str = ""
     fetched_at: str = ""
     article: str = ""
+    applicability: str = "exact_match"
+    document_type: str = "technical_document"
+    reference: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,3 +206,5 @@ class ResolveResult:
     tried_url_hashes: tuple[str, ...] = ()
     retryable: bool = False
     manufacturer_site: dict[str, str] | None = None
+    candidates: tuple[dict[str, Any], ...] = ()
+    stage_status: str = "not_searched"

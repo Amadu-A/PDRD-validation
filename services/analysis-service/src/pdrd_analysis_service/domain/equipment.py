@@ -18,14 +18,15 @@ def _token(value: str) -> str:
 
 
 def equipment_key(
-    manufacturer: str, model: str, variant: str, article: str = ""
+    manufacturer: str, model: str, variant: str, article: str = "", reference: str = ""
 ) -> tuple[str, str, str]:
     """Сохраняет модель, исполнение и артикул при незначащих вариациях записи."""
     return (
         _token(manufacturer),
         identity_token(model),
         identity_token(variant)
-        + ("/артикул" + identity_token(article) if article else ""),
+        + ("/артикул" + identity_token(article) if article else "")
+        + ("/стандарт" + identity_token(reference) if reference else ""),
     )
 
 
@@ -61,11 +62,20 @@ class InventoryItem:
     model_status: str = "confirmed"
     manufacturer_status: str = "explicit"
     article: str = ""
+    item_type: str = "serial_equipment"
+    search_name: str = ""
+    search_reference: str = ""
 
     @property
     def key(self) -> tuple[str, str, str]:
         """Возвращает ключ для единственного внешнего поиска."""
-        return equipment_key(self.manufacturer, self.model, self.variant, self.article)
+        return equipment_key(
+            self.manufacturer,
+            self.model,
+            self.variant,
+            self.article,
+            self.search_reference,
+        )
 
 
 def build_inventory(pages: Sequence[Mapping[str, Any]]) -> tuple[InventoryItem, ...]:
@@ -88,7 +98,13 @@ def build_inventory(pages: Sequence[Mapping[str, Any]]) -> tuple[InventoryItem, 
             model = str(identity.get("model") or "").strip()
             variant = str(identity.get("variant") or "").strip()
             article = str(identity.get("article") or "").strip()
-            key = equipment_key(manufacturer, model, variant, article)
+            key = equipment_key(
+                manufacturer,
+                model,
+                variant,
+                article,
+                str(identity.get("search_reference") or ""),
+            )
             occurrence = EquipmentOccurrence(
                 page=page_number,
                 object_ref=str(identity.get("object_ref") or ""),
@@ -159,6 +175,9 @@ def build_inventory(pages: Sequence[Mapping[str, Any]]) -> tuple[InventoryItem, 
                 ),
                 manufacturer_status=str(first.get("manufacturer_status") or "explicit"),
                 article=str(first.get("article") or "").strip(),
+                item_type=str(first.get("item_type") or "serial_equipment"),
+                search_name=str(first.get("search_name") or ""),
+                search_reference=str(first.get("search_reference") or ""),
             )
         )
 
@@ -244,6 +263,19 @@ class Comparison:
 
 
 _PROPERTY_ALIASES = {
+    "outer_diameter": ("наружный диаметр", "outer diameter"),
+    "nominal_diameter": ("номинальный диаметр", "условный диаметр", "nominal diameter"),
+    "rated_pressure": ("номинальное давление", "rated pressure"),
+    "working_pressure": ("рабочее давление", "working pressure"),
+    "rated_flow_rate": ("номинальный расход", "rated flow rate"),
+    "max_flow_rate": ("максимальный расход", "maximum flow rate"),
+    "useful_volume": ("полезный объём", "полезный объем", "useful volume"),
+    "diameter": ("наружный диаметр", "номинальный диаметр", "диаметр", "diameter"),
+    "wall_thickness": ("толщина стенки", "wall thickness"),
+    "pressure": ("рабочее давление", "номинальное давление", "pressure"),
+    "flow_rate": ("номинальный расход", "расход воды", "flow rate"),
+    "volume": ("объём", "объем", "volume"),
+    "load_capacity": ("испытательная нагрузка", "нагрузка", "load capacity"),
     "sensor_type": ("sensor type", "тип датчика", "тип термопреобразователя"),
     "rtd_wires": ("rtd wires", "схема подключения rtd", "число проводов датчика"),
     "measurement_error": ("measurement error", "погрешность измерения"),
@@ -291,6 +323,19 @@ _PROPERTY_ALIASES = {
     ),
 }
 _UNIT_SCALE = {
+    "м3": ("volume", Decimal(1)),
+    "м³": ("volume", Decimal(1)),
+    "м3/ч": ("flow_rate", Decimal(1)),
+    "м³/ч": ("flow_rate", Decimal(1)),
+    "л/с": ("flow_rate", Decimal("3.6")),
+    "мпа": ("pressure", Decimal(1)),
+    "mpa": ("pressure", Decimal(1)),
+    "бар": ("pressure", Decimal("0.1")),
+    "bar": ("pressure", Decimal("0.1")),
+    "кпа": ("pressure", Decimal("0.001")),
+    "kpa": ("pressure", Decimal("0.001")),
+    "кн": ("load_capacity", Decimal(1)),
+    "kn": ("load_capacity", Decimal(1)),
     "мм": ("length", Decimal(1)),
     "mm": ("length", Decimal(1)),
     "м": ("length", Decimal(1000)),
@@ -328,6 +373,11 @@ def _property(value: str) -> str:
         if text == kind or any(alias in text for alias in aliases):
             return kind
     return ""
+
+
+def equipment_property_name(value: str) -> str:
+    """Возвращает единый предметный ключ свойства для отчёта отдельной позиции."""
+    return _property(value)
 
 
 def _current_type(value: str) -> str:
@@ -421,12 +471,20 @@ def _value(value: str, unit: str, property_name: str) -> tuple | None:
         expected = (
             "length"
             if property_name.startswith("mounting_")
+            or property_name
+            in {"diameter", "wall_thickness", "outer_diameter", "nominal_diameter"}
             else "voltage"
             if property_name.endswith("voltage")
             else "current"
             if property_name.endswith("current")
             else "temperature"
             if property_name == "ambient_temperature"
+            else "pressure"
+            if property_name.endswith("pressure")
+            else "flow_rate"
+            if property_name.endswith("flow_rate")
+            else "volume"
+            if property_name.endswith("volume")
             else property_name
         )
         if property_name == "measurement_error":
@@ -627,3 +685,32 @@ def compare_equipment(
 def inventory_payload(items: Sequence[InventoryItem]) -> list[dict]:
     """Готовит JSON без потери физических вхождений."""
     return [asdict(item) for item in items]
+
+
+def equipment_property_checks(
+    item: InventoryItem,
+    facts: Sequence[EquipmentFact],
+    comparisons: Sequence[Comparison],
+) -> list[dict]:
+    """Отличает отсутствие параметра от невозможности сопоставить условия его проверки."""
+    project = {
+        _property(str(parameter.get("property_name") or ""))
+        for part in item.occurrences
+        for parameter in part.parameters
+        if parameter.get("evidence_status") != "needs_review"
+    }
+    manufacturer = {_property(fact.property_name) for fact in facts}
+    compared = {comparison.property_name for comparison in comparisons}
+    return [
+        {
+            "property_name": prop,
+            "status": "project_property_missing"
+            if prop not in project
+            else "manufacturer_property_missing"
+            if prop not in manufacturer
+            else "comparison_completed"
+            if prop in compared
+            else "conditions_not_comparable",
+        }
+        for prop in sorted((project | manufacturer) - {""})
+    ]

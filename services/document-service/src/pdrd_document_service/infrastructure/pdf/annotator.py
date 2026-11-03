@@ -77,7 +77,7 @@ class _PdfReportWriter:
             )
 
         self._write(
-            "Замечания",
+            report.findings_label,
             font_size=13.0,
             after=7.0,
         )

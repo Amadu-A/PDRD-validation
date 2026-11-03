@@ -110,12 +110,12 @@ class PyMuPdfEquipmentDocumentReader:
         with suppress(Exception):
             for table in page.find_tables().tables[:8]:
                 for row in table.extract()[:80]:
-                    if 1 < len(row) <= 16:
+                    if 1 < len(row) <= 32:
                         cells = [
                             " ".join(str(cell or "").split())[:500] for cell in row
                         ]
                         tables.append(" | ".join(cells))
-        return (content + "\n" + "\n".join(tables))[:20_000]
+        return (content + "\n" + "\n".join(tables))[:200_000]
 
     def extract(
         self,

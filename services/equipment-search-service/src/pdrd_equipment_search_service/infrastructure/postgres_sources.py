@@ -60,14 +60,15 @@ class PostgresSourceManager:
             rows = (
                 await connection.execute(
                     text("""
-                        SELECT s.id, m.name AS manufacturer, m.aliases,
+                        SELECT s.id, COALESCE(m.name, 'Справочные источники') AS manufacturer,
+                               COALESCE(m.aliases, '[]'::jsonb) AS aliases,
                                s.hostname, s.status, s.enabled, s.allow_http,
                                s.registration_source, s.example_url,
                                s.example_model, s.updated_at, s.updated_by,
                                (SELECT count(*) FROM equipment_search.documents d
                                 WHERE d.source_domain_id = s.id) AS uses_count
                         FROM equipment_search.source_domains s
-                        JOIN equipment_search.manufacturers m
+                        LEFT JOIN equipment_search.manufacturers m
                           ON m.normalized_name = s.manufacturer_key
                         WHERE (CAST(:status AS TEXT) IS NULL
                                OR s.status = CAST(:status AS TEXT))
@@ -138,6 +139,8 @@ class PostgresSourceManager:
             raise ValueError("Нужны производитель, причина и инициатор.")
         hostname = validate_hostname(hostname)
         key = normalized_token(manufacturer)
+        if key == "справочные источники":
+            key = ""
         now = datetime.now(UTC)
         async with self.engine.begin() as connection:
             row = (
@@ -152,7 +155,7 @@ class PostgresSourceManager:
             ).first()
             if row is not None:
                 key = row.normalized_name
-            else:
+            elif key:
                 await connection.execute(
                     text("""
                         INSERT INTO equipment_search.manufacturers

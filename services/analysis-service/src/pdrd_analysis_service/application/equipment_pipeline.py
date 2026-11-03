@@ -11,6 +11,7 @@ from pdrd_analysis_service.application.engineering_program import (
 )
 from pdrd_analysis_service.application.equipment_report import (
     model_report,
+    position_report,
     report_statistics,
 )
 from pdrd_analysis_service.domain.equipment import (
@@ -20,6 +21,7 @@ from pdrd_analysis_service.domain.equipment import (
     build_inventory,
     compare_equipment,
     equipment_key,
+    equipment_property_checks,
     inventory_payload,
 )
 from pdrd_analysis_service.domain.equipment_specification import specification_report
@@ -101,7 +103,13 @@ def compare_equipment_stage(
         key = equipment_key(
             *(
                 str(identity.get(field) or "")
-                for field in ("manufacturer", "model", "variant", "article")
+                for field in (
+                    "manufacturer",
+                    "model",
+                    "variant",
+                    "article",
+                    "reference",
+                )
             )
         )
         by_key[key] = raw
@@ -136,6 +144,13 @@ def compare_equipment_stage(
         verified_brand = result.get("resolved_manufacturer") or (
             result.get("document") or {}
         ).get("manufacturer")
+        reference = item.item_type != "serial_equipment"
+        if (
+            reference
+            and (result.get("document") or {}).get("applicability")
+            == "technical_reference"
+        ):
+            item = replace(item, status="resolved")
         if item.status != "resolved" and not (
             not item.manufacturer
             and item.manufacturer_status == "unknown"
@@ -176,6 +191,12 @@ def compare_equipment_stage(
             )[index]
             != equipment_key(item.manufacturer, item.model, item.variant)[index]
             for index, field in enumerate(("manufacturer", "model", "variant"))
+        ) or (
+            item.search_reference
+            and equipment_key(
+                "", "", "", reference=str(document.get("reference") or "")
+            )[2]
+            != equipment_key("", "", "", reference=item.search_reference)[2]
         ):
             diagnostics.append(
                 {
@@ -259,9 +280,22 @@ def compare_equipment_stage(
                 f"Для {item.manufacturer} {item.model} нужны подтверждённые EQ Facts."
             )
             continue
+        if reference:
+            # Нормативная/типовая характеристика не становится паспортом поставки.
+            facts = [
+                replace(
+                    fact,
+                    confidence=min(fact.confidence, 0.6),
+                    applicability="technical_reference",
+                )
+                for fact in facts
+            ]
         model_comparisons = compare_equipment(item, facts)
         row.update(
             model_report(item, result, [asdict(part) for part in model_comparisons])
+        )
+        row["property_checks"] = equipment_property_checks(
+            item, facts, model_comparisons
         )
         if not model_comparisons and any(part.parameters for part in item.occurrences):
             diagnostics.append(
@@ -387,6 +421,7 @@ def compare_equipment_stage(
         "policy": search.get("policy") or {},
         "metrics": metrics,
         "inventory": inventory_payload(inventory),
+        "positions": position_report(models, specification_report(pages)),
         "comparisons": comparisons,
         "candidates_by_page": {str(page): rows for page, rows in candidates.items()},
         "warnings": warnings,

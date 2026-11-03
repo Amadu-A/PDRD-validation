@@ -116,6 +116,7 @@ def project(value="30"):
 
 
 @pytest.mark.parametrize("media_type", ["application/pdf", "text/html"])
+@pytest.mark.parametrize("discovery", [False, True])
 @pytest.mark.parametrize(
     ("source_status", "override", "allowed"),
     [
@@ -126,7 +127,7 @@ def project(value="30"):
     ],
 )
 async def test_shared_search_document_facts_and_comparison(
-    media_type, source_status, override, allowed
+    media_type, source_status, override, allowed, discovery
 ):
     """Разрешение реально включает извлечение/проверку; blocked не обходится галкой."""
     document_app, knowledge_app = FastAPI(), FastAPI()
@@ -177,6 +178,12 @@ async def test_shared_search_document_facts_and_comparison(
         async def download(self, url, **kwargs):
             """Возвращает реальные PDF/HTML bytes."""
             self.calls += 1
+            if discovery and url.endswith("/passport"):
+                return DownloadedDocument(
+                    b'<html><a href="/download?id=9">Passport PDF</a></html>',
+                    url,
+                    "text/html",
+                )
             return DownloadedDocument(content, url, media_type)
 
     source = SourceDomain("MEAN WELL", "maker.example", source_status)
@@ -275,5 +282,11 @@ async def test_shared_search_document_facts_and_comparison(
         searches_before = len([r for r in requests if r[0] == "searxng"])
         warm = await resolver.execute(identity, allow_unverified=override)
         assert warm.status == "local" and warm.facts == resolved.facts
-        assert downloader.calls == 1
+        assert downloader.calls == (2 if discovery else 1)
+        if discovery:
+            assert resolved.document.source_url == "https://maker.example/download?id=9"
+            assert any(
+                row["discovery_method"] == "html_link" and row.get("source_id")
+                for row in resolved.candidates
+            )
         assert len([r for r in requests if r[0] == "searxng"]) == searches_before

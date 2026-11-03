@@ -61,3 +61,7 @@ class Settings(BaseSettings):
     batch_size: int = Field(default=10, ge=1, le=50)
     adaptive_vision_ceiling: int = Field(default=8, ge=0, le=12)
     max_resume_runs: int = Field(default=3, ge=0, le=5)
+    pages_per_model: int = Field(default=6, ge=1, le=20)
+    extractions_per_model: int = Field(default=6, ge=1, le=20)
+    discovery_depth: int = Field(default=2, ge=0, le=3)
+    links_per_page: int = Field(default=5, ge=1, le=10)

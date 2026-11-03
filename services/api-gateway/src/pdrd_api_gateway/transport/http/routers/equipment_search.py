@@ -12,8 +12,12 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from pdrd_api_gateway.application.ports.review import ReviewRequestError
+from pdrd_api_gateway.application.use_cases.equipment_export import (
+    ExportEquipmentBundle,
+)
 from pdrd_api_gateway.core.container import ApplicationContainer
 from pdrd_api_gateway.core.equipment_updates import build_equipment_update
+from pdrd_api_gateway.infrastructure.equipment_export import HttpEquipmentExport
 from pdrd_api_gateway.infrastructure.equipment_search import EquipmentSearchClient
 from pdrd_api_gateway.transport.http.dependencies import get_container
 from pdrd_api_gateway.transport.http.identity_authorization import VerifiedIdentity
@@ -159,6 +163,41 @@ async def equipment_report(
         raise HTTPException(error.status_code, error.detail) from error
     except httpx.HTTPError as error:
         raise _upstream_error(error) from error
+
+
+@router.get("/api/v1/analyses/{job_id}/equipment-search/report.pdf")
+@router.get("/api/v1/analyses/{job_id}/equipment-search/documents.zip")
+async def export_equipment_report(
+    job_id: UUID,
+    request: Request,
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+    revision: int,
+) -> Response:
+    """Выгружает именно закреплённую версию доступного анализа, включая фоновый EQ."""
+    await _document_id(container, job_id)
+    bundle = request.url.path.endswith(".zip")
+    try:
+        proposal = await build_equipment_update(container).execute(
+            job_id=job_id, revision=revision
+        )
+        content = await ExportEquipmentBundle(
+            HttpEquipmentExport(_client(container), container.settings.document_service)
+        ).execute(proposal, bundle=bundle)
+    except ReviewRequestError as error:
+        raise HTTPException(error.status_code, error.detail) from error
+    except httpx.HTTPError as error:
+        raise _upstream_error(error) from error
+    suffix = "zip" if bundle else "pdf"
+    return Response(
+        content,
+        media_type="application/zip" if bundle else "application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=eq-{job_id}-r{revision}.{suffix}",
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
+        },
+    )
 
 
 @router.post("/api/v1/analyses/{job_id}/review/equipment-updates")

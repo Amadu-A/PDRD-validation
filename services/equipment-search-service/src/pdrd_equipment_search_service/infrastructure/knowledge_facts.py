@@ -39,6 +39,7 @@ class KnowledgeEquipmentFactIndex:
                 "model": snapshot.model,
                 "variant": snapshot.variant,
                 "properties": list(identity.properties[:8]),
+                "reference_mode": snapshot.applicability == "technical_reference",
                 "vision_facts": list(vision_facts),
                 "pages": [{"page": page, "text": content} for page, content in pages],
             },

@@ -28,6 +28,9 @@ class PostgresJobRepository:
         """Проверяет соединение и наличие таблиц после миграции."""
         async with self.engine.connect() as connection:
             await connection.execute(
+                text("SELECT assessment FROM equipment_search.documents LIMIT 0")
+            )
+            await connection.execute(
                 text(
                     "SELECT policy, checkpoint, revision, resume_count "
                     "FROM equipment_search.equipment_jobs LIMIT 0"
@@ -87,6 +90,9 @@ class PostgresJobRepository:
                 "model_status": "confirmed",
                 "variant_kind": "execution",
                 "article": "",
+                "item_type": "serial_equipment",
+                "name": "",
+                "reference": "",
             }
             saved = [{**defaults, **item} for item in row.identities]
             requested = [{**defaults, **item} for item in identities]

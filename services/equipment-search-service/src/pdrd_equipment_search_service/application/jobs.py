@@ -117,6 +117,8 @@ class SearchJobService:
     batch_size: int = 10
     adaptive_vision_ceiling: int = 8
     max_resume_runs: int = 3
+    pages_per_model: int = 6
+    extractions_per_model: int = 6
     _watcher: asyncio.Task[None] | None = field(default=None, init=False)
     _tasks: dict[UUID, asyncio.Task[None]] = field(default_factory=dict, init=False)
     _semaphore: asyncio.Semaphore = field(init=False)
@@ -202,6 +204,8 @@ class SearchJobService:
         """Ограничивает квоты числом моделей без выдачи каждому собственного GPU-бюджета."""
         return {
             "background": models > self.inline_models,
+            "pages_per_model": self.pages_per_model,
+            "extractions_per_model": self.extractions_per_model,
             "models": models,
             "query_limit": min(
                 1500, max(self.max_queries, models * self.queries_per_model)

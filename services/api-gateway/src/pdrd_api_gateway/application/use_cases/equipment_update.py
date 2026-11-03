@@ -51,9 +51,19 @@ class BuildEquipmentUpdate:
             if revision is not None
             else await self.jobs.state(job.document_id)
         )
-        report = await self.comparison.compare(
-            inventory_pages(check.get("inventory") or []), search
-        )
+        pages = inventory_pages(check.get("inventory") or [])
+        specification = check.get("specification") or {}
+        if pages and specification:
+            # Отчёт сравнения сам связывает каждую позицию по исходным row_id.
+            pages[0]["facts"]["equipment_specification"] = {
+                **specification,
+                "items": specification.get("structured_items", []),
+                "page": pages[0]["page_number"],
+            }
+        report = await self.comparison.compare(pages, search)
+        # Исходная таблица сохраняется и после фонового обновления EQ.
+        if check.get("specification"):
+            report["specification"] = check["specification"]
         return {
             "job_id": str(job_id),
             "revision": int(search.get("revision") or 0),

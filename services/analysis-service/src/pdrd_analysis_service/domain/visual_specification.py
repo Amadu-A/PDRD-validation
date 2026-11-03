@@ -236,6 +236,12 @@ def visual_specification_facts(rows, page):
 
 def visual_equipment_records(facts):
     """Передаёт те же строки в EQ без повторного запроса и без угадывания модели изделия."""
+    from pdrd_analysis_service.domain.evidence_audit import literal_contains
+    from pdrd_analysis_service.domain.specification_strategy import (
+        specification_parameters,
+        specification_strategy,
+    )
+
     records, seen = [], set()
     for fact in facts:
         if (
@@ -250,10 +256,20 @@ def visual_equipment_records(facts):
         )
         row = source["row"]
         columns = row["columns"]
+        explicit_model = str(columns.get("model") or "")
+        model_proven = bool(
+            explicit_model and literal_contains(row["row_text"], explicit_model)
+        )
+        strategy = specification_strategy(
+            {"name": row["name"], "model": explicit_model if model_proven else ""}
+        )
         seen.add(fact.source_item_id)
         records.append(
             {
-                "model": columns.get("model", ""),
+                "model": strategy["search_model"],
+                "item_type": strategy["item_type"],
+                "search_name": strategy["search_name"],
+                "search_reference": strategy["search_reference"],
                 "manufacturer": columns.get("manufacturer", ""),
                 "article": columns.get("article", ""),
                 "variant": "",
@@ -262,10 +278,12 @@ def visual_equipment_records(facts):
                 "object_ref": row["position"],
                 "evidence_text": fact.evidence_text,
                 "visual_regions": list(fact.visual_regions),
-                "parameters": [],
+                "parameters": specification_parameters(row["name"]),
                 "status": "needs_review",
                 "confidence": 0.8,
-                "model_status": "needs_review",
+                "model_status": "confirmed"
+                if strategy["search_confirmed"]
+                else "needs_review",
                 "manufacturer_status": "unknown",
                 "entity_kind": "equipment",
                 "extraction_method": fact.extraction_method,

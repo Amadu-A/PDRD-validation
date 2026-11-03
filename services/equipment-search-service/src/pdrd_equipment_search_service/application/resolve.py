@@ -2,6 +2,7 @@
 
 """Поиск документации по уникальной подтверждённой модели оборудования."""
 
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from hashlib import sha256
@@ -29,13 +30,19 @@ from pdrd_equipment_search_service.domain.diagnostics import (
     DocumentOperationError,
     ReasonCode,
 )
+from pdrd_equipment_search_service.domain.discovery import (
+    candidate_id,
+    discover_links,
+    html_access_issue,
+    public_url,
+    search_queries,
+)
 from pdrd_equipment_search_service.domain.equipment import (
     EquipmentIdentity,
     ResolveResult,
     SearchHit,
     SourceDomain,
     SourceStatus,
-    safe_search_term,
 )
 from pdrd_equipment_search_service.domain.search_candidates import clearly_other_model
 
@@ -49,6 +56,8 @@ class SearchLimits:
     downloads: int = 3
     total_queries: int = 8
     vision_calls: int = 2
+    discovery_depth: int = 2
+    links_per_page: int = 5
 
 
 class SearchCancelled(Exception):
@@ -92,6 +101,7 @@ class ResolveEquipment:
                 "needs_review",
                 warning="Модель или производитель не подтверждены.",
                 reason_code=ReasonCode.MODEL_UNCERTAIN,
+                stage_status="comparison_unavailable",
             )
 
         vision_budget = vision_budget or EquipmentVisionBudget(self.limits.vision_calls)
@@ -109,12 +119,15 @@ class ResolveEquipment:
             if local is not None
             else None
         )
+        local_fallback = None
         if local is not None and local_source is not None:
             effective_local = replace(identity, manufacturer=local.manufacturer)
             # Решение источника относится к новому заданию; исторические байты и
             # trust_status сохранённого snapshot не переписываются.
             local = replace(
                 local,
+                source_url=public_url(local.source_url),
+                final_url=public_url(local.final_url),
                 trust_status=(
                     "trusted"
                     if local_source.status is SourceStatus.TRUSTED
@@ -130,6 +143,7 @@ class ResolveEquipment:
                     "local",
                     document=local,
                     manufacturer_site=manufacturer_site,
+                    stage_status="document_verified",
                 )
             try:
                 pages = await self.catalog.document_pages(local.source_id)
@@ -146,7 +160,7 @@ class ResolveEquipment:
                     should_stop=should_stop,
                     inspector=self.inspector,
                 )
-                return ResolveResult(
+                local_result = ResolveResult(
                     identity,
                     "local" if facts else "incomplete",
                     document=local,
@@ -158,7 +172,14 @@ class ResolveEquipment:
                     else "Характеристики сохранённого документа не извлечены.",
                     retryable=not bool(facts),
                     manufacturer_site=manufacturer_site,
+                    stage_status="facts_extracted"
+                    if facts
+                    else "comparison_unavailable",
+                    candidates=tuple((previous or {}).get("candidates", ())),
                 )
+                if facts:
+                    return local_result
+                local_fallback = local_result
             except Exception:
                 return ResolveResult(
                     identity,
@@ -172,8 +193,9 @@ class ResolveEquipment:
         hosts = await self.catalog.trusted_hosts(identity.manufacturer)
         tried: set[str] = set((previous or {}).get("tried_url_hashes", ()))
         attempts: list[dict] = []
+        candidates = [dict(row) for row in (previous or {}).get("candidates", ())]
         if round_index is not None:
-            return await self._execute_round(
+            result = await self._execute_round(
                 identity,
                 hosts,
                 tried,
@@ -183,7 +205,9 @@ class ResolveEquipment:
                 should_stop,
                 vision_budget,
                 search_budget,
+                candidates,
             )
+            return _keep_saved_document(result, local_fallback)
         downloads = 0
         queries = 0
         warning = ""
@@ -215,6 +239,7 @@ class ResolveEquipment:
                     vision_budget,
                     search_budget,
                     attempts,
+                    candidates,
                 )
                 if result is not None:
                     return result
@@ -244,13 +269,14 @@ class ResolveEquipment:
                 vision_budget,
                 search_budget,
                 attempts,
+                candidates,
             )
             if result is not None:
                 return result
             if inspection_warning:
                 warning = inspection_warning
 
-        return ResolveResult(
+        result = ResolveResult(
             identity,
             "not_found" if not warning else "incomplete",
             warning=warning or "Применимая документация не найдена.",
@@ -258,7 +284,10 @@ class ResolveEquipment:
             reason_code=attempts[-1]["code"] if attempts else ReasonCode.NOT_FOUND,
             attempts=tuple(attempts),
             tried_url_hashes=tuple(sorted(tried)),
+            candidates=tuple(candidates),
+            stage_status="document_rejected" if candidates else "document_not_found",
         )
+        return _keep_saved_document(result, local_fallback)
 
     async def _execute_round(
         self,
@@ -271,28 +300,55 @@ class ResolveEquipment:
         should_stop,
         vision_budget,
         search_budget,
+        candidates,
     ) -> ResolveResult:
         """Выполняет одну попытку модели, оставляя первоначальный проход остальным."""
         hostname = hosts[0] if hosts and round_index == 0 else None
-        queries = self._queries(identity, hostname)
+        queries = search_queries(identity, hostname)
         query = queries[
             0 if hostname else min(round_index - bool(hosts), len(queries) - 1)
         ]
-        if not hosts and round_index == 2:
-            query = f"{queries[0]} filetype:pdf"
-        if not search_budget.claim_query():
-            return ResolveResult(
-                identity, "not_checked", reason_code=ReasonCode.QUERY_BUDGET
-            )
-        try:
-            hits = await self.search.search(query, self.limits.urls_per_query)
-        except Exception:
-            return ResolveResult(
-                identity,
-                "incomplete",
-                reason_code=ReasonCode.NETWORK_ERROR,
-                attempts=({"stage": "search", "code": ReasonCode.NETWORK_ERROR},),
-                retryable=True,
+        hits = tuple(
+            SearchHit(row["document_url"], row.get("title", ""))
+            for row in candidates
+            if row.get("download_status") == "downloaded"
+            and row.get("retryable")
+            and row.get("document_url")
+        )
+        if not hits:
+            if not search_budget.claim_query():
+                return ResolveResult(
+                    identity,
+                    "not_checked",
+                    reason_code=ReasonCode.QUERY_BUDGET,
+                    candidates=tuple(candidates),
+                    stage_status="budget_exhausted",
+                )
+            try:
+                hits = await self.search.search(query, self.limits.urls_per_query)
+            except Exception as error:
+                return ResolveResult(
+                    identity,
+                    "incomplete",
+                    reason_code="search_temporarily_unavailable",
+                    attempts=(
+                        {
+                            "stage": "search",
+                            "code": getattr(error, "code", ReasonCode.NETWORK_ERROR),
+                            "engines": getattr(error, "engines", ()),
+                        },
+                    ),
+                    retryable=True,
+                    candidates=tuple(candidates),
+                    stage_status="search_temporarily_unavailable",
+                )
+        if getattr(hits, "engines", ()):
+            attempts.append(
+                {
+                    "stage": "search",
+                    "code": "search_partial_results",
+                    "engines": hits.engines,
+                }
             )
         result, _, warning = await self._try_hits(
             identity,
@@ -304,6 +360,7 @@ class ResolveEquipment:
             vision_budget,
             search_budget,
             attempts,
+            candidates,
         )
         if result is not None:
             return replace(
@@ -318,6 +375,14 @@ class ResolveEquipment:
             attempts=tuple(attempts),
             tried_url_hashes=tuple(sorted(tried)),
             retryable=True,
+            candidates=tuple(candidates),
+            stage_status=(
+                "budget_exhausted"
+                if "бюджет" in warning.lower()
+                else "document_rejected"
+            )
+            if candidates
+            else "document_not_found",
         )
 
     async def _local_source(
@@ -344,20 +409,7 @@ class ResolveEquipment:
         self, identity: EquipmentIdentity, hostname: str | None
     ) -> tuple[str, ...]:
         """Формирует только нейтральные запросы из маркировки оборудования."""
-        parts = [
-            safe_search_term(identity.manufacturer),
-            safe_search_term(identity.model),
-            safe_search_term(identity.article),
-            safe_search_term(identity.variant)
-            if identity.variant_kind != "interface"
-            else "",
-        ]
-        base = " ".join(part for part in parts if part)
-        suffix = f" site:{hostname}" if hostname else ""
-        return (
-            f"{base} datasheet manual{suffix}",
-            f"{base} паспорт руководство{suffix}",
-        )[: self.limits.queries_per_stage]
+        return search_queries(identity, hostname)[: self.limits.queries_per_stage]
 
     async def _rank_hits(
         self, identity: EquipmentIdentity, hits: tuple[SearchHit, ...]
@@ -368,7 +420,7 @@ class ResolveEquipment:
         redirect; происхождение из реестра читается из существующих данных БД.
         """
         candidates = []
-        for hit in hits[: self.limits.urls_per_query]:
+        for hit in hits[: self.limits.urls_per_query * 3]:
             if not hit.hostname:
                 continue
             effective = identity
@@ -384,10 +436,17 @@ class ResolveEquipment:
                 and source.matches(effective.manufacturer, hit.hostname)
                 and source.status is SourceStatus.TRUSTED
             )
-            priority = (0 if source.registry_official else 1) if trusted else 2
+            priority = ((0 if source.registry_official else 1) if trusted else 2) * 10
+            if re.search(
+                r"паспорт|datasheet|\.pdf(?:\?|$)", hit.url + " " + hit.title, re.I
+            ):
+                priority -= 3
             candidates.append((priority, hit, effective, source))
         candidates.sort(key=lambda candidate: candidate[0])
-        return [(hit, effective, source) for _, hit, effective, source in candidates]
+        return [
+            (hit, effective, source)
+            for _, hit, effective, source in candidates[: self.limits.urls_per_query]
+        ]
 
     async def _try_hits(
         self,
@@ -400,17 +459,66 @@ class ResolveEquipment:
         vision_budget: EquipmentVisionBudget,
         search_budget: EquipmentSearchBudget,
         attempts: list[dict] | None = None,
+        candidates: list[dict] | None = None,
     ) -> tuple[ResolveResult | None, int, str]:
         """Проверяет доверие, скачивает и валидирует ограниченные кандидаты."""
         inspection_warning = ""
         attempts = attempts if attempts is not None else []
-        for hit, effective, source in await self._rank_hits(identity, hits):
+        candidates = candidates if candidates is not None else []
+        # После рестарта адрес найденного дочернего PDF остаётся доступен даже
+        # когда исходная HTML-страница уже просмотрена и исключена из повторов.
+        pending = tuple(
+            SearchHit(row["document_url"], row.get("title", ""))
+            for row in candidates
+            if row.get("retryable")
+            and row.get("document_url")
+            and int(row.get("attempt_count", 0)) < 2
+        )
+        hits = tuple(dict.fromkeys((*pending, *hits)))
+        queue = [
+            (hit, effective, source, "", 0)
+            for hit, effective, source in await self._rank_hits(identity, hits)
+        ]
+        queued = {hit.url for hit, *_ in queue}
+        for hit, _, _, _, _ in queue:
+            _remember_candidate(candidates, hit, "", 0)
+        cursor = 0
+        saved_result = None
+        while cursor < len(queue) and cursor < self.limits.urls_per_query * (
+            self.limits.discovery_depth + 1
+        ):
+            hit, effective, source, parent_url, depth = queue[cursor]
+            cursor += 1
             await _check_stop(should_stop)
-            if downloads >= self.limits.downloads:
-                break
             fingerprint = sha256(hit.url.encode()).hexdigest()
-            if not hit.hostname or fingerprint in tried:
+            if not hit.hostname:
                 continue
+            identifier = candidate_id(hit.url)
+            old = next(
+                (row for row in candidates if row.get("candidate_id") == identifier),
+                None,
+            )
+            cached_bytes = bool(
+                old and old.get("download_status") == "downloaded" and old.get("sha256")
+            )
+            if fingerprint in tried and not (cached_bytes and old.get("retryable")):
+                continue
+            if old and (
+                (
+                    old.get("inspection_status") == "rejected"
+                    and not old.get("retryable")
+                )
+                or int(old.get("attempt_count", 0)) >= 2
+            ):
+                continue
+            candidate = _remember_candidate(candidates, hit, parent_url, depth)
+            candidate["trust_status"] = (
+                "trusted"
+                if source and source.status is SourceStatus.TRUSTED
+                else "unverified_user_override"
+                if allow_unverified
+                else "pending"
+            )
             if clearly_other_model(identity, hit):
                 tried.add(fingerprint)
                 attempts.append(
@@ -420,10 +528,15 @@ class ResolveEquipment:
                         "hostname": hit.hostname,
                     }
                 )
+                candidate.update(
+                    applicability="wrong_model",
+                    reason_codes=[ReasonCode.LINK_MODEL_MISMATCH],
+                )
                 continue
             if not identity.manufacturer:
                 blocker = getattr(self.catalog, "source_blocked", None)
                 if blocker is not None and await blocker(hit.hostname):
+                    candidate["reason_codes"] = [ReasonCode.SOURCE_BLOCKED]
                     attempts.append(
                         {
                             "stage": "source",
@@ -439,6 +552,7 @@ class ResolveEquipment:
             if source is not None and (
                 source.status is SourceStatus.BLOCKED or not source.enabled
             ):
+                candidate["reason_codes"] = [ReasonCode.SOURCE_BLOCKED]
                 attempts.append(
                     {
                         "stage": "source",
@@ -453,6 +567,7 @@ class ResolveEquipment:
                 and source.status is SourceStatus.TRUSTED
             )
             if not trusted and not allow_unverified:
+                candidate["reason_codes"] = [ReasonCode.SOURCE_UNVERIFIED]
                 attempts.append(
                     {
                         "stage": "source",
@@ -473,15 +588,34 @@ class ResolveEquipment:
                 )
                 continue
             await _check_stop(should_stop)
+            cache_credit = cached_bytes and search_budget.downloads_remaining <= 0
+            if cache_credit:
+                search_budget.downloads_remaining += 1
             if not search_budget.claim_download():
+                candidate.update(
+                    reason_codes=[ReasonCode.DOWNLOAD_BUDGET], retryable=True
+                )
                 inspection_warning = "Исчерпан общий бюджет загрузки документов."
                 if not attempts:
                     attempts.append(
                         {"stage": "download", "code": ReasonCode.DOWNLOAD_BUDGET}
                     )
                 break
+            page_reserved = not (
+                (cached_bytes and old.get("media_type") == "application/pdf")
+                or re.search(r"\.pdf(?:\?|$)", hit.url, re.I)
+            )
+            if page_reserved and not search_budget.claim_page():
+                search_budget.downloads_remaining += 1
+                if cache_credit:
+                    search_budget.downloads_remaining -= 1
+                inspection_warning = "Исчерпан бюджет просмотра страниц."
+                candidate["reason_codes"] = ["page_budget_exhausted"]
+                candidate["retryable"] = True
+                break
             downloads += 1
             tried.add(fingerprint)
+            candidate["attempt_count"] = int(candidate.get("attempt_count", 0)) + 1
             stage = "download"
             try:
                 approved = (
@@ -492,7 +626,42 @@ class ResolveEquipment:
                 download_options = {"allow_http": allow_http}
                 if any(host != hit.hostname for host in approved):
                     download_options["allowed_redirect_hosts"] = approved
-                document = await self.downloader.download(hit.url, **download_options)
+                document = None
+                loader = getattr(self.catalog, "load_candidate_download", None)
+                if cached_bytes and loader is not None:
+                    document = await loader(
+                        candidate["sha256"], candidate.get("media_type", ""), hit.url
+                    )
+                network_download = document is None
+                if network_download and cache_credit:
+                    downloads -= 1
+                    candidate.update(
+                        reason_codes=[ReasonCode.DOWNLOAD_BUDGET], retryable=True
+                    )
+                    break
+                if network_download:
+                    search_budget.download_attempts += 1
+                    document = await self.downloader.download(
+                        hit.url, **download_options
+                    )
+                    cache = getattr(self.catalog, "cache_candidate_download", None)
+                    if cache is not None:
+                        await cache(document)
+                else:
+                    search_budget.downloads_remaining += 1
+                    downloads -= 1
+                if cache_credit:
+                    search_budget.downloads_remaining -= 1
+                candidate.update(
+                    download_status="downloaded",
+                    sha256=document.sha256,
+                    document_url=public_url(document.final_url),
+                    media_type=document.media_type,
+                )
+                if search_budget.on_progress is not None:
+                    await search_budget.on_progress(
+                        {"candidates": candidates, "tried_url_hashes": sorted(tried)}
+                    )
                 final_host = SearchHit(document.final_url).hostname
                 final_source = await self.catalog.source_for(
                     effective.manufacturer,
@@ -524,16 +693,69 @@ class ResolveEquipment:
                         }
                     )
                     continue
+                if document.media_type == "text/html":
+                    # Просмотр HTML и загрузка документа имеют разные квоты.
+                    if network_download:
+                        search_budget.downloads_remaining += 1
+                        downloads -= 1
+                    access_issue = html_access_issue(document.content)
+                    if access_issue:
+                        candidate.update(
+                            inspection_status="rejected",
+                            reason_codes=[access_issue],
+                            applicability="unreadable_document",
+                        )
+                        attempts.append(
+                            {
+                                "stage": "discovery",
+                                "code": access_issue,
+                                "hostname": final_host,
+                            }
+                        )
+                        continue
+                    links = discover_links(
+                        document.content,
+                        document.final_url,
+                        self.limits.links_per_page,
+                        identity=identity,
+                    )
+                    if depth < self.limits.discovery_depth:
+                        children = await self._rank_hits(identity, links)
+                        for child, child_identity, child_source in reversed(children):
+                            if child.url not in queued:
+                                queued.add(child.url)
+                                _remember_candidate(
+                                    candidates, child, document.final_url, depth + 1
+                                )
+                                queue.insert(
+                                    cursor,
+                                    (
+                                        child,
+                                        child_identity,
+                                        child_source,
+                                        document.final_url,
+                                        depth + 1,
+                                    ),
+                                )
+                    candidate["links_found"] = len(links)
+                    if links and depth < self.limits.discovery_depth:
+                        candidate.update(
+                            inspection_status="discovery_page",
+                            document_type="html_page",
+                        )
+                        continue
+                elif page_reserved:
+                    search_budget.pages_remaining += 1
                 await _check_stop(should_stop)
                 stage = "extract"
+                if not search_budget.claim_extraction():
+                    candidate["reason_codes"] = ["extraction_budget_exhausted"]
+                    inspection_warning = "Исчерпан бюджет извлечения документации."
+                    candidate["retryable"] = True
+                    candidate["attempt_count"] = max(0, candidate["attempt_count"] - 1)
+                    break
                 inspection = await self.inspector.inspect(effective, document)
-                if inspection.requires_vision and not effective.manufacturer:
-                    inspection = replace(
-                        inspection,
-                        reason_code=ReasonCode.MANUFACTURER_UNKNOWN,
-                        reason="Для визуальной проверки требуется подтверждение производителя.",
-                    )
-                elif inspection.requires_vision and self.vision_inspector is not None:
+                if inspection.requires_vision and self.vision_inspector is not None:
                     await _check_stop(should_stop)
                     alias_reader = getattr(self.catalog, "manufacturer_aliases", None)
                     if alias_reader is not None:
@@ -551,6 +773,14 @@ class ResolveEquipment:
                         should_stop=should_stop,
                     )
                 if not inspection.applicable:
+                    candidate.update(
+                        inspection_status="rejected",
+                        applicability=_applicability(inspection),
+                        reason_codes=[
+                            inspection.reason_code or ReasonCode.MODEL_MISMATCH
+                        ],
+                        document_type=inspection.document_type,
+                    )
                     attempts.append(
                         {
                             "stage": "verify",
@@ -570,7 +800,10 @@ class ResolveEquipment:
                     effective,
                     manufacturer=inspection.manufacturer or effective.manufacturer,
                 )
-                if not effective.manufacturer:
+                if (
+                    not effective.manufacturer
+                    and identity.item_type == "serial_equipment"
+                ):
                     attempts.append(
                         {
                             "stage": "verify",
@@ -600,6 +833,34 @@ class ResolveEquipment:
                     document,
                     inspection,
                     trust_status,
+                )
+                snapshot = replace(
+                    snapshot,
+                    source_url=public_url(snapshot.source_url),
+                    final_url=public_url(snapshot.final_url),
+                    applicability=inspection.applicability,
+                    document_type=inspection.document_type,
+                    reference=identity.reference,
+                )
+                candidate.update(
+                    inspection_status="accepted",
+                    applicability=inspection.applicability,
+                    document_type=inspection.document_type,
+                    manufacturer=inspection.manufacturer,
+                    manufacturer_evidence=inspection.manufacturer_evidence,
+                    model=identity.model,
+                    source_id=snapshot.source_id,
+                    evidence_pages=sorted(
+                        set(inspection.vision_pages)
+                        | (
+                            {inspection.manufacturer_evidence_page}
+                            if inspection.manufacturer_evidence_page
+                            else set()
+                        )
+                    ),
+                    trust_status=trust_status,
+                    reason_codes=[],
+                    retryable=False,
                 )
                 fact_status = ""
                 facts = ()
@@ -639,30 +900,28 @@ class ResolveEquipment:
                             downloads,
                             inspection_warning,
                         )
-                return (
-                    ResolveResult(
-                        identity,
-                        "found" if self.fact_index is None or facts else "incomplete",
-                        document=snapshot,
-                        searched_urls=len(tried),
-                        facts=facts,
-                        facts_status=fact_status,
-                        warning=""
-                        if self.fact_index is None or facts
-                        else "Документ сохранён, но характеристики не извлечены.",
-                        reason_code=""
-                        if self.fact_index is None or facts
-                        else fact_reason,
-                        retryable=self.fact_index is not None and not bool(facts),
-                        attempts=tuple(attempts),
-                        resolved_manufacturer=effective.manufacturer,
-                        manufacturer_site=_manufacturer_site(
-                            identity, snapshot.final_url, final_source
-                        ),
+                saved_result = ResolveResult(
+                    identity,
+                    "found" if self.fact_index is None or facts else "incomplete",
+                    document=snapshot,
+                    searched_urls=len(tried),
+                    facts=facts,
+                    facts_status=fact_status,
+                    warning=""
+                    if self.fact_index is None or facts
+                    else "Документ сохранён, но характеристики не извлечены.",
+                    reason_code="" if self.fact_index is None or facts else fact_reason,
+                    retryable=self.fact_index is not None and not bool(facts),
+                    attempts=tuple(attempts),
+                    resolved_manufacturer=effective.manufacturer,
+                    manufacturer_site=_manufacturer_site(
+                        identity, snapshot.final_url, final_source
                     ),
-                    downloads,
-                    inspection_warning,
+                    candidates=tuple(candidates),
+                    stage_status="facts_extracted" if facts else "document_verified",
                 )
+                if self.fact_index is None or facts:
+                    return saved_result, downloads, inspection_warning
             except SearchCancelled:
                 raise
             except Exception as error:
@@ -678,11 +937,95 @@ class ResolveEquipment:
                 attempts.append(
                     {"stage": stage, "code": code, "hostname": hit.hostname}
                 )
+                transient = code in {
+                    ReasonCode.NETWORK_ERROR,
+                    ReasonCode.DNS_ERROR,
+                    ReasonCode.TIMEOUT,
+                    ReasonCode.HTTP_ERROR,
+                }
+                candidate.update(
+                    download_status="failed" if stage == "download" else "downloaded",
+                    inspection_status="failed",
+                    reason_codes=[code],
+                    retryable=transient,
+                )
+                if stage == "download" and code in {
+                    ReasonCode.NETWORK_ERROR,
+                    ReasonCode.DNS_ERROR,
+                    ReasonCode.TLS_ERROR,
+                    ReasonCode.URL_BLOCKED,
+                    ReasonCode.REDIRECT_BLOCKED,
+                }:
+                    search_budget.downloads_remaining += 1
+                    downloads -= 1
+                if transient:
+                    tried.discard(fingerprint)
                 inspection_warning = (
                     "Не удалось загрузить или обработать документацию производителя."
                 )
                 continue
-        return None, downloads, inspection_warning
+        return saved_result, downloads, inspection_warning
+
+
+def _applicability(inspection) -> str:
+    """Преобразует прежние причины отказа в отдельную предметную оценку."""
+    if inspection.applicability != "exact_match":
+        return inspection.applicability
+    return {
+        ReasonCode.MODEL_MISMATCH: "wrong_model",
+        ReasonCode.VARIANT_MISMATCH: "wrong_variant",
+        ReasonCode.ARTICLE_MISMATCH: "wrong_variant",
+        ReasonCode.MANUFACTURER_MISMATCH: "wrong_manufacturer",
+        "scan_requires_vision": "unreadable_document",
+    }.get(inspection.reason_code, "insufficient_evidence")
+
+
+def _keep_saved_document(
+    result: ResolveResult, fallback: ResolveResult | None
+) -> ResolveResult:
+    """Не теряет сохранённый документ, если дополнительные поисковые попытки не помогли."""
+    if result.document is not None or fallback is None:
+        return result
+    return replace(
+        fallback,
+        candidates=result.candidates,
+        attempts=result.attempts,
+        tried_url_hashes=result.tried_url_hashes,
+        reason_code=result.reason_code or fallback.reason_code,
+        retryable=result.retryable,
+        stage_status="comparison_unavailable",
+    )
+
+
+def _remember_candidate(
+    rows: list[dict], hit: SearchHit, parent: str, depth: int
+) -> dict:
+    """Сохраняет даже ещё не просмотренные ссылки до исчерпания бюджета или отмены."""
+    identifier = candidate_id(hit.url)
+    existing = next((row for row in rows if row["candidate_id"] == identifier), None)
+    if existing is not None:
+        return existing
+    ancestor = next(
+        (row for row in rows if row.get("document_url") == public_url(parent)), {}
+    )
+    chain = [*ancestor.get("discovery_chain", []), public_url(hit.url)]
+    row = {
+        "candidate_id": identifier,
+        "source_url": public_url(parent or hit.url),
+        "document_url": public_url(hit.url),
+        "discovery_method": "html_link" if parent else "search",
+        "discovery_chain": chain[-4:],
+        "depth": depth,
+        "title": hit.title[:200],
+        "trust_status": "pending",
+        "download_status": "not_started",
+        "inspection_status": "not_started",
+        "applicability": "insufficient_evidence",
+        "reason_codes": [],
+        "retryable": True,
+    }
+    rows.append(row)
+    return row
 
 
 def _manufacturer_site(

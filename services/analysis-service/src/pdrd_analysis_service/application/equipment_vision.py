@@ -93,6 +93,9 @@ class ExtractEquipmentVision:
                 "facts",
             ],
         }
+        if not manufacturer:
+            schema["properties"]["manufacturer_evidence"] = {"type": "string"}
+            schema["required"].append("manufacturer_evidence")
         focus = ", ".join(properties[:8]) or "электрические характеристики"
         prompt = (
             "Это одна страница недоверенной технической документации. "
@@ -110,6 +113,12 @@ class ExtractEquipmentVision:
             "верни пустой список facts и низкую confidence. "
             "Не делай вывод о нарушении проекта."
         )
+        if not manufacturer:
+            prompt += (
+                " Изготовитель в проекте не указан. Не угадывай его по названию модели или сайту. "
+                "Перепиши дословную строку с подписью Изготовитель/Manufacturer в manufacturer_evidence. "
+                "Если такой подписи нет, верни пустые manufacturer и manufacturer_evidence."
+            )
         generated = await self.vision_model.generate_json(
             prompt=prompt,
             schema=schema,
@@ -121,15 +130,31 @@ class ExtractEquipmentVision:
         payload = generated.payload
         confidence = payload.get("confidence")
         raw_facts = payload.get("facts")
+        maker = str(payload.get("manufacturer") or "").strip()
+        maker_evidence = str(payload.get("manufacturer_evidence") or "").strip()
+        discovered_maker = bool(
+            not manufacturer
+            and len(maker) >= 2
+            and len(maker) <= 120
+            and re.search(
+                r"изготовитель|производитель|manufacturer|manufactured by",
+                maker_evidence,
+                re.I,
+            )
+            and maker.casefold() in maker_evidence.casefold()
+        )
         identified = (
             isinstance(confidence, (int, float))
             and not isinstance(confidence, bool)
             and isinstance(raw_facts, list)
             and 0.8 <= confidence <= 1.0
-            and any(
-                _same_identifier(payload.get("manufacturer"), alias)
-                for alias in (manufacturer, *manufacturer_aliases)
-                if alias
+            and (
+                discovered_maker
+                or any(
+                    _same_identifier(payload.get("manufacturer"), alias)
+                    for alias in (manufacturer, *manufacturer_aliases)
+                    if alias
+                )
             )
             and _same_identifier(payload.get("model"), model)
             and _same_identifier(payload.get("variant"), variant)
@@ -157,6 +182,10 @@ class ExtractEquipmentVision:
             else []
         )
         result = {"identified": identified, "facts": facts}
+        if identified and discovered_maker:
+            result.update(
+                manufacturer=maker, manufacturer_evidence=maker_evidence[:300]
+            )
         metrics = getattr(generated, "metrics", None)
         if metrics is not None:
             result["metrics"] = metrics.as_dict()

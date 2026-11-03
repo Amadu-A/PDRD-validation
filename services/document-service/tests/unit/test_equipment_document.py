@@ -71,3 +71,18 @@ def test_html_charset_and_table_columns_are_preserved():
     assert "Параметр | Датчик-Ш" in result.pages[0].text
     assert "Напряжение питания | 8...30 В" in result.pages[0].text
     assert "\ufffd" not in result.pages[0].text
+
+
+def test_water_meter_table_with_nineteen_columns_is_preserved():
+    """Таблица шести диаметров и трёх классов не исчезает из-за прежнего лимита 16 колонок."""
+    from types import SimpleNamespace
+
+    row = ["Номинальный расход Qn, м3/ч", *[str(index) for index in range(18)]]
+    page = SimpleNamespace(
+        get_text=lambda kind: "ВСКМ 90-20",
+        find_tables=lambda: SimpleNamespace(
+            tables=[SimpleNamespace(extract=lambda: [row])]
+        ),
+    )
+    result = PyMuPdfEquipmentDocumentReader()._page_text(page)
+    assert " | ".join(row) in result

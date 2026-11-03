@@ -21,6 +21,14 @@ from pdrd_equipment_search_service.domain.equipment import (
 class EquipmentCatalog(Protocol):
     """Хранит доверие, локальные документы и версии."""
 
+    async def cache_candidate_download(self, document: DownloadedDocument) -> None:
+        """Сохраняет bytes кандидата до оценки применимости без выдачи доверия."""
+
+    async def load_candidate_download(
+        self, digest: str, media_type: str, url: str
+    ) -> DownloadedDocument | None:
+        """Читает прежний content-addressed blob с проверкой SHA."""
+
     async def source_blocked(self, hostname: str) -> bool:
         """Запрещает заблокированный домен при неизвестном производителе."""
 

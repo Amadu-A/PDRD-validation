@@ -58,10 +58,13 @@ async def run_search_job(service: "SearchJobService", job_id: UUID) -> None:
         for row in results:
             if row.get("status") not in {"found", "local"}:
                 row["retryable"] = True
-                row["tried_url_hashes"] = []
+                for candidate in row.get("candidates", []):
+                    if candidate.get("retryable"):
+                        candidate["attempt_count"] = 0
     queries_used = int(checkpoint.get("queries_used") or 0)
     downloads_used = int(checkpoint.get("downloads_used") or 0)
     per_model_downloads = dict(checkpoint.get("per_model_downloads") or {})
+    phase_usage = dict(checkpoint.get("phase_usage") or {})
     vision = EquipmentVisionBudget(
         max(0, policy["vision_limit"] - int(checkpoint.get("vision_used") or 0))
     )
@@ -119,7 +122,37 @@ async def run_search_job(service: "SearchJobService", job_id: UUID) -> None:
                                         - per_model_downloads.get(str(index), 0),
                                     ),
                                 ),
+                                pages_remaining=min(
+                                    3,
+                                    max(
+                                        0,
+                                        policy.get("pages_per_model", 6)
+                                        - phase_usage.get(str(index), {}).get(
+                                            "pages", 0
+                                        ),
+                                    ),
+                                ),
+                                extractions_remaining=min(
+                                    4,
+                                    max(
+                                        0,
+                                        policy.get("extractions_per_model", 6)
+                                        - phase_usage.get(str(index), {}).get(
+                                            "extractions", 0
+                                        ),
+                                    ),
+                                ),
                             )
+                            pages_before, extractions_before = (
+                                budget.pages_remaining,
+                                budget.extractions_remaining,
+                            )
+                            phase_before = dict(phase_usage.get(str(index), {}))
+                            phase_usage[str(index)] = {
+                                "pages": phase_before.get("pages", 0) + pages_before,
+                                "extractions": phase_before.get("extractions", 0)
+                                + extractions_before,
+                            }
                             queries_before, downloads_before = (
                                 budget.queries_remaining,
                                 budget.downloads_remaining,
@@ -143,11 +176,28 @@ async def run_search_job(service: "SearchJobService", job_id: UUID) -> None:
                                     + downloads_before,
                                 },
                                 "inflight": {"index": index},
+                                "phase_usage": phase_usage,
                             }
                             await service.repository.checkpoint(
                                 job_id, results, reservation
                             )
                             started = perf_counter()
+
+                            async def persist_candidates(
+                                partial: dict,
+                                *,
+                                slot=index,
+                                prior=previous,
+                                reserved=reservation,
+                            ) -> None:
+                                """Закрепляет найденные байты до следующего HTTP/VLM шага."""
+                                results[slot] = {**prior, **partial}
+                                await service.repository.checkpoint(
+                                    job_id, results, reserved
+                                )
+
+                            budget.on_progress = persist_candidates
+
                             try:
                                 async with asyncio.timeout(service.max_seconds):
                                     result = await service.resolver.execute(
@@ -178,6 +228,14 @@ async def run_search_job(service: "SearchJobService", job_id: UUID) -> None:
                                     retryable=True,
                                 )
                             model_metrics = vision.metrics[metric_offset:]
+                            phase_usage[str(index)] = {
+                                "pages": phase_before.get("pages", 0)
+                                + pages_before
+                                - budget.pages_remaining,
+                                "extractions": phase_before.get("extractions", 0)
+                                + extractions_before
+                                - budget.extractions_remaining,
+                            }
                             cached = sum(
                                 metric.get("done_reason") == "cache_hit"
                                 for metric in model_metrics
@@ -199,12 +257,17 @@ async def run_search_job(service: "SearchJobService", job_id: UUID) -> None:
                                 "downloads_per_model"
                             ]
                             metrics["run_number"] = generation + 1
+                            metrics["pages_viewed"] = phase_usage[str(index)]["pages"]
+                            metrics["extractions"] = phase_usage[str(index)][
+                                "extractions"
+                            ]
                             delta = {
                                 "duration_ms": round(
                                     (perf_counter() - started) * 1000, 3
                                 ),
                                 "queries": queries,
                                 "downloads": downloads,
+                                "download_attempts": budget.download_attempts,
                                 "vision_calls": calls,
                                 "vision_cache_hits": cached,
                                 "resolution_attempts": 1,
@@ -244,6 +307,7 @@ async def run_search_job(service: "SearchJobService", job_id: UUID) -> None:
                                 "downloads_used": downloads_used,
                                 "vision_used": vision_used,
                                 "per_model_downloads": per_model_downloads,
+                                "phase_usage": phase_usage,
                             }
                             await service.repository.checkpoint(
                                 job_id, results, checkpoint

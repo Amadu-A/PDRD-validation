@@ -5,6 +5,7 @@ import { followEquipmentEvents } from "./equipment-events.js";
 import { guestAccessHeaders } from "./guest-access.js";
 import { equipmentSnapshotUrl, focusPageEvidence, safeExternalSourceUrl } from "./finding-provenance.js";
 import { reviewCapabilities } from "../review/access.js";
+import { EQ_STAGES, EQ_APPLICABILITY, EQ_ITEM_TYPES } from "./equipment-discovery.js";
 
 export const EQUIPMENT_STATUS_LABELS = {
   confirmed: "Подтверждено", mismatch: "Несоответствие", incomplete: "Частично выполнено",
@@ -28,6 +29,15 @@ export const EQUIPMENT_REASON_LABELS = {
   document_not_found: "Документ не найден", not_checked: "Поиск не выполнялся",
   model_uncertain: "Маркировка требует уточнения", operation_timeout: "Время попытки истекло",
   cancelled: "Отменено", internal_error: "Ошибка обработки", scan_requires_vision: "Нужен адресный VLM",
+  javascript_required: "Сайт требует JavaScript; автоматический обход не выполняется",
+  access_challenge: "Сайт требует проверку посетителя",
+  page_budget_exhausted: "Исчерпан бюджет просмотра страниц",
+  extraction_budget_exhausted: "Исчерпан бюджет извлечения",
+  reference_not_applicable: "Справочник не относится к этому изделию или стандарту",
+  page_coverage_incomplete: "Прочитана только часть большого документа; применимость не установлена",
+  search_temporarily_unavailable: "Поиск временно недоступен",
+  search_rate_limited: "Поисковик ограничил частоту запросов",
+  search_partial_results: "Часть поисковых движков недоступна; найденные ссылки сохранены",
 };
 
 /** Попытки загрузки не выдаются за документы, прошедшие проверку применимости. */
@@ -80,6 +90,7 @@ export function equipmentDisplayName(row) {
 
 /** Показывает каждую позицию спецификации, сохраняя один общий поиск по модели. */
 export function equipmentRows(check) {
+  if (Array.isArray(check.positions) && check.positions.length) return check.positions;
   const models = equipmentModels(check);
   const positions = check.specification?.structured_items;
   if (!Array.isArray(positions) || !positions.length) return models;
@@ -94,7 +105,7 @@ export function equipmentRows(check) {
     const comparisons = (base.comparisons || []).filter((part) => (item.source_pages || []).includes(part.page) && part.object_ref === (item.position || item.item_id));
     const statuses = new Set(comparisons.map((part) => part.status));
     let status = base.status || "not_checked";
-    if (base.document?.source_id && !base.document.revision_ambiguous) {
+    if (base.document?.source_id && !base.document.revision_ambiguous && base.document.trust_status !== "unverified_user_override") {
       status = statuses.has("mismatch_candidate") ? "mismatch"
         : comparisons.length && statuses.size === 1 && statuses.has("matched") ? "confirmed"
           : "no_data";
@@ -128,7 +139,8 @@ export function equipmentRowId(row) {
 /** Документ означает сохранённый прочитанный snapshot, а не найденную поисковую ссылку. */
 export function equipmentDocumentStatus(row) {
   if (row.manufacturer_site?.relationship === "analog" || row.document?.applicability === "analog") return "Недостаточно данных";
-  if (!row.document?.source_id) return "Не проверено";
+  if (!row.document?.source_id) return EQ_STAGES[row.stage_status] || "Не проверено";
+  if (row.document.applicability === "technical_reference") return "Справочник; поставка не подтверждена";
   if (row.document.revision_ambiguous || row.reason_code === "revision_ambiguous") return "Требуется уточнение редакции";
   if (row.status === "confirmed") return "Соответствует";
   if (row.status === "mismatch") return "Есть замечание";
@@ -216,11 +228,25 @@ export function appendEquipmentReport(parent, initial, {
   function detailsFor(row) {
     inspectionBody.replaceChildren(element("h4", equipmentDisplayName(row)));
     inspectionBody.append(element("p", equipmentReason(row)));
+    inspectionBody.append(element("p", `${EQ_ITEM_TYPES[row.item_type] || "Тип не установлен"}. ${EQ_STAGES[row.stage_status] || "Состояние поиска не сохранено"}.`));
+    const candidates = row.candidates || [];
+    inspectionBody.append(element("p", `Кандидатов: ${candidates.length}; просмотрено: ${candidates.filter((part) => part.download_status === "downloaded").length}; отклонено: ${candidates.filter((part) => part.inspection_status === "rejected").length}; сравнений: ${(row.comparisons || []).length}.`));
+    for (const candidate of candidates) {
+      const line = element("p", `${candidate.title || candidate.candidate_id}: ${EQ_APPLICABILITY[candidate.applicability] || "Применимость не установлена"}; ${(candidate.reason_codes || []).map((code) => EQUIPMENT_REASON_LABELS[code] || code).join(", ")}`);
+      const href = safeExternalSourceUrl(candidate.document_url);
+      if (href) {
+        const link = element("a", " Открыть кандидата", "equipment-report__link");
+        link.href = href; link.target = "_blank"; link.rel = "noopener noreferrer"; line.append(link);
+      }
+      inspectionBody.append(line);
+    }
+    for (const fact of row.facts || []) inspectionBody.append(element("p", `Документ, стр. ${fact.page}: ${fact.property_name} = ${fact.value_raw} ${fact.unit_raw || ""}. ${fact.snippet || ""}`));
+    for (const property of row.property_checks || []) inspectionBody.append(element("p", `${property.property_name}: ${{ project_property_missing: "параметр не указан в проекте", manufacturer_property_missing: "параметр не найден в документе", conditions_not_comparable: "не доказана сопоставимость условий", comparison_completed: "сопоставлено" }[property.status] || "нет данных"}`));
     if (row.article) inspectionBody.append(element("p", `Артикул: ${row.article}`));
     if (row.project_position || row.quantity) inspectionBody.append(element("p", `Позиция: ${row.project_position || "не указана"}. Количество: ${row.quantity || "не указано"} ${row.units || ""}.`));
-    inspectionBody.append(element("p", `Запросы: ${row.metrics?.queries || 0}. Попытки загрузки: ${row.metrics?.downloads || 0}. Визуальных чтений: ${row.metrics?.vision_calls || 0}. Документов, прошедших проверку применимости: ${row.metrics?.verified_documents || 0}.`));
+    inspectionBody.append(element("p", `Запросы: ${row.metrics?.queries || 0}. Попытки загрузки: ${row.metrics?.download_attempts ?? row.metrics?.downloads ?? 0}. Просмотрено страниц: ${row.metrics?.pages_viewed || 0}. Визуальных чтений: ${row.metrics?.vision_calls || 0}. Документов, прошедших проверку применимости: ${row.metrics?.verified_documents || 0}.`));
     for (const attempt of row.attempts || []) inspectionBody.append(element("p", `${attempt.hostname || ""}: ${EQUIPMENT_REASON_LABELS[attempt.code] || (attempt.code === "verified" ? "Документ проверен" : "Обработка не завершена")}`));
-    for (const comparison of row.comparisons || []) inspectionBody.append(element("p", `Документ, стр. ${comparison.source_page}: ${comparison.manufacturer_evidence || ""}`));
+    for (const comparison of row.comparisons || []) inspectionBody.append(element("p", `Проект: ${comparison.project_value} ${comparison.project_unit || ""}; документ: ${comparison.manufacturer_value} ${comparison.manufacturer_unit || ""}, стр. ${comparison.source_page}. ${comparison.explanation || ""} ${comparison.manufacturer_evidence || ""}`));
     if (row.document) {
       for (const [label, value] of [["Исходный URL", row.document.source_url], ["Прочитанный URL", row.document.final_url]]) {
         const url = safeExternalSourceUrl(value);
@@ -379,6 +405,21 @@ export function appendEquipmentReport(parent, initial, {
     table.append(body); scroll.replaceChildren(table); limitVisibleRows(table, renderedRows, head, body);
     message.textContent = "";
     if (!jobId) return;
+    if (Number(search.revision) > 0 && !["queued", "running"].includes(search.status)) {
+      for (const [suffix, label, mediaType] of [["report.pdf", "Скачать отчёт EQ (PDF)", "application/pdf"], ["documents.zip", "Скачать документы EQ (ZIP)", "application/zip"]]) {
+        action(label, async () => {
+          const revision = Number(search.revision);
+          const response = await fetchImpl(`${base}/equipment-search/${suffix}?revision=${revision}`, {
+            credentials: "same-origin", cache: "no-store", signal: abort.signal,
+            headers: { ...guestAccessHeaders(jobId), Accept: mediaType },
+          });
+          if (!response.ok) throw new Error("Не удалось выгрузить эту версию EQ. Обновите результаты проверки.");
+          const blob = await response.blob(); const href = URL.createObjectURL(blob);
+          const link = element("a"); link.href = href; link.download = `eq-${jobId}-r${revision}.${suffix.endsWith("zip") ? "zip" : "pdf"}`;
+          link.click(); setTimeout(() => URL.revokeObjectURL(href), 1000);
+        });
+      }
+    }
     if (["queued", "running"].includes(search.status)) {
       message.textContent = "EQ продолжается в фоне. Основной анализ завершён; результаты других источников доступны.";
       action("Отменить EQ", async () => { search = await request("/equipment-search/cancel", {}); await refresh(); });

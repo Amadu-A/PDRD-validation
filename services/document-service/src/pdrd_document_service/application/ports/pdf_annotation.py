@@ -79,6 +79,7 @@ class PdfTextReport:
         str,
         ...,
     ]
+    findings_label: str = "Замечания"
 
 
 class PdfAnnotationWriter(Protocol):

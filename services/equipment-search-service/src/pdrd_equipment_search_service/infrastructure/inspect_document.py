@@ -139,6 +139,36 @@ class DocumentServiceInspector:
                 requires_vision=True,
                 reason_code="scan_requires_vision",
             )
+        if identity.item_type != "serial_equipment":
+            kind_terms = {
+                "material": r"песок|бетон|щебень|арматур",
+                "standard_product": r"труб|отвод|люк|фитинг|фланец|тройник|втулк|задвижк|гильз",
+                "prefabricated_structure": r"колод|кольц|железобетон",
+                "designed_structure": r"резервуар|упор",
+            }
+            # Совпадение стандарта и предмета даёт справочник, а не паспорт поставки.
+            relevant = tuple(
+                (page, content)
+                for page, content in pages
+                if (
+                    not identity.reference
+                    or _contains_identifier(content, identity.reference)
+                )
+                and re.search(
+                    kind_terms.get(identity.item_type, r"(?!)"), content, re.I
+                )
+            )
+            return DocumentInspection(
+                bool(relevant),
+                pages=pages,
+                applicability="technical_reference"
+                if relevant
+                else "insufficient_evidence",
+                document_type="technical_reference",
+                vision_pages=tuple(page for page, _ in relevant),
+                reason_code="" if relevant else "reference_not_applicable",
+                reason="Справочный документ не подтверждает изготовителя и конкретную поставку.",
+            )
         model_pages = tuple(
             page_text
             for _, page_text in pages
@@ -155,16 +185,75 @@ class DocumentServiceInspector:
             if _contains_identifier(page_text, identity.model)
         )
         if not model_pages:
+            family = re.match(r"[A-Za-zА-Яа-яЁё]+(?:[\s-]+\d+)?", identity.model)
+            family_pages = tuple(
+                page
+                for page, content in pages
+                if family and _contains_identifier(content, family.group())
+            )
             return DocumentInspection(
                 False,
                 reason="Модель не найдена в документе.",
                 pages=pages,
-                reason_code=ReasonCode.MODEL_MISMATCH,
+                reason_code="page_coverage_incomplete"
+                if int(payload.get("total_pages") or len(pages)) > len(pages)
+                else ReasonCode.MODEL_MISMATCH,
+                applicability="partial_match"
+                if int(payload.get("total_pages") or len(pages)) > len(pages)
+                else "family_match"
+                if family_pages
+                else "wrong_model",
+                vision_pages=family_pages,
             )
         manufacturer = identity.manufacturer
         profile_reader = getattr(self.catalog, "manufacturer_profiles", None)
         profiles = await profile_reader() if profile_reader is not None else ()
         page_text = " ".join(model_pages)
+        maker_evidence = ""
+        raw_labels = re.findall(
+            r"(?:изготовитель|производитель|manufacturer|manufactured by)\s*[:—-]\s*([^\n|;]{2,120})",
+            "\n".join(model_pages),
+            re.I,
+        )
+        raw_labels = [
+            label.strip().strip('"')
+            for label in raw_labels
+            if not re.search(r"https?://|не\s+указан|unknown|продавец", label, re.I)
+        ]
+        maker_page = 0
+        # В паспорте подпись изготовителя часто находится в разделе гарантий,
+        # отдельно от страницы точной модели. Общий каталог этим правилом не связывается.
+        frontmatter = "\n".join(content for _, content in pages[:2])[:12000]
+        if (
+            not raw_labels
+            and document.media_type == "application/pdf"
+            and re.search(
+                r"руководство\s+по\s+эксплуатации|паспорт|operating\s+manual|datasheet",
+                frontmatter,
+                re.I,
+            )
+            and not re.search(
+                r"каталог\s+(?:продукции|изделий)|product\s+catalog", frontmatter, re.I
+            )
+        ):
+            labels = [
+                (page, match.group(1).strip().rstrip(" ."))
+                for page, content in pages
+                for match in re.finditer(
+                    r"(?:изготовитель|производитель|manufacturer|manufactured by)\s*[:—-]\s*([^\n|;]{2,120})",
+                    content,
+                    re.I,
+                )
+            ]
+            labels = [
+                (page, label)
+                for page, label in labels
+                if not re.search(r"https?://|не\s+указан|unknown|продавец", label, re.I)
+            ]
+            if len({label.casefold() for _, label in labels}) == 1:
+                maker_page, label = labels[0]
+                raw_labels = [label]
+                page_text += "\nИзготовитель: " + label
         observed = {
             profile["name"]
             for profile in profiles
@@ -192,9 +281,7 @@ class DocumentServiceInspector:
             if self.catalog is not None:
                 aliases = await self.catalog.manufacturer_aliases(manufacturer)
             verified = any(
-                _contains_identifier(" ".join(model_pages), alias)
-                for alias in aliases
-                if alias
+                _contains_identifier(page_text, alias) for alias in aliases if alias
             )
             if observed:
                 own = {
@@ -212,6 +299,27 @@ class DocumentServiceInspector:
             candidates = labelled or observed
             verified = len(candidates) == 1
             manufacturer = next(iter(candidates)) if verified else ""
+            if not candidates and len({label.casefold() for label in raw_labels}) == 1:
+                manufacturer = raw_labels[0]
+                maker_evidence = "Изготовитель: " + raw_labels[0]
+                verified = True
+        if (
+            identity.manufacturer
+            and raw_labels
+            and not any(
+                _contains_identifier(label, alias)
+                for label in raw_labels
+                for alias in aliases
+                if alias
+            )
+        ):
+            return DocumentInspection(
+                False,
+                pages=pages,
+                reason="Явная подпись изготовителя противоречит проектной идентичности.",
+                reason_code=ReasonCode.MANUFACTURER_MISMATCH,
+                applicability="wrong_manufacturer",
+            )
         if not verified:
             # Известный точный сайт производителя тоже является доказательством
             # происхождения. Чужая явная подпись изготовителя имеет приоритет.
@@ -263,6 +371,9 @@ class DocumentServiceInspector:
                     if identity.manufacturer
                     else ReasonCode.MANUFACTURER_UNKNOWN
                 ),
+                requires_vision=not identity.manufacturer
+                and document.media_type == "application/pdf",
+                vision_pages=vision_pages,
             )
         if (
             identity.variant
@@ -325,4 +436,9 @@ class DocumentServiceInspector:
             pages=pages,
             manufacturer=manufacturer,
             vision_pages=vision_pages,
+            manufacturer_evidence=maker_evidence,
+            manufacturer_evidence_page=maker_page,
+            document_type="product_page"
+            if document.media_type == "text/html"
+            else "technical_document",
         )

@@ -876,7 +876,7 @@ async def compare_equipment_http(payload: dict[str, Any]) -> dict[str, Any]:
 class EquipmentVisionRequest(BaseModel):
     """Одна ограниченная страница PDF производителя для адресного VLM."""
 
-    manufacturer: str = Field(min_length=1, max_length=200)
+    manufacturer: str = Field(default="", max_length=200)
     model: str = Field(min_length=1, max_length=200)
     variant: str = Field(default="", max_length=200)
     article: str = Field(default="", max_length=200)

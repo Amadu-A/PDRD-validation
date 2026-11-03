@@ -119,6 +119,15 @@ class TargetedVisionInspector:
                     requires_vision=False,
                     reason="",
                     reason_code="",
+                    manufacturer=str(
+                        payload.get("manufacturer")
+                        or inspection.manufacturer
+                        or identity.manufacturer
+                    ),
+                    manufacturer_evidence=str(
+                        payload.get("manufacturer_evidence")
+                        or inspection.manufacturer_evidence
+                    ),
                     vision_facts=tuple(
                         {**fact, "page": page}
                         for fact in facts[:8]

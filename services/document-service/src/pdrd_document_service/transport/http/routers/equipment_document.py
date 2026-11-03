@@ -6,12 +6,34 @@ import base64
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
 from pdrd_document_service.core.container import ApplicationContainer
 from pdrd_document_service.transport.http.dependencies import get_container
 
 router = APIRouter(prefix="/internal/v1/equipment-documents", tags=["equipment"])
+
+
+class EquipmentReportRequest(BaseModel):
+    """Закреплённая сервером версия EQ и все позиции отчёта."""
+
+    job_id: str = Field(min_length=1, max_length=80)
+    revision: int = Field(ge=1)
+    rows: list[dict] = Field(max_length=2000)
+
+
+@router.post("/report-pdf")
+async def export_equipment_pdf(
+    payload: EquipmentReportRequest,
+    container: Annotated[ApplicationContainer, Depends(get_container)],
+) -> Response:
+    """Создаёт самостоятельный PDF, не обращаясь к исходному проектному документу."""
+    use_case = container.export_equipment_report
+    if use_case is None:
+        raise HTTPException(503, "Экспорт EQ не настроен.")
+    content = use_case.execute(**payload.model_dump())
+    return Response(content, media_type="application/pdf")
 
 
 class EquipmentPageResponse(BaseModel):

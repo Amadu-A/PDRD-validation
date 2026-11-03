@@ -17,6 +17,9 @@ from pdrd_document_service.application.use_cases.crop_pdf import CropPdf
 from pdrd_document_service.application.use_cases.equipment_document import (
     ExtractEquipmentDocument,
 )
+from pdrd_document_service.application.use_cases.equipment_report import (
+    ExportEquipmentReport,
+)
 from pdrd_document_service.application.use_cases.extract import (
     ExtractPdfDocument,
 )
@@ -49,6 +52,9 @@ from pdrd_document_service.infrastructure.pdf.annotator import (
     PyMuPdfAnnotationWriter,
 )
 from pdrd_document_service.infrastructure.pdf.crop import PyMuPdfCropRenderer
+from pdrd_document_service.infrastructure.pdf.equipment_report import (
+    PyMuPdfEquipmentReportWriter,
+)
 from pdrd_document_service.infrastructure.pdf.pymupdf import (
     PyMuPdfReader,
 )
@@ -69,6 +75,7 @@ class ApplicationContainer:
     build_annotated_pdf: BuildAnnotatedPdf | None = None
     crop_pdf: CropPdf | None = None
     extract_equipment_document: ExtractEquipmentDocument | None = None
+    export_equipment_report: ExportEquipmentReport | None = None
 
 
 def build_container() -> ApplicationContainer:
@@ -148,6 +155,7 @@ def build_container() -> ApplicationContainer:
         extract_pdf_project_context=(extract_pdf_project_context),
         build_annotated_pdf=(build_annotated_pdf),
         crop_pdf=CropPdf(PyMuPdfCropRenderer(), settings.pdf.max_upload_bytes),
+        export_equipment_report=ExportEquipmentReport(PyMuPdfEquipmentReportWriter()),
         extract_equipment_document=ExtractEquipmentDocument(
             PyMuPdfEquipmentDocumentReader(),
         ),
