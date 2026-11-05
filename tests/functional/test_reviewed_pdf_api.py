@@ -181,9 +181,10 @@ async def test_final_pdf_includes_gold_and_text_only_and_excludes_rejected(
         with fitz.open(stream=response.content, filetype="pdf") as document:
             page = document[0]
             help_notes = [
-                annot.info["content"]
+                annot.get_text()
                 for annot in page.annots()
-                if annot.type[1] == "Text"
+                if annot.type[1] == "FreeText"
+                and not annot.get_text().strip().isdigit()
             ]
             assert len(help_notes) == (1 if reject_first else 2)
             assert any("Ручное замечание Gold" in note for note in help_notes)
@@ -242,7 +243,9 @@ async def test_revoking_area_invalidates_cache_even_with_same_approved_revision(
         assert result.content != initial.content
         with fitz.open(stream=result.content, filetype="pdf") as document:
             page = document[0]
-            assert len([note for note in page.annots() if note.type[1] == "Text"]) == 1
+            assert (
+                len([note for note in page.annots() if note.type[1] == "FreeText"]) == 2
+            )
             assert "Исходный полный текст VLM" in document[1].get_text()
 
 
@@ -319,7 +322,9 @@ async def test_unlocated_vlm_is_only_text_without_artificial_geometry(pdf_flow):
         with fitz.open(stream=response.content, filetype="pdf") as document:
             page = document[0]
             notes = [
-                note.info["content"] for note in page.annots() if note.type[1] == "Text"
+                note.get_text()
+                for note in page.annots()
+                if note.type[1] == "FreeText" and not note.get_text().strip().isdigit()
             ]
             assert len(notes) == 2 and any("Gold" in note for note in notes)
             assert not any("Замечание без координат" in note for note in notes)

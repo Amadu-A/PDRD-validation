@@ -592,6 +592,51 @@ class FinalizeFindings:
 
         candidate_count = len(findings)
         original_candidates = findings
+        from pdrd_analysis_service.application.use_cases.document_context import (
+            merge_cross_page_findings,
+        )
+
+        grouped = {}
+        for finding in findings:
+            grouped.setdefault(finding.page, []).append(finding)
+        merged = merge_cross_page_findings(
+            page_findings={page: tuple(rows) for page, rows in grouped.items()},
+            cross_findings=(),
+            stage="pre_finalization_deduplication",
+        )
+        order = {
+            item.finding_id: index for index, item in enumerate(original_candidates)
+        }
+        findings = tuple(
+            sorted(
+                (finding for rows in merged.values() for finding in rows),
+                key=lambda item: order[item.finding_id],
+            )
+        )
+        pre_merged_count = len(original_candidates) - len(findings)
+        # Поиск N/E выполнен до объединения: его результаты принадлежат всем маршрутам.
+        experience_by_finding = dict(experience_by_finding)
+        normative_candidates_by_finding = dict(normative_candidates_by_finding or {})
+        for finding in findings:
+            identifiers = [
+                finding.finding_id,
+                *(
+                    origin["finding_id"]
+                    for origin in finding.origin_assertions
+                    if origin.get("origin") == "merged_finding"
+                    and origin.get("finding_id")
+                ),
+            ]
+            for mapping in (experience_by_finding, normative_candidates_by_finding):
+                combined = []
+                for identifier in identifiers:
+                    combined.extend(
+                        source
+                        for source in mapping.get(identifier, ())
+                        if source not in combined
+                    )
+                if combined:
+                    mapping[finding.finding_id] = tuple(combined)
         pre_rejected = []
         accepted = []
         for finding in findings:
@@ -849,7 +894,12 @@ class FinalizeFindings:
         before_merge_count = len(final_items)
         final_items, post_rejected = audit_final_findings(final_items, findings)
         rejected_findings.extend(post_rejected)
-        merged_count = before_merge_count - len(final_items) - len(post_rejected)
+        merged_count = (
+            pre_merged_count
+            + before_merge_count
+            - len(final_items)
+            - len(post_rejected)
+        )
         kept_ids = {item.finding_id for item in final_items}
         merged_into = {
             origin["finding_id"]: item.finding_id

@@ -135,10 +135,9 @@ def test_table_scope_requires_engineer_review() -> None:
     fact["applicability"] = "single_model_block"
 
     result = compare_equipment_stage(_pages(), search)
-    candidate = result["candidates_by_page"]["2"][0]
-
-    assert candidate["status"] == "needs_review"
-    assert candidate["equipment_details"]["comparison_status"] == "needs_review"
+    assert result["candidates_by_page"] == {}
+    assert result["diagnostics"][0]["reason_code"] == "fact_identity_not_proven"
+    assert result["diagnostics"][0]["comparisons"]
 
 
 def test_conflicting_manufacturer_values_require_review() -> None:
@@ -153,9 +152,10 @@ def test_conflicting_manufacturer_values_require_review() -> None:
 
     result = compare_equipment_stage(_pages(), search)
 
-    assert {candidate["status"] for candidate in result["candidates_by_page"]["2"]} == {
-        "needs_review"
-    }
+    assert result["candidates_by_page"] == {}
+    assert len(result["diagnostics"]) == 1
+    assert result["diagnostics"][0]["reason_code"] == "conflicting_document_values"
+    assert len(result["diagnostics"][0]["comparisons"]) == 2
 
 
 def test_multiple_saved_revisions_require_review() -> None:
@@ -164,9 +164,8 @@ def test_multiple_saved_revisions_require_review() -> None:
     search["results"][0]["document"]["revision_ambiguous"] = True
 
     result = compare_equipment_stage(_pages(), search)
-    candidate = result["candidates_by_page"]["2"][0]
-
-    assert candidate["status"] == "needs_review"
+    assert result["candidates_by_page"] == {}
+    assert result["diagnostics"][0]["reason_code"] == "fact_evidence_insufficient"
     assert result["status"] == "incomplete"
     assert any("несколько ревизий" in warning for warning in result["warnings"])
 
@@ -182,7 +181,8 @@ def test_phase_and_condition_guard_confirmed_finding() -> None:
     pages[0]["facts"]["equipment_identities"][0]["parameters"][0]["phase"] = "3-phase"
     fact["condition"] = "at full load"
     result = compare_equipment_stage(pages, search)
-    assert result["candidates_by_page"]["2"][0]["status"] == "needs_review"
+    assert result["candidates_by_page"] == {}
+    assert result["diagnostics"][0]["reason_code"] == "conditions_not_proven"
 
 
 def test_partial_eq_reason_reaches_common_report_diagnostics() -> None:
@@ -214,7 +214,7 @@ def test_equipment_finding_query_keeps_property_values_and_project_context() -> 
 def test_review_equipment_query_does_not_assert_confirmed_mismatch() -> None:
     """Неоднозначная характеристика остаётся вопросом для нормативного поиска."""
     search = _search()
-    search["results"][0]["facts"][0]["applicability"] = "single_model_block"
+    search["results"][0]["facts"][0]["value_raw"] = "24"
     candidate = compare_equipment_stage(_pages(), search)["candidates_by_page"]["2"][0]
     assert candidate["status"] == "needs_review"
     assert (
@@ -222,3 +222,144 @@ def test_review_equipment_query_does_not_assert_confirmed_mismatch() -> None:
         in candidate["experience_query"]
     )
     assert "Обнаружено расхождение" not in candidate["experience_query"]
+
+
+def test_reference_values_remain_lossless_diagnostics_without_findings():
+    """84 произвольных справочных значения не становятся 84 претензиями к изделию."""
+    search = _search()
+    template = search["results"][0]["facts"][0]
+    search["results"][0]["facts"] = [
+        dict(
+            template,
+            value_raw=str(value),
+            page=value,
+            applicability="technical_reference",
+            confidence=0.6,
+        )
+        for value in range(1, 85)
+    ]
+    result = compare_equipment_stage(_pages(), search)
+    assert result["candidates_by_page"] == {}
+    assert len(result["comparisons"]) == 84
+    assert len(result["diagnostics"]) == 1
+    assert len(result["diagnostics"][0]["comparisons"]) == 84
+    assert result["models"][0]["facts"] == search["results"][0]["facts"]
+
+
+def test_repeated_passport_fact_has_one_finding_and_all_pages():
+    """Повтор паспорта не размножает вопрос; разные физические объекты сохраняются."""
+    from copy import deepcopy
+
+    search = _search()
+    search["results"][0]["facts"].append(dict(search["results"][0]["facts"][0], page=4))
+    pages = _pages()
+    other = deepcopy(pages[0])
+    other["page_number"] = 3
+    pages.append(other)
+    result = compare_equipment_stage(pages, search)
+    rows = [row for values in result["candidates_by_page"].values() for row in values]
+    assert len(rows) == 1
+    assert {
+        source["page"] for source in rows[0]["equipment_documentation_basis_sources"]
+    } == {3, 4}
+    assert {
+        origin["page"]
+        for origin in rows[0]["origin_assertions"]
+        if origin["origin"] == "merged_equipment_comparison"
+    } == {2, 3}
+    pages[1]["facts"]["equipment_identities"][0]["object_ref"] = "PS2"
+    assert (
+        sum(
+            map(
+                len,
+                compare_equipment_stage(pages, search)["candidates_by_page"].values(),
+            )
+        )
+        == 2
+    )
+
+
+def test_pipe_and_reservoir_reference_values_do_not_become_product_passports():
+    """110 мм против 1 м, стенка 10 против 2 мм и объёмы разных баков остаются диагностикой."""
+    for prop, project, unit, reference_value, reference_unit in (
+        ("outer_diameter", "110", "мм", "1", "м"),
+        ("wall_thickness", "10", "мм", "2", "мм"),
+        ("volume", "100", "м³", "6", "м³"),
+        ("volume", "50", "м³", "1", "м³"),
+    ):
+        pages, search = _pages(), _search()
+        parameter = pages[0]["facts"]["equipment_identities"][0]["parameters"][0]
+        parameter.update(
+            property_name=prop,
+            value_raw=project,
+            unit_raw=unit,
+            role="",
+            current_type="",
+        )
+        fact = search["results"][0]["facts"][0]
+        fact.update(
+            property_name=prop,
+            value_raw=reference_value,
+            unit_raw=reference_unit,
+            role="",
+            current_type="",
+            applicability="technical_reference",
+            confidence=0.6,
+        )
+        result = compare_equipment_stage(pages, search)
+        assert result["candidates_by_page"] == {}
+        assert len(result["comparisons"]) == 1
+        assert result["diagnostics"][0]["reason_code"] == "fact_identity_not_proven"
+
+
+async def test_resume_does_not_return_legacy_reference_findings_to_report():
+    """Повторная финализация старого результата сохраняет справочное сравнение в диагностике."""
+    from pdrd_analysis_service.application.use_cases.finalization import (
+        FinalizeFindings,
+    )
+
+    candidate = compare_equipment_stage(_pages(), _search())["candidates_by_page"]["2"][
+        0
+    ]
+    candidate["origin_assertions"][0]["facts"][0]["applicability"] = (
+        "technical_reference"
+    )
+    finding = FindingDraftPayload.model_validate(candidate).to_domain()
+
+    class NoVision:
+        """Запрещает заменять проверку применимости новой модельной интерпретацией."""
+
+        async def generate_json(self, **kwargs):
+            raise AssertionError(
+                "Справочный факт не должен попадать в модель Finalization"
+            )
+
+    use_case = FinalizeFindings(
+        vision_model=NoVision(),
+        num_predict=1000,
+        batch_size=4,
+        experience_context_limit=500,
+        experience_min_score=0.5,
+    )
+    _, findings, metrics = await use_case.execute(
+        findings=(finding,), experience_by_finding={}
+    )
+    assert findings == ()
+    assert metrics["rejected_count"] == 1
+    assert metrics["rejected_findings"][0]["candidate"]["origin_assertions"]
+
+
+def test_neighbor_model_or_article_fact_does_not_borrow_document_identity():
+    """Доверие к паспорту не исправляет чужую строку модели, производителя или артикула."""
+    for field, value in (
+        ("model", "DRC-100A"),
+        ("manufacturer", "Другой завод"),
+        ("article", "OTHER-1"),
+    ):
+        search = _search()
+        search["results"][0]["facts"][0][field] = value
+        result = compare_equipment_stage(_pages(), search)
+        assert result["candidates_by_page"] == {}
+        assert (
+            result["diagnostics"][0]["reason_code"] == "fact_product_identity_mismatch"
+        )

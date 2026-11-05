@@ -67,33 +67,30 @@ def test_gold_preserves_both_fractional_rectangles(rotation, cropped):
         page = document[0]
         squares = [note for note in page.annots() if note.type[1] == "Square"]
         assert len(squares) == 2
-        for note, box in zip(squares, (BOX, CARD), strict=True):
-            visual = note.rect * page.rotation_matrix
-            expected = [
-                page.rect.width * box["x_min"] / 1000,
-                page.rect.height * box["y_min"] / 1000,
-                page.rect.width * box["x_max"] / 1000,
-                page.rect.height * box["y_max"] / 1000,
-            ]
-            assert list(visual) == pytest.approx(expected, abs=1.3)
-            assert note.colors["stroke"] == pytest.approx((0.65, 0.49, 0.08))
+        visual = squares[0].rect * page.rotation_matrix
+        original_width, original_height = (750, 520) if cropped else (842, 595)
+        if rotation in (90, 270):
+            original_width, original_height = original_height, original_width
+        expected = [
+            original_width * BOX["x_min"] / 1000,
+            original_height * BOX["y_min"] / 1000,
+            original_width * BOX["x_max"] / 1000,
+            original_height * BOX["y_max"] / 1000,
+        ]
+        assert list(visual) == pytest.approx(expected, abs=1.3)
+        assert (squares[1].rect * page.rotation_matrix).x0 > original_width
+        assert squares[0].colors["stroke"] == pytest.approx((0.86, 0.12, 0.12))
         assert len([note for note in page.annots() if note.type[1] == "Line"]) == 1
-        help_note = next(note for note in page.annots() if note.type[1] == "Text")
-        assert help_note.info["content"] == TEXT
+        assert not any(note.type[1] == "Text" for note in page.annots())
         assert "Пользователь обнаружил" in document[1].get_text()
 
 
 def test_long_full_text_is_preserved_across_report_pages():
-    """Карточка сокращается визуально, полный текст Help и приложения не обрезается."""
+    """Карточка сокращается визуально, полный текст приложения не обрезается."""
     text = TEXT * 170 + "КОНЕЦ ПОЛНОГО ЗАМЕЧАНИЯ"
     with fitz.open(stream=reviewed_pdf(text=text), filetype="pdf") as document:
         page = document[0]
-        assert (
-            next(note for note in page.annots() if note.type[1] == "Text").info[
-                "content"
-            ]
-            == text
-        )
+        assert not any(note.type[1] == "Text" for note in page.annots())
         assert len(document) >= 3
         report = " ".join(
             " ".join(document[i].get_text() for i in range(1, len(document))).split()

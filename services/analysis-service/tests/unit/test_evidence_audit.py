@@ -319,3 +319,103 @@ def test_meter_is_not_matched_as_part_of_millimeter_unit():
         bind_evidence(item, {1: item.fact.evidence_text}).reason_code
         == "unit_not_bound_to_quote"
     )
+
+
+def test_consumption_subsections_cannot_be_confirmed_as_same_table_purpose():
+    """Таблица 2 производственного и таблица 3 непроизводственного расхода различимы."""
+    a = observation(
+        "2",
+        prop="Номер таблицы",
+        unit="",
+        table_title="Производственное водопотребление",
+    )
+    b = observation(
+        "3",
+        page=2,
+        prop="Номер таблицы",
+        unit="",
+        table_title="Непроизводственное водопотребление",
+    )
+    result = assess(a, b)
+    assert result.disposition == "diagnostic"
+    assert result.reason_code == "different_consumption_scope"
+
+
+def test_section_continuation_is_checked_before_absence_claim():
+    """Пункт н.1 продолжается 18→19; другой пункт не служит контрдоказательством."""
+    from pdrd_analysis_service.domain.structural_evidence import section_continuation
+
+    texts = {
+        17: "Предыдущий раздел",
+        18: "н.1) Энергетическая эффективность\nДля снижения потерь предусмотрены мероприятия:",
+        19: (
+            "- теплоизоляция трубопроводов и автоматическое регулирование температуры.\n"
+            "- контроль утечек при эксплуатации.\nо) Следующий раздел"
+        ),
+    }
+    proof = section_continuation(
+        "Раздел н.1 обрывается, мероприятия не приведены", page=18, page_texts=texts
+    )
+    assert proof["pages"] == [18, 19]
+    assert "контроль утечек" in proof["continuation"]
+    assert (
+        section_continuation("Раздел н.2 обрывается", page=18, page_texts=texts) is None
+    )
+    assert (
+        section_continuation(
+            "Раздел н.1 обрывается",
+            page=18,
+            page_texts={18: texts[18], 19: "о) Другой раздел"},
+        )
+        is None
+    )
+
+
+def test_table_references_bind_to_actual_subsection_even_when_scope_not_extracted():
+    """Две ссылки одного листа не сравниваются без учёта предшествующих заголовков."""
+    text = (
+        "с) Баланс для объектов производственного назначения\nБаланс приведён в таблице 3.\n"
+        "т) Баланс для объектов непроизводственного назначения\nБаланс приведён в таблице 2."
+    )
+    a = observation(
+        "3",
+        page=20,
+        prop="Номер таблицы",
+        unit="",
+        quote="Баланс приведён в таблице 3.",
+    )
+    b = observation(
+        "2",
+        page=20,
+        prop="Номер таблицы",
+        unit="",
+        quote="Баланс приведён в таблице 2.",
+    )
+    assert assess(a, b, texts={20: text}).reason_code == "different_consumption_scope"
+
+
+def test_section_marker_underscore_and_repeated_title_block_are_not_lost():
+    """PDF н_1 соответствует н.1; общий штамп следующего листа не заменяет содержание."""
+    from pdrd_analysis_service.domain.structural_evidence import section_continuation
+
+    stamp = "Шифр документа\nЛист\n14\nПодп. Дата\n"
+    current = (
+        stamp
+        + "н_1) Перечень мероприятий энергетической эффективности\nматериалов, используемых в системе ГВС,"
+    )
+    following = (
+        stamp
+        + "позволяющих исключить нерациональный расход воды и энергетических ресурсов.\n"
+        "Проектом предусмотрены учёт и теплоизоляция."
+    )
+    assert section_continuation(
+        "Раздел н.1 обрывается", page=18, page_texts={18: current, 19: following}
+    )["pages"] == [18, 19]
+    assert (
+        section_continuation(
+            "Раздел н.1 обрывается",
+            page=18,
+            page_texts={18: current, 19: stamp + "о) Следующий самостоятельный раздел"},
+        )
+        is None
+    )

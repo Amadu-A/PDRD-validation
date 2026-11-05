@@ -223,9 +223,10 @@ async def test_lan_frontend_approval_saves_experience_and_exports_reviewed_pdf(
         assert response.headers["content-type"] == "application/pdf"
         with fitz.open(stream=response.content, filetype="pdf") as document:
             notes = [
-                annotation.info["content"]
+                annotation.get_text()
                 for annotation in document[0].annots()
-                if annotation.type[1] == "Text"
+                if annotation.type[1] == "FreeText"
+                and not annotation.get_text().strip().isdigit()
             ]
             assert len(notes) == 1 and "Ручное замечание Gold" in notes[0]
             text = "\n".join(page.get_text() for page in document)

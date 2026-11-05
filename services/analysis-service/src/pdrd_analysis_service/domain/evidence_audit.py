@@ -303,6 +303,25 @@ def audit_assertion(
         )
         for item in facts
     ]
+    # Подразделы производственного и непроизводственного потребления не тождественны.
+    from pdrd_analysis_service.domain.structural_evidence import consumption_scope
+
+    consumption_scopes = []
+    for item, text in zip(facts, role_texts, strict=True):
+        local = normalize_label(
+            item.fact.scope_condition + " " + item.fact.scope_segment + " " + text
+        )
+        bound_scope = consumption_scope(
+            page_texts.get(item.page, ""), item.fact.evidence_text
+        )
+        if bound_scope:
+            consumption_scopes.append(bound_scope)
+        elif "непроизводствен" in local:
+            consumption_scopes.append("nonproduction")
+        elif "производствен" in local:
+            consumption_scopes.append("production")
+    if assertion.claim_type == "contradiction" and len(set(consumption_scopes)) > 1:
+        return result("counterevidence", "diagnostic", "different_consumption_scope")
     role_unknown = False
     for family in (
         ("гарантирован", "требуем"),

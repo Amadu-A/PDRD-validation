@@ -161,8 +161,9 @@ def test_document_service_owns_pdf_annotation_mutation() -> None:
     assert "add_rect_annot" in annotator
     assert "add_freetext_annot" in annotator
     assert "add_line_annot" in annotator
-    assert "add_text_annot" in annotator
-    assert "_place_card" in annotator
+    assert "add_text_annot" not in annotator
+    assert "extend_right" in annotator
+    assert "plan_cards" in annotator
     assert "derotation_matrix" in annotator
     assert '"cjk"' in annotator
     assert "new_page" in annotator
@@ -240,7 +241,7 @@ def test_unlocated_findings_use_full_callout_and_v8_cache() -> None:
 
     assert "default_factory=list" in compact_schema
 
-    assert "annotated-v9.pdf" in cache_literals
+    assert "annotated-v10.pdf" in cache_literals
 
     assert "_LOCATIONS_SCHEMA_VERSION=6" in _compact(
         cache,

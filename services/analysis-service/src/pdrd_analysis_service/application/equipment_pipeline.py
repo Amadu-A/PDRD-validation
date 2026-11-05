@@ -22,6 +22,7 @@ from pdrd_analysis_service.domain.equipment import (
     compare_equipment,
     equipment_key,
     equipment_property_checks,
+    equipment_value_key,
     inventory_payload,
 )
 from pdrd_analysis_service.domain.equipment_specification import specification_report
@@ -264,6 +265,9 @@ def compare_equipment_stage(
                 condition=str(fact.get("condition") or ""),
                 configuration=str(fact.get("configuration") or ""),
                 value_type=str(fact.get("value_type") or "number"),
+                manufacturer=str(fact.get("manufacturer") or ""),
+                model=str(fact.get("model") or ""),
+                article=str(fact.get("article") or ""),
                 document_revision=str(document.get("revision") or ""),
                 table_title=str(fact.get("table_title") or ""),
                 row_label=str(fact.get("row_label") or ""),
@@ -312,6 +316,31 @@ def compare_equipment_stage(
             )
         for comparison in model_comparisons:
             comparisons.append(asdict(comparison))
+            if comparison.applicability_status != "applicable":
+                # Сохраняем исходные сравнения без размножения пользовательских претензий.
+                key = (
+                    item.key,
+                    comparison.object_ref or comparison.page,
+                    comparison.property_name,
+                    comparison.source_id,
+                    comparison.mode,
+                    comparison.condition,
+                    comparison.configuration,
+                )
+                diagnostic = next(
+                    (part for part in diagnostics if part.get("identity") == key), None
+                )
+                if diagnostic is None:
+                    diagnostic = {
+                        "identity": key,
+                        "status": "not_comparable",
+                        "reason_code": comparison.reason_code,
+                        "reason": comparison.explanation,
+                        "comparisons": [],
+                    }
+                    diagnostics.append(diagnostic)
+                diagnostic["comparisons"].append(asdict(comparison))
+                continue
             if comparison.status not in {"mismatch_candidate", "needs_review"}:
                 continue
             if not trusted_document:
@@ -392,10 +421,18 @@ def compare_equipment_stage(
                         "manufacturer_value": comparison.manufacturer_value,
                         "manufacturer_unit": comparison.manufacturer_unit,
                         "comparison_status": comparison.status,
+                        "project_code": comparison.project_code,
+                        "under": comparison.under,
+                        "mode": comparison.mode,
+                        "condition": comparison.condition,
+                        "configuration": comparison.configuration,
+                        "applicability_status": comparison.applicability_status,
                     },
                 }
             )
 
+    # Сохраняем исходные сравнения без размножения пользовательских претензий.
+    candidates = _consolidate_candidates(candidates)
     metrics = {
         key: sum(
             float(result.get("metrics", {}).get(key) or 0) for result in by_key.values()
@@ -432,3 +469,77 @@ def compare_equipment_stage(
             else "completed"
         ),
     }
+
+
+def _consolidate_candidates(candidates: dict[int, list[dict]]) -> dict[int, list[dict]]:
+    """Объединяет одинаковые EQ-претензии без потери страниц и оснований."""
+    result: dict[int, list[dict]] = defaultdict(list)
+    groups: dict[tuple, dict] = {}
+    for rows in candidates.values():
+        for row in rows:
+            details = row["equipment_details"]
+            key = tuple(
+                str(details.get(name) or "").casefold()
+                for name in (
+                    "manufacturer",
+                    "model",
+                    "variant",
+                    "article",
+                    "object_ref",
+                    "property_name",
+                    "project_code",
+                    "under",
+                    "mode",
+                    "condition",
+                    "configuration",
+                    "applicability_status",
+                    "comparison_status",
+                )
+            )
+            for value, unit in (
+                ("project_value", "project_unit"),
+                ("manufacturer_value", "manufacturer_unit"),
+            ):
+                key += (
+                    equipment_value_key(
+                        details[value], details[unit], details["property_name"]
+                    )
+                    or (details[value], details[unit]),
+                )
+            if not details.get("object_ref"):
+                key += (row["page"],)
+            key += (tuple(row["equipment_documentation_source_ids"]),)
+            previous = groups.get(key)
+            if previous is None:
+                groups[key] = row
+                result[row["page"]].append(row)
+                continue
+            for field in ("equipment_documentation_basis_sources", "origin_assertions"):
+                previous[field].extend(
+                    part for part in row[field] if part not in previous[field]
+                )
+            previous["evidence_locations"].append(
+                {
+                    "page": row["page"],
+                    "source_id": row["finding_id"],
+                    "text": row["evidence"],
+                    "visual_regions": row["visual_regions"],
+                }
+            )
+            previous["origin_assertions"].append(
+                {
+                    "origin": "merged_equipment_comparison",
+                    "finding_id": row["finding_id"],
+                    "page": row["page"],
+                    "evidence": row["evidence"],
+                    "visual_regions": row["visual_regions"],
+                    "equipment_details": details,
+                }
+            )
+            if row["page"] == previous["page"]:
+                previous["visual_regions"].extend(
+                    part
+                    for part in row["visual_regions"]
+                    if part not in previous["visual_regions"]
+                )
+    return result

@@ -34,6 +34,7 @@ from pdrd_analysis_service.domain.analysis import (
     FindingDraft,
     FindingVisualRegion,
 )
+from pdrd_analysis_service.domain.claim_identity import same_engineering_claim
 from pdrd_analysis_service.domain.design_decisions import build_decision_registry
 from pdrd_analysis_service.domain.document_context import (
     ConflictGroup,
@@ -1228,6 +1229,7 @@ def merge_cross_page_findings(
                     and assertion_subsumes(right, left)
                 )
                 requirement_duplicate = _same_requirement_claim(cross, finding)
+                route_duplicate = same_engineering_claim(cross, finding)
                 # Внутренняя диагностика не поглощает полезный вопрос или подтверждённую запись.
                 if (finding.status == "hypothesis") != (
                     cross.status == "hypothesis"
@@ -1235,6 +1237,7 @@ def merge_cross_page_findings(
                     continue
                 if (
                     structured_duplicate
+                    or route_duplicate
                     or requirement_duplicate
                     or subsumed
                     or (
@@ -1254,6 +1257,8 @@ def merge_cross_page_findings(
                     merge_reasons[finding.finding_id] = (
                         "subsumed_by_supported_comparison"
                         if subsumed
+                        else "same_cross_route_engineering_claim"
+                        if route_duplicate
                         else "same_verified_requirement_claim"
                         if requirement_duplicate
                         else "same_table_total_rule"
@@ -1262,6 +1267,10 @@ def merge_cross_page_findings(
                         else "same_engineering_assertion"
                     )
                     findings.remove(finding)
+        if not duplicates:
+            # Одиночная запись не получает новые области или изменённый origin при дедупликации.
+            result.setdefault(cross.page, []).append(cross)
+            continue
         updates = {}
         for field, id_field in (
             ("basis_sources", "normative_source_ids"),

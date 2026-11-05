@@ -1,54 +1,20 @@
 # services/document-service/tests/test_pdf_annotation_layout.py
 
-"""Regression tests collision-aware PDF annotation card placement."""
+"""Раскладка PDF-карточек за пределами исходной страницы."""
 
 import fitz
-from pdrd_document_service.infrastructure.pdf.annotator import (
-    PyMuPdfAnnotationWriter,
-)
+from pdrd_document_service.infrastructure.pdf.sidebar import plan_cards
 
 
-def test_card_score_strongly_penalizes_original_text_overlap() -> None:
-    """Card поверх source text должен проигрывать эквивалентному clear месту."""
-    writer = PyMuPdfAnnotationWriter()
-
-    anchor = fitz.Rect(
-        250,
-        250,
-        270,
-        270,
+def test_cards_are_placed_to_right_without_covering_source():
+    """Даже сохранённые GUI-позиции не нужны локальной раскладке PDF."""
+    original = fitz.Rect(0, 0, 595, 842)
+    cards, added_width = plan_cards(
+        original, [("Проверить расчёт и обоснование", 8.5)] * 20
     )
-
-    candidate = fitz.Rect(
-        300,
-        200,
-        430,
-        280,
+    assert added_width > 0
+    assert all(
+        card.rect.x0 > original.x1 and not card.rect.intersects(original)
+        for card in cards
     )
-
-    score_without_text = writer._candidate_score(
-        candidate=candidate,
-        anchor=anchor,
-        occupied_cards=[],
-        all_regions=(),
-        text_regions=(),
-    )
-
-    score_over_text = writer._candidate_score(
-        candidate=candidate,
-        anchor=anchor,
-        occupied_cards=[],
-        all_regions=(),
-        text_regions=(
-            fitz.Rect(
-                300,
-                200,
-                430,
-                280,
-            ),
-        ),
-    )
-
-    assert score_over_text > score_without_text
-
-    assert score_over_text - score_without_text > 1000
+    assert all(card.font_size == 8.5 for card in cards)

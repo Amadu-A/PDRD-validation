@@ -69,3 +69,84 @@ def structural_counterevidence(
     ):
         return "section_composition_requirement_not_established"
     return None
+
+
+def section_continuation(
+    comment: str, *, page: int, page_texts: dict[int, str]
+) -> dict | None:
+    """Устанавливает продолжение конкретного пункта по соседним исходным страницам.
+
+    Возвращает компактные ссылки и цитаты, не копируя раздел в контекст каждого листа.
+    Наличие продолжения опровергает обрыв, но не доказывает достаточность мероприятий.
+    """
+    if not re.search(
+        r"обрыв|обрыва|не\s+заверш|неполн|отсутств|не\s+(?:привед|описан|представлен)",
+        comment,
+        re.I,
+    ):
+        return None
+    target = re.search(
+        r"(?:пункт|подпункт|раздел)\w*\s*[«\"']?([а-яё](?:[._]\d+)*|\d+(?:\.\d+)*)\b",
+        comment,
+        re.I,
+    )
+    if target is None:
+        return None
+    key = target[1].casefold().replace("_", ".")
+    marker = re.escape(key).replace(r"\.", "[._]")
+    heading = re.compile(r"(?m)^\s*" + marker + r"[).]?\s+\S", re.I)
+    for start_page in (page - 1, page):
+        current = page_texts.get(start_page, "")
+        following = page_texts.get(start_page + 1, "")
+        # Общие начальные строки листов и отдельные номера не являются продолжением раздела.
+        running = {line.strip() for line in current.splitlines()[:24] if line.strip()}
+        next_lines = following.splitlines()
+        while next_lines and (
+            not next_lines[0].strip()
+            or next_lines[0].strip() in running
+            or next_lines[0].strip().isdigit()
+        ):
+            next_lines.pop(0)
+        following = "\n".join(next_lines)
+        found = heading.search(current)
+        if found is None or len(following.strip()) < 50:
+            continue
+        # Новый пункт того же уровня закрывает раздел до границы страницы.
+        next_heading = re.compile(
+            r"(?m)^\s*(?:[а-яё](?:[._]\d+)*|\d+(?:\.\d+)*)[).]\s+\S", re.I
+        )
+        if next_heading.search(current, found.end()):
+            continue
+        first_heading = next_heading.search(following)
+        prefix = following[: first_heading.start()] if first_heading else following
+        if len(prefix.strip()) < 50:
+            continue
+        return {
+            "section": key,
+            "pages": [start_page, start_page + 1],
+            "tail": current[-240:],
+            "continuation": prefix[:240],
+        }
+    return None
+
+
+def consumption_scope(text: str, quote: str) -> str:
+    """Привязывает цитату к явно подписанному подразделу, включая два пункта на листе."""
+    if not quote.strip():
+        return ""
+    from pdrd_analysis_service.domain.document_context import normalize_label
+
+    headings = re.compile(
+        r"(?ms)^\s*[а-яёa-z][).]\s+.*?(?=^\s*[а-яёa-z][).]\s+|\Z)", re.I
+    )
+    scopes = set()
+    for section in headings.finditer(text):
+        normalized = normalize_label(section[0])
+        if normalize_label(quote) not in normalized:
+            continue
+        heading = normalized[: normalized.index(normalize_label(quote))]
+        if re.search(r"для\s+объектов\s+непроизводственн\w*\s+назначени", heading):
+            scopes.add("nonproduction")
+        elif re.search(r"для\s+объектов\s+производственн\w*\s+назначени", heading):
+            scopes.add("production")
+    return next(iter(scopes)) if len(scopes) == 1 else ""

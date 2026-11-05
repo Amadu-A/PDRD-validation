@@ -447,12 +447,25 @@ def _audit_finding(finding, *, page_texts, stage):
         finding.comment + " " + finding.recommendation_draft
     )
     from pdrd_analysis_service.domain.structural_evidence import (
+        section_continuation,
         structural_counterevidence,
     )
 
     counterevidence = structural_counterevidence(
         finding.comment, finding.evidence, page_texts
     )
+    continuation = section_continuation(
+        finding.comment, page=finding.page, page_texts=page_texts
+    )
+    if continuation is not None:
+        counterevidence = "section_continues_on_adjacent_page"
+        finding = replace(
+            finding,
+            origin_assertions=(
+                *finding.origin_assertions,
+                {"origin": "section_continuity", **continuation},
+            ),
+        )
     if re.search(
         r"норматив\w*[^.!?]{0,60}(?:может\s+не\s+(?:покрывать|учитывать)|возможно\s+не\s+охватывает)",
         finding.comment,

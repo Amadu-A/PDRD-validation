@@ -146,8 +146,8 @@ def test_html_table_keeps_exact_model_column() -> None:
     assert facts[0]["value_raw"] == "21...29"
 
 
-def test_visual_eq_facts_create_review_candidate_with_snapshot() -> None:
-    """Визуальная строка проходит в общий pipeline с сохранённым evidence."""
+def test_visual_eq_facts_without_proven_applicability_are_diagnostic() -> None:
+    """Визуальная строка без SHA/URL сохраняется в диагностике с исходным evidence."""
     from pdrd_knowledge_service.application.equipment_vision_facts import (
         normalize_equipment_vision_facts,
     )
@@ -184,10 +184,11 @@ def test_visual_eq_facts_create_review_candidate_with_snapshot() -> None:
             ],
         },
     )
-    candidate = result["candidates_by_page"]["3"][0]
-    assert candidate["status"] == "needs_review"
-    assert candidate["equipment_documentation_source_ids"] == ["EQ-scan"]
-    assert candidate["equipment_documentation_basis_sources"][0]["page"] == 2
+    assert result["candidates_by_page"] == {}
+    diagnostic = result["diagnostics"][0]
+    assert diagnostic["reason_code"] == "fact_identity_not_proven"
+    assert diagnostic["comparisons"][0]["source_id"] == "EQ-scan"
+    assert diagnostic["comparisons"][0]["source_page"] == 2
 
 
 def test_pdf_table_geometry_keeps_neighbor_models_separate() -> None:

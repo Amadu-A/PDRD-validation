@@ -105,9 +105,9 @@ async def test_acceptance_geometry_rejection_and_training_selection(
         assert document_response.status_code == 200, document_response.text
         with fitz.open(stream=document_response.content, filetype="pdf") as document:
             notes = [
-                note.info["content"]
+                note.get_text()
                 for note in document[0].annots() or ()
-                if note.type[1] == "Text"
+                if note.type[1] == "FreeText" and not note.get_text().strip().isdigit()
             ]
             assert len(notes) == (1 if actions[-1] == "accepted" else 0)
             text = "\n".join(page.get_text() for page in document)

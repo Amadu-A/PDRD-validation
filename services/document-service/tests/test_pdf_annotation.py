@@ -269,21 +269,13 @@ def test_writer_preserves_original_pages_and_appends_report() -> None:
 
         assert "Square" in first_types
         assert "FreeText" in first_types
-        assert "Text" in first_types
+        assert "Text" not in first_types
         assert "Line" in first_types
 
         assert "Square" in second_types
         assert "FreeText" in second_types
-        assert "Text" in second_types
+        assert "Text" not in second_types
         assert "Line" in second_types
-
-        first_help = next(
-            annotation
-            for annotation in first_annotations
-            if annotation.type[1] == "Text"
-        )
-
-        assert "Нет маркировки ЩР-1." in first_help.info["content"]
 
         report_text = "\n".join(
             (document[page_index].get_text())
@@ -364,7 +356,7 @@ def test_writer_adds_full_page_callout_when_bbox_is_unavailable() -> None:
 
         assert "FreeText" in types
         assert "Square" in types
-        assert "Text" in types
+        assert "Text" not in types
         assert "Line" not in types
 
         free_text_annotations = [
@@ -385,17 +377,6 @@ def test_writer_adds_full_page_callout_when_bbox_is_unavailable() -> None:
         assert "Проверить лист целиком." in " ".join(visible_text.split())
 
         assert "PDRD [" not in visible_text
-
-        help_annotation = next(
-            annotation for annotation in annotations if annotation.type[1] == "Text"
-        )
-
-        assert help_annotation.info["name"] == "Help"
-
-        assert (
-            "Точное место автоматически "
-            "не локализовано." in help_annotation.info["content"]
-        )
 
         assert all(
             (annotation.rect & page.rect).is_empty is False

@@ -347,7 +347,12 @@ async def test_audited_question_keeps_accepted_review_geometry_and_exported_pdf(
             text = "\n".join(page.get_text() for page in pdf)
             assert "10" in text and "S1" in text
             assert "engineering_context" not in text
-            assert any(annotation.type[1] == "Text" for annotation in pdf[0].annots())
+            assert any(
+                annotation.type[1] == "FreeText" for annotation in pdf[0].annots()
+            )
+            assert not any(
+                annotation.type[1] == "Text" for annotation in pdf[0].annots()
+            )
 
 
 async def test_specific_temperature_question_is_not_replaced_by_flow_question():

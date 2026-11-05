@@ -239,6 +239,9 @@ class EquipmentFact:
     condition: str = ""
     configuration: str = ""
     value_type: str = "number"
+    manufacturer: str = ""
+    model: str = ""
+    article: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,6 +263,13 @@ class Comparison:
     project_evidence: str
     manufacturer_evidence: str
     visual_regions: tuple[dict[str, Any], ...]
+    project_code: str = ""
+    under: str = ""
+    applicability_status: str = "applicable"
+    reason_code: str = ""
+    mode: str = ""
+    condition: str = ""
+    configuration: str = ""
 
 
 _PROPERTY_ALIASES = {
@@ -590,6 +600,9 @@ def compare_equipment(
                 maker_low, maker_high = maker_quantity[1:]
                 conflicting = any(
                     other is not fact
+                    and other.applicability
+                    in {"exact_model_line", "exact_model_column"}
+                    and other.confidence >= 0.85
                     and _property(other.property_name) == property_name
                     and (not other.variant or _token(other.variant) == item.key[2])
                     and _token(other.role) == _token(fact.role)
@@ -608,21 +621,52 @@ def compare_equipment(
                     and other_quantity[1:] != maker_quantity[1:]
                     for other in facts
                 )
-                if conflicting:
-                    status = "needs_review"
+                applicability_status = "applicable"
+                reason_code = ""
+                foreign_identity = any(
+                    raw and identity_token(raw) != identity_token(expected)
+                    for raw, expected in (
+                        (fact.manufacturer, item.manufacturer),
+                        (fact.model, item.model),
+                        (fact.article, item.article),
+                    )
+                )
+                if foreign_identity:
+                    status = "not_comparable"
+                    applicability_status = "not_proven"
+                    reason_code = "fact_product_identity_mismatch"
+                    explanation = (
+                        "Факт относится к другому изготовителю, модели или артикулу."
+                    )
+                elif fact.applicability not in {
+                    "exact_model_line",
+                    "exact_model_column",
+                }:
+                    status = "not_comparable"
+                    applicability_status = "not_proven"
+                    reason_code = "fact_identity_not_proven"
+                    explanation = "Справочный факт не подтверждает характеристику конкретного изделия."
+                elif fact.confidence < 0.85:
+                    status = "insufficient_evidence"
+                    applicability_status = "not_proven"
+                    reason_code = "fact_evidence_insufficient"
+                    explanation = (
+                        "Достоверность и применимость характеристики не подтверждены."
+                    )
+                elif conflicting:
+                    status = "insufficient_evidence"
+                    applicability_status = "ambiguous"
+                    reason_code = "conflicting_document_values"
                     explanation = "Документация содержит противоречивые значения одной характеристики."
-                elif (
-                    fact.condition
-                    or parameter.get("condition")
-                    or fact.confidence < 0.85
-                    or fact.applicability
-                    not in {
-                        "exact_model_line",
-                        "exact_model_column",
-                    }
+                elif _token(fact.condition) != _token(
+                    str(parameter.get("condition") or "")
                 ):
                     status = "needs_review"
-                    explanation = "Применимость характеристики требует проверки таблицы производителя."
+                    applicability_status = "not_proven"
+                    reason_code = "conditions_not_proven"
+                    explanation = (
+                        "Условия применения характеристики не сопоставлены с проектом."
+                    )
                 elif _fits(project_quantity, maker_quantity):
                     status = "matched"
                     explanation = "Проектное значение соответствует подтверждённым значениям производителя."
@@ -677,6 +721,13 @@ def compare_equipment(
                         ),
                         manufacturer_evidence=fact.snippet,
                         visual_regions=occurrence.visual_regions,
+                        project_code=occurrence.project_code,
+                        under=occurrence.under,
+                        applicability_status=applicability_status,
+                        reason_code=reason_code,
+                        mode=fact.mode,
+                        condition=fact.condition,
+                        configuration=fact.configuration,
                     )
                 )
     return tuple(comparisons)
@@ -700,7 +751,11 @@ def equipment_property_checks(
         if parameter.get("evidence_status") != "needs_review"
     }
     manufacturer = {_property(fact.property_name) for fact in facts}
-    compared = {comparison.property_name for comparison in comparisons}
+    compared = {
+        comparison.property_name
+        for comparison in comparisons
+        if comparison.applicability_status == "applicable"
+    }
     return [
         {
             "property_name": prop,
@@ -714,3 +769,8 @@ def equipment_property_checks(
         }
         for prop in sorted((project | manufacturer) - {""})
     ]
+
+
+def equipment_value_key(value: str, unit: str, property_name: str) -> tuple | None:
+    """Канонизирует сравнимое значение без изменения исходной паспортной записи."""
+    return _value(value, unit, property_name)

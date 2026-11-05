@@ -1494,6 +1494,56 @@ def equipment_review_question(finding):
         or not finding.equipment_documentation_basis_sources
     ):
         return finding
+    # Повторный запуск финализации не возвращает старые справочные сравнения в отчёт.
+    from pdrd_analysis_service.domain.equipment import (
+        EquipmentFact,
+        EquipmentOccurrence,
+        InventoryItem,
+        compare_equipment,
+    )
+
+    for origin in finding.origin_assertions:
+        if origin.get("origin") != "equipment_program_check":
+            continue
+        try:
+            raw = dict(origin["item"])
+            raw["occurrences"] = tuple(
+                EquipmentOccurrence(**item) for item in raw["occurrences"]
+            )
+            comparisons = compare_equipment(
+                InventoryItem(**raw),
+                tuple(EquipmentFact(**fact) for fact in origin["facts"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        invalid = next(
+            (
+                part
+                for part in comparisons
+                if part.candidate_id == finding.finding_id
+                and part.applicability_status != "applicable"
+            ),
+            None,
+        )
+        if invalid is not None:
+            return replace(
+                finding,
+                status="hypothesis",
+                origin_assertions=(
+                    *finding.origin_assertions,
+                    {
+                        "origin": "engineering_evidence_audit",
+                        "stage": "equipment_applicability_replay",
+                        "status": "incomplete",
+                        "disposition": "diagnostic",
+                        "reason_code": invalid.reason_code,
+                        "original": {
+                            "comment": finding.comment,
+                            "status": finding.status,
+                        },
+                    },
+                ),
+            )
     if verified_equipment_check(finding) or finding.status != "confirmed":
         return finding
     details = finding.equipment_details
