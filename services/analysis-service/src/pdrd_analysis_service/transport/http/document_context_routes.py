@@ -2,6 +2,7 @@
 
 """Закрытые HTTP-этапы D-контекста и межстраничной проверки."""
 
+import asyncio
 from collections import Counter
 from dataclasses import asdict
 from typing import Annotated, Any
@@ -164,7 +165,8 @@ async def build_page_contexts(
         )
     pages = tuple(page.to_domain() for page in request.pages)
     semantic = {item.page_number: tuple(item.sources) for item in request.semantic}
-    sources = build_page_document_context(
+    sources = await asyncio.to_thread(
+        build_page_document_context,
         pages=pages,
         semantic_by_page=semantic,
         options=_options(container),
@@ -190,18 +192,6 @@ async def check_cross_page_consistency(
 ) -> CheckConsistencyResponse:
     """Проверяет группы кандидатов ограниченными пакетами VLM."""
     use_case = container.check_cross_page_consistency
-    if use_case is None or not request.enabled:
-        pages = tuple(page.to_domain() for page in request.pages)
-        report = document_engineering_report(
-            pages, str(request.document_id), enabled=False
-        )
-        return await _bounded_consistency_response(
-            request,
-            container,
-            _checked_response(
-                request, report, program_findings(report), expose_findings=False
-            ),
-        )
     probe = container.analysis_progress_probe
 
     async def cancelled() -> bool:
@@ -215,6 +205,26 @@ async def check_cross_page_consistency(
                 total=1,
             )
         )
+
+    if use_case is None or not request.enabled:
+        if await cancelled():
+            return CheckConsistencyResponse(findings=[], items=[], cancelled=True)
+        pages = tuple(page.to_domain() for page in request.pages)
+        report = await asyncio.to_thread(
+            document_engineering_report,
+            pages,
+            str(request.document_id),
+            enabled=False,
+        )
+        if await cancelled():
+            return CheckConsistencyResponse(findings=[], items=[], cancelled=True)
+        findings = await asyncio.to_thread(program_findings, report)
+        response = await asyncio.to_thread(
+            _checked_response, request, report, findings, expose_findings=False
+        )
+        if await cancelled():
+            return CheckConsistencyResponse(findings=[], items=[], cancelled=True)
+        return await _bounded_consistency_response(request, container, response)
 
     diagnostics = {}
     try:
@@ -230,7 +240,9 @@ async def check_cross_page_consistency(
             if await cancelled():
                 return CheckConsistencyResponse(findings=[], items=[], cancelled=True)
             pages = tuple(page.to_domain() for page in request.pages)
-            report = document_engineering_report(pages, str(request.document_id))
+            report = await asyncio.to_thread(
+                document_engineering_report, pages, str(request.document_id)
+            )
             findings = await use_case.execute(
                 pages=pages,
                 cancel_check=cancelled,
@@ -245,11 +257,12 @@ async def check_cross_page_consistency(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(error),
         ) from error
-    return await _bounded_consistency_response(
-        request,
-        container,
-        _checked_response(request, report, findings, diagnostics=diagnostics),
+    response = await asyncio.to_thread(
+        _checked_response, request, report, findings, diagnostics=diagnostics
     )
+    if await cancelled():
+        return CheckConsistencyResponse(findings=[], items=[], cancelled=True)
+    return await _bounded_consistency_response(request, container, response)
 
 
 async def _bounded_consistency_response(request, container, response):

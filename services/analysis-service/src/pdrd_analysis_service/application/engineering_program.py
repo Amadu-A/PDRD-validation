@@ -494,6 +494,13 @@ def program_findings(
                 proof_key,
                 *table_scope,
                 *((f"local-page:{first.page}",) if local_identity else ()),
+                *(
+                    (f"document-field:{first.page}:{first.fact.source_item_id}",)
+                    if check.rule == "document_quality"
+                    and check.property_key
+                    in {"table_caption", "maintenance_interval", "repeated_word"}
+                    else ()
+                ),
             ),
             check.observations,
             "deterministic",
@@ -1098,6 +1105,16 @@ def _document_source(item):
 
 
 def _wording(check):
+    if check.rule == "inventory_description":
+        from pdrd_analysis_service.domain.inventory_description import (
+            inventory_description_wording,
+        )
+
+        return inventory_description_wording(check)
+    if check.rule == "document_quality":
+        from pdrd_analysis_service.domain.document_quality import quality_wording
+
+        return quality_wording(check)
     values = check.calculation or {}
     obj = (
         check.observations[0].fact.subject_name or check.observations[0].fact.identifier
@@ -1150,6 +1167,26 @@ def _wording(check):
                 f"и применимое требование. В проверенных материалах (стр. {pages}) цепочка основания не установлена.",
                 "Связать принятое значение с исходными условиями и применимым пунктом нормы; "
                 "нарушение численного требования без этих условий не подтверждено.",
+            )
+        if values["dependency"] == "required_head_basis":
+            return (
+                f"Для {obj} принят требуемый напор {values['accepted']}. "
+                "Уточнить расчётное обоснование: точку и режим расчёта, геодезическую высоту, "
+                "расходы, диаметры, скорости, потери и требуемый свободный напор у потребителя. "
+                "Гарантированный напор источника и требуемый напор сети имеют разные роли; "
+                "само различие значений не доказывает ошибку.",
+                "Связать принятое значение с конкретным гидравлическим расчётом и его исходными условиями; "
+                "показать соответствие расчётной точки, режима и защищаемых потребителей.",
+            )
+        if values["dependency"] == "rain_flow_basis":
+            return (
+                f"Принят расчётный расход дождевых вод {values['accepted']} с {obj}. "
+                "Уточнить его расчётное обоснование: площадь водосбора и типы покрытий, "
+                "коэффициенты стока, интенсивность дождя и период однократного превышения. "
+                "В доступных материалах связанная цепочка исходных данных не установлена.",
+                "Привести расчёт для указанной территории с применимыми нормативными условиями. "
+                "Производительность очистных сооружений и полный дождевой сток имеют разные роли; "
+                "их различие само по себе не доказывает ошибку или недостаточность ЛОС.",
             )
         labels = {
             "design_flow": "расчётный расход",

@@ -150,7 +150,12 @@ async def test_real_adopted_decisions_produce_concrete_questions_and_keep_source
         )
     )
     _, final, metrics = await finalize(*drafts)
-    assert len(final) == 4 and metrics["vlm_call_count"] == 0
+    assert len(final) == 5 and metrics["vlm_call_count"] == 0
+    assert any(
+        o.get("check", {}).get("property_key") == "fire_storage_basis"
+        for finding in final
+        for o in finding.origin_assertions
+    )
     assert all(
         f.status == "needs_review" and f.document_context_basis_sources for f in final
     )

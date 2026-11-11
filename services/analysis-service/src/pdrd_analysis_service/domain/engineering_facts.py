@@ -178,6 +178,98 @@ def explicit_pipe_choices(text: str) -> tuple[DocumentFact, ...]:
     return tuple(result)
 
 
+def explicit_head_declarations(text: str) -> tuple[DocumentFact, ...]:
+    """Связывает соседние объявления напора с одним явно подписанным назначением сети.
+
+    Гарантированный и требуемый напоры остаются разными свойствами. Общий тег
+    системы не доказывает совпадение расчётной точки или режима этих величин.
+    """
+    content = re.sub(r"\s+", " ", text)
+    pattern = re.compile(
+        rf"(?P<quote>Гарантированный\s+напор\s+в\s+сетях\s+"
+        rf"(?P<available_purpose>[^.;()]{{3,85}}?)\s*\((?P<tag>{_TAG})\)\s*[-–]?\s*"
+        rf"(?P<available>\d+(?:[.,]\d+)?)\s*м\.?\s+"
+        rf"Требуемый\s+напор\s+в\s+сети\s+(?P<required_purpose>[^.;()]{{3,85}}?)\s+"
+        rf"составляет\s+(?P<required>\d+(?:[.,]\d+)?)\s*м)(?!\w)",
+        re.I,
+    )
+
+    def purpose(value):
+        """Сопоставляет только явно прочитанные классы назначения, без вывода из номера В1/В2."""
+        if re.search(r"хоз(?:яйственно)?[-\s]*питьев", value, re.I):
+            return "potable"
+        if re.search(r"противопожар", value, re.I):
+            return "fire"
+        return None
+
+    result = []
+    for match in pattern.finditer(content):
+        if not purpose(match["available_purpose"]) or purpose(
+            match["available_purpose"]
+        ) != purpose(match["required_purpose"]):
+            continue
+        for role, label in (
+            ("available", "Гарантированный напор"),
+            ("required", "Требуемый напор"),
+        ):
+            fact = document_fact_from_mapping(
+                {
+                    "kind": "parameter",
+                    "subject_type": "system",
+                    "identifier": match["tag"],
+                    "property_type": "parameter",
+                    "property_name": label,
+                    "relation": "accepted_head_choice"
+                    if role == "required"
+                    else "declared_available_head",
+                    "value_role": role + "_head",
+                    "value_raw": match[role],
+                    "unit_raw": "м",
+                    "scope_system": match["tag"],
+                    "evidence_text": match["quote"],
+                    "extraction_method": "pdf_text",
+                }
+            )
+            if fact is not None:
+                result.append(fact)
+    return tuple(result)
+
+
+def explicit_rain_flow_choices(text: str) -> tuple[DocumentFact, ...]:
+    """Читает принятый сток явно названной территории, отдельно от мощности ЛОС.
+
+    Фраза не устанавливает площадь, интенсивность дождя и режим очистки. Эти
+    исходные данные нельзя вывести из соседнего числа производительности ЛОС.
+    """
+    content = re.sub(r"\s+", " ", text)
+    pattern = re.compile(
+        r"(?P<quote>Расч[её]тный\s+расход\s+дождевых\s+вод\s+с\s+"
+        r"(?P<catchment>территории\s+[а-яё\s-]{3,70}?)\s+составляет\s+"
+        r"(?P<value>\d+(?:[.,]\d+)?)\s*(?:инв\.?\s+)?(?P<unit>л/с|м[³3]/ч))(?!\w)",
+        re.I,
+    )
+    result = []
+    for match in pattern.finditer(content):
+        fact = document_fact_from_mapping(
+            {
+                "kind": "parameter",
+                "subject_type": "catchment",
+                "identifier": match["catchment"],
+                "property_type": "design_flow",
+                "property_name": "Расчётный расход дождевых вод",
+                "relation": "accepted_rain_flow_choice",
+                "scope_location": match["catchment"],
+                "value_raw": match["value"],
+                "unit_raw": match["unit"],
+                "evidence_text": match["quote"],
+                "extraction_method": "pdf_text",
+            }
+        )
+        if fact is not None:
+            result.append(fact)
+    return tuple(result)
+
+
 def explicit_network_lengths(text: str) -> tuple[DocumentFact, ...]:
     """Читает общую протяжённость подписанной сети, не принимая длину участка L за итог."""
     content = re.sub(r"\s+", " ", text)
@@ -222,6 +314,8 @@ def merge_text_engineering_facts(
         for fact in (
             *explicit_system_purposes(text),
             *explicit_design_parameters(text),
+            *explicit_head_declarations(text),
+            *explicit_rain_flow_choices(text),
             *explicit_flow_rows(text, page),
             *explicit_pipe_choices(text),
             *explicit_network_lengths(text),
@@ -230,17 +324,7 @@ def merge_text_engineering_facts(
     )
     return (
         *facts,
-        *(
-            fact
-            for fact in additions
-            if not any(
-                old.identifier == fact.identifier
-                and old.property_name == fact.property_name
-                and old.value_raw == fact.value_raw
-                and old.evidence_text == fact.evidence_text
-                for old in facts
-            )
-        ),
+        *(fact for fact in additions if fact not in facts),
     )
 
 
@@ -265,6 +349,45 @@ def explicit_protection_choices(text: str) -> tuple[DocumentFact, ...]:
                 "relation": "accepted_storage_choice",
                 "value_raw": match["values"],
                 "evidence_text": match["quote"],
+                "extraction_method": "pdf_text",
+            }
+        )
+        if fact is not None:
+            result.append(fact)
+    # Перечень «два резервуара ... и один ...» задаёт тот же вид принятого
+    # решения, что перечисление объёмов. Читаем реальную запись, не превращая
+    # геометрический состав в полезный противопожарный запас.
+    for sentence in re.split(r"(?<=[.!?])\s+(?=[А-ЯЁ])", content):
+        if not re.search(r"противопожар|пожаротушен", sentence, re.I):
+            continue
+        group = re.search(
+            r"резервуар\w*\s+(?:противопожарного\s+)?запаса\s+воды", sentence, re.I
+        )
+        components = counted_storage_components(sentence)
+        if (
+            group is None
+            or not components
+            or any(
+                fact.relation == "accepted_storage_choice"
+                and fact.evidence_text in sentence
+                for fact in result
+            )
+        ):
+            continue
+        first, last = components[0]["evidence_text"], components[-1]["evidence_text"]
+        start, end = sentence.find(first), sentence.rfind(last)
+        if start < 0 or end < start:
+            continue
+        fact = document_fact_from_mapping(
+            {
+                "kind": "parameter",
+                "subject_type": "storage_group",
+                "identifier": group[0],
+                "property_type": "fire_reserve_choice",
+                "property_name": "Состав противопожарного запаса",
+                "relation": "accepted_storage_choice",
+                "value_raw": sentence[start : end + len(last)],
+                "evidence_text": sentence,
                 "extraction_method": "pdf_text",
             }
         )

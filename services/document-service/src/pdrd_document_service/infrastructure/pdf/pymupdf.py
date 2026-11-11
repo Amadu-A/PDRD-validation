@@ -3,6 +3,7 @@
 """PyMuPDF adapter для чтения и рендеринга PDF."""
 
 import math
+import re
 
 import fitz
 
@@ -21,6 +22,26 @@ from pdrd_document_service.domain.project_context import (
 )
 from pdrd_document_service.domain.specification import join_specification_pages
 from pdrd_document_service.infrastructure.pdf.specification import extract_specification
+
+
+def _compact_native_text(text: str) -> str:
+    """Удаляет отступы до ограничения текста, сохраняя слова, строки и порядок чтения.
+
+    PyMuPDF sort=True может заполнить широкую страницу десятками тысяч пробелов.
+    Они не должны вытеснять строки спецификации или основную надпись из лимита.
+    Два пробела сохраняют границу разнесённых подписей для существующего
+    детектора позиций схемы. Табличная геометрия остаётся в text_words,
+    а изображение не изменяется.
+    """
+    return "\n".join(
+        re.sub(
+            r"[ \t]+",
+            lambda match: "  " if len(match[0]) > 1 or "\t" in match[0] else " ",
+            line,
+        ).strip()
+        for line in text.splitlines()
+        if line.strip()
+    )
 
 
 class PyMuPdfReader:
@@ -118,9 +139,11 @@ class PyMuPdfReader:
                     PdfTextPage(
                         number=page_number,
                         text=(
-                            document[page_number - 1].get_text(
-                                "text",
-                                sort=True,
+                            _compact_native_text(
+                                document[page_number - 1].get_text(
+                                    "text",
+                                    sort=True,
+                                )
                             )[: self._text_limit]
                         ).strip(),
                     )
@@ -140,7 +163,7 @@ class PyMuPdfReader:
         include_equipment_specification: bool = False,
     ) -> PdfPage:
         full_text = page.get_text("text", sort=True)
-        text = full_text[: self._text_limit].strip()
+        text = _compact_native_text(full_text)[: self._text_limit].strip()
         specification = (
             extract_specification(page, page_number, full_text)
             if include_equipment_specification

@@ -56,7 +56,7 @@ async def test_raw_project_choices_add_reserve_and_protected_object_questions_pr
         "protected_object_basis",
         "pipe_selection_basis",
     } <= dependencies
-    reserve = next(
+    reserves = tuple(
         finding
         for finding in final
         if any(
@@ -64,7 +64,9 @@ async def test_raw_project_choices_add_reserve_and_protected_object_questions_pr
             for origin in finding.origin_assertions
         )
     )
-    assert reserve.page == 18 and reserve.status == "needs_review"
+    assert {finding.page for finding in reserves} >= {8, 18}
+    reserve = next(finding for finding in reserves if finding.page == 18)
+    assert reserve.status == "needs_review"
     assert (
         "100 м3, 100 м3, 50 м3" in reserve.comment
         and "полезный объём" in reserve.comment

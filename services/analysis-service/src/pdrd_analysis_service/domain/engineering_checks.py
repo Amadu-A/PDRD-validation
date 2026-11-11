@@ -17,12 +17,16 @@ from pdrd_analysis_service.domain.document_context import (
     property_key,
     scope_key,
 )
+from pdrd_analysis_service.domain.document_quality import quality_checks
 from pdrd_analysis_service.domain.engineering_assertion import engineering_object_key
 from pdrd_analysis_service.domain.engineering_calculations import (
     Scalar,
     arithmetic,
     comparison_tolerance,
     scalar,
+)
+from pdrd_analysis_service.domain.inventory_description import (
+    inventory_description_checks,
 )
 from pdrd_analysis_service.domain.project_dependencies import (
     explicit_project_dependencies,
@@ -79,7 +83,19 @@ def evaluate_decisions(
         for item in registry.evidence
         if program_evidence_eligible(item)
     )
-    results = []
+    results = (
+        list(quality_checks(grounded))
+        if registry.document_context_enabled
+        else [
+            check
+            for page in page_texts
+            for check in quality_checks(
+                tuple(item for item in grounded if item.page == page)
+            )
+        ]
+    )
+    if registry.document_context_enabled:
+        results.extend(inventory_description_checks(grounded))
     for decision in registry.decisions:
         observations = tuple(item.observation for item in decision.observations)
         results.append(
@@ -305,7 +321,12 @@ def _design_basis_questions(
         pipe = fact.relation == "accepted_pipe_choice"
         storage = fact.relation == "accepted_storage_choice"
         protection = fact.relation == "accepted_protection_solution"
-        if not (fire or pipe or storage or protection):
+        head = (
+            fact.relation == "accepted_head_choice"
+            and _fact_kind(fact) == "required_head"
+        )
+        rain = fact.relation == "accepted_rain_flow_choice"
+        if not (fire or pipe or storage or protection or head or rain):
             continue
         related = tuple(
             other
@@ -323,6 +344,10 @@ def _design_basis_questions(
             if storage
             else "protected_object_basis"
             if protection
+            else "required_head_basis"
+            if head
+            else "rain_flow_basis"
+            if rain
             else "pipe_selection_basis"
         )
         key = (
@@ -364,14 +389,36 @@ def _design_basis_questions(
             if protection
             else ("design_input", "requirement_reference")
             if fire
+            else (
+                "calculation_point",
+                "operating_mode",
+                "geodetic_head",
+                "free_head",
+                "head_loss",
+                "calculation_reference",
+            )
+            if head
+            else (
+                "catchment_area",
+                "runoff_coefficient",
+                "rainfall_intensity",
+                "rainfall_return_period",
+                "calculation_reference",
+            )
+            if rain
             else ("design_flow", "internal_diameter", "flow_velocity", "head_loss")
         )
-        # Наличие связанного расчёта ограничивает автоматический вывод: его проверяет обычная цепочка.
-        if not (storage or protection) and any(
+        # Ссылка на расчёт того же объекта ещё не замыкает выбор трубы/напора:
+        # она может относиться к иному параметру, точке или режиму.
+        if fire and any(
             other.fact.property_type == "calculation_reference" for other in comparable
         ):
             continue
         missing = tuple(kind for kind in required if kind not in kinds)
+        if head and not fact.scope_location and "calculation_point" not in missing:
+            missing += ("calculation_point",)
+        if head and not fact.scope_operating_mode and "operating_mode" not in missing:
+            missing += ("operating_mode",)
         if pipe and segment is None:
             missing += ("calculation_segment",)
         if pipe and not fact.scope_operating_mode:

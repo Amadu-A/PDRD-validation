@@ -99,6 +99,18 @@ async def test_existing_http_table_audit_and_finalization_preserve_candidates_wi
         )
         assert response.status_code == 200, response.text
         findings = response.json()["items"][0]["result"]["findings"]
+        references = [
+            item
+            for item in findings
+            if any(
+                o.get("check", {}).get("property_key") == "reference_edition"
+                for o in item.get("origin_assertions", [])
+            )
+        ]
+        assert len(references) == 1
+        assert references[0]["status"] == "needs_review"
+        assert "СП 124.13330" in references[0]["evidence"]
+        findings = [item for item in findings if item not in references]
         assert len(findings) == 4
         assert [item["status"] for item in findings] == ["hypothesis"] * 3 + [
             "needs_review"

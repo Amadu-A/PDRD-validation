@@ -81,6 +81,12 @@ class ConflictGroup:
 
 _SPACE = re.compile(r"\s+")
 _NUMBER = re.compile(r"^[+-]?\d+(?:[.,]\d+)?$")
+_STANDARD_REFERENCE_CODE = re.compile(
+    r"(?<!\w)(?:ГОСТ(?:\s+Р)?\s+\d+(?:\.\d+)*[-–]\d{2,4}|"
+    r"СП\s+\d+(?:\.\d+)+[.\-–](?:19|20)\d{2}|"
+    r"СНиП\s+\d+(?:[.\-–]\d+)+[-–]\d{2,4})(?!\w|[.\-–]\d)",
+    re.I,
+)
 _UNIT_FACTORS: dict[str, tuple[str, Decimal]] = {
     "°c": ("temperature_c", Decimal("1")),
     "град.c": ("temperature_c", Decimal("1")),
@@ -213,6 +219,9 @@ def scope_key(fact: DocumentFact) -> tuple[str, ...]:
 
 def normalized_value(fact: DocumentFact) -> tuple[str, str] | None:
     """Сравнивает единицы без подмены исходного значения."""
+    reference = _standard_reference_target(fact)
+    if reference is not None:
+        return "standard_reference", reference
     raw = normalize_label(fact.value_raw).replace(" ", "")
     # Знаки умножения в типоразмере не меняют наружный диаметр и стенку.
     raw = re.sub(r"(?<=\d)[xх×*](?=\d)", "x", raw).replace(",", ".")
@@ -273,6 +282,45 @@ def normalized_value(fact: DocumentFact) -> tuple[str, str] | None:
     return "text", raw
 
 
+def _standard_reference_target(fact: DocumentFact) -> str | None:
+    """Сопоставляет адрес ссылки, не приравнивая тему применения к названию нормы.
+
+    Полный шифр с редакцией должен однозначно присутствовать в исходной цитате.
+    Название, требования и условия применения остаются самостоятельными свойствами.
+    Неполный шифр, несколько адресов и несогласованное значение не нормализуются.
+    """
+    if (
+        normalize_label(fact.subject_type) != "standard"
+        or normalize_label(fact.property_type) != "standard_reference"
+        or normalize_label(fact.property_name)
+        not in {"ссылка на стандарт", "нормативная ссылка", "standard reference"}
+        or fact.unit_raw
+        or not _STANDARD_REFERENCE_CODE.fullmatch(fact.identifier)
+        or not fact.value_raw
+        or normalize_label(fact.value_raw) not in normalize_label(fact.evidence_text)
+    ):
+        return None
+
+    def canonical(value):
+        """Сохраняет номер, часть и редакцию; меняет только пробелы, регистр и тире."""
+        return normalize_label(value).replace("–", "-")
+
+    target = canonical(fact.identifier)
+    evidence_codes = {
+        canonical(match[0])
+        for match in _STANDARD_REFERENCE_CODE.finditer(fact.evidence_text)
+    }
+    value_codes = {
+        canonical(match[0])
+        for match in _STANDARD_REFERENCE_CODE.finditer(fact.value_raw)
+    }
+    return (
+        target
+        if evidence_codes == {target} and (not value_codes or value_codes == {target})
+        else None
+    )
+
+
 def discover_conflicts(
     facts: tuple[LocatedDocumentFact, ...],
     *,
@@ -302,6 +350,17 @@ def discover_conflicts(
         value = normalized_value(fact)
         if not subject or not prop or value is None:
             continue
+        if (
+            normalize_label(fact.kind) == "identifier"
+            and normalize_label(fact.subject_type)
+            in {"drawing_document", "drawing_sheet", "document", "document_sheet"}
+            and normalize_label(fact.property_type) == "format"
+            and normalize_label(fact.property_name)
+            in {"формат", "формат листа", "формат чертежа", "формат документа"}
+        ):
+            # Один шифр ГЧ объединяет комплект, но формат относится к конкретному
+            # физическому листу. Все факты остаются в реестре и нормативных проверках.
+            subject = f"{subject}:physical_pdf_page:{located.page}"
         physical = None
         if require_physical_identity:
             from pdrd_analysis_service.domain.physical_identity import (

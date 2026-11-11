@@ -12,6 +12,7 @@ from pdrd_analysis_service.application.use_cases.document_context import (
     DocumentContextOptions,
     DocumentPage,
     build_page_document_context,
+    document_engineering_report,
 )
 from pdrd_analysis_service.domain.document_context import (
     DocumentFact,
@@ -106,6 +107,60 @@ def test_three_values_create_one_group_not_pairwise_duplicates() -> None:
     )
     assert len(groups) == 1
     assert len(groups[0].facts) == 3
+
+
+def test_format_of_different_physical_sheets_is_not_a_document_conflict() -> None:
+    """Общий шифр ГЧ не превращает разные листы А2 и А3 в один физический объект."""
+    formats = _located(
+        *(
+            replace(
+                _fact(value, unit="", mode=""),
+                kind="identifier",
+                subject_type="drawing_document",
+                identifier="392/118-5-ИОС7.9-ГЧ",
+                property_type="format",
+                property_name="Формат",
+                scope_system="",
+                scope_location="",
+                evidence_text=f"Формат {value}",
+            )
+            for value in ["А2", "А3", "А3"]
+        )
+    )
+    assert discover_conflicts(formats) == ()
+    report = document_engineering_report(
+        tuple(
+            DocumentPage(item.page, item.fact.evidence_text, "", (item.fact,))
+            for item in formats
+        ),
+        "sheet-format-control",
+    )
+    actual = [
+        item.observation
+        for item in report.registry.evidence
+        if item.observation.fact.property_type == "format"
+    ]
+    assert actual == [
+        replace(item, fact=replace(item.fact, source_pages=(item.page,)))
+        for item in formats
+    ]
+
+
+def test_format_of_one_equipment_is_still_compared() -> None:
+    """Локальная принадлежность формата листа не отключает свойства оборудования."""
+    facts = _located(
+        *(
+            replace(
+                _fact(value, identifier="УП-4", unit="", mode=""),
+                subject_type="equipment",
+                property_type="format",
+                property_name="Формат",
+                evidence_text=f"УП-4 Формат {value}",
+            )
+            for value in ["А2", "А3"]
+        )
+    )
+    assert len(discover_conflicts(facts)) == 1
 
 
 def _options() -> DocumentContextOptions:

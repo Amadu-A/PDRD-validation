@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -28,6 +29,10 @@ from pdrd_analysis_service.application.evidence_audit import (
     audit_findings_evidence,
     evidence_audit,
 )
+from pdrd_analysis_service.application.native_document_context import (
+    native_identifier_sources,
+)
+from pdrd_analysis_service.application.origin_history import compact_origin_history
 from pdrd_analysis_service.application.ports.vision_model import StructuredVisionModel
 from pdrd_analysis_service.domain.analysis import (
     DocumentContextSource,
@@ -48,6 +53,7 @@ from pdrd_analysis_service.domain.document_context import (
     scope_key,
     subject_key,
 )
+from pdrd_analysis_service.domain.document_quality import document_quality_facts
 from pdrd_analysis_service.domain.engineering_assertion import (
     assertion_from_facts,
     assertion_subsumes,
@@ -160,12 +166,44 @@ def document_engineering_report(
     from pdrd_analysis_service.domain.calculation_tables import (
         calculation_tables_by_page,
     )
+    from pdrd_analysis_service.domain.engineering_facts import (
+        merge_text_engineering_facts,
+    )
+    from pdrd_analysis_service.domain.inventory_description import (
+        inventory_description_facts,
+    )
+
+    pages = tuple(
+        replace(
+            page, facts=merge_text_engineering_facts(page.facts, page.text, page.page)
+        )
+        for page in pages
+    )
 
     tables = calculation_tables_by_page(
         tuple((page.page, page.text_words) for page in pages),
         link_continuations=enabled,
     )
     located = _located(pages, link_continuations=enabled)
+    inventory = (
+        inventory_description_facts(pages)
+        if enabled
+        else {
+            page.page: inventory_description_facts((page,))[page.page] for page in pages
+        }
+    )
+    quality = (
+        document_quality_facts(
+            tuple((page.page, page.text, page.text_words) for page in pages)
+        )
+        if enabled
+        else {
+            page.page: document_quality_facts(
+                ((page.page, page.text, page.text_words),)
+            )[page.page]
+            for page in pages
+        }
+    )
 
     facts = tuple(
         LocatedDocumentFact(page.page, index, fact)
@@ -175,6 +213,8 @@ def document_engineering_report(
                 *(item.fact for item in located if item.page == page.page),
                 *explicit_project_dependencies(page.text, page.page),
                 *tables[page.page],
+                *quality[page.page],
+                *inventory[page.page],
             ),
             1,
         )
@@ -236,9 +276,48 @@ def build_page_document_context(
             by_table.setdefault(table_key, []).append(fact)
 
     result: dict[int, tuple[DocumentContextSource, ...]] = {}
+    identity_pages = tuple(
+        page
+        for page in pages
+        if page.page <= 2
+        and re.search(
+            r"проектная\s+документация|рабочая\s+документация|шифр\s+объекта",
+            page.text,
+            re.I,
+        )
+    )[:1]
+    native_sources = native_identifier_sources(pages)
     for page in pages:
         sources: list[dict[str, Any]] = []
         seen: set[str] = set()
+        for native_source in native_sources[page.page]:
+            seen.add(native_source["source_id"])
+            sources.append(native_source)
+        for identity in identity_pages:
+            if identity.page == page.page:
+                continue
+            source_id = f"D-p{identity.page:04d}-identity"
+            text = "\n".join(
+                re.sub(r"[ \t]+", " ", line).strip()
+                for line in identity.text.splitlines()
+                if line.strip()
+            )[:1600]
+            seen.add(source_id)
+            sources.append(
+                {
+                    "source_id": source_id,
+                    "page": identity.page,
+                    "match_type": "document_identity",
+                    "score": 1.0,
+                    "fact_id": None,
+                    "subject": "Проверяемый проект",
+                    "property": "Назначение и реквизиты",
+                    "scope": "",
+                    "text": text,
+                    "evidence_text": text,
+                    "visual_regions": [],
+                }
+            )
         for item in located:
             if (
                 item.fact.continuation_marker != "adjacent_page_literal"
@@ -632,7 +711,11 @@ class CheckCrossPageConsistency:
         """Сохраняет подтверждённые группы и конкретные подозрения с обеими сторонами evidence."""
         if cancel_check is not None and await cancel_check():
             raise CrossPageCancelled
-        report = engineering_report or document_engineering_report(pages, document_id)
+        report = engineering_report or await asyncio.to_thread(
+            document_engineering_report, pages, document_id
+        )
+        if cancel_check is not None and await cancel_check():
+            raise CrossPageCancelled
         registry = report.registry
         facts = tuple(item.observation for item in registry.evidence)
         if registry.document_id != document_id:
@@ -1465,5 +1548,8 @@ def merge_cross_page_findings(
                 reason=merge_reasons[duplicate.finding_id],
                 merged_into=merged.finding_id,
             )
+        merged = replace(
+            merged, origin_assertions=compact_origin_history(merged.origin_assertions)
+        )
         result.setdefault(cross.page, []).append(merged)
     return {page: tuple(findings) for page, findings in result.items()}

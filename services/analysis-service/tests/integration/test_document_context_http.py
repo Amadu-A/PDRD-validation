@@ -2,8 +2,10 @@
 
 """HTTP-регрессии выбора D и единого межстраничного результата."""
 
+import asyncio
 import json
 import subprocess
+import threading
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
@@ -87,6 +89,94 @@ class ForbiddenCrossCheck:
     async def execute(self, **kwargs):
         """Любой вызов означает нарушение быстрого режима."""
         raise AssertionError("D отключён")
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize(
+    "cpu_step", ["document_engineering_report", "_checked_response"]
+)
+async def test_consistency_cpu_work_keeps_cancel_request_responsive(
+    monkeypatch, enabled, cpu_step
+):
+    """Другой HTTP-запрос отменяет анализ во время CPU-работы, до нового VLM-вызова."""
+    from pdrd_analysis_service.transport.http import document_context_routes as routes
+
+    entered, released = asyncio.Event(), threading.Event()
+    loop = asyncio.get_running_loop()
+    cancelled = False
+    original = getattr(routes, cpu_step)
+
+    def slow_cpu(*args, **kwargs):
+        """Имитирует большой протокол; освободить его должен другой HTTP-запрос."""
+        loop.call_soon_threadsafe(entered.set)
+        assert released.wait(1), "CPU-проверка заблокировала HTTP-отмену"
+        return original(*args, **kwargs)
+
+    class Probe:
+        """Читает тот же durable-флаг, который записывает запрос отмены."""
+
+        async def is_cancelled(self, **kwargs):
+            """Не обращается к модели или внешним сервисам."""
+            return cancelled
+
+    class NoVision:
+        """Отмена не должна приводить к запуску проверки моделью."""
+
+        async def generate_json(self, **kwargs):
+            """Любой новый вызов после запроса отмены является регрессией."""
+            raise AssertionError("VLM не должен запускаться")
+
+    app = build_app()
+    app.state.container = replace(
+        app.state.container,
+        analysis_progress_probe=Probe(),
+        check_cross_page_consistency=CheckCrossPageConsistency(
+            NoVision(), _options(app.state.container)
+        ),
+    )
+
+    @app.post("/test-cancel")
+    async def cancel_request():
+        """Моделирует независимую HTTP-запись отмены без задержек и GPU."""
+        nonlocal cancelled
+        cancelled = True
+        released.set()
+        return {"cancelled": True}
+
+    monkeypatch.setattr(routes, cpu_step, slow_cpu)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        task = asyncio.create_task(
+            client.post(
+                "/internal/v1/document-context/check-consistency",
+                json={
+                    "document_id": str(uuid4()),
+                    "enabled": enabled,
+                    "pages": [
+                        {
+                            "page_number": 7,
+                            "extracted_text": "Б-012 -37 °C",
+                            "page_facts": facts_payload(),
+                        }
+                    ],
+                },
+            )
+        )
+        try:
+            async with asyncio.timeout(3):
+                await entered.wait()
+                response = await client.post("/test-cancel")
+                assert response.status_code == 200
+                result = await task
+            assert result.status_code == 200, result.text
+            assert result.json()["cancelled"] is True
+            assert result.json()["findings"] == []
+            assert result.json()["items"] == []
+        finally:
+            released.set()
+            if not task.done():
+                await task
 
 
 async def test_missing_decision_http_returns_full_diagnostics_and_preserves_page_metrics():
