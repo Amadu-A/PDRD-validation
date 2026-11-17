@@ -34,7 +34,7 @@ def clean_cell(value: str | None, *, identifier: bool = False) -> str:
 def project_code_from_text(text: str) -> str:
     """Читает явный шифр; неоднозначные обозначения сохраняет пустыми."""
     explicit = re.findall(
-        r"(?:шифр\s+(?:проекта|документа)|код\s+проекта)\s*[:=]\s*([\w/.-]+)",
+        r"(?:шифр\s+(?:проекта|документа)|код\s+проекта)(?:\s*[:=]\s*|\s+)([\w/.-]+)",
         text,
         re.I,
     )
@@ -42,7 +42,18 @@ def project_code_from_text(text: str) -> str:
         r"[\w/]+(?:-[\w/]+)*-ИОС\s*\d+(?:\.\d+)*", text, re.I
     )
     candidates = list(dict.fromkeys(candidates))
-    return candidates[0] if len(candidates) == 1 else ""
+    if len(candidates) == 1:
+        return candidates[0]
+    if explicit:
+        return ""
+    # SHX может содержать наложенные фрагменты шифра документа. Если полное
+    # обозначение неоднозначно, допускается лишь отдельно подписанный шифр объекта.
+    objects = list(
+        dict.fromkeys(
+            re.findall(r"шифр\s+объекта(?:\s*[:=]\s*|\s+)([\w/.-]+)", text, re.I)
+        )
+    )
+    return objects[0] if len(objects) == 1 else ""
 
 
 def specification_columns(values: list[str | None]) -> dict[str, list[int]]:

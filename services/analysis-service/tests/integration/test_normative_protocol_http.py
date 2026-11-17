@@ -548,6 +548,22 @@ async def test_large_mandatory_findings_use_bounded_http_and_actual_workflow_res
         app.state.container, normative_protocol_writer=gateway.writer
     )
     expected = []
+    # В этом тесте сравнивается весь восстановленный payload, включая телеметрию.
+    # Фиксируем только часы; данные, сериализация, HTTP и JS resolver остаются настоящими.
+    from pdrd_analysis_service.application.performance import StageProfile
+
+    profile_result = StageProfile.result
+
+    def stable_profile(self, status="ok"):
+        """Убирает случайность часов из digest, сохраняя все остальные поля профиля."""
+        return {
+            **profile_result(self, status),
+            "started_at": "2026-11-13T00:00:00+00:00",
+            "ended_at": "2026-11-13T00:00:00+00:00",
+            "wall_ms": 0,
+        }
+
+    monkeypatch.setattr(StageProfile, "result", stable_profile)
     for number in range(1, 32):
         draft = _finding_draft_payload(
             replace(
@@ -574,6 +590,16 @@ async def test_large_mandatory_findings_use_bounded_http_and_actual_workflow_res
         else:
             result = CheckNormsResponse(
                 summary="Проверено", findings=[draft], metrics={}
+            )
+        if stage in {"norms", "finalize"}:
+            result.metrics["execution_profile"] = stable_profile(
+                StageProfile(
+                    str(UUID(int=900)),
+                    stage_routes._CHECKING_STAGE
+                    if stage == "norms"
+                    else stage_routes._FINALIZATION_STAGE,
+                    number,
+                )
             )
         expected.append(
             {"page_number": number, "result": result.model_dump(mode="json")}

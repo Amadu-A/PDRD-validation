@@ -14,6 +14,7 @@ from pdrd_api_gateway.application.ports.analysis_pdf_export import (
     AnalysisAnnotatedPdfDocument,
     AnalysisAnnotatedPdfRenderer,
     AnalysisPdfAnnotation,
+    AnalysisPdfExportError,
     AnalysisPdfReport,
     AnalysisPdfReportField,
     AnalysisPdfReportFinding,
@@ -251,6 +252,8 @@ class GetAnalysisAnnotatedPdf:
                 report=report,
             )
 
+        except AnalysisPdfExportError:
+            raise
         except Exception as error:
             raise AnalysisAnnotatedPdfUnavailableError(
                 ("Document Service не сформировал annotated PDF."),

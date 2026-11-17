@@ -8,6 +8,7 @@
 
 import asyncio
 import logging
+import math
 from collections import OrderedDict, deque
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -36,19 +37,28 @@ class _Waiter:
     ready: asyncio.Future[None]
     granted: bool = False
     admitted_at: float = 0.0
+    estimated_tokens: int = 0
 
 
 class LimitedVisionModel:
     """Распределяет общий лимит по заданиям и проверяет отмену после ожидания."""
 
     def __init__(
-        self, delegate: StructuredVisionModel, max_concurrent: int = 4
+        self,
+        delegate: StructuredVisionModel,
+        max_concurrent: int = 4,
+        *,
+        token_budget: int = 0,
     ) -> None:
         """Создаёт очередь процесса; физические параметры GPU остаются внешними."""
         if max_concurrent < 1:
             raise ValueError("Лимит VLM должен быть положительным.")
         self.delegate = delegate
         self.max_concurrent = max_concurrent
+        if token_budget < 0:
+            raise ValueError("Бюджет токенов очереди не может быть отрицательным.")
+        self.token_budget = token_budget
+        self._active_tokens = 0
         self._queues: OrderedDict[str, deque[_Waiter]] = OrderedDict()
         self._active: dict[str, int] = {}
         self._report_lock = asyncio.Lock()
@@ -57,6 +67,18 @@ class LimitedVisionModel:
         """Выдаёт слоты, передвигая обслуженное задание в конец очереди."""
         while self._queues and sum(self._active.values()) < self.max_concurrent:
             key, queue = self._queues.popitem(last=False)
+            # Крупное задание ждёт освобождения уже выданных разрешений. Один
+            # запрос сверх оценки бюджета разрешается только в пустой очереди
+            # исполнения: данные не обрезаются ради допуска.
+            next_waiter = queue[0]
+            if (
+                self.token_budget
+                and self._active_tokens
+                and self._active_tokens + next_waiter.estimated_tokens
+                > self.token_budget
+            ):
+                self._queues[key] = queue
+                break
             waiter = queue.popleft()
             if queue:
                 self._queues[key] = queue
@@ -65,11 +87,13 @@ class LimitedVisionModel:
             waiter.granted = True
             waiter.admitted_at = perf_counter()
             self._active[key] = self._active.get(key, 0) + 1
+            self._active_tokens += waiter.estimated_tokens
             waiter.ready.set_result(None)
 
     def _release(self, waiter: _Waiter) -> None:
         """Удаляет отменённое ожидание или освобождает выданный слот без утечки."""
         if waiter.granted:
+            self._active_tokens -= waiter.estimated_tokens
             count = self._active[waiter.key] - 1
             if count:
                 self._active[waiter.key] = count
@@ -115,6 +139,10 @@ class LimitedVisionModel:
         waiter = _Waiter(
             execution.job_key if execution is not None else "unscoped",
             asyncio.get_running_loop().create_future(),
+            # vLLM ограничивает prompt в prefill, а не max_tokens или grammar.
+            # Это оценка допуска, не токенизация и не изменение полного входа.
+            estimated_tokens=math.ceil(len(prompt.encode("utf-8")) / 3)
+            + (4096 if image_bytes else 0),
         )
         started = perf_counter()
         self._queues.setdefault(waiter.key, deque()).append(waiter)
@@ -154,12 +182,15 @@ class LimitedVisionModel:
                 raise
             finally:
                 logger.info(
-                    "vlm_slot_timing job=%s stage=%s slot_wait_ms=%.2f provider_ms=%.2f provider_attempts=%s",
+                    "vlm_slot_timing job=%s stage=%s slot_wait_ms=%.2f provider_ms=%.2f "
+                    "provider_attempts=%s estimated_tokens=%s token_budget=%s",
                     waiter.key,
                     stage,
                     wait_ms,
                     (perf_counter() - generated_at) * 1000,
                     provider_attempts,
+                    waiter.estimated_tokens,
+                    self.token_budget,
                 )
             if isinstance(result, GenerationResult):
                 result = replace(

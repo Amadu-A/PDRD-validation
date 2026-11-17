@@ -50,7 +50,15 @@ def validated_specification(value: dict | None, page_number: int) -> dict | None
                 "Исходная строка не связана с физической страницей."
             )
         ids.append(row.get("row_id"))
-        _valid_region(row.get("bbox"))
+        if (
+            row.get("bbox") is None
+            and row.get("geometry_status") == "geometry_unresolved"
+            and specification.get("external_extraction", {}).get("provider")
+            == "spec_extracting_ai"
+        ):
+            pass
+        else:
+            _valid_region(row.get("bbox"))
     if any(
         not isinstance(identifier, str) or not identifier for identifier in ids
     ) or len(ids) != len(set(ids)):
@@ -94,7 +102,15 @@ def validated_specification(value: dict | None, page_number: int) -> dict | None
             not isinstance(identifier, str) for identifier in item["row_ids"]
         ) or len(item["row_ids"]) != len(set(item["row_ids"])):
             raise SpecificationContractError("В позиции повторены исходные строки.")
-        if not item.get("source_pages") or not item.get("source_regions"):
+        unresolved_external = (
+            item.get("geometry_status") == "geometry_unresolved"
+            and specification.get("external_extraction", {}).get("provider")
+            == "spec_extracting_ai"
+            and item.get("extraction_method") == "spec_service"
+        )
+        if not item.get("source_pages") or (
+            not item.get("source_regions") and not unresolved_external
+        ):
             raise SpecificationContractError(
                 "Позиция не связана с исходными страницами и областями."
             )
@@ -199,7 +215,9 @@ def table_equipment_records(
                 "visual_regions": regions,
                 "parameters": item.get("parameters")
                 or specification_parameters(item.get("name", "")),
-                "extraction_method": "pdf_table",
+                "extraction_method": item.get("extraction_method", "pdf_table"),
+                "geometry_status": item.get("geometry_status", "resolved"),
+                "external_original": item.get("external_original"),
                 "specification_item_id": item["item_id"],
                 "source_pages": item["source_pages"],
                 "source_regions": item["source_regions"],

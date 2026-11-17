@@ -230,14 +230,14 @@ class UnderstandPage:
             "items": len(spec.get("items", [])),
             "document_facts": len(document_facts),
             "programmatic_facts": sum(
-                fact.extraction_method in {"pdf_table", "pdf_text"}
+                fact.extraction_method in {"pdf_table", "pdf_text", "spec_service"}
                 for fact in document_facts
             ),
             "text_facts": sum(
                 fact.extraction_method == "pdf_text" for fact in document_facts
             ),
             "vlm_facts": sum(
-                fact.extraction_method not in {"pdf_table", "pdf_text"}
+                fact.extraction_method not in {"pdf_table", "pdf_text", "spec_service"}
                 for fact in document_facts
             ),
             "duration_ms": round((time.perf_counter() - started) * 1000, 2),
@@ -339,6 +339,7 @@ class UnderstandPage:
             max_facts=max_facts,
             max_equipment=max_equipment,
             max_graphical_targets=max_graphical_targets,
+            include_specification_rows=not tabular,
         )
         try:
             result = await self.vision_model.generate_json(

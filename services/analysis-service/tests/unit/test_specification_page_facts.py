@@ -3,6 +3,7 @@
 """Программные факты, безопасный выбор маршрута и независимость D от EQ."""
 
 import json
+import time
 from dataclasses import asdict, replace
 
 import pytest
@@ -15,6 +16,19 @@ from pdrd_analysis_service.domain.specification_facts import (
 )
 
 from .test_equipment_specification import metrics, model, specification
+
+
+def test_external_specification_facts_are_not_counted_as_new_vlm_work():
+    """Сохранённые строки общего Spec не приписываются повторной генерации Understanding."""
+    source = routed_specification()
+    original = specification_document_facts(source, 25)[0]
+    external = replace(original, extraction_method="spec_service")
+    visual = replace(original, extraction_method="vlm")
+    diagnostic = UnderstandPage._diagnostics(
+        25, True, True, source, (original, external, visual), time.perf_counter()
+    )
+    assert diagnostic["document_facts"] == 3
+    assert diagnostic["programmatic_facts"] == 2 and diagnostic["vlm_facts"] == 1
 
 
 def routed_specification(route="pdf_table"):
@@ -123,6 +137,10 @@ async def test_mixed_page_only_generates_non_table_facts_and_discards_same_row_c
     facts, result = await understand(provider, source)
     request = provider.generate_json.await_args.kwargs
     assert "equipment_identities" not in request["schema"]["properties"]
+    assert "specification_rows" not in request["schema"]["properties"]
+    assert "specification_notes" not in request["schema"]["properties"]
+    assert "document_facts" in request["schema"]["properties"]
+    assert "Начни ответ со specification_rows" not in request["prompt"]
     assert "ВСЯ ТАБЛИЦА" not in request["prompt"]
     assert (
         "Вне таблицы" in request["prompt"]

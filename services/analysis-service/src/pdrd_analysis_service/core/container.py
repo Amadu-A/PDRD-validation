@@ -106,6 +106,7 @@ def build_container() -> ApplicationContainer:
         delegate=LimitedVisionModel(
             shared_vlm,
             max_concurrent=settings.pipeline.vlm_stage_concurrency,
+            token_budget=settings.pipeline.vlm_inflight_token_budget,
         ),
         provider_identity=(f"{settings.vlm.base_url.rstrip('/')}|{settings.vlm.model}"),
         root_path=(settings.vlm.cache.root_path),

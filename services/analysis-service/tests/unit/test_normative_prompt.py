@@ -8,12 +8,45 @@ from pdrd_analysis_service.application.prompts import (
     build_normative_check_prompt,
 )
 from pdrd_analysis_service.domain.analysis import (
+    DocumentContextSource,
     NormativeSource,
     PageFacts,
 )
 from pdrd_analysis_service.transport.http.schemas import (
     NormativeSourcePayload,
 )
+
+
+def test_document_context_deduplicates_only_identical_text_without_losing_evidence():
+    """Различные фрагменты сохраняются; дословный дубль заменяется однозначной ссылкой."""
+    import json
+
+    from pdrd_analysis_service.application.prompts import _document_context_payload
+
+    source = DocumentContextSource(
+        source_id="D-p0008-f0001",
+        page=8,
+        evidence_text="В2: расход 10 л/с при пожаре",
+        text="В2: расход 10 л/с при пожаре",
+        fact_id="fact",
+        subject="В2",
+        property="Расход",
+        scope="при пожаре",
+    )
+    payload = _document_context_payload(source)
+    assert payload["text_same_as_evidence"] is True and "text" not in payload
+    assert payload["evidence_text"] == source.evidence_text
+    for name in ("source_id", "page", "fact_id", "subject", "property", "scope"):
+        assert payload[name] == getattr(source, name)
+    different = DocumentContextSource(
+        source_id=source.source_id,
+        page=8,
+        evidence_text="Дословное доказательство",
+        text="Иной контекст",
+    )
+    assert _document_context_payload(different)["text"] == different.text
+    assert "text_same_as_evidence" not in _document_context_payload(different)
+    assert json.loads(json.dumps(payload, ensure_ascii=False))["scope"] == source.scope
 
 
 def normalize_prompt(

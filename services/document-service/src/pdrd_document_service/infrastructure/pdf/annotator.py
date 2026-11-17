@@ -10,6 +10,7 @@ from pdrd_document_service.application.ports.pdf import (
     PdfProcessingError,
 )
 from pdrd_document_service.application.ports.pdf_annotation import (
+    PdfAnnotationGenerationError,
     PdfFindingAnnotation,
     PdfReportField,
     PdfTextReport,
@@ -413,6 +414,8 @@ class PyMuPdfAnnotationWriter:
         report: PdfTextReport,
     ) -> bytes:
         """Создаёт PDF с callout annotations и текстовыми report pages."""
+        operation = "open_pdf"
+        page_number = None
         try:
             with fitz.open(
                 stream=content,
@@ -427,6 +430,7 @@ class PyMuPdfAnnotationWriter:
 
                 by_page: dict[int, list[PdfFindingAnnotation]] = {}
                 for annotation in annotations:
+                    operation = "validate_annotation"
                     self._annotation_page(
                         document=document,
                         original_page_count=original_page_count,
@@ -434,6 +438,7 @@ class PyMuPdfAnnotationWriter:
                     )
                     by_page.setdefault(annotation.page_number, []).append(annotation)
                 for page_number, page_annotations in by_page.items():
+                    operation = "resolve_geometry"
                     page = document[page_number - 1]
                     original_rect = fitz.Rect(page.rect)
                     # Фиксируем visual bbox ДО изменения ширины и матриц страницы.
@@ -463,11 +468,14 @@ class PyMuPdfAnnotationWriter:
                                 old_font + 1.5,
                             )
                         )
+                    operation = "plan_sidebar"
                     cards, extra_width = plan_cards(original_rect, entries)
+                    operation = "extend_page_boxes"
                     page = extend_right(page, extra_width)
                     for annotation, visual_regions, card in zip(
                         page_annotations, regions, cards, strict=True
                     ):
+                        operation = "add_annotation"
                         self._add_finding_annotation(
                             page=page,
                             annotation=annotation,
@@ -475,6 +483,8 @@ class PyMuPdfAnnotationWriter:
                             card=card,
                         )
 
+                operation = "append_report"
+                page_number = None
                 report_font = fitz.Font(
                     "cjk",
                 )
@@ -488,17 +498,27 @@ class PyMuPdfAnnotationWriter:
                     report,
                 )
 
+                operation = "serialize_pdf"
                 result = document.tobytes(
                     garbage=3,
                     deflate=True,
                 )
 
+        except fitz.FileDataError as error:
+            if operation == "open_pdf":
+                raise PdfProcessingError(
+                    "Исходный PDF повреждён или не поддерживается."
+                ) from error
+            raise PdfAnnotationGenerationError(
+                operation=operation, page_number=page_number
+            ) from error
         except PdfProcessingError:
             raise
 
         except Exception as error:
-            raise PdfProcessingError(
-                ("Не удалось сформировать PDF с аннотациями."),
+            raise PdfAnnotationGenerationError(
+                operation=operation,
+                page_number=page_number,
             ) from error
 
         if not result.startswith(

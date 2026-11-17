@@ -50,7 +50,7 @@ def specification_document_facts(
             "source_pages": item["source_pages"],
             "source_regions": item["source_regions"],
             "visual_regions": regions,
-            "extraction_method": "pdf_table",
+            "extraction_method": item.get("extraction_method", "pdf_table"),
         }
         values = [
             ("name", "equipment_name", "Наименование", ""),

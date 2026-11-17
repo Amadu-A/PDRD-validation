@@ -21,6 +21,7 @@ from pdrd_document_service.domain.project_context import (
     PdfTextPage,
 )
 from pdrd_document_service.domain.specification import join_specification_pages
+from pdrd_document_service.infrastructure.pdf.native_text import native_text, shx_spans
 from pdrd_document_service.infrastructure.pdf.specification import extract_specification
 
 
@@ -140,10 +141,7 @@ class PyMuPdfReader:
                         number=page_number,
                         text=(
                             _compact_native_text(
-                                document[page_number - 1].get_text(
-                                    "text",
-                                    sort=True,
-                                )
+                                native_text(document[page_number - 1])
                             )[: self._text_limit]
                         ).strip(),
                     )
@@ -162,7 +160,7 @@ class PyMuPdfReader:
         page_number: int,
         include_equipment_specification: bool = False,
     ) -> PdfPage:
-        full_text = page.get_text("text", sort=True)
+        full_text = native_text(page)
         text = _compact_native_text(full_text)[: self._text_limit].strip()
         specification = (
             extract_specification(page, page_number, full_text)
@@ -271,6 +269,11 @@ class PyMuPdfReader:
         raw_words = page.get_text(
             "words",
             sort=True,
+        )
+        first_shx_block = max((word[5] for word in raw_words), default=-1) + 1
+        raw_words.extend(
+            (*span["bbox"], span["text"], first_shx_block + index, 0, 0)
+            for index, span in enumerate(shx_spans(page))
         )
 
         result: list[PdfTextWord] = []

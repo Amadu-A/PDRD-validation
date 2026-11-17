@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pdrd_analysis_service.application.performance import observe_vision_call
 from pdrd_analysis_service.application.ports.vision_model import (
     StructuredVisionModel,
 )
@@ -79,6 +80,7 @@ class CachedStructuredVisionModel:
 
         self._last_prune_monotonic = 0.0
 
+    @observe_vision_call
     async def generate_json(
         self,
         *,

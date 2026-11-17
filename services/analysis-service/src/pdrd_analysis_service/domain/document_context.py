@@ -13,6 +13,15 @@ from typing import Any
 from pdrd_analysis_service.domain.engineering_claims import extract_quantities
 
 
+def native_evidence_text(text: str) -> str:
+    """Исключает явно помеченное альтернативное чтение из доказательств нативного слоя.
+
+    Полный текст остаётся в источнике и промпте. OCR/конверсия не доказывают
+    дословную запись PDF без независимой проверки изображения и области.
+    """
+    return re.split(r"(?m)^\[DOCLING_(?:OCR_)?ALTERNATIVE(?:\]|:)", text, maxsplit=1)[0]
+
+
 @dataclass(frozen=True, slots=True)
 class DocumentFact:
     """Атомарное утверждение документа с исходной формулировкой."""

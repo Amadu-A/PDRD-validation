@@ -99,6 +99,7 @@ export function createAutomaticReview({ onGeometry, onRecord, onStart, isEnabled
           };
           const resize = attachBoxResize({
             node: bbox.node, page, label: "Область ошибки VLM",
+            movable: true,
             bounds: () => adapter.imagePane.getBoundingClientRect(),
             getBox: () => ({ ...entry.boxes[index] }),
             enabled: () => index < entry.editableCount && isEnabled() && !entry.rejected && page.dataset.reviewSelecting !== "true",

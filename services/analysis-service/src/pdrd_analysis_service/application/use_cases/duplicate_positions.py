@@ -15,6 +15,7 @@ from typing import Any
 from pdrd_analysis_service.application.use_cases.common import (
     ViolationCandidateSelection,
 )
+from pdrd_analysis_service.domain.document_context import native_evidence_text
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -64,6 +65,7 @@ def repeated_standalone_positions(
     extracted_text: str, *, page_type: str
 ) -> tuple[tuple[str, int], ...]:
     """Считает визуально отделённые подписи в текстовом слое PDF-схемы."""
+    extracted_text = native_evidence_text(extracted_text)
     # В текст проверки может быть добавлен контекст из пояснительной записки.
     # Источником факта остаётся только текст самой PDF-страницы.
     page_marker = "=== ТЕКСТ АНАЛИЗИРУЕМОЙ СТРАНИЦЫ ===\n"

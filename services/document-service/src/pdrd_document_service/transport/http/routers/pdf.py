@@ -2,6 +2,7 @@
 
 """Внутренний HTTP API проверки выбора и извлечения PDF-страниц."""
 
+import asyncio
 import base64
 from hashlib import sha256
 from typing import Annotated
@@ -120,7 +121,8 @@ async def extract_pdf(
         )
 
         try:
-            document = container.extract_pdf.execute(
+            document = await asyncio.to_thread(
+                container.extract_pdf.execute,
                 content=content,
                 page_spec=pages,
                 **(
@@ -140,7 +142,8 @@ async def extract_pdf(
                 project_context = ExplanatoryNoteContext.disabled()
 
             else:
-                project_context = container.extract_pdf_project_context.execute(
+                project_context = await asyncio.to_thread(
+                    container.extract_pdf_project_context.execute,
                     content=content,
                     enabled=use_explanatory_note,
                     start_page=note_start_page,
@@ -185,6 +188,17 @@ async def extract_pdf(
     finally:
         await file.close()
 
+    if include_equipment_specification and container.enrich_specification is not None:
+        document = await container.enrich_specification.execute(
+            document=document,
+            content=content,
+            file_name=file.filename or "document.pdf",
+        )
+    if container.enrich_document is not None:
+        document = await container.enrich_document.execute(
+            document=document, content=content
+        )
+
     return PdfExtractionResponse(
         file_name=(file.filename or "document.pdf"),
         source_sha256=sha256(content).hexdigest(),
@@ -197,6 +211,8 @@ async def extract_pdf(
                 page_number=page.number,
                 page_type=page.page_type,
                 text=page.text,
+                alternative_text=page.alternative_text,
+                conversion_metadata=page.conversion_metadata,
                 equipment_specification=page.equipment_specification,
                 graphic_lines=list(page.graphic_lines) if include_text_geometry else [],
                 width_points=(page.width_points),

@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from pdrd_api_gateway.application.normative_coverage import normative_coverage
+from pdrd_api_gateway.application.performance import performance_report
 from pdrd_api_gateway.application.ports.artifacts import (
     AnalysisArtifactStore,
 )
@@ -86,6 +87,9 @@ class GetAnalysisResult:
         coverage = normative_coverage(result)
         if coverage is not None:
             result = {**result, **coverage}
+        performance = performance_report(job=job, result=result)
+        if performance is not None:
+            result = {**result, "performance": performance}
 
         if getattr(job, "source_artifacts_deleted_at", None) is not None:
             return {

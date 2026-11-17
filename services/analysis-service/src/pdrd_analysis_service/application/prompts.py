@@ -54,6 +54,15 @@ def _compact_context(value):
     return value
 
 
+def _document_context_payload(source: DocumentContextSource) -> dict:
+    """Передаёт совпавшие дословные text/evidence_text один раз, сохраняя ID, условия и области."""
+    payload = asdict(source)
+    if source.text and source.text == source.evidence_text:
+        payload.pop("text")
+        payload["text_same_as_evidence"] = True
+    return _compact_context(payload)
+
+
 COMBINED_MODE_SEMANTICS = """
 --- PDF + CAD COMBINED MODE ---
 
@@ -932,7 +941,7 @@ def build_normative_check_prompt(
     document_instruction = ""
     if document_context_sources:
         document_json = json.dumps(
-            _compact_context([asdict(source) for source in document_context_sources]),
+            [_document_context_payload(source) for source in document_context_sources],
             ensure_ascii=False,
             default=list,
             separators=(",", ":"),
@@ -950,6 +959,8 @@ D-source — факт из этого же проверяемого PDF, а не
 ложных замечаний. D может показать внутреннее противоречие,
 но не доказывает нарушение ГОСТ/СП/ПУЭ и не определяет,
 какое из двух разных значений правильно.
+При text_same_as_evidence=true поле text дословно совпадает с evidence_text:
+полный исходный фрагмент передан один раз в evidence_text. Это не сокращение источника.
 
 """
 

@@ -14,6 +14,10 @@ from pdrd_document_service.application.use_cases.combined import (
     ExtractCombinedDocument,
 )
 from pdrd_document_service.application.use_cases.crop_pdf import CropPdf
+from pdrd_document_service.application.use_cases.enrich_document import EnrichDocument
+from pdrd_document_service.application.use_cases.enrich_specification import (
+    EnrichSpecification,
+)
 from pdrd_document_service.application.use_cases.equipment_document import (
     ExtractEquipmentDocument,
 )
@@ -42,8 +46,12 @@ from pdrd_document_service.infrastructure.cad.processor import (
 from pdrd_document_service.infrastructure.cad.renderer import (
     EzdxfCadRenderer,
 )
+from pdrd_document_service.infrastructure.docling import HttpDoclingConverter
 from pdrd_document_service.infrastructure.equipment_document import (
     PyMuPdfEquipmentDocumentReader,
+)
+from pdrd_document_service.infrastructure.extraction_artifacts import (
+    FilesystemExtractionArtifacts,
 )
 from pdrd_document_service.infrastructure.image_composer import (
     PillowCombinedImageComposer,
@@ -57,6 +65,9 @@ from pdrd_document_service.infrastructure.pdf.equipment_report import (
 )
 from pdrd_document_service.infrastructure.pdf.pymupdf import (
     PyMuPdfReader,
+)
+from pdrd_document_service.infrastructure.specification_extraction import (
+    HttpSpecificationExtractor,
 )
 
 
@@ -73,6 +84,8 @@ class ApplicationContainer:
     extract_pdf_project_context: ExtractPdfProjectContext | None = None
 
     build_annotated_pdf: BuildAnnotatedPdf | None = None
+    enrich_specification: EnrichSpecification | None = None
+    enrich_document: EnrichDocument | None = None
     crop_pdf: CropPdf | None = None
     extract_equipment_document: ExtractEquipmentDocument | None = None
     export_equipment_report: ExportEquipmentReport | None = None
@@ -154,6 +167,31 @@ def build_container() -> ApplicationContainer:
         extract_combined=extract_combined,
         extract_pdf_project_context=(extract_pdf_project_context),
         build_annotated_pdf=(build_annotated_pdf),
+        enrich_specification=EnrichSpecification(
+            HttpSpecificationExtractor(
+                settings=settings.specification_service,
+                artifacts=FilesystemExtractionArtifacts(
+                    settings.specification_service.artifacts_path
+                ),
+            ),
+            allow_native_fallback=settings.specification_service.allow_native_fallback,
+            artifacts=FilesystemExtractionArtifacts(
+                settings.specification_service.artifacts_path
+            ),
+        )
+        if settings.specification_service.enabled
+        else None,
+        enrich_document=EnrichDocument(
+            HttpDoclingConverter(
+                settings=settings.docling,
+                artifacts=FilesystemExtractionArtifacts(
+                    settings.docling.artifacts_path
+                ),
+            ),
+            concurrency=settings.docling.concurrency,
+        )
+        if settings.docling.enabled
+        else None,
         crop_pdf=CropPdf(PyMuPdfCropRenderer(), settings.pdf.max_upload_bytes),
         export_equipment_report=ExportEquipmentReport(PyMuPdfEquipmentReportWriter()),
         extract_equipment_document=ExtractEquipmentDocument(

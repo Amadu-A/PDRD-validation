@@ -68,7 +68,6 @@ testpaths = [
     "services/knowledge-service/tests",
     "services/analysis-service/tests",
     "services/equipment-search-service/tests",
-    "services/multimodal-embedding-service/tests",
     "services/experience-service/tests",
     "services/user-service/tests",
     "services/auth-service/tests",

@@ -3,9 +3,10 @@
 """Runtime-конфигурация Document Service."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 EnvironmentName = Literal[
@@ -25,6 +26,8 @@ class PdfSettings(BaseModel):
         ge=1,
         le=1000,
     )
+
+    max_annotation_payload_mb: int = Field(default=32, ge=1, le=200)
 
     render_max_side: int = Field(
         default=2400,
@@ -127,6 +130,52 @@ class CadSettings(BaseModel):
         return self.max_upload_mb * 1024 * 1024
 
 
+class SpecificationServiceSettings(BaseModel):
+    """Контракт существующего Spec Extracting AI и выделенный интеграционный ключ."""
+
+    enabled: bool = False
+    base_url: str = "http://spec-extracting-ai-api-1:8080"
+    api_key: SecretStr = SecretStr("")
+    request_timeout_seconds: float = Field(default=30, gt=0, le=180)
+    total_timeout_seconds: float = Field(default=180, gt=0, le=900)
+    poll_interval_seconds: float = Field(default=0.5, gt=0, le=10)
+    cache_version: str = "spec-api-v1-9844c4e"
+    artifacts_path: Path = Path("/data/extraction-artifacts/specification")
+    allow_native_fallback: bool = True
+
+    @model_validator(mode="after")
+    def require_key(self):
+        """Не позволяет молча запускать включённую интеграцию без выделенного ключа."""
+        if self.enabled and not self.api_key.get_secret_value():
+            raise ValueError(
+                "Для Spec Extracting AI требуется выделенный интеграционный ключ."
+            )
+        return self
+
+
+class DoclingSettings(BaseModel):
+    """Выборочный CPU Docling Serve из общего инфраструктурного контракта."""
+
+    enabled: bool = False
+    base_url: str = "http://docling-eval:5001"
+    api_key: SecretStr = SecretStr("")
+    request_timeout_seconds: float = Field(default=30, gt=0, le=180)
+    total_timeout_seconds: float = Field(default=90, gt=0, le=300)
+    poll_interval_seconds: float = Field(default=0.5, gt=0, le=10)
+    concurrency: int = Field(default=2, ge=1, le=4)
+    ocr_preset: str = "tesseract"
+    ocr_languages: tuple[str, ...] = ("rus", "eng")
+    cache_version: str = "docling-serve-1.38.2-v1"
+    artifacts_path: Path = Path("/data/extraction-artifacts/docling")
+
+    @model_validator(mode="after")
+    def require_key(self):
+        """Не включает внешний OCR без настроенного ключа доступа."""
+        if self.enabled and not self.api_key.get_secret_value():
+            raise ValueError("Для Docling требуется выделенный ключ доступа.")
+        return self
+
+
 class Settings(BaseSettings):
     """Настройки процесса Document Service."""
 
@@ -139,6 +188,7 @@ class Settings(BaseSettings):
         env_nested_delimiter="__",
         case_sensitive=False,
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     service_name: str = "PDRD Document Service"
@@ -156,9 +206,56 @@ class Settings(BaseSettings):
 
     docs_enabled: bool = True
 
+    spec_extracting_ai_base_url: str | None = Field(
+        default=None, validation_alias="SPEC_EXTRACTING_AI_BASE_URL", exclude=True
+    )
+    spec_extracting_ai_api_key: SecretStr | None = Field(
+        default=None, validation_alias="SPEC_EXTRACTING_AI_API_KEY", exclude=True
+    )
+    docling_base_url: str | None = Field(
+        default=None, validation_alias="DOCLING_BASE_URL", exclude=True
+    )
+    docling_api_key: SecretStr | None = Field(
+        default=None, validation_alias="DOCLING_API_KEY", exclude=True
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def shared_integration_aliases(cls, values):
+        """Принимает публичные имена интеграций из .env до проверки вложенных настроек."""
+        values = dict(values)
+        for field, mappings in (
+            (
+                "specification_service",
+                (
+                    ("SPEC_EXTRACTING_AI_BASE_URL", "base_url"),
+                    ("SPEC_EXTRACTING_AI_API_KEY", "api_key"),
+                ),
+            ),
+            (
+                "docling",
+                (("DOCLING_BASE_URL", "base_url"), ("DOCLING_API_KEY", "api_key")),
+            ),
+        ):
+            for alias, target in mappings:
+                if values.get(alias) is not None:
+                    current = values.get(field, {})
+                    nested = (
+                        current.model_dump()
+                        if isinstance(current, BaseModel)
+                        else dict(current)
+                    )
+                    nested[target] = values[alias]
+                    values[field] = nested
+        return values
+
     pdf: PdfSettings = Field(
         default_factory=PdfSettings,
     )
+    specification_service: SpecificationServiceSettings = Field(
+        default_factory=SpecificationServiceSettings
+    )
+    docling: DoclingSettings = Field(default_factory=DoclingSettings)
 
     cad: CadSettings = Field(
         default_factory=CadSettings,

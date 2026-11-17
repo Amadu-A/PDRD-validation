@@ -25,6 +25,7 @@ from pdrd_analysis_service.application.normative_protocol import (
     compact_page_metrics,
     publish_independent,
 )
+from pdrd_analysis_service.application.performance import stage_profile
 from pdrd_analysis_service.application.ports.normative_protocol import (
     NormativeProtocolUnavailable,
 )
@@ -213,6 +214,27 @@ async def _run_stage_items[ItemT, ResultT](
             )
 
     async def process_with_retry(item: ItemT, current: int) -> ResultT:
+        """Сохраняет измерение всей страницы, включая завершившиеся и неудачные повторы."""
+        with stage_profile(
+            document_id=str(document_id),
+            stage=stage,
+            page=getattr(item, "page_number", current),
+        ) as profile:
+            result = await process_with_retry_inner(item, current)
+            if isinstance(result, BaseModel) and isinstance(
+                getattr(result, "metrics", None), dict
+            ):
+                result = result.model_copy(
+                    update={
+                        "metrics": {
+                            **result.metrics,
+                            "execution_profile": profile.result(),
+                        }
+                    }
+                )
+            return result
+
+    async def process_with_retry_inner(item: ItemT, current: int) -> ResultT:
         """Повторяет только временно недоступную страницу, освободив слот провайдера.
 
         Успешные соседние страницы остаются в results. Неизвестная программная

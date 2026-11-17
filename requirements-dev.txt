@@ -5,6 +5,8 @@ pytest>=8.4,<10.0
 pytest-asyncio>=1.1,<2.0
 pytest-cov>=6.2,<8.0
 ruff>=0.12,<1.0
+# Изолированный headless Edge для опциональной проверки настоящих pointer-событий.
+playwright==1.65.1; sys_platform == "win32"
 
 # Editable backend services вместе с лёгкими test dependencies.
 -e ./services/api-gateway[test]
@@ -12,7 +14,6 @@ ruff>=0.12,<1.0
 -e ./services/knowledge-service[test]
 -e ./services/analysis-service[test]
 -e ./services/equipment-search-service[test]
--e ./services/multimodal-embedding-service[test]
 -e ./services/experience-service
 -e ./services/user-service[test]
 -e ./services/auth-service[test]

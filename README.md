@@ -115,7 +115,7 @@ experience_sources                  = E
 | Микросервис | Ответственность | Собственное хранение | Профиль Compose |
 |---|---|---|---|
 | **API Gateway** | Публичный API, проверка прав/владельца, история, задания, неизменяемый снимок N/T/U, Outbox и артефакты | PostgreSQL `public.analysis_jobs`, `public.outbox_messages`; `/data/analyses` | Основной стек |
-| **Document Service** | Проверка числа PDF-страниц, извлечение PDF/CAD, DWG → DXF, изображения, crop, автоматический и Reviewed PDF | Собственной БД нет; обрабатывает переданные файлы | Основной стек |
+| **Document Service** | Проверка числа PDF-страниц, извлечение PDF/CAD, DWG → DXF, изображения, crop, автоматический и Reviewed PDF | Собственной БД нет; собственные JSON-артефакты внешнего извлечения в `/data/extraction-artifacts` | Основной стек |
 | **Knowledge Service** | Каталог N/U, промпты разделов, личные пакеты, lifecycle ТЗ, индексация, поиск и временный контекст проекта | PostgreSQL `knowledge`, Qdrant, `/data/normative`, `/data/technical-assignments` | Основной стек |
 | **Analysis Service** | Understanding, инженерная программа по фактам, T-first, независимый N-first полного атомарного корпуса, план N/T/U, аудит доказательств, финализация | Собственной БД нет; технический VLM-кеш `/data/vlm-cache` | Основной стек |
 | **Equipment Search Service** | Поиск документации оборудования через SearXNG, проверка найденных документов и асинхронное обновление EQ | PostgreSQL `equipment_search`, `/data/equipment-documents` | Основной стек; поиск включается в задании |
@@ -128,7 +128,7 @@ experience_sources                  = E
 
 **Frontend** — статические страницы и Nginx; браузер обращается только к API Gateway. `review-frontend` — дополнительный интерфейс на loopback `127.0.0.1:8081`, без собственной БД. Основной интерфейс доступен через корпоративный HTTPS-прокси. Прямого браузерного доступа к внутренним API, n8n, PostgreSQL и Qdrant нет.
 
-**Shared infrastructure** имеет самостоятельный жизненный цикл в сети `ai-shared`: `shared-vlm`, `shared-embedding`, RabbitMQ, n8n и SearXNG (профиль shared `ai-search`). PDRD потребляет `http://searxng:8080`, не создаёт свою копию и не хранит `SEARXNG_SECRET`. Проект не поднимает второй GPU runtime. Каталог `services/multimodal-embedding-service` сохранён как прежняя реализация для совместимости и тестов; в текущем Compose он не запускается. Вызовы идут в общий OpenAI-совместимый embedding endpoint.
+**Shared infrastructure** имеет самостоятельный жизненный цикл в сети `ai-shared`: `shared-vlm`, `shared-embedding`, RabbitMQ, n8n и SearXNG (профиль shared `ai-search`). PDRD потребляет `http://searxng:8080`, не создаёт свою копию и не хранит `SEARXNG_SECRET`. Проект не поднимает второй GPU runtime. Прежний каталог `services/multimodal-embedding-service` удалён вместе с зависимостями и конфигурацией его отдельного runtime. Вызовы идут в общий OpenAI-совместимый embedding endpoint.
 
 **Инфраструктура проекта:** PostgreSQL с независимыми схемами `public`/`knowledge`/`users`/`auth`/`experience`/`equipment_search`, Qdrant и постоянные тома файлов. Сервисы не читают чужие схемы SQL напрямую; межсервисные UUID являются логическими ссылками, без внешних ключей между схемами.
 
@@ -884,12 +884,22 @@ flowchart LR
     N8N["n8n: extraction/render"] --> DS
     DS --> PDF["PyMuPDF: страницы, текст, PNG, PDF"]
     DS --> CAD["ezdxf / LibreDWG: геометрия CAD"]
+    DS --> SPEC["Spec Extracting AI REST: состав выбранных страниц спецификации"]
+    DS --> DOCLING["Docling Serve REST: выбранные сканы и сложные таблицы"]
+    SPEC --> ART["Собственные JSON-артефакты PDRD: SHA256 + полный результат + warnings"]
+    DOCLING --> ART
     DS --> RESPONSE["JSON или файл ответа"]
     RESPONSE --> OWNER["Хранит вызывающий сервис: Gateway либо Experience"]
     OWNER --> FILES["analysis_artifacts либо experience_crops"]
 ```
 
 Document не владеет PostgreSQL/Qdrant и не создаёт связи таблиц. До создания задания `/internal/v1/pdf/inspect` проверяет количество выбранных страниц: максимум 200. Превышение даёт понятный `422`; большой PDF можно анализировать диапазонами. PDF+CAD остаётся анализом одного выбранного листа.
+
+Интеграции Spec Extracting AI и Docling включаются отдельно в `DOCUMENT_SERVICE_SPECIFICATION_SERVICE__ENABLED` и `DOCUMENT_SERVICE_DOCLING__ENABLED` после выдачи выделенных ключей в `.env`. Без ключа включение отклоняется. PDRD обращается к опубликованным REST API и не читает БД соседних приложений. Состав спецификации поступает из Spec; PyMuPDF доказывает привязку к физической строке. Неустановленная геометрия сохраняется как `geometry_unresolved`, строка остаётся в D/EQ. Docling не перечитывает готовую спецификацию и надёжные текстовые страницы; полный альтернативный результат сохраняется отдельно. Резервный путь отмечается явной диагностикой. Подробности и статус приёмки: [рефакторинг pipeline](docs/pipeline-refactor-2026-11-13.md).
+
+JSON полного PDF-отчёта передаётся в Document Service отдельной multipart-частью-файлом `payload`, а не большим текстовым полем. Лимит `DOCUMENT_SERVICE_PDF__MAX_ANNOTATION_PAYLOAD_MB=32` проверяется до декодирования. Старые небольшие текстовые поля поддерживаются. Ошибки входа, генерации, недоступности и тайм-аута различаются; `X-Request-ID` связывает ответ и защищённую серверную диагностику.
+
+Чтение Docling остаётся альтернативным источником: оно доступно модели, но не подтверждает само себя как нативную цитату PDF в программных проверках. Готовый состав Spec повторно не запрашивается у Understanding; нетабличные сведения и проверка изображения сохраняются.
 
 ### 6.8. Analysis Service: VLM и технический кеш, без собственной БД
 
@@ -907,7 +917,7 @@ flowchart LR
 
 Analysis не владеет SQL-таблицами или Qdrant. Итог и история принадлежат Gateway; кеш VLM не является пользовательской историей. Лимит `MAX_STAGE_PAGES=200` согласован с Document Service.
 
-### 6.9. Общий embedding runtime и прежний multimodal-embedding-service
+### 6.9. Общий embedding runtime
 
 ```mermaid
 flowchart LR
@@ -915,7 +925,6 @@ flowchart LR
     EMB --> VEC["Векторы: единая embedding identity, 4096 измерений"]
     VEC --> IDX["Индексаторы Knowledge"]
     IDX --> QD[("Проектный Qdrant")]
-    LEGACY["multimodal-embedding-service: код совместимости и тесты"] -. не запускается в Compose .-> EMB
 ```
 
 Runtime не хранит прикладных таблиц проекта; Qdrant и метаданные индекса принадлежат Knowledge. Веса моделей и хранение shared runtime управляются отдельным стеком shared infrastructure.
@@ -2045,8 +2054,7 @@ PDRD-validation/
 │   ├── user-service/                  # users: профили, роли, разделы и аудит
 │   ├── auth-service/                  # auth: LDAPS, локальные пароли и сессии
 │   ├── admin-service/                 # административные сценарии через API; без SQL
-│   ├── experience-service/            # experience: Review, каталог и версии
-│   └── multimodal-embedding-service/  # прежний код для совместимости и тестов
+│   └── experience-service/            # experience: Review, каталог и версии
 │       # у каждого сервиса: src/<пакет>/ и tests/
 │       # у владельцев PostgreSQL: alembic/ и alembic.ini
 ├── n8n/workflows/

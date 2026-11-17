@@ -4,6 +4,8 @@
 
 import fitz
 
+from pdrd_document_service.infrastructure.pdf.native_text import cell_text, shx_spans
+
 
 def page_content_metadata(
     page: fitz.Page, specification_boxes: list, tables: list
@@ -15,6 +17,7 @@ def page_content_metadata(
     Стандартная рамка страницы сама по себе не считается инженерной схемой.
     """
     table_boxes = [fitz.Rect(box) for box in specification_boxes]
+    shx = shx_spans(page)
     stamps = []
     candidate = fitz.Rect(
         page.rect.width * 0.5,
@@ -22,7 +25,13 @@ def page_content_metadata(
         page.rect.width,
         page.rect.height,
     )
-    candidate_text = page.get_textbox(candidate).casefold()
+    rotation = page.rotation_matrix
+    derotation = page.derotation_matrix
+    candidate_text = (
+        page.get_textbox(candidate * derotation)
+        + "\n"
+        + cell_text(page, candidate, shx, visual=True)
+    ).casefold()
     if (
         "лист" in candidate_text
         and "изм" in candidate_text
@@ -33,29 +42,46 @@ def page_content_metadata(
         box = fitz.Rect(table.bbox)
         if box.x0 < page.rect.width * 0.45 or box.y0 < page.rect.height * 0.75:
             continue
-        text = page.get_textbox(box).casefold()
+        text = (
+            page.get_textbox(box * derotation)
+            + "\n"
+            + cell_text(page, box, shx, visual=True)
+        ).casefold()
         if "лист" in text and ("изм" in text or "подп" in text):
             stamps.append(box)
     outside_lines, text_boxes = [], []
     for block in page.get_text("dict")["blocks"]:
         for line in block.get("lines", []):
-            box = fitz.Rect(line["bbox"])
+            box = fitz.Rect(line["bbox"]) * rotation
             if _covered(box, table_boxes):
                 continue
             text = "".join(span["text"] for span in line["spans"]).strip()
             if text:
                 outside_lines.append(text)
                 text_boxes.append(box)
+    for span in shx:
+        box = fitz.Rect(span["visual_bbox"])
+        if not _covered(box, table_boxes):
+            outside_lines.append(span["text"])
+            text_boxes.append(box)
     outside_images = sum(
-        not _covered(fitz.Rect(image["bbox"]), stamps)
+        not _covered(fitz.Rect(image["bbox"]) * rotation, stamps)
         for image in page.get_image_info()
     )
     outside_graphics = 0
     for drawing in page.get_drawings():
-        box = fitz.Rect(drawing["rect"])
+        box = fitz.Rect(drawing["rect"]) * rotation
         if _covered(box, [*table_boxes, *stamps, *text_boxes]):
             continue
-        if all(_page_border(item, page.rect) for item in drawing["items"]):
+        visual_items = [
+            ("re", fitz.Rect(item[1]) * rotation)
+            if item[0] == "re"
+            else ("l", item[1] * rotation, item[2] * rotation)
+            if item[0] == "l"
+            else item
+            for item in drawing["items"]
+        ]
+        if all(_page_border(item, page.rect) for item in visual_items):
             continue
         outside_graphics += 1
     outside_text = "\n".join(outside_lines)
@@ -105,7 +131,6 @@ def _page_border(item: tuple, page: fitz.Rect) -> bool:
 
 def _normalized(box: fitz.Rect, page: fitz.Page) -> dict:
     """Сохраняет область таблицы в действующей системе визуальных координат."""
-    box = box * page.rotation_matrix if page.rotation else box
     return {
         "x_min": max(0, int(box.x0 / page.rect.width * 1000)),
         "y_min": max(0, int(box.y0 / page.rect.height * 1000)),

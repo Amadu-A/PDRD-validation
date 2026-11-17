@@ -15,6 +15,7 @@ def build_understanding_contract(
     max_facts: int = 12,
     max_equipment: int = 0,
     max_graphical_targets: int = 0,
+    include_specification_rows: bool = True,
 ) -> tuple[str, dict]:
     """Разрешает опускать пустые атрибуты записей, сохраняя все известные данные и grounding."""
     schema = build_page_facts_schema(
@@ -55,6 +56,13 @@ def build_understanding_contract(
             "evidence_text",
             "visual_regions",
         ]
+    if not include_specification_rows:
+        # Состав уже прочитан единственным источником. Нетабличные факты и
+        # графические детали остаются в контракте, полный парсер строк не нужен.
+        fields.pop("specification_rows", None)
+        fields.pop("specification_notes", None)
+        if "specification_rows" in schema["required"]:
+            schema["required"].remove("specification_rows")
     if "equipment_identities" in fields:
         fields["equipment_identities"]["items"]["required"] = [
             "model",
@@ -90,7 +98,7 @@ def build_understanding_contract(
         "не заменяй дословные доказательства пересказом. "
         "Не добавляй неизвестные значения для заполнения схемы."
     )
-    if max_facts > 0:
+    if max_facts > 0 and include_specification_rows:
         # Порядок полей влияет на порядок генерации: строки не должны оставаться
         # после развёрнутых интерпретаций той же таблицы.
         schema["properties"] = {

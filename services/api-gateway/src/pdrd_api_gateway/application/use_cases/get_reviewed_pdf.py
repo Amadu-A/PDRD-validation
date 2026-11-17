@@ -10,6 +10,7 @@ from uuid import UUID
 from pdrd_api_gateway.application.ports.analysis_pdf_export import (
     AnalysisAnnotatedPdfDocument,
     AnalysisAnnotatedPdfRenderer,
+    AnalysisPdfExportError,
 )
 from pdrd_api_gateway.application.ports.artifacts import (
     AnalysisArtifactStorageError,
@@ -112,6 +113,8 @@ class GetReviewedPdf:
                 if not content.startswith(b"%PDF-"):
                     raise RuntimeError("Результат не является PDF.")
                 await self.cache.save(job_id=job_id, key=key, content=content)
+        except AnalysisPdfExportError as error:
+            raise ReviewRequestError(error.status_code, str(error)) from error
         except (OSError, RuntimeError) as error:
             raise ReviewRequestError(
                 503, "Не удалось сформировать итоговый PDF. Повторите скачивание."

@@ -213,7 +213,13 @@ def test_project_compose_uses_shared_embedding_without_local_runtime() -> None:
 
     assert "ai-shared" in migrator_block
 
-    assert (ROOT / "services" / "multimodal-embedding-service").is_dir()
+    legacy = ROOT / "services" / "multimodal-embedding-service"
+    assert not (
+        legacy / "src" / "pdrd_multimodal_embedding_service" / "runtime.py"
+    ).exists()
+    assert "./services/multimodal-embedding-service" not in (
+        ROOT / "requirements-dev.txt"
+    ).read_text(encoding="utf-8")
 
 
 def test_embedding_migration_preserves_atomic_t_requirements() -> None:

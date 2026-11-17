@@ -372,6 +372,15 @@ services:
 
     env_file: *app-env-files
 
+    environment:
+      # Loopback из .env.example предназначен для клиентов на Docker host.
+      # В контейнере используем опубликованные DNS-контракты ai-shared.
+      SPEC_EXTRACTING_AI_BASE_URL: ${PDRD_SPEC_EXTRACTING_AI_INTERNAL_BASE_URL:-http://spec-extracting-ai-api-1:8080}
+      DOCLING_BASE_URL: ${PDRD_DOCLING_INTERNAL_BASE_URL:-http://docling-eval:5001}
+
+    volumes:
+      - document_extraction_artifacts:/data/extraction-artifacts
+
     ports:
       - "${DOCUMENT_SERVICE_BIND_IP:-127.0.0.1}:${DOCUMENT_SERVICE_HOST_PORT:-8301}:8301"
 
@@ -938,6 +947,7 @@ services:
       - app-net
 
 volumes:
+  document_extraction_artifacts:
   experience_index_quality:
   experience_crops:
   postgres_data:

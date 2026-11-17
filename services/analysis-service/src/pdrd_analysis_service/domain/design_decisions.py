@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass
 
 from pdrd_analysis_service.domain.document_context import (
     LocatedDocumentFact,
+    native_evidence_text,
     normalize_label,
     normalized_value,
     property_key,
@@ -187,7 +188,8 @@ def build_decision_registry(
     if len({item.fact_id for item in facts}) != len(facts):
         raise ValueError("В реестре повторены идентификаторы исходных фактов.")
     normalized_texts = {
-        page: normalize_label(text) for page, text in page_texts.items()
+        page: normalize_label(native_evidence_text(text))
+        for page, text in page_texts.items()
     }
     evidence = tuple(
         DecisionEvidence(item, _grounding(item, normalized_texts)) for item in facts

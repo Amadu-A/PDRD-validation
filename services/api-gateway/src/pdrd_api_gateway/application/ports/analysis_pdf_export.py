@@ -10,6 +10,17 @@ from pdrd_api_gateway.application.ports.analysis_visualization import (
 )
 
 
+class AnalysisPdfExportError(RuntimeError):
+    """Безопасная классификация ошибки внутреннего PDF-сервиса."""
+
+    def __init__(self, *, code: str, status_code: int, request_id: str) -> None:
+        """Сохраняет код и идентификатор без тела внутреннего HTTP-ответа."""
+        super().__init__("Не удалось подготовить PDF. Код обращения: " + request_id)
+        self.code = code
+        self.status_code = status_code
+        self.request_id = request_id
+
+
 @dataclass(frozen=True, slots=True)
 class AnalysisPdfAnnotation:
     """Одно finding annotation для Document Service."""

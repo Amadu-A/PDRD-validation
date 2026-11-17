@@ -6,9 +6,18 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 from urllib.parse import urlsplit
 
-from pdrd_document_service.domain.pdf import (
-    PdfNormalizedBoundingBox,
-)
+from pdrd_document_service.application.ports.pdf import PdfProcessingError
+from pdrd_document_service.domain.pdf import PdfNormalizedBoundingBox
+
+
+class PdfAnnotationGenerationError(PdfProcessingError):
+    """Ошибка генерации с безопасной стадией; исходная причина остаётся в цепочке."""
+
+    def __init__(self, *, operation: str, page_number: int | None) -> None:
+        """Сохраняет место сбоя без текста документа и внутренних путей."""
+        super().__init__("Не удалось сформировать PDF с аннотациями.")
+        self.operation = operation
+        self.page_number = page_number
 
 
 @dataclass(frozen=True, slots=True)

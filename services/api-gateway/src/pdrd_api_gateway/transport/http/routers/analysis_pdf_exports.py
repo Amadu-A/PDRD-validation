@@ -14,6 +14,9 @@ from fastapi import (
     status,
 )
 
+from pdrd_api_gateway.application.ports.analysis_pdf_export import (
+    AnalysisPdfExportError,
+)
 from pdrd_api_gateway.application.use_cases.get_analysis_annotated_pdf import (
     AnalysisAnnotatedPdfJobNotFoundError,
     AnalysisAnnotatedPdfNotReadyError,
@@ -92,6 +95,17 @@ async def get_analysis_annotated_pdf(
             detail=str(
                 error,
             ),
+        ) from error
+
+    except AnalysisPdfExportError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail={
+                "code": error.code,
+                "message": str(error),
+                "request_id": error.request_id,
+            },
+            headers={"X-Request-ID": error.request_id},
         ) from error
 
     except AnalysisAnnotatedPdfUnavailableError as error:

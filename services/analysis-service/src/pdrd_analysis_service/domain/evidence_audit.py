@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, replace
 from pdrd_analysis_service.domain.document_context import (
     LocatedDocumentFact,
     discover_conflicts,
+    native_evidence_text,
     normalize_label,
     normalized_value,
     property_key,
@@ -89,13 +90,14 @@ def bind_evidence(
     text = page_texts.get(item.page)
     if text is None:
         return result("source_unavailable", "physical_page_unavailable")
+    text = native_evidence_text(text)
     quote = fact.evidence_text
     if fact.source_fragments:
         if not all(
             isinstance(part.get("page"), int)
             and literal_key(part.get("text", ""))
             and literal_key(part["text"])
-            in literal_key(page_texts.get(part["page"], ""))
+            in literal_key(native_evidence_text(page_texts.get(part["page"], "")))
             for part in fact.source_fragments
         ):
             return result("counterevidence", "source_fragment_unavailable")
@@ -131,7 +133,7 @@ def bind_evidence(
             if region.get("role") == "operating_mode"
             and literal_key(region.get("text", ""))
             and literal_key(region["text"])
-            in literal_key(page_texts.get(region.get("page"), ""))
+            in literal_key(native_evidence_text(page_texts.get(region.get("page"), "")))
         )
     object_bound = literal_contains(anchors, fact.identifier)
     if not object_bound and not (
@@ -312,7 +314,7 @@ def audit_assertion(
             item.fact.scope_condition + " " + item.fact.scope_segment + " " + text
         )
         bound_scope = consumption_scope(
-            page_texts.get(item.page, ""), item.fact.evidence_text
+            native_evidence_text(page_texts.get(item.page, "")), item.fact.evidence_text
         )
         if bound_scope:
             consumption_scopes.append(bound_scope)

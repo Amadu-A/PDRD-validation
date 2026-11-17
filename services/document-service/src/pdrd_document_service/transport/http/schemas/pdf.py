@@ -57,6 +57,8 @@ class PdfPageResponse(BaseModel):
     page_type: PdfPageType
 
     text: str
+    alternative_text: str = ""
+    conversion_metadata: dict[str, Any] | None = None
 
     width_points: float
     height_points: float

@@ -216,6 +216,7 @@ class PipelineSettings(BaseModel):
         ge=1,
         le=32,
     )
+    vlm_inflight_token_budget: int = Field(default=100000, ge=0, le=131072)
     vlm_stage_transient_retries: int = Field(default=2, ge=0, le=3)
     vlm_stage_retry_delay_seconds: float = Field(default=5.0, ge=0, le=30)
 

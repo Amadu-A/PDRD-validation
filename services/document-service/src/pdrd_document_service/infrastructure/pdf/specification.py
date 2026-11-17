@@ -12,14 +12,15 @@ from pdrd_document_service.domain.specification import (
     project_code_from_text,
     specification_columns,
 )
+from pdrd_document_service.infrastructure.pdf.native_text import cell_text, shx_spans
 from pdrd_document_service.infrastructure.pdf.page_content import page_content_metadata
 
 
 def _box(rect: tuple | fitz.Rect, page: fitz.Page) -> dict[str, int]:
     """Переводит область PDF в общую систему 0..1000 с учётом поворота."""
     rect = fitz.Rect(rect)
-    if page.rotation:
-        rect = rect * page.rotation_matrix
+    # TableFinder 1.28 возвращает bbox в визуальной системе даже при /Rotate.
+    # Его временное преобразование страницы уже учло поворот.
     return {
         "x_min": max(0, math.floor(rect.x0 / page.rect.width * 1000)),
         "y_min": max(0, math.floor(rect.y0 / page.rect.height * 1000)),
@@ -41,9 +42,19 @@ def extract_specification(page: fitz.Page, page_number: int, text: str) -> dict 
     result = []
     row_boxes = {}
     try:
+        shx = shx_spans(page)
         tables = page.find_tables().tables
         for table_number, table in enumerate(tables, 1):
             values = table.extract()
+            values = [
+                [
+                    value
+                    if value and str(value).strip()
+                    else (cell_text(page, cell, shx, visual=True) or value)
+                    for value, cell in zip(row, geometry.cells, strict=True)
+                ]
+                for row, geometry in zip(values, table.rows, strict=True)
+            ]
             header_index, columns = next(
                 (
                     (index, columns)
