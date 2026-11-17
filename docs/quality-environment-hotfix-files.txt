@@ -1,0 +1,12 @@
+# docs/quality-environment-hotfix-files.txt
+README.md
+docs/quality-environment-hotfix.md
+docs/quality-environment-hotfix-files.txt
+ops/Dockerfile.quality
+ops/check-quality.ps1
+pyproject.toml
+services/document-service/src/pdrd_document_service/application/use_cases/enrich_document.py
+services/document-service/src/pdrd_document_service/transport/http/routers/pdf.py
+services/document-service/tests/integration/test_pdf_selection_http.py
+tests/functional/test_docling_evidence_boundary.py
+tests/functional/test_quality_environment.py

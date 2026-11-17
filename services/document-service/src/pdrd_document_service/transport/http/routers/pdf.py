@@ -20,6 +20,9 @@ from fastapi import (
 from pdrd_document_service.application.ports.pdf import (
     PdfProcessingError,
 )
+from pdrd_document_service.application.use_cases.enrich_document import (
+    reuse_converted_project_context,
+)
 from pdrd_document_service.application.use_cases.extract import (
     EmptyPdfError,
     PdfTooLargeError,
@@ -198,6 +201,7 @@ async def extract_pdf(
         document = await container.enrich_document.execute(
             document=document, content=content
         )
+        project_context = reuse_converted_project_context(document, project_context)
 
     return PdfExtractionResponse(
         file_name=(file.filename or "document.pdf"),

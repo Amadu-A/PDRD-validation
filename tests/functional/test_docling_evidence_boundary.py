@@ -2,6 +2,8 @@
 
 """Сквозной контракт OCR: весь текст доступен анализу, но не подменяет нативное доказательство."""
 
+from dataclasses import replace
+
 import pytest
 from pdrd_analysis_service.application.use_cases.duplicate_positions import (
     repeated_standalone_positions,
@@ -13,8 +15,63 @@ from pdrd_analysis_service.domain.document_context import (
 )
 from pdrd_analysis_service.domain.engineering_checks import program_evidence_eligible
 from pdrd_analysis_service.domain.evidence_audit import bind_evidence
-from pdrd_document_service.application.use_cases.enrich_document import EnrichDocument
+from pdrd_document_service.application.use_cases.enrich_document import (
+    EnrichDocument,
+    reuse_converted_project_context,
+)
 from pdrd_document_service.domain.pdf import PdfDocument, PdfPage, PdfPageType
+from pdrd_document_service.domain.project_context import (
+    ExplanatoryNoteContext,
+    PdfTextPage,
+)
+
+
+@pytest.mark.parametrize("status", ["ready", "fallback"])
+def test_context_reuses_only_ready_selected_ocr_and_preserves_native_evidence(status):
+    """ПЗ получает уже прочитанный скан, без потери номера, маркера и готового native-текста."""
+    text = "[DOCLING_OCR_ALTERNATIVE: OCR]\nВ2: наружный диаметр 90 мм."
+    converted = PdfPage(
+        1,
+        PdfPageType.GENERAL_NOTES,
+        text,
+        100,
+        200,
+        b"image",
+        conversion_metadata={"provider": "docling", "status": status, "do_ocr": True},
+    )
+    context = ExplanatoryNoteContext(
+        True,
+        1,
+        3,
+        (PdfTextPage(1, ""), PdfTextPage(2, "Нативная запись"), PdfTextPage(3, "")),
+    )
+    document = PdfDocument(3, (converted, replace(converted, number=2)))
+    result = reuse_converted_project_context(document, context)
+    assert result.pages_count == 3 and (result.start_page, result.end_page) == (1, 3)
+    assert result.pages[0].text == (text if status == "ready" else "")
+    assert result.pages[1] == context.pages[1] and result.pages[2] == context.pages[2]
+    if status == "ready":
+        fact = document_fact_from_mapping(
+            {
+                "kind": "parameter",
+                "subject_type": "system",
+                "identifier": "В2",
+                "property_type": "outer_diameter",
+                "property_name": "Наружный диаметр",
+                "value_raw": "90",
+                "unit_raw": "мм",
+                "evidence_text": "В2: наружный диаметр 90 мм.",
+                "extraction_method": "pdf_text",
+            }
+        )
+        assert (
+            bind_evidence(
+                LocatedDocumentFact(1, 1, fact), {1: result.pages[0].text}
+            ).status
+            != "supported"
+        )
+    disabled = ExplanatoryNoteContext.disabled()
+    assert reuse_converted_project_context(document, disabled) is disabled
 
 
 def test_ocr_repetition_does_not_become_protected_native_duplicate():

@@ -6,6 +6,10 @@ FROM python:3.12.13-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+# Общий gate проверяет моки и изолированные стенды, а не рабочие внешние API.
+# Приватный .env и выделенные ключи не должны попадать в этот образ.
+ENV DOCUMENT_SERVICE_SPECIFICATION_SERVICE__ENABLED=false
+ENV DOCUMENT_SERVICE_DOCLING__ENABLED=false
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y nodejs \

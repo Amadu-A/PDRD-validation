@@ -6,11 +6,61 @@ from dataclasses import replace
 
 import fitz
 from fastapi.testclient import TestClient
+from pdrd_document_service.application.use_cases.enrich_document import EnrichDocument
 from pdrd_document_service.application.use_cases.extract import ExtractPdfDocument
 from pdrd_document_service.core.container import build_container
 from pdrd_document_service.core.settings import PdfSettings
 from pdrd_document_service.infrastructure.pdf.pymupdf import PyMuPdfReader
 from pdrd_document_service.main import create_app
+
+
+def test_extracted_ocr_page_is_reused_in_pz_http_response_without_second_conversion():
+    """Пустая страница ПЗ получает уже выполненный OCR, вместо устаревшего пустого native-снимка."""
+    calls = []
+
+    class Converter:
+        """Изолированный OCR общего сервиса на физической странице 1."""
+
+        async def convert(self, **kwargs):
+            """Фиксирует вызов, сохраняя контракт материализованного результата."""
+            calls.append((kwargs["page_number"], kwargs["do_ocr"]))
+            return {
+                "artifact_key": "a" * 64,
+                "result": {
+                    "document": {
+                        "json_content": {
+                            "texts": [{"text": "Распознанный контекст ПЗ"}],
+                            "tables": [],
+                        }
+                    }
+                },
+            }
+
+    with fitz.open() as document:
+        document.new_page()
+        document.new_page().insert_text((72, 72), "Native project context")
+        content = document.tobytes()
+    container = replace(build_container(), enrich_document=EnrichDocument(Converter()))
+    with TestClient(create_app(container=container)) as client:
+        response = client.post(
+            "/internal/v1/pdf/extract",
+            files={"file": ("project.pdf", content, "application/pdf")},
+            data={
+                "pages": "1-2",
+                "use_explanatory_note": "true",
+                "note_start_page": "1",
+                "note_end_page": "2",
+            },
+        )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert calls == [(1, True)]
+    context = body["explanatory_note_context"]
+    assert context["pages_count"] == 2
+    assert context["pages"][0]["text"] == body["pages"][0]["text"]
+    assert "DOCLING_OCR_ALTERNATIVE" in context["pages"][0]["text"]
+    assert "Распознанный контекст ПЗ" in context["pages"][0]["text"]
+    assert context["pages"][1]["text"] == "Native project context"
 
 
 def pdf(pages):

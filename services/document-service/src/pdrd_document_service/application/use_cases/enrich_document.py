@@ -11,8 +11,40 @@ from pdrd_document_service.application.ports.document_conversion import (
     DocumentConverter,
 )
 from pdrd_document_service.domain.pdf import PdfDocument, PdfPageType
+from pdrd_document_service.domain.project_context import ExplanatoryNoteContext
 
 logger = logging.getLogger(__name__)
+
+
+def reuse_converted_project_context(
+    document: PdfDocument, context: ExplanatoryNoteContext
+) -> ExplanatoryNoteContext:
+    """Передаёт уже прочитанные сканы в пустые страницы ПЗ без нового OCR.
+
+    Физические номера и маркер альтернативного чтения сохраняются. Надёжный
+    нативный текст не заменяется; отсутствующие в анализе страницы не достраиваются.
+    """
+    if not context.enabled:
+        return context
+    converted = {
+        page.number: page.text
+        for page in document.pages
+        if page.text.strip()
+        and (page.conversion_metadata or {}).get("provider") == "docling"
+        and page.conversion_metadata.get("status") == "ready"
+        and page.conversion_metadata.get("do_ocr") is True
+    }
+    if not converted:
+        return context
+    return replace(
+        context,
+        pages=tuple(
+            replace(page, text=converted[page.number])
+            if not page.text.strip() and page.number in converted
+            else page
+            for page in context.pages
+        ),
+    )
 
 
 def _converted_text(content: dict) -> str:

@@ -2263,6 +2263,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\ops\check-quality.ps1
 
 Скрипт проверяет Python/Node, `pip check`, Ruff check/format, общий pytest с новым `--basetemp`, все `frontend/tests/*.test.js` и `git diff --check`. Параметр `-Fix` применяет исправления Ruff. `ExecutionPolicy Bypass` действует только для этого запуска. Коммит и push выполняет разработчик после проверки diff; документация не требует автоматического коммита всех файлов.
 
+Во время Windows-проверки рабочие Spec/Docling временно отключаются только в окружении тестовых процессов. Исходные значения флагов восстанавливаются и при успехе, и при ошибке. Ключи в `.env` не изменяются; включённый рабочий Document Service по-прежнему требует выделенные ключи.
+
 Для изменения только README достаточно при разработке проверить его архитектурные контракты и diff; перед публикацией ветки выполняется общий gate:
 
 ```powershell
@@ -2280,6 +2282,8 @@ bash ops/check-quality.sh
 ```
 
 Скрипт выводит семь этапов: зависимости, Ruff, Python- и frontend-тесты в `quality-tests`, затем PostgreSQL-проверки Gateway, Knowledge, Experience, User, Auth и Equipment Search. Интеграционные наборы запускаются **в отдельных тестовых проектах** с временными БД; Knowledge дополнительно использует тестовый Qdrant. Они не должны получать рабочие database URL или production volumes.
+
+Образ `quality-tests` отключает реальные Spec/Docling через собственное ENV, даже если они включены в `.env.example`. Приватный `.env` и рабочие API-ключи в него не передаются. Ошибка ключей при сборке тестов и восстановление окружения закреплены регрессиями: [quality environment hotfix](docs/quality-environment-hotfix.md).
 
 | Подсистема | Compose-файл | Остановка с кодом тестов |
 |---|---|---|

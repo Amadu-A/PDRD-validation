@@ -53,8 +53,20 @@ if (-not $pythonExecutable) {
 $previousPath = $env:PATH
 $previousPythonIoEncoding = $env:PYTHONIOENCODING
 $previousPythonPath = $env:PYTHONPATH
+$integrationFlags = @(
+    "DOCUMENT_SERVICE_SPECIFICATION_SERVICE__ENABLED",
+    "DOCUMENT_SERVICE_DOCLING__ENABLED"
+)
+$previousIntegrationFlags = @{}
+foreach ($flag in $integrationFlags) {
+    $previousIntegrationFlags[$flag] = [Environment]::GetEnvironmentVariable($flag, "Process")
+}
 Push-Location $repositoryRoot
 try {
+    # Unit/functional не должны запускать рабочие Spec/OCR из локального .env.
+    foreach ($flag in $integrationFlags) {
+        [Environment]::SetEnvironmentVariable($flag, "false", "Process")
+    }
     # Совпадает с UTF-8 OutputEncoding PowerShell и сохраняет русский вывод pytest.
     $env:PYTHONIOENCODING = "utf-8"
     # Новые сервисы ещё могут отсутствовать в существующем локальном venv.
@@ -114,6 +126,9 @@ try {
     Write-Host "Все проверки качества успешно завершены."
 }
 finally {
+    foreach ($flag in $integrationFlags) {
+        [Environment]::SetEnvironmentVariable($flag, $previousIntegrationFlags[$flag], "Process")
+    }
     $env:PATH = $previousPath
     $env:PYTHONIOENCODING = $previousPythonIoEncoding
     $env:PYTHONPATH = $previousPythonPath
