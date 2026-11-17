@@ -119,6 +119,9 @@ async def extract_pdf(
     max_read_size = container.settings.pdf.max_upload_bytes + 1
 
     try:
+        for storage in container.extraction_storage:
+            await storage.check_ready()
+
         content = await file.read(
             max_read_size,
         )

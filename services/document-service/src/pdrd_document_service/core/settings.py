@@ -134,7 +134,7 @@ class SpecificationServiceSettings(BaseModel):
     """Контракт существующего Spec Extracting AI и выделенный интеграционный ключ."""
 
     enabled: bool = False
-    base_url: str = "http://spec-extracting-ai-api-1:8080"
+    base_url: str = "http://spec-extracting-ai-api-1:8083"
     api_key: SecretStr = SecretStr("")
     request_timeout_seconds: float = Field(default=30, gt=0, le=180)
     total_timeout_seconds: float = Field(default=180, gt=0, le=900)

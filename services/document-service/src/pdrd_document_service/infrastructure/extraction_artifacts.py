@@ -9,6 +9,10 @@ import os
 import tempfile
 from pathlib import Path
 
+from pdrd_document_service.application.ports.specification_extraction import (
+    ExtractionArtifactStorageError,
+)
+
 
 class FilesystemExtractionArtifacts:
     """Изолирует кэш интеграций по детерминированному SHA256 запроса."""
@@ -16,6 +20,29 @@ class FilesystemExtractionArtifacts:
     def __init__(self, root: Path) -> None:
         """Сохраняет путь собственного тома PDRD."""
         self.root = root
+
+    async def check_ready(self) -> None:
+        """Проверяет запись и fsync, включая отсутствующий каталог и read-only том."""
+
+        def probe():
+            """Создаёт и удаляет только собственный временный файл без изменения артефактов."""
+            self.root.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryFile(dir=self.root) as stream:
+                stream.write(b"pdrd-storage-probe")
+                stream.flush()
+                os.fsync(stream.fileno())
+
+        await self._io(probe)
+
+    @staticmethod
+    async def _io(operation):
+        """Отделяет эксплуатационный сбой файловой системы от программной ошибки/повреждения."""
+        try:
+            return await asyncio.to_thread(operation)
+        except OSError as error:
+            raise ExtractionArtifactStorageError(
+                "Хранилище результатов извлечения недоступно."
+            ) from error
 
     def _path(self, key: str) -> Path:
         """Не допускает произвольных путей из внешнего job_id."""
@@ -37,7 +64,7 @@ class FilesystemExtractionArtifacts:
                 raise RuntimeError("Повреждён артефакт внешнего извлечения.")
             return json.loads(raw)
 
-        return await asyncio.to_thread(read)
+        return await self._io(read)
 
     async def save(self, key: str, value: dict) -> None:
         """Записывает через отдельный временный файл и атомарную замену."""
@@ -62,4 +89,4 @@ class FilesystemExtractionArtifacts:
                 if os.path.exists(temporary):
                     os.unlink(temporary)
 
-        await asyncio.to_thread(write)
+        await self._io(write)

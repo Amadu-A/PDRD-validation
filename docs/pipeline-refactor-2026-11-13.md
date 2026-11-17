@@ -241,7 +241,7 @@ DOCUMENT_SERVICE_DOCLING__ENABLED=true
 
 Публичный host URL Spec в каталоге — `SPEC_EXTRACTING_AI_BASE_URL=http://127.0.0.1:8083`.
 В контейнере он заменяется `PDRD_SPEC_EXTRACTING_AI_INTERNAL_BASE_URL`, default
-`http://spec-extracting-ai-api-1:8080`. Для Docling аналогично действует
+`http://spec-extracting-ai-api-1:8083`. Для Docling аналогично действует
 `PDRD_DOCLING_INTERNAL_BASE_URL=http://docling-eval:5001`. Если сервис перенесён,
 оператор меняет соответствующую INTERNAL_BASE_URL. Секреты остаются только в `.env`.
 После редактирования `.env` нужен recreate Document, обычный restart не перечитывает

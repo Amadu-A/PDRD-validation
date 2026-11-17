@@ -10,6 +10,18 @@ class SpecificationExtractionError(RuntimeError):
     """Безопасный отказ внешней интеграции, не подменяющий неполный результат готовым."""
 
 
+class ExtractionArtifactStorageError(RuntimeError):
+    """Собственное хранилище недоступно: полный результат нельзя надёжно сохранить."""
+
+
+class ExtractionStorageProbe(Protocol):
+    """Проверяет локальную готовность хранилища без обращения к внешним API."""
+
+    async def check_ready(self) -> None:
+        """Проверяет фактическую запись от имени рабочего пользователя сервиса."""
+        ...
+
+
 @dataclass(frozen=True, slots=True)
 class SpecificationExtraction:
     """Исходные строки и диагностика; геометрия устанавливается отдельно в PDRD."""

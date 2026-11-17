@@ -1,0 +1,20 @@
+# docs/extraction-runtime-hotfix-files.txt
+.env.example
+README.md
+compose.yaml
+docs/extraction-runtime-hotfix-files.txt
+docs/extraction-runtime-hotfix.md
+docs/pipeline-refactor-2026-11-13.md
+scripts/check-stack.sh
+scripts/up.sh
+services/document-service/Dockerfile
+services/document-service/src/pdrd_document_service/application/ports/specification_extraction.py
+services/document-service/src/pdrd_document_service/core/container.py
+services/document-service/src/pdrd_document_service/core/settings.py
+services/document-service/src/pdrd_document_service/infrastructure/extraction_artifacts.py
+services/document-service/src/pdrd_document_service/main.py
+services/document-service/src/pdrd_document_service/transport/http/routers/health.py
+services/document-service/src/pdrd_document_service/transport/http/routers/pdf.py
+services/document-service/tests/integration/test_extraction_storage_http.py
+services/document-service/tests/unit/test_shared_extraction.py
+tests/architecture/test_operational_startup.py

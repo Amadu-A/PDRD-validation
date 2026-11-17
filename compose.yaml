@@ -375,7 +375,7 @@ services:
     environment:
       # Loopback из .env.example предназначен для клиентов на Docker host.
       # В контейнере используем опубликованные DNS-контракты ai-shared.
-      SPEC_EXTRACTING_AI_BASE_URL: ${PDRD_SPEC_EXTRACTING_AI_INTERNAL_BASE_URL:-http://spec-extracting-ai-api-1:8080}
+      SPEC_EXTRACTING_AI_BASE_URL: ${PDRD_SPEC_EXTRACTING_AI_INTERNAL_BASE_URL:-http://spec-extracting-ai-api-1:8083}
       DOCLING_BASE_URL: ${PDRD_DOCLING_INTERNAL_BASE_URL:-http://docling-eval:5001}
 
     volumes:

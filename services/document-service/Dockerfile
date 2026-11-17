@@ -84,7 +84,8 @@ FROM base AS runtime
 RUN useradd \
     --create-home \
     --uid 1000 \
-    app
+    app \
+    && install -d -o app -g app /data/extraction-artifacts
 
 USER app
 

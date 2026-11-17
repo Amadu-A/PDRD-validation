@@ -489,6 +489,38 @@ check_http \
 echo
 echo "=== Shared services ==="
 
+# Проверяем реальные адреса/ключи включённых интеграций из Document-контейнера.
+# Секреты не передаются в аргументы процесса и не выводятся в журнал.
+if docker compose exec -T document-service python3 - <<'PY' >/dev/null 2>&1
+import httpx
+from pdrd_document_service.core.settings import Settings
+
+settings = Settings()
+for config, health_path, expected in (
+    (settings.specification_service, "/api/v1/health/ready", ("ready", True)),
+    (settings.docling, "/health", ("status", "ok")),
+):
+    if not config.enabled:
+        continue
+    with httpx.Client(
+        base_url=config.base_url.rstrip("/"), timeout=10,
+        headers={"X-API-Key": config.api_key.get_secret_value()},
+    ) as client:
+        response = client.get(health_path)
+        response.raise_for_status()
+        assert response.json().get(expected[0]) == expected[1]
+        if config is settings.specification_service:
+            # У API нет списка заданий. Чтение отсутствующего UUID проверяет
+            # credential без создания задания или обращения к чужим данным.
+            response = client.get("/api/v1/extractions/00000000-0000-0000-0000-000000000000")
+            assert response.status_code == 404
+PY
+then
+    ok "Document Service -> enabled Spec/Docling integrations"
+else
+    bad "Document Service -> enabled Spec/Docling integrations (URL, key or readiness)"
+fi
+
 if docker compose exec \
     -T \
     api-gateway \

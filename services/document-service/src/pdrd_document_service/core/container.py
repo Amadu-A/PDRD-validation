@@ -4,6 +4,9 @@
 
 from dataclasses import dataclass
 
+from pdrd_document_service.application.ports.specification_extraction import (
+    ExtractionStorageProbe,
+)
 from pdrd_document_service.application.use_cases.annotate import (
     BuildAnnotatedPdf,
 )
@@ -89,6 +92,7 @@ class ApplicationContainer:
     crop_pdf: CropPdf | None = None
     extract_equipment_document: ExtractEquipmentDocument | None = None
     export_equipment_report: ExportEquipmentReport | None = None
+    extraction_storage: tuple[ExtractionStorageProbe, ...] = ()
 
 
 def build_container() -> ApplicationContainer:
@@ -160,6 +164,17 @@ def build_container() -> ApplicationContainer:
         image_composer=image_composer,
     )
 
+    specification_artifacts = (
+        FilesystemExtractionArtifacts(settings.specification_service.artifacts_path)
+        if settings.specification_service.enabled
+        else None
+    )
+    docling_artifacts = (
+        FilesystemExtractionArtifacts(settings.docling.artifacts_path)
+        if settings.docling.enabled
+        else None
+    )
+
     return ApplicationContainer(
         settings=settings,
         extract_pdf=extract_pdf,
@@ -170,28 +185,27 @@ def build_container() -> ApplicationContainer:
         enrich_specification=EnrichSpecification(
             HttpSpecificationExtractor(
                 settings=settings.specification_service,
-                artifacts=FilesystemExtractionArtifacts(
-                    settings.specification_service.artifacts_path
-                ),
+                artifacts=specification_artifacts,
             ),
             allow_native_fallback=settings.specification_service.allow_native_fallback,
-            artifacts=FilesystemExtractionArtifacts(
-                settings.specification_service.artifacts_path
-            ),
+            artifacts=specification_artifacts,
         )
         if settings.specification_service.enabled
         else None,
         enrich_document=EnrichDocument(
             HttpDoclingConverter(
                 settings=settings.docling,
-                artifacts=FilesystemExtractionArtifacts(
-                    settings.docling.artifacts_path
-                ),
+                artifacts=docling_artifacts,
             ),
             concurrency=settings.docling.concurrency,
         )
         if settings.docling.enabled
         else None,
+        extraction_storage=tuple(
+            store
+            for store in (specification_artifacts, docling_artifacts)
+            if store is not None
+        ),
         crop_pdf=CropPdf(PyMuPdfCropRenderer(), settings.pdf.max_upload_bytes),
         export_equipment_report=ExportEquipmentReport(PyMuPdfEquipmentReportWriter()),
         extract_equipment_document=ExtractEquipmentDocument(

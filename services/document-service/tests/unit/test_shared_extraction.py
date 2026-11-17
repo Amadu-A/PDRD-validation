@@ -11,6 +11,7 @@ import fitz
 import httpx
 import pytest
 from pdrd_document_service.application.ports.specification_extraction import (
+    ExtractionArtifactStorageError,
     SpecificationExtractionError,
 )
 from pdrd_document_service.application.use_cases.enrich_document import EnrichDocument
@@ -30,6 +31,49 @@ from pdrd_document_service.infrastructure.specification_extraction import (
     HttpSpecificationExtractor,
 )
 from pydantic import SecretStr, ValidationError
+
+
+async def test_storage_probe_preserves_cached_results_and_leaves_no_files(tmp_path):
+    """Проверка готовности не меняет digest и не оставляет мусор в собственном томе."""
+    store = FilesystemExtractionArtifacts(tmp_path / "new" / "docling")
+    await store.check_ready()
+    await store.save("a" * 64, {"texts": ["исходное чтение"], "physical_page": 26})
+    before = {p.name: p.read_bytes() for p in store.root.iterdir()}
+    await store.check_ready()
+    assert {p.name: p.read_bytes() for p in store.root.iterdir()} == before
+    assert (await store.load("a" * 64))["physical_page"] == 26
+
+
+async def test_storage_io_failure_is_explicit_but_unexpected_errors_are_not_hidden(
+    tmp_path, monkeypatch
+):
+    """EACCES типизирован, повреждённый digest/программные исключения не подменяются пустым кэшем."""
+    from pdrd_document_service.infrastructure import extraction_artifacts
+
+    store = FilesystemExtractionArtifacts(tmp_path)
+
+    def denied(*args, **kwargs):
+        """Воспроизводит отказ ядра при сохранении результата."""
+        raise PermissionError(13, "test-only")
+
+    monkeypatch.setattr(extraction_artifacts.tempfile, "mkstemp", denied)
+    with pytest.raises(ExtractionArtifactStorageError) as caught:
+        await store.save("a" * 64, {})
+    assert isinstance(caught.value.__cause__, PermissionError)
+    assert not list(tmp_path.iterdir())
+    (tmp_path / ("a" * 64 + ".json")).write_text(
+        json.dumps({"payload": "{}", "sha256": "bad"}), encoding="utf-8"
+    )
+    with pytest.raises(RuntimeError, match="Повреждён"):
+        await store.load("a" * 64)
+
+
+def test_spec_default_matches_existing_service_port():
+    """Контейнер обращается к порту API 8083, а не к отсутствующему 8080."""
+    assert (
+        SpecificationServiceSettings().base_url
+        == "http://spec-extracting-ai-api-1:8083"
+    )
 
 
 def item(caption="Труба ПЭ100 SDR11 110x10", page="26"):

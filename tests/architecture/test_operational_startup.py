@@ -32,6 +32,52 @@ def test_one_command_startup_script_exists() -> None:
     assert UP_SCRIPT.is_file()
 
 
+def test_startup_repairs_only_document_volume_root_before_starting_applications():
+    """Старый root-owned том исправляется без рекурсивного chown и chmod 777."""
+    source = UP_SCRIPT.read_text(encoding="utf-8")
+    operation = source.index("1000:1000 /data/extraction-artifacts")
+    assert (
+        source.index("docker compose build")
+        < operation
+        < source.index("=== Application stack ===")
+    )
+    block = source[source.rfind("docker compose run", 0, operation) : operation]
+    assert (
+        "--no-deps" in block and "--user 0" in block and "--entrypoint chown" in block
+    )
+    assert "chown -R" not in block and "chmod" not in block
+    dockerfile = (ROOT / "services/document-service/Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    assert dockerfile.index(
+        "install -d -o app -g app /data/extraction-artifacts"
+    ) < dockerfile.index("USER app")
+    assert "document-service" in source[source.index("log_services=(") :]
+
+
+def test_spec_runtime_port_matches_catalog_and_host_contract():
+    """Host URL и контейнерный адрес согласованы с действующим сервисом Spec."""
+    source = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+    catalog = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert (
+        "${PDRD_SPEC_EXTRACTING_AI_INTERNAL_BASE_URL:-http://spec-extracting-ai-api-1:8083}"
+        in source
+    )
+    assert (
+        "PDRD_SPEC_EXTRACTING_AI_INTERNAL_BASE_URL=http://spec-extracting-ai-api-1:8083"
+        in catalog
+    )
+    assert "SPEC_EXTRACTING_AI_BASE_URL=http://127.0.0.1:8083" in catalog
+    readiness = CHECK_STACK_SCRIPT.read_text(encoding="utf-8")
+    assert '"/api/v1/health/ready"' in readiness
+    assert '"/api/v1/extractions/00000000-0000-0000-0000-000000000000"' in readiness
+    assert (
+        "settings.specification_service" in readiness
+        and "settings.docling" in readiness
+    )
+    assert "config.api_key.get_secret_value()" in readiness
+
+
 def test_operational_scripts_load_baseline_before_private_overrides() -> None:
     """Команды запуска используют общий baseline и затем sparse private override."""
     for path in (UP_SCRIPT, CHECK_STACK_SCRIPT, EMBEDDING_MIGRATION_SCRIPT):

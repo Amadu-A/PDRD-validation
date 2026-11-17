@@ -2285,6 +2285,13 @@ bash ops/check-quality.sh
 
 Образ `quality-tests` отключает реальные Spec/Docling через собственное ENV, даже если они включены в `.env.example`. Приватный `.env` и рабочие API-ключи в него не передаются. Ошибка ключей при сборке тестов и восстановление окружения закреплены регрессиями: [quality environment hotfix](docs/quality-environment-hotfix.md).
 
+Рабочий Document Service запускается от UID 1000. Его `/health/ready` проверяет запись
+в хранилища включённых интеграций; `scripts/up.sh` адресно восстанавливает владельца
+корня прежнего тома `/data/extraction-artifacts`. `scripts/check-stack.sh` дополнительно
+проверяет фактические адреса Spec (`8083`) и Docling из контейнера, включая credential
+Spec без создания задания. Диагностика, регрессии и поставка:
+[исправление runtime извлечения](docs/extraction-runtime-hotfix.md).
+
 | Подсистема | Compose-файл | Остановка с кодом тестов |
 |---|---|---|
 | User | `ops/compose.user-test.yaml` | `--exit-code-from user-test-runner` |

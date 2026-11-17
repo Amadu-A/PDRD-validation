@@ -1,9 +1,15 @@
 # services/document-service/src/pdrd_document_service/main.py
 
-"""FastAPI entry point Document Service."""
+"""Точка входа FastAPI и безопасные ответы эксплуатационных ошибок Document Service."""
 
-from fastapi import FastAPI
+import logging
 
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+from pdrd_document_service.application.ports.specification_extraction import (
+    ExtractionArtifactStorageError,
+)
 from pdrd_document_service.core.container import (
     ApplicationContainer,
     build_container,
@@ -48,6 +54,26 @@ def create_app(
     )
 
     application.state.container = application_container
+
+    @application.exception_handler(ExtractionArtifactStorageError)
+    async def extraction_storage_unavailable(
+        request: Request, error: ExtractionArtifactStorageError
+    ) -> JSONResponse:
+        """Сообщает эксплуатационный отказ явно, без путей, ключей и потери результата."""
+        logging.getLogger(__name__).error(
+            "extraction_storage status=unavailable path=%s error_type=%s",
+            request.url.path,
+            type(error.__cause__).__name__,
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": {
+                    "code": "extraction_storage_unavailable",
+                    "message": "Хранилище результатов извлечения недоступно. Проверьте права тома Document Service.",
+                }
+            },
+        )
 
     application.include_router(
         health_router,

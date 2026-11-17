@@ -283,6 +283,19 @@ echo "=== Build ==="
 docker compose build
 
 echo
+echo "=== Document extraction storage ==="
+
+# Docker не копирует владельца из нового образа в уже существующий named volume.
+# Исправляем только корень собственного тома; файлы, другие тома и shared не трогаем.
+docker compose run \
+    --rm \
+    --no-deps \
+    --user 0 \
+    --entrypoint chown \
+    document-service \
+    1000:1000 /data/extraction-artifacts
+
+echo
 echo "=== PostgreSQL / Qdrant ==="
 
 docker compose up \
@@ -372,6 +385,7 @@ while true; do
         log_services=(
             api-gateway
             api-gateway-worker
+            document-service
             knowledge-service
             knowledge-embedding-migrator
             knowledge-indexer

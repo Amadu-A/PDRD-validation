@@ -1,6 +1,6 @@
 # services/document-service/src/pdrd_document_service/transport/http/routers/health.py
 
-"""Health endpoints Document Service."""
+"""Проверки живости процесса и готовности локальных возможностей Document Service."""
 
 from typing import Annotated
 
@@ -45,7 +45,7 @@ def health_live(
     "/health/ready",
     response_model=ReadyHealthResponse,
 )
-def health_ready(
+async def health_ready(
     container: Annotated[
         ApplicationContainer,
         Depends(get_container),
@@ -53,6 +53,9 @@ def health_ready(
 ) -> ReadyHealthResponse:
     """Возвращает готовность локальных document capabilities."""
     settings = container.settings
+
+    for storage in container.extraction_storage:
+        await storage.check_ready()
 
     cad_capabilities = container.extract_cad.capabilities()
 
